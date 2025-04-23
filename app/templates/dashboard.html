@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Dashboard | AI Posting Tool{% endblock %}
+
+{% block content %}
+<h2 class="text-2xl font-semibold mb-6">ダッシュボード</h2>
+
+<div class="grid md:grid-cols-3 gap-6">
+  <div class="bg-white dark:bg-gray-800 p-6 rounded shadow">
+    <h3 class="text-sm text-gray-500 dark:text-gray-400">総記事数</h3>
+    <p class="text-3xl font-bold mt-2">{{ g.total_articles or 0 }}</p>
+  </div>
+  <div class="bg-white dark:bg-gray-800 p-6 rounded shadow">
+    <h3 class="text-sm text-gray-500 dark:text-gray-400">生成中</h3>
+    <p class="text-3xl font-bold mt-2">{{ g.generating or 0 }}</p>
+  </div>
+  <div class="bg-white dark:bg-gray-800 p-6 rounded shadow">
+    <h3 class="text-sm text-gray-500 dark:text-gray-400">完了</h3>
+    <p class="text-3xl font-bold mt-2">{{ g.done or 0 }}</p>
+  </div>
+</div>
+{% endblock %}

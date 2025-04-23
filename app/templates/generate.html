@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}記事生成{% endblock %}
+
+{% block content %}
+  <h2 class="text-2xl font-semibold mb-6">記事生成</h2>
+
+  <form method="post" id="genForm" class="space-y-6 max-w-3xl">
+    {{ form.hidden_tag() }}
+
+    <!-- サイト選択 -->
+    <div>
+      {{ form.site_select.label(class="block mb-1 font-medium") }}
+      {{ form.site_select(class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
+    </div>
+
+    <!-- 保存済みプロンプト選択 -->
+    <div>
+      {{ form.genre_select.label(class="block mb-1 font-medium") }}
+      {{ form.genre_select(id="selectPrompt", class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
+    </div>
+
+    <!-- タイトル生成プロンプト -->
+    <div>
+      {{ form.title_prompt.label(class="block mb-1 font-medium") }}
+      {{ form.title_prompt(rows=3, id="titlePT", class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
+    </div>
+
+    <!-- 本文生成プロンプト -->
+    <div>
+      {{ form.body_prompt.label(class="block mb-1 font-medium") }}
+      {{ form.body_prompt(rows=5, id="bodyPT", class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
+    </div>
+
+    <!-- キーワード -->
+    <div>
+      {{ form.keywords.label(class="block mb-1 font-medium") }}
+      {{ form.keywords(rows=8, class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
+      <small class="text-gray-500 dark:text-gray-400">
+        1 行 1 キーワード（最大 40 行）
+      </small>
+    </div>
+
+    <!-- 生成開始ボタン -->
+    {{ form.submit(class="py-2 px-6 bg-blue-600 hover:bg-blue-700 text-white rounded") }}
+  </form>
+
+  <script>
+    async function onPromptChange() {
+      const pid = document.getElementById('selectPrompt').value;
+      if (!pid) return;
+      try {
+        const res = await fetch(`/api/prompt/${pid}`);
+        if (!res.ok) throw new Error(res.statusText);
+        const j = await res.json();
+        document.getElementById('titlePT').value = j.title_pt;
+        document.getElementById('bodyPT').value  = j.body_pt;
+      } catch (err) {
+        console.error('プロンプト取得エラー', err);
+      }
+    }
+    document.getElementById('selectPrompt').addEventListener('change', onPromptChange);
+  </script>
+{% endblock %}
