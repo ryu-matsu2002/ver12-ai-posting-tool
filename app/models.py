@@ -7,7 +7,7 @@ from . import db
 class User(db.Model, UserMixin):
     id       = db.Column(db.Integer, primary_key=True)
     email    = db.Column(db.String(120), unique=True, nullable=False)
-    password = db.Column(db.String(128), nullable=False)
+    password = db.Column(db.String(300), nullable=False)
     prompts  = db.relationship("PromptTemplate", backref="user", lazy=True)
     articles = db.relationship("Article",        backref="user", lazy=True)
     sites    = db.relationship("Site",           backref="user", lazy=True)
