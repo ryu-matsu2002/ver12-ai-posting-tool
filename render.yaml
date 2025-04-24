@@ -4,7 +4,7 @@ services:
     env: python
     buildCommand: pip install -r requirements.txt
     releaseCommand: flask --app app db upgrade
-    startCommand: gunicorn --bind 0.0.0.0:$PORT "app:create_app()"
+    sstartCommand: gunicorn --bind 0.0.0.0:$PORT --factory app:create_app
   - type: worker
     name: aipt-worker
     env: python
