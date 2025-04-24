@@ -1,3 +1,12 @@
+# 環境設定
 .env
-__pycache__/
-instance/local.db
+
+# Python キャッシュ
+**/__pycache__/
+*.pyc
+
+# Flask インスタンスディレクトリ（SQLite等のローカル DB を含む）
+instance/
+
+# 仮想環境
+venv/
