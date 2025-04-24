@@ -9,14 +9,12 @@ from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_migrate import Migrate
-from apscheduler.schedulers.background import BackgroundScheduler
 from celery import Celery
 
 # ── Flask-拡張の“空”インスタンスを先に作成 ───────────
-db             = SQLAlchemy()
-login_manager  = LoginManager()
-migrate        = Migrate()
-scheduler      = BackgroundScheduler(timezone="UTC")
+db            = SQLAlchemy()
+login_manager = LoginManager()
+migrate       = Migrate()
 
 # --------------------------------------------------
 # 1) Flask App Factory
@@ -32,7 +30,7 @@ def create_app() -> Flask:
     # ─── 基本設定 ─────────────────────────────
     app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-key")
     app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
-        "DATABASE_URL", "sqlite:///local.db"
+        "DATABASE_URL", "sqlite:///instance/local.db"
     )
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
@@ -41,25 +39,21 @@ def create_app() -> Flask:
     login_manager.init_app(app)
     migrate.init_app(app, db)
 
-    # ─── Blueprints & APScheduler 登録 ────────
+    # ─── Blueprints 登録とスケジューラ起動 ───────
     with app.app_context():
-        from .routes import bp               # ルート BluePrint
-        app.register_blueprint(bp)
+        # ルート BluePrint
+        from .routes import bp as main_bp
+        app.register_blueprint(main_bp)
 
-        # APScheduler にタスクを登録（存在する場合）
-        try:
-            from .tasks import schedule_pending_jobs  # type: ignore
-            schedule_pending_jobs()
-            scheduler.start()
-        except Exception:
-            # tasks.py が無い場合などは無視して起動
-            pass
+        # 自動投稿ジョブをスケジューラに登録して起動
+        from .tasks import init_scheduler  # 先に作成した init_scheduler 関数
+        init_scheduler(app)
 
         # Flask-Login: user_loader
-        from .models import User            # 循環 import 回避のためローカル import
+        from .models import User  # 循環 import 回避のためローカル import
 
         @login_manager.user_loader
-        def load_user(user_id: str) -> User | None:   # type: ignore[name-defined]
+        def load_user(user_id: str) -> User | None:  # type: ignore[name-defined]
             return User.query.get(int(user_id))
 
     login_manager.login_view = "main.login"

@@ -227,7 +227,7 @@ def post_article(id):
     try:
         url = post_to_wp(art.site, art)
         art.posted_at = datetime.utcnow()
-        art.status    = "posted"      # ← ここを追加
+        art.status    = "posted"    # ← 新規：ステータスを posted に
         db.session.commit()
         flash(f"WordPress へ投稿しました: {url}", "success")
     except Exception as e:

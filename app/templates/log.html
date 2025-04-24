@@ -18,7 +18,7 @@
     {% for s in sites %}
       <option
         value="{{ s.id }}"
-        {% if s.id|string == request.args.get('site_id', '') %}selected{% endif %}
+        {% if s.id|string == request.args.get('site_id','') %}selected{% endif %}
       >
         {{ s.name }}
       </option>
@@ -41,7 +41,7 @@
         <th class="px-4 py-2 text-left">Site</th>
         <th class="px-4 py-2 text-left">Status</th>
         <th class="px-4 py-2 text-left">Progress</th>
-        <th class="px-4 py-2 text-left">🗓 Schedule<br class="hidden sm:inline" /> (JST)</th>
+        <th class="px-4 py-2 text-left">🗓 Schedule<br class="hidden sm:inline"/> (JST)</th>
         <th class="px-4 py-2 text-left">Title</th>
         <th class="px-4 py-2 text-left">Preview</th>
         <th class="px-4 py-2 text-left">Img</th>
@@ -51,12 +51,7 @@
     <tbody>
       {% for a in articles %}
       <tr class="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-900">
-        {# Keyword #}
-        <td class="px-4 py-2 align-top max-w-[10rem] break-words">
-          {{ a.keyword }}
-        </td>
-
-        {# Site #}
+        <td class="px-4 py-2 align-top max-w-[10rem] break-words">{{ a.keyword }}</td>
         <td class="px-4 py-2 align-top">
           {% if a.site %}[{{ a.site.name }}]{% else %}—{% endif %}
         </td>
@@ -71,50 +66,39 @@
         </td>
         <td class="px-4 py-2 align-top">{{ a.progress }}%</td>
 
-        {# Scheduled datetime (JST) #}
+        {# Scheduled (JST) - そのまま JST 表示 #}
         <td class="px-4 py-2 align-top">
           {% if a.scheduled_at %}
-            {{ a.scheduled_at.astimezone(jst).strftime("%Y-%m-%d %H:%M") }}
+            {{ a.scheduled_at.strftime("%Y-%m-%d %H:%M") }}
           {% else %}
             —
           {% endif %}
         </td>
 
-        {# Title #}
-        <td class="px-4 py-2 align-top max-w-sm break-words">
-          {{ a.title }}
-        </td>
+        <td class="px-4 py-2 align-top max-w-sm break-words">{{ a.title }}</td>
 
-        {# Preview #}
         <td class="px-4 py-2 align-top">
-          {% if a.status in ["done", "posted"] %}
+          {% if a.status in ["done","posted"] %}
             <a href="{{ url_for('main.preview', article_id=a.id) }}"
                class="text-blue-600 hover:underline">Preview</a>
           {% else %}—{% endif %}
         </td>
 
-        {# Thumbnail #}
         <td class="px-4 py-2 align-top">
           {% if a.image_url %}
             <img src="{{ a.image_url }}" alt="thumb"
-                 class="h-12 w-20 rounded object-cover" />
+                 class="h-12 w-20 rounded object-cover"/>
           {% else %}—{% endif %}
         </td>
 
-        {# Actions #}
         <td class="px-4 py-2 align-top space-x-3 whitespace-nowrap">
-          {# Edit #}
           <a href="{{ url_for('main.edit_article', id=a.id) }}"
              class="text-green-600 hover:underline">Edit</a>
-
-          {# Delete #}
           <form action="{{ url_for('main.delete_article', id=a.id) }}"
                 method="post" class="inline"
                 onsubmit="return confirm('本当に削除しますか？');">
             <button type="submit" class="text-red-600 hover:underline">Delete</button>
           </form>
-
-          {# WP Post #}
           {% if a.status == "done" and a.site_id %}
           <form action="{{ url_for('main.post_article', id=a.id) }}" method="post" class="inline">
             <button type="submit"

@@ -5,15 +5,19 @@ services:
     buildCommand: pip install -r requirements.txt
     releaseCommand: flask --app app db upgrade
     startCommand: gunicorn --bind 0.0.0.0:$PORT wsgi:app
-    envVars:                # ← 追加: OpenAI モデルを固定
-      - key: OPENAI_MODEL
-        value: gpt-4o-mini
+    # OpenAI API キーは Render の Secret に設定してください
+    envVars:
+      - key: OPENAI_API_KEY
+        fromSecret: OPENAI_API_KEY
 
   - type: worker
     name: aipt-worker
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: celery -A worker.celery worker --loglevel=info
+    envVars:
+      - key: OPENAI_API_KEY
+        fromSecret: OPENAI_API_KEY
 
 databases:
   - name: redis
