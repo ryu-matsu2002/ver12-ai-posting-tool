@@ -3,7 +3,7 @@ services:
     name: aipt-web
     env: python
     buildCommand: pip install -r requirements.txt
-    releaseCommand: flask db upgrade
+    releaseCommand: flask --app app db upgrade
     # ← ここを修正します
     startCommand: gunicorn "app:create_app()"
   - type: worker
