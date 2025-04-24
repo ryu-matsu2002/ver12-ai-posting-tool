@@ -1,4 +1,4 @@
-{# app/templates/log.html  – schedule 対応版 #}
+{# app/templates/log.html  – schedule & posted status 対応版 #}
 {% extends "base.html" %}
 {% block title %}生成ログ | AI Posting Tool{% endblock %}
 
@@ -41,7 +41,7 @@
         <th class="px-4 py-2 text-left">Site</th>
         <th class="px-4 py-2 text-left">Status</th>
         <th class="px-4 py-2 text-left">Progress</th>
-        <th class="px-4 py-2 text-left">🗓 Schedule<br class="hidden sm:inline" /> (JST)</th>  {# 追加 #}
+        <th class="px-4 py-2 text-left">🗓 Schedule<br class="hidden sm:inline" /> (JST)</th>
         <th class="px-4 py-2 text-left">Title</th>
         <th class="px-4 py-2 text-left">Preview</th>
         <th class="px-4 py-2 text-left">Img</th>
@@ -62,7 +62,13 @@
         </td>
 
         {# Status / Progress #}
-        <td class="px-4 py-2 align-top">{{ a.status }}</td>
+        <td class="px-4 py-2 align-top">
+          {% if a.status == "posted" %}
+            <span class="text-green-600 font-bold">posted</span>
+          {% else %}
+            {{ a.status }}
+          {% endif %}
+        </td>
         <td class="px-4 py-2 align-top">{{ a.progress }}%</td>
 
         {# Scheduled datetime (JST) #}
@@ -81,7 +87,7 @@
 
         {# Preview #}
         <td class="px-4 py-2 align-top">
-          {% if a.status == "done" %}
+          {% if a.status in ["done", "posted"] %}
             <a href="{{ url_for('main.preview', article_id=a.id) }}"
                class="text-blue-600 hover:underline">Preview</a>
           {% else %}—{% endif %}

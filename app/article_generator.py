@@ -11,7 +11,7 @@
 """
 
 from __future__ import annotations
-import os, random, threading, logging, re, uuid, math
+import os, re, random, threading, logging, uuid, math
 from datetime import datetime, timedelta, date, time
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Tuple
@@ -29,12 +29,12 @@ from .image_utils import fetch_featured_image
 # OpenAI 共通設定
 # ──────────────────────────────
 client  = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
-MODEL   = "gpt-4-turbo"
+MODEL   = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 TOKENS  = {"title": 80, "outline": 400, "block": 950}
 TEMP    = {"title": 0.40, "outline": 0.45, "block": 0.70}
 
 CTX_LIMIT, SHRINK = 4096, 0.75
-MIN_BODY_CHARS    = 3_000
+MIN_BODY_CHARS_DEFAULT = 3_000
 MAX_TITLE_RETRY   = 7
 TITLE_DUP_THRESH  = 0.80        # SequenceMatcher ratio (0-1)
 
@@ -166,13 +166,15 @@ def _block_html(kw: str, h2: str, h3s: List[str], persona: str, pt: str) -> str:
                  TOKENS["block"], TEMP["block"])
 
 def _compose_body(kw: str, outline: str, pt: str) -> str:
+    m = re.search(r"(\d{3,5})\s*字", pt)
+    min_chars = int(m.group(1)) if m else MIN_BODY_CHARS_DEFAULT
     parts = [_block_html(kw, h2, h3, random.choice(PERSONAS), pt)
              for h2, h3 in _parse_outline(outline)]
     html  = "\n\n".join(parts)
     # 見出しに class を付与漏れがあれば補完
     html  = re.sub(r"<h([23])(?![^>]*wp-heading)",
                    r'<h\1 class="wp-heading"', html)
-    if len(html) < MIN_BODY_CHARS:
+    if len(html) < min_chars:
         html += '\n\n<h2 class="wp-heading">まとめ</h2><p>要点を整理しました。</p>'
     return html
 

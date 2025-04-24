@@ -1,7 +1,6 @@
 # app/routes.py
 
 from __future__ import annotations
-
 from datetime import datetime
 
 from flask import (
@@ -12,6 +11,7 @@ from flask_login import (
     login_user, logout_user, login_required, current_user
 )
 from werkzeug.security import generate_password_hash, check_password_hash
+from pytz import timezone
 
 from . import db
 from .models import User, Article, PromptTemplate, Site
@@ -22,9 +22,7 @@ from .forms import (
 from .article_generator import enqueue_generation
 from .wp_client import post_to_wp        # WordPress 投稿ユーティリティ
 
-from pytz import timezone
 JST = timezone("Asia/Tokyo")
-
 bp = Blueprint("main", __name__)
 
 # ───────────────────────────── 認証
@@ -71,6 +69,7 @@ def dashboard():
     g.total_articles = Article.query.filter_by(user_id=current_user.id).count()
     g.generating     = Article.query.filter_by(user_id=current_user.id, status="gen").count()
     g.done           = Article.query.filter_by(user_id=current_user.id, status="done").count()
+    g.posted         = Article.query.filter_by(user_id=current_user.id, status="posted").count()
     return render_template("dashboard.html")
 
 
@@ -196,12 +195,12 @@ def log():
     q = Article.query.filter_by(user_id=current_user.id)
     if site_id:
         q = q.filter_by(site_id=site_id)
-    arts = q.order_by(Article.created_at.desc()).all()
+    arts  = q.order_by(Article.created_at.desc()).all()
     sites = Site.query.filter_by(user_id=current_user.id).all()
     return render_template("log.html",
-                            articles=arts,
-                            sites=sites,
-                            jst=JST)
+                           articles=arts,
+                           sites=sites,
+                           jst=JST)
 
 
 # ───────────────────────────── プレビュー
@@ -228,6 +227,7 @@ def post_article(id):
     try:
         url = post_to_wp(art.site, art)
         art.posted_at = datetime.utcnow()
+        art.status    = "posted"      # ← ここを追加
         db.session.commit()
         flash(f"WordPress へ投稿しました: {url}", "success")
     except Exception as e:
