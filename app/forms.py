@@ -2,8 +2,12 @@
 
 from flask_wtf import FlaskForm
 from wtforms import (
-    StringField, PasswordField, TextAreaField,
-    SubmitField, SelectField
+    StringField,
+    PasswordField,
+    TextAreaField,
+    SubmitField,
+    SelectField,
+    IntegerField,         # ← 新規追加
 )
 from wtforms.validators import DataRequired, Email, Length, EqualTo, URL, Optional
 
@@ -30,6 +34,11 @@ class GenerateForm(FlaskForm):
     body_prompt   = TextAreaField(
         "本文生成プロンプト",
         validators=[DataRequired()]
+    )
+    body_length   = IntegerField(
+        "本文文字数下限 (字)",       # ← 新規追加
+        default=2000,               # ← デフォルト 2000 字
+        validators=[Optional()]
     )
     genre_select  = SelectField(
         "保存済みプロンプト",

@@ -34,7 +34,7 @@ TEMP   = {"title": 0.40, "outline": 0.45, "block": 0.70}
 
 CTX_LIMIT              = 4096
 SHRINK                 = 0.75
-MIN_BODY_CHARS_DEFAULT = 2_000   # ← 3,000→2,000 に変更
+MIN_BODY_CHARS_DEFAULT = 2_000   # ← デフォルト 2000字に
 MAX_TITLE_RETRY        = 7
 TITLE_DUP_THRESH       = 0.80
 
@@ -78,7 +78,6 @@ SAFE_SYS = (
     "公序良俗に反する表現・誤情報・個人情報や差別的・政治的主張は禁止します。"
 )
 
-
 # ──────────────────────────────
 # Chat API wrapper
 # ──────────────────────────────
@@ -110,8 +109,7 @@ def _similar(a: str, b: str) -> bool:
 def _title_once(kw: str, pt: str, retry: bool) -> str:
     extra = "\n※既存と類似するため、異なる切り口にしてください。" if retry else ""
     usr   = f"{pt}{extra}\n\n▼ 条件\n- KW を含める\n- 末尾は？\n▼ KW: {kw}"
-    sys   = "あなたは一流の日本語 SEO ライターです。" \
-            "Q&A形式タイトルを1行で返してください。"
+    sys   = SAFE_SYS + "Q&A形式タイトルを1行で返してください。"
     return _chat([{"role":"system","content":sys},
                   {"role":"user","content":usr}],
                  TOKENS["title"], TEMP["title"])
@@ -120,20 +118,19 @@ def _unique_title(kw: str, pt: str) -> str:
     history = [t[0] for t in db.session.query(Article.title)
                          .filter(Article.keyword==kw,
                                  Article.title.isnot(None))]
-    title = ""
     for i in range(MAX_TITLE_RETRY):
-        title = _title_once(kw, pt, retry=(i>0))
-        if not any(_similar(title, h) for h in history):
-            break
-    return title
+        cand = _title_once(kw, pt, retry=(i>0))
+        if not any(_similar(cand, h) for h in history):
+            return cand
+    return cand
 
 # ──────────────────────────────
 # アウトライン & 本文生成
 # ──────────────────────────────
 def _outline(kw: str, title: str, pt: str) -> str:
     sys = (
-        "あなたは一流の日本語 SEO ライターです。"
-        "必ず Markdown形式の##/###で6見出し以上の詳細アウトラインを返してください。"
+        SAFE_SYS
+        + "必ず Markdown形式の##/###で6見出し以上の詳細アウトラインを返してください。"
     )
     usr = f"{pt}\n\n▼ KW:{kw}\n▼ TITLE:{title}"
     return _chat([{"role":"system","content":sys},
@@ -159,14 +156,15 @@ def _parse_outline(raw: str) -> List[Tuple[str,List[str]]]:
 def _block_html(kw: str, h2: str, h3s: List[str], persona: str, pt: str) -> str:
     h3txt = "\n".join(f"### {h}" for h in h3s) if h3s else ""
     sys   = (
-        "あなたは一流の日本語 SEO ライターです。"
-        "以下制約でH2セクションをHTML生成:\n"
-        "-600-800字\n-結論→理由→具体例×3→再結論\n"
-        "-具体例は<h3 class=\"wp-heading\">で示す\n"
-        f"-視点:{persona}\n"
-        "-<h2>/<h3>にclass=\"wp-heading\"付与"
+        SAFE_SYS
+        + "以下制約でH2セクションをHTML生成:\n"
+          "- 600-800字\n"
+          "- 結論→理由→具体例×3→再結論\n"
+          "- 具体例は<h3 class=\"wp-heading\">で示す\n"
+          f"- 視点:{persona}\n"
+          "- <h2>/<h3>にclass=\"wp-heading\"付与"
     )
-    usr   = f"{pt}\n\n▼ KW:{kw}\n▼ H2:{h2}\n▼ H3s\n{h3txt}"
+    usr = f"{pt}\n\n▼ KW:{kw}\n▼ H2:{h2}\n▼ H3s\n{h3txt}"
     return _chat([{"role":"system","content":sys},
                   {"role":"user","content":usr}],
                  TOKENS["block"], TEMP["block"])
@@ -175,11 +173,11 @@ def _compose_body(kw: str, outline: str, pt: str) -> str:
     m = re.search(r"(\d{3,5})\s*(?:字|文字)", pt)
     min_chars = int(m.group(1)) if m else MIN_BODY_CHARS_DEFAULT
     parts = [
-        _block_html(kw, h2, h3s, random.choice([
-            "節約志向の学生","ビジネス渡航が多い会社員",
-            "小さな子供連れファミリー","リタイア後の移住者",
-            "ペット同伴で移動する読者"
-        ]), pt)
+        _block_html(
+            kw, h2, h3s,
+            random.choice(PERSONAS),
+            pt
+        )
         for h2, h3s in _parse_outline(outline)
     ]
     html = "\n\n".join(parts)
@@ -208,7 +206,7 @@ def _generate(app, aid: int, tpt: str, bpt: str):
             art.body    = _compose_body(art.keyword, outline, bpt)
             art.progress = 80; db.session.commit()
 
-            # 画像取得: 先頭H2 or キーワードで強化クエリ
+            # 画像取得: 本文先頭 H2 or キーワード で強化クエリ
             body_html = art.body or ""
             match = re.search(r"<h2\b[^>]*>(.*?)</h2>", body_html, re.IGNORECASE)
             query = match.group(1) if match else art.keyword

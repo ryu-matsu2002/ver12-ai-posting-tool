@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime
+import pytz                                # ← 新規追加
 from flask import current_app
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -19,7 +20,8 @@ def _auto_post_job(app):
     WordPress に自動投稿し、status="posted" に更新するジョブ。
     """
     with app.app_context():
-        now = datetime.utcnow()
+        # UTC tz-aware の現在時刻で比較
+        now = datetime.now(pytz.utc)          # ← datetime.utcnow() ⇒ tz-aware に変更
         pending = (
             Article.query
                    .filter(Article.status == "done",
@@ -47,7 +49,6 @@ def init_scheduler(app):
       1) APScheduler に自動投稿ジョブを登録
       2) 1 分間隔で _auto_post_job を実行するようスケジュール
     """
-    # 重複登録を避けるため、既存ジョブを置き換え
     scheduler.add_job(
         func=_auto_post_job,
         trigger="interval",
