@@ -65,10 +65,19 @@ def _upload_featured_image(site, image_url: str) -> Optional[int]:
 # ──────────────────────────────
 # HTML に装飾用の style / class を注入
 # ──────────────────────────────
-_H2_STYLE  = 'style="background:#dbeafe;color:#1e3a8a;padding:.75rem 1.25rem;border-left:4px solid #3b82f6;border-radius:.375rem;font-weight:600;font-size:1.5rem;margin:1.75rem 0 .75rem"'
-_H3_STYLE  = 'style="background:#e0e7ff;color:#312e81;padding:.5rem 1rem;border-left:3px solid #6366f1;border-radius:.375rem;font-weight:500;font-size:1.25rem;margin:1.5rem 0 .5rem"'
-_P_CLASS   = 'class="tw-paragraph mb-6 leading-relaxed"'  # Tailwind を利用する場合
-
+_H2_STYLE  = (
+    'style="background:#dbeafe;color:#1e3a8a;'
+    'padding:.75rem 1.25rem;border-left:4px solid #3b82f6;'
+    'border-radius:.375rem;font-weight:600;'
+    'font-size:1.5rem;margin:1.75rem 0 .75rem"'
+)
+_H3_STYLE  = (
+    'style="background:#e0e7ff;color:#312e81;'
+    'padding:.5rem 1rem;border-left:3px solid #6366f1;'
+    'border-radius:.375rem;font-weight:500;'
+    'font-size:1.25rem;margin:1.5rem 0 .5rem"'
+)
+_P_CLASS   = 'class="tw-paragraph mb-6 leading-relaxed"'
 _tag_pat   = re.compile(r"<(/?)(h2|h3|p)(\s[^>]*)?>", re.I)
 
 
@@ -79,11 +88,10 @@ def _decorate_html(html: str) -> str:
     """
     def _repl(m: re.Match) -> str:
         close, tag, attrs = m.group(1), m.group(2).lower(), m.group(3) or ""
-        if close:  # 閉じタグ
+        if close:
             return f"</{tag}>"
 
         attrs = attrs.strip()
-
         if tag == "h2" and "style=" not in attrs:
             attrs = f"{attrs} {_H2_STYLE}".strip()
         elif tag == "h3" and "style=" not in attrs:
@@ -112,7 +120,7 @@ def post_to_wp(site, article) -> str:
     # 2. コンテンツ装飾
     styled_body = _decorate_html(article.body or "")
 
-    # 3. REST  呼び出し
+    # 3. REST 呼び出し
     api  = f"{site.url.rstrip('/')}/wp-json/wp/v2/posts"
     hdrs = _basic_auth_header(site.username, site.app_pass)
 

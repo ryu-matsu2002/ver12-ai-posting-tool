@@ -5,8 +5,9 @@
 ● 記事生成 + 予約投稿時刻自動決定
   - タイトル重複判定
   - 本文見出し構成 + class付与
-  - 最低字数 2,000 (プロンプト依存で可変)
-  - 画像取得: 本文先頭 H2 or キーワード でクエリ強化
+  - 文字数範囲（2500字〜3000字など）での下限・上限制御
+  - 画像取得: 本文先頭 H2 + キーワード でクエリ強化
+  - スケジュールは「翌日」以降のUTCスロット
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ TEMP   = {"title": 0.40, "outline": 0.45, "block": 0.70}
 
 CTX_LIMIT              = 4096
 SHRINK                 = 0.75
-MIN_BODY_CHARS_DEFAULT = 2_000   # ← デフォルト 2000字に
+MIN_BODY_CHARS_DEFAULT = 2_000
 MAX_TITLE_RETRY        = 7
 TITLE_DUP_THRESH       = 0.80
 
@@ -54,13 +55,17 @@ def _poisson_rand(lambda_: float = LAMBDA) -> int:
     return k or 1
 
 def _generate_slots(n: int) -> List[datetime]:
-    slots, cur = [], date.today()
+    """
+    明日の00:00から必要数のUTCスロットを返す
+    """
+    slots: List[datetime] = []
+    cur = date.today() + timedelta(days=1)   # ← 明日スタート
     while len(slots) < n:
         cnt = min(MAX_PERDAY, _poisson_rand())
         hrs = random.sample(POST_HOURS, min(cnt, len(POST_HOURS)))
         for h in hrs:
-            dt = datetime.combine(cur, time(hour=h), tzinfo=JST)
-            slots.append(dt.astimezone(pytz.utc))
+            dt_local = datetime.combine(cur, time(hour=h), tzinfo=JST)
+            slots.append(dt_local.astimezone(pytz.utc))
         cur += timedelta(days=1)
     return sorted(slots)[:n]
 
@@ -78,9 +83,9 @@ SAFE_SYS = (
     "公序良俗に反する表現・誤情報・個人情報や差別的・政治的主張は禁止します。"
 )
 
-# ──────────────────────────────
+# ══════════════════════════════════════════════
 # Chat API wrapper
-# ──────────────────────────────
+# ══════════════════════════════════════════════
 def _tok(txt: str) -> int:
     return int(len(txt) * 0.45)
 
@@ -100,9 +105,9 @@ def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float) -> str:
             return call(int(max_t * SHRINK))
         raise
 
-# ──────────────────────────────
+# ══════════════════════════════════════════════
 # タイトル生成
-# ──────────────────────────────
+# ══════════════════════════════════════════════
 def _similar(a: str, b: str) -> bool:
     return SequenceMatcher(None, a, b).ratio() >= TITLE_DUP_THRESH
 
@@ -115,18 +120,20 @@ def _title_once(kw: str, pt: str, retry: bool) -> str:
                  TOKENS["title"], TEMP["title"])
 
 def _unique_title(kw: str, pt: str) -> str:
-    history = [t[0] for t in db.session.query(Article.title)
-                         .filter(Article.keyword==kw,
-                                 Article.title.isnot(None))]
+    history = [
+        t[0] for t in db.session.query(Article.title)
+                    .filter(Article.keyword==kw, Article.title.isnot(None))
+    ]
+    cand = ""
     for i in range(MAX_TITLE_RETRY):
         cand = _title_once(kw, pt, retry=(i>0))
         if not any(_similar(cand, h) for h in history):
-            return cand
+            break
     return cand
 
-# ──────────────────────────────
+# ══════════════════════════════════════════════
 # アウトライン & 本文生成
-# ──────────────────────────────
+# ══════════════════════════════════════════════
 def _outline(kw: str, title: str, pt: str) -> str:
     sys = (
         SAFE_SYS
@@ -141,7 +148,8 @@ def _parse_outline(raw: str) -> List[Tuple[str,List[str]]]:
     blocks, cur, subs = [], None, []
     for ln in raw.splitlines():
         s = ln.strip()
-        if not s: continue
+        if not s: 
+            continue
         if s.startswith("## "):
             if cur: blocks.append((cur, subs))
             cur, subs = s[3:], []
@@ -150,10 +158,13 @@ def _parse_outline(raw: str) -> List[Tuple[str,List[str]]]:
         else:
             if cur: blocks.append((cur, subs))
             cur, subs = s, []
-    if cur: blocks.append((cur, subs))
+    if cur:
+        blocks.append((cur, subs))
     return blocks
 
-def _block_html(kw: str, h2: str, h3s: List[str], persona: str, pt: str) -> str:
+def _block_html(
+    kw: str, h2: str, h3s: List[str], persona: str, pt: str
+) -> str:
     h3txt = "\n".join(f"### {h}" for h in h3s) if h3s else ""
     sys   = (
         SAFE_SYS
@@ -164,21 +175,20 @@ def _block_html(kw: str, h2: str, h3s: List[str], persona: str, pt: str) -> str:
           f"- 視点:{persona}\n"
           "- <h2>/<h3>にclass=\"wp-heading\"付与"
     )
-    usr = f"{pt}\n\n▼ KW:{kw}\n▼ H2:{h2}\n▼ H3s\n{h3txt}"
+    usr   = f"{pt}\n\n▼ KW:{kw}\n▼ H2:{h2}\n▼ H3s\n{h3txt}"
     return _chat([{"role":"system","content":sys},
                   {"role":"user","content":usr}],
                  TOKENS["block"], TEMP["block"])
 
 def _compose_body(kw: str, outline: str, pt: str) -> str:
-    # ① 「2500字から3000字」パターンを探す
+    # ① 範囲指定 (e.g. "2500字から3000字")
     m_range = re.search(r"(\d{3,5})\s*字から\s*(\d{3,5})\s*字", pt)
     if m_range:
         min_chars, max_chars = map(int, m_range.groups())
     else:
-        # 従来通り「○○字」で min_chars を決定、上限は None
         m = re.search(r"(\d{3,5})\s*字", pt)
-        min_chars = int(m.group(1)) if m else MIN_BODY_CHARS_DEFAULT
-        max_chars = None
+        min_chars, max_chars = (int(m.group(1)), None) if m else (MIN_BODY_CHARS_DEFAULT, None)
+
     parts = [
         _block_html(
             kw, h2, h3s,
@@ -188,26 +198,25 @@ def _compose_body(kw: str, outline: str, pt: str) -> str:
         for h2, h3s in _parse_outline(outline)
     ]
     html = "\n\n".join(parts)
-    html = re.sub(r"<h([23])(?![^>]*wp-heading)",
-                  r'<h\1 class="wp-heading"', html)
+    html = re.sub(
+        r"<h([23])(?![^>]*wp-heading)>",
+        r'<h\1 class="wp-heading">',
+        html
+    )
     if len(html) < min_chars:
         html += '\n\n<h2 class="wp-heading">まとめ</h2><p>要点を整理しました。</p>'
 
-    # ③ **新規：上限超過時に切り詰め**
+    # ③ 上限超過時に切り詰め
     if max_chars and len(html) > max_chars:
-        html = html[:max_chars]
-        # HTML タグが中途半端に切れると不正になるので、
-        # 最後の '</p>' まで戻すなどの処理を入れてください:
-        last_p = html.rfind("</p>")
-        if last_p != -1:
-            html = html[:last_p+4]
+        snippet = html[:max_chars]
+        last_p = snippet.rfind("</p>")
+        html = snippet[:last_p+4] if last_p != -1 else snippet
 
     return html
 
-
-# ──────────────────────────────
+# ══════════════════════════════════════════════
 # 生成タスク
-# ──────────────────────────────
+# ══════════════════════════════════════════════
 def _generate(app, aid: int, tpt: str, bpt: str):
     with app.app_context():
         art = Article.query.get(aid)
@@ -224,11 +233,11 @@ def _generate(app, aid: int, tpt: str, bpt: str):
             art.body    = _compose_body(art.keyword, outline, bpt)
             art.progress = 80; db.session.commit()
 
-            # 画像取得: 本文先頭 H2 or キーワード で強化クエリ
-            body_html = art.body or ""
-            match = re.search(r"<h2\b[^>]*>(.*?)</h2>", body_html, re.IGNORECASE)
-            query = match.group(1) if match else art.keyword
-            art.image_url = fetch_featured_image(body_html, query or art.keyword)
+            # 画像取得: 本文先頭 H2 + キーワード
+            match = re.search(r"<h2\b[^>]*>(.*?)</h2>", art.body or "", re.IGNORECASE)
+            first_h2 = match.group(1) if match else ""
+            query    = f"{art.keyword} {first_h2}".strip()
+            art.image_url = fetch_featured_image(art.body or "", query)
 
             art.status, art.progress = "done", 100
             art.updated_at = datetime.utcnow()
@@ -238,9 +247,6 @@ def _generate(app, aid: int, tpt: str, bpt: str):
         finally:
             db.session.commit()
 
-# ──────────────────────────────
-# enqueue_generation
-# ──────────────────────────────
 def enqueue_generation(
     user_id: int,
     keywords: List[str],
@@ -270,8 +276,8 @@ def enqueue_generation(
                     ids.append(art.id)
             db.session.commit()
 
-        for aid in ids:
-            _generate(app, aid, title_prompt, body_prompt)
-                
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            for aid in ids:
+                ex.submit(_generate, app, aid, title_prompt, body_prompt)
 
     threading.Thread(target=bg, daemon=True).start()

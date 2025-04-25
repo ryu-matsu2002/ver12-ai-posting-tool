@@ -24,11 +24,8 @@
       </option>
     {% endfor %}
   </select>
-
   <noscript>
-    <button type="submit" class="py-1 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded">
-      適用
-    </button>
+    <button type="submit" class="py-1 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded">適用</button>
   </noscript>
 </form>
 
@@ -51,17 +48,10 @@
     <tbody>
       {% for a in articles %}
       <tr class="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-900">
-        {# Keyword #}
-        <td class="px-4 py-2 align-top max-w-[10rem] break-words">
-          {{ a.keyword }}
-        </td>
-
-        {# Site #}
+        <td class="px-4 py-2 align-top max-w-[10rem] break-words">{{ a.keyword }}</td>
         <td class="px-4 py-2 align-top">
           {% if a.site %}[{{ a.site.name }}]{% else %}—{% endif %}
         </td>
-
-        {# Status #}
         <td class="px-4 py-2 align-top">
           {% if a.status == "posted" %}
             <span class="text-green-600 font-bold">posted</span>
@@ -71,78 +61,57 @@
             {{ a.status }}
           {% endif %}
         </td>
-
-        {# Progress #}
         <td class="px-4 py-2 align-top">{{ a.progress }}%</td>
-
-        {# Scheduled_at (JST) #}
         <td class="px-4 py-2 align-top">
           {% if a.scheduled_at %}
             {{ a.scheduled_at.astimezone(jst).strftime("%Y-%m-%d %H:%M") }}
           {% else %}
-            —
+            —  
           {% endif %}
         </td>
-
-        {# Title #}
-        <td class="px-4 py-2 align-top max-w-sm break-words">
-          {{ a.title }}
-        </td>
-
-        {# Preview #}
+        <td class="px-4 py-2 align-top max-w-sm break-words">{{ a.title }}</td>
         <td class="px-4 py-2 align-top">
-          {% if a.status in ["done", "posted"] %}
+          {% if a.status in ["done","posted"] %}
             <a href="{{ url_for('main.preview', article_id=a.id) }}"
                class="text-blue-600 hover:underline">Preview</a>
           {% else %}
-            —
+            —  
           {% endif %}
         </td>
-
-        {# Thumbnail #}
         <td class="px-4 py-2 align-top">
           {% if a.image_url %}
             <img src="{{ a.image_url }}" alt="thumb"
                  class="h-12 w-20 rounded object-cover"/>
           {% else %}
-            —
+            —  
           {% endif %}
         </td>
-
-        {# Actions #}
         <td class="px-4 py-2 align-top space-x-3 whitespace-nowrap">
-          {# Retry ボタン（エラー時のみ） #}
           {% if a.status == "error" %}
-          <form action="{{ url_for('main.retry_article', id=a.id) }}"
-                method="post" class="inline">
-            <button type="submit"
-                    class="py-1 px-3 bg-yellow-500 hover:bg-yellow-600 text-white rounded">
-              Retry
-            </button>
-          </form>
+            <form action="{{ url_for('main.retry_article', id=a.id) }}"
+                  method="post" class="inline">
+              <button type="submit"
+                      class="py-1 px-3 bg-yellow-500 hover:bg-yellow-600 text-white rounded">
+                Retry
+              </button>
+            </form>
           {% endif %}
-
-          {# Edit #}
           <a href="{{ url_for('main.edit_article', id=a.id) }}"
              class="text-green-600 hover:underline">Edit</a>
-
-          {# Delete #}
           <form action="{{ url_for('main.delete_article', id=a.id) }}"
                 method="post" class="inline"
                 onsubmit="return confirm('本当に削除しますか？');">
             <button type="submit" class="text-red-600 hover:underline">Delete</button>
           </form>
-
-          {# WordPress Post #}
           {% if a.status == "done" and a.site_id %}
-          <form action="{{ url_for('main.post_article', id=a.id) }}"
-                method="post" class="inline">
-            <button type="submit"
-                    class="inline-flex items-center gap-1 py-1 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded"
-                    title="WordPress へ投稿">
-              ⬆️ <span class="hidden sm:inline">Post</span>
-            </button>
-          </form>
+            <form action="{{ url_for('main.post_article', id=a.id) }}"
+                  method="post" class="inline">
+              <button type="submit"
+                      class="inline-flex items-center gap-1 py-1 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded"
+                      title="WordPress へ投稿">
+                ⬆️ <span class="hidden sm:inline">Post</span>
+              </button>
+            </form>
           {% endif %}
         </td>
       </tr>
