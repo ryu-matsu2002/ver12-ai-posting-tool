@@ -170,8 +170,15 @@ def _block_html(kw: str, h2: str, h3s: List[str], persona: str, pt: str) -> str:
                  TOKENS["block"], TEMP["block"])
 
 def _compose_body(kw: str, outline: str, pt: str) -> str:
-    m = re.search(r"(\d{3,5})\s*(?:字|文字)", pt)
-    min_chars = int(m.group(1)) if m else MIN_BODY_CHARS_DEFAULT
+    # ① 「2500字から3000字」パターンを探す
+    m_range = re.search(r"(\d{3,5})\s*字から\s*(\d{3,5})\s*字", pt)
+    if m_range:
+        min_chars, max_chars = map(int, m_range.groups())
+    else:
+        # 従来通り「○○字」で min_chars を決定、上限は None
+        m = re.search(r"(\d{3,5})\s*字", pt)
+        min_chars = int(m.group(1)) if m else MIN_BODY_CHARS_DEFAULT
+        max_chars = None
     parts = [
         _block_html(
             kw, h2, h3s,
@@ -185,7 +192,18 @@ def _compose_body(kw: str, outline: str, pt: str) -> str:
                   r'<h\1 class="wp-heading"', html)
     if len(html) < min_chars:
         html += '\n\n<h2 class="wp-heading">まとめ</h2><p>要点を整理しました。</p>'
+
+    # ③ **新規：上限超過時に切り詰め**
+    if max_chars and len(html) > max_chars:
+        html = html[:max_chars]
+        # HTML タグが中途半端に切れると不正になるので、
+        # 最後の '</p>' まで戻すなどの処理を入れてください:
+        last_p = html.rfind("</p>")
+        if last_p != -1:
+            html = html[:last_p+4]
+
     return html
+
 
 # ──────────────────────────────
 # 生成タスク
