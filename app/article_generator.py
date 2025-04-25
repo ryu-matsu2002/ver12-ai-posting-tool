@@ -252,8 +252,8 @@ def enqueue_generation(
                     ids.append(art.id)
             db.session.commit()
 
-        with ThreadPoolExecutor(max_workers=3) as ex:
-            for aid in ids:
-                ex.submit(_generate, app, aid, title_prompt, body_prompt)
+        for aid in ids:
+            _generate(app, aid, title_prompt, body_prompt)
+                
 
     threading.Thread(target=bg, daemon=True).start()
