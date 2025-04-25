@@ -1,24 +1,25 @@
 # ─────────────────────────────────────────────
-# app/image_utils.py   – v3 (2025-04-XX)
+# app/image_utils.py   – v4 (2025-05-XX)
 # ─────────────────────────────────────────────
 """
-・Pixabay で 0 件なら Unsplash Source をフォールバック
-・tags にキーワードを含む画像を優先（含まなければ最初のヒット）
-・全て標準ライブラリ／requests のみで完結（追加 pip 不要）
+・Pixabay → Unsplash → デフォルト画像 の順でフォールバック
+・検索クエリを「キーワード＋本文先頭 H2 見出し」など複合化
+・エラー時や全て 0 件なら社内 CDN 等のDEFAULT_IMAGE_URLを返却
 """
 
 from __future__ import annotations
-import os, requests, random, logging
+import os, re, requests, random, logging
 from typing import List, Optional
 
-# ───── API キー ─────
-PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY", "")
+# ───── 環境変数 ─────
+PIXABAY_API_KEY    = os.getenv("PIXABAY_API_KEY", "")
+DEFAULT_IMAGE_URL  = os.getenv("DEFAULT_IMAGE_URL", "/static/default-thumb.jpg")
 
 # ══════════════════════════════════════════════
-# Pixabay
+# Pixabay 検索
 # ══════════════════════════════════════════════
 def _search_pixabay(query: str, per_page: int = 20) -> List[dict]:
-    if not PIXABAY_API_KEY:
+    if not PIXABAY_API_KEY or not query:
         return []
     params = {
         "key"        : PIXABAY_API_KEY,
@@ -32,14 +33,10 @@ def _search_pixabay(query: str, per_page: int = 20) -> List[dict]:
         r.raise_for_status()
         return r.json().get("hits", [])
     except Exception as e:
-        logging.debug("Pixabay API エラー (%s): %s", query, e)
+        logging.debug("Pixabay API error (%s): %s", query, e)
         return []
 
 def _pick_pixabay(hits: List[dict], keyword: str = "") -> Optional[str]:
-    """
-    tags に keyword を含み 0.5 < w/h < 3 の画像を返す。
-    見つからなければ最初のヒットを返す。
-    """
     if not hits:
         return None
     random.shuffle(hits)
@@ -50,40 +47,50 @@ def _pick_pixabay(hits: List[dict], keyword: str = "") -> Optional[str]:
         w, hgt = h.get("imageWidth", 0), h.get("imageHeight", 1)
         if hgt and 0.5 < w / hgt < 3:
             return h.get("webformatURL")
-    # 条件に合う物が無ければ 1 件目
+    # 条件に合うものが無ければ最初のヒット
     return hits[0].get("webformatURL")
 
 # ══════════════════════════════════════════════
-# Unsplash (フォールバック)
+# Unsplash Source（Pixabayフォールバック）
 # ══════════════════════════════════════════════
 def _unsplash_src(query: str) -> str:
-    """
-    Unsplash Source は API キー不要・ランダム返却。
-    例: https://source.unsplash.com/featured/1200x630/?travel
-    """
-    q = requests.utils.quote(query or "travel")
+    q = requests.utils.quote(query or "")
     return f"https://source.unsplash.com/featured/1200x630/?{q}"
 
 # ══════════════════════════════════════════════
-# Public
+# Public API
 # ══════════════════════════════════════════════
 def fetch_featured_image(body: str, keyword: str = "") -> str:
     """
-    ① 本文 → 先頭 50 文字をとりあえず検索語として Pixabay
-    ② tags に一致する画像を優先 / 無ければ最初
-    ③ 0 件なら Unsplash Source でフォールバック
+    1) 検索語を「keyword + 本文先頭 H2 見出し」から組み立て
+    2) Pixabay でヒット→条件に合うものを返却
+    3) Pixabay 0件 or エラー→Unsplash Source
+    4) それもエラーなら DEFAULT_IMAGE_URL
     """
-    # ------ ① 検索語決定 ------
-    # 深い NLP を使わず「本文先頭 50 字 or keyword」で十分ヒットする
-    query = (keyword or body[:50]).strip()
-    if not query:
-        return ""
+    # --- クエリ組み立て ---
+    # 本文中の最初の <h2> を抽出
+    heading_match = re.search(r"<h2\b[^>]*>(.*?)</h2>", body or "", re.IGNORECASE)
+    parts = []
+    if keyword:
+        parts.append(keyword.strip())
+    if heading_match:
+        parts.append(heading_match.group(1).strip())
+    query = " ".join(parts).strip() or (body or "")[:50].strip()
 
-    # ------ ② Pixabay ------
-    hits = _search_pixabay(query)
-    url = _pick_pixabay(hits, keyword=query)
-    if url:
-        return url
+    # --- Pixabay検索 ---
+    try:
+        hits = _search_pixabay(query)
+        url = _pick_pixabay(hits, keyword=query)
+        if url:
+            return url
+    except Exception:
+        logging.debug("Pixabay fallback failed for query: %s", query)
 
-    # ------ ③ Unsplash ------
-    return _unsplash_src(query)
+    # --- Unsplashフォールバック ---
+    try:
+        return _unsplash_src(query)
+    except Exception:
+        logging.debug("Unsplash fallback failed for query: %s", query)
+
+    # --- 最終フォールバック ---
+    return DEFAULT_IMAGE_URL

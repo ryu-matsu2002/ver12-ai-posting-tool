@@ -45,13 +45,12 @@ def create_app() -> Flask:
         from .routes import bp as main_bp
         app.register_blueprint(main_bp)
 
-        # 自動投稿ジョブをスケジューラに登録して起動
-        from .tasks import init_scheduler  # 先に作成した init_scheduler 関数
+        # 自動投稿ジョブを APScheduler に登録して起動
+        from .tasks import init_scheduler
         init_scheduler(app)
 
         # Flask-Login: user_loader
-        from .models import User  # 循環 import 回避のためローカル import
-
+        from .models import User  # 循環 import 回避
         @login_manager.user_loader
         def load_user(user_id: str) -> User | None:  # type: ignore[name-defined]
             return User.query.get(int(user_id))
@@ -68,7 +67,7 @@ def make_celery(app: Flask) -> Celery:
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     celery = Celery(app.import_name, broker=redis_url, backend=redis_url)
 
-    # Flask 設定を Celery にコピー（必要なら）
+    # Flask 設定を Celery にコピー
     celery.conf.update(app.config)
 
     class ContextTask(celery.Task):

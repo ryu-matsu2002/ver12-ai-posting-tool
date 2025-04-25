@@ -12,6 +12,7 @@ from flask_login import (
 )
 from werkzeug.security import generate_password_hash, check_password_hash
 from pytz import timezone
+from sqlalchemy import asc, nulls_last
 
 from . import db
 from .models import User, Article, PromptTemplate, Site
@@ -191,16 +192,30 @@ def generate():
 @bp.route("/log")
 @login_required
 def log():
+    # site_id（数値）を取得
     site_id = request.args.get("site_id", type=int)
+
+    # ユーザー記事をフィルタ
     q = Article.query.filter_by(user_id=current_user.id)
     if site_id:
         q = q.filter_by(site_id=site_id)
-    arts  = q.order_by(Article.created_at.desc()).all()
-    sites = Site.query.filter_by(user_id=current_user.id).all()
-    return render_template("log.html",
-                           articles=arts,
-                           sites=sites,
-                           jst=JST)
+
+    # scheduled_at 昇順（null を末尾に）→ created_at 降順
+    q = q.order_by(
+        nulls_last(asc(Article.scheduled_at)),
+        Article.created_at.desc()
+    )
+
+    articles = q.all()
+    sites    = Site.query.filter_by(user_id=current_user.id).all()
+
+    return render_template(
+        "log.html",
+        articles=articles,
+        sites=sites,
+        site_id=site_id,  # テンプレートで比較に使う
+        jst=JST
+    )
 
 
 # ───────────────────────────── プレビュー
@@ -227,7 +242,7 @@ def post_article(id):
     try:
         url = post_to_wp(art.site, art)
         art.posted_at = datetime.utcnow()
-        art.status    = "posted"    # ← 新規：ステータスを posted に
+        art.status    = "posted"    # 新規：ステータスを posted に
         db.session.commit()
         flash(f"WordPress へ投稿しました: {url}", "success")
     except Exception as e:
@@ -262,4 +277,24 @@ def delete_article(id):
     db.session.delete(art)
     db.session.commit()
     flash("記事を削除しました", "success")
+    return redirect(url_for(".log"))
+
+@bp.post("/article/<int:id>/retry")
+@login_required
+def retry_article(id: int):
+    art = Article.query.get_or_404(id)
+    if art.user_id != current_user.id:
+        abort(403)
+    # ステータスを pending に戻してキューに再登録
+    art.status = "pending"
+    art.progress = 0
+    db.session.commit()
+    enqueue_generation(
+        current_user.id,
+        [art.keyword],
+        art.title_pt or current_user.prompt_template.body_pt,  # 必要なら使うプロンプトを指定
+        art.body_pt  or current_user.prompt_template.body_pt,
+        art.site_id,
+    )
+    flash("再試行のキューに登録しました", "success")
     return redirect(url_for(".log"))

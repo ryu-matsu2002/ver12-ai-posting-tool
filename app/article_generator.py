@@ -1,13 +1,12 @@
 # ─────────────────────────────────────────────
-# app/article_generator.py   – v7-full (2025-04-XX)
+# app/article_generator.py   – v7-full+ (2025-05-XX)
 # ─────────────────────────────────────────────
 """
-● 記事生成 + 予約投稿時刻を自動決定する完全版
-    ・タイトル重複判定: difflib.SequenceMatcher
-    ・本文: H2 600-800 字×複数、<h2>/<h3> に class 付与保証
-    ・ガードレール: 禁止事項を system prompt で明示
-    ・スケジュール: 1 日あたり 1-5 本（ポアソン分布 λ=4）、
-                    JST 10:00-20:59 のランダム時刻
+● 記事生成 + 予約投稿時刻自動決定
+  - タイトル重複判定
+  - 本文見出し構成 + class付与
+  - 最低字数 2,000 (プロンプト依存で可変)
+  - 画像取得: 本文先頭 H2 or キーワード でクエリ強化
 """
 
 from __future__ import annotations
@@ -16,8 +15,8 @@ from datetime import datetime, timedelta, date, time
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Tuple
 
-from difflib import SequenceMatcher           # 重複判定
-import pytz                                   # ★ pip install pytz
+from difflib import SequenceMatcher
+import pytz
 from flask import current_app
 from openai import OpenAI, BadRequestError
 
@@ -33,21 +32,21 @@ MODEL  = os.getenv("OPENAI_MODEL", "gpt-4-turbo")
 TOKENS = {"title": 80, "outline": 400, "block": 950}
 TEMP   = {"title": 0.40, "outline": 0.45, "block": 0.70}
 
-CTX_LIMIT, SHRINK = 4096, 0.75
-MIN_BODY_CHARS_DEFAULT = 3_000
-MAX_TITLE_RETRY = 7
-TITLE_DUP_THRESH = 0.80  # SequenceMatcher ratio (0-1)
+CTX_LIMIT              = 4096
+SHRINK                 = 0.75
+MIN_BODY_CHARS_DEFAULT = 2_000   # ← 3,000→2,000 に変更
+MAX_TITLE_RETRY        = 7
+TITLE_DUP_THRESH       = 0.80
 
 # ──────────────────────────────
 # スケジュール設定
 # ──────────────────────────────
 JST        = pytz.timezone("Asia/Tokyo")
-POST_HOURS = list(range(10, 21))  # 10-20 時
-LAMBDA     = 4                    # 平均 4 本／日
-MAX_PERDAY = 5                    # 上限 5 本
+POST_HOURS = list(range(10, 21))
+LAMBDA     = 4
+MAX_PERDAY = 5
 
 def _poisson_rand(lambda_: float = LAMBDA) -> int:
-    """疑似ポアソン乱数 (0 を除外して 1-∞)"""
     L, k, p = math.exp(-lambda_), 0, 1.0
     while p > L:
         k += 1
@@ -55,17 +54,13 @@ def _poisson_rand(lambda_: float = LAMBDA) -> int:
     return k or 1
 
 def _generate_slots(n: int) -> List[datetime]:
-    """
-    今日日付から必要数だけ UTC の日時スロットを返す
-    """
-    slots: List[datetime] = []
-    cur = date.today()
+    slots, cur = [], date.today()
     while len(slots) < n:
-        count = min(MAX_PERDAY, _poisson_rand())
-        hours = random.sample(POST_HOURS, min(count, len(POST_HOURS)))
-        for h in hours:
-            dt_local = datetime.combine(cur, time(hour=h), tzinfo=JST)
-            slots.append(dt_local.astimezone(pytz.utc))
+        cnt = min(MAX_PERDAY, _poisson_rand())
+        hrs = random.sample(POST_HOURS, min(cnt, len(POST_HOURS)))
+        for h in hrs:
+            dt = datetime.combine(cur, time(hour=h), tzinfo=JST)
+            slots.append(dt.astimezone(pytz.utc))
         cur += timedelta(days=1)
     return sorted(slots)[:n]
 
@@ -83,11 +78,12 @@ SAFE_SYS = (
     "公序良俗に反する表現・誤情報・個人情報や差別的・政治的主張は禁止します。"
 )
 
-# ══════════════════════════════════════════════
-# ChatCompletion ラッパ
-# ══════════════════════════════════════════════
+
+# ──────────────────────────────
+# Chat API wrapper
+# ──────────────────────────────
 def _tok(txt: str) -> int:
-    return int(len(txt) * 0.45)  # 日本語 1 文字≈0.45 token
+    return int(len(txt) * 0.45)
 
 def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float) -> str:
     prompt = sum(_tok(m["content"]) for m in msgs)
@@ -105,132 +101,97 @@ def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float) -> str:
             return call(int(max_t * SHRINK))
         raise
 
-# ══════════════════════════════════════════════
+# ──────────────────────────────
 # タイトル生成
-# ══════════════════════════════════════════════
+# ──────────────────────────────
 def _similar(a: str, b: str) -> bool:
     return SequenceMatcher(None, a, b).ratio() >= TITLE_DUP_THRESH
 
 def _title_once(kw: str, pt: str, retry: bool) -> str:
-    extra = "\n※既存と類似するため、まったく異なる切り口にしてください。" if retry else ""
-    usr = f"{pt}{extra}\n\n▼ 条件\n- KW を含める\n- 末尾は？\n▼ KW: {kw}"
-    sys = SAFE_SYS + "条件を満たす Q&A 形式タイトルを 1 行のみ返す。"
-    return _chat(
-        [{"role": "system", "content": sys},
-         {"role": "user",   "content": usr}],
-        TOKENS["title"], TEMP["title"]
-    )
+    extra = "\n※既存と類似するため、異なる切り口にしてください。" if retry else ""
+    usr   = f"{pt}{extra}\n\n▼ 条件\n- KW を含める\n- 末尾は？\n▼ KW: {kw}"
+    sys   = "あなたは一流の日本語 SEO ライターです。" \
+            "Q&A形式タイトルを1行で返してください。"
+    return _chat([{"role":"system","content":sys},
+                  {"role":"user","content":usr}],
+                 TOKENS["title"], TEMP["title"])
 
 def _unique_title(kw: str, pt: str) -> str:
-    bases = [
-        t[0] for t in db.session.query(Article.title)
-                       .filter(Article.keyword == kw,
-                               Article.title.isnot(None))
-    ]
-    cand = ""
+    history = [t[0] for t in db.session.query(Article.title)
+                         .filter(Article.keyword==kw,
+                                 Article.title.isnot(None))]
+    title = ""
     for i in range(MAX_TITLE_RETRY):
-        cand = _title_once(kw, pt, retry=(i > 0))
-        if not any(_similar(cand, b) for b in bases):
+        title = _title_once(kw, pt, retry=(i>0))
+        if not any(_similar(title, h) for h in history):
             break
-    return cand
+    return title
 
-# ══════════════════════════════════════════════
-# アウトライン & 本文
-# ══════════════════════════════════════════════
+# ──────────────────────────────
+# アウトライン & 本文生成
+# ──────────────────────────────
 def _outline(kw: str, title: str, pt: str) -> str:
-    # 「必ず Markdown 見出しマーカーを使う」ように強化
     sys = (
-        SAFE_SYS
-        + "必ず Markdown 形式で「## 見出し」「### 小見出し」を使い、"
-          "H2 (##) を６つ以上、必要に応じて H3 (###) を含む詳細アウトラインを返してください。"
+        "あなたは一流の日本語 SEO ライターです。"
+        "必ず Markdown形式の##/###で6見出し以上の詳細アウトラインを返してください。"
     )
     usr = f"{pt}\n\n▼ KW:{kw}\n▼ TITLE:{title}"
-    return _chat(
-        [{"role": "system", "content": sys},
-         {"role": "user",   "content": usr}],
-        TOKENS["outline"], TEMP["outline"]
-    )
+    return _chat([{"role":"system","content":sys},
+                  {"role":"user","content":usr}],
+                 TOKENS["outline"], TEMP["outline"])
 
-def _parse_outline(raw: str) -> List[Tuple[str, List[str]]]:
-    # マーカーあり・なし両対応の汎用パーサ
-    blocks: List[Tuple[str, List[str]]] = []
-    cur_h2: str | None = None
-    sub_h3: List[str] = []
-
+def _parse_outline(raw: str) -> List[Tuple[str,List[str]]]:
+    blocks, cur, subs = [], None, []
     for ln in raw.splitlines():
         s = ln.strip()
-        if not s:
-            continue
-
+        if not s: continue
         if s.startswith("## "):
-            # 新しい H2
-            if cur_h2:
-                blocks.append((cur_h2, sub_h3))
-            cur_h2, sub_h3 = s[3:], []
+            if cur: blocks.append((cur, subs))
+            cur, subs = s[3:], []
         elif s.startswith("### "):
-            # H2 配下の H3
-            sub_h3.append(s[4:])
+            subs.append(s[4:])
         else:
-            # マーカーなし行を H2 とみなすフォールバック
-            if cur_h2:
-                blocks.append((cur_h2, sub_h3))
-            cur_h2, sub_h3 = s, []
-
-    if cur_h2:
-        blocks.append((cur_h2, sub_h3))
-
+            if cur: blocks.append((cur, subs))
+            cur, subs = s, []
+    if cur: blocks.append((cur, subs))
     return blocks
 
-def _block_html(
-    kw: str, h2: str, h3s: List[str],
-    persona: str, pt: str
-) -> str:
+def _block_html(kw: str, h2: str, h3s: List[str], persona: str, pt: str) -> str:
     h3txt = "\n".join(f"### {h}" for h in h3s) if h3s else ""
-    sys = SAFE_SYS + (
-        "以下制約で H2 セクションを HTML で生成:\n"
-        "- 600-800 字\n"
-        "- 結論→理由→具体例×3→再結論\n"
-        "- 具体例は <h3 class=\"wp-heading\"> で示す\n"
-        f"- 視点: {persona}\n"
-        "- <h2>/<h3> に class=\"wp-heading\" を付与"
+    sys   = (
+        "あなたは一流の日本語 SEO ライターです。"
+        "以下制約でH2セクションをHTML生成:\n"
+        "-600-800字\n-結論→理由→具体例×3→再結論\n"
+        "-具体例は<h3 class=\"wp-heading\">で示す\n"
+        f"-視点:{persona}\n"
+        "-<h2>/<h3>にclass=\"wp-heading\"付与"
     )
-    usr = f"{pt}\n\n▼ KW:{kw}\n▼ H2:{h2}\n▼ H3s\n{h3txt}"
-    return _chat(
-        [{"role": "system", "content": sys},
-         {"role": "user",   "content": usr}],
-        TOKENS["block"], TEMP["block"]
-    )
+    usr   = f"{pt}\n\n▼ KW:{kw}\n▼ H2:{h2}\n▼ H3s\n{h3txt}"
+    return _chat([{"role":"system","content":sys},
+                  {"role":"user","content":usr}],
+                 TOKENS["block"], TEMP["block"])
 
 def _compose_body(kw: str, outline: str, pt: str) -> str:
-    # プロンプト内に「○○字」と書かれていればそこを下限に使う
-    m = re.search(r"(\d{3,5})\s*字", pt)
+    m = re.search(r"(\d{3,5})\s*(?:字|文字)", pt)
     min_chars = int(m.group(1)) if m else MIN_BODY_CHARS_DEFAULT
-
     parts = [
-        _block_html(
-            kw, h2, h3s,
-            random.choice(PERSONAS),
-            pt
-        )
+        _block_html(kw, h2, h3s, random.choice([
+            "節約志向の学生","ビジネス渡航が多い会社員",
+            "小さな子供連れファミリー","リタイア後の移住者",
+            "ペット同伴で移動する読者"
+        ]), pt)
         for h2, h3s in _parse_outline(outline)
     ]
     html = "\n\n".join(parts)
-
-    # 見出しに class 付与漏れがあれば補完
-    html = re.sub(
-        r"<h([23])(?![^>]*wp-heading)",
-        r'<h\1 class="wp-heading"', html
-    )
-
-    # 短すぎたらまとめを追加
+    html = re.sub(r"<h([23])(?![^>]*wp-heading)",
+                  r'<h\1 class="wp-heading"', html)
     if len(html) < min_chars:
         html += '\n\n<h2 class="wp-heading">まとめ</h2><p>要点を整理しました。</p>'
-
     return html
 
-# ══════════════════════════════════════════════
+# ──────────────────────────────
 # 生成タスク
-# ══════════════════════════════════════════════
+# ──────────────────────────────
 def _generate(app, aid: int, tpt: str, bpt: str):
     with app.app_context():
         art = Article.query.get(aid)
@@ -238,20 +199,20 @@ def _generate(app, aid: int, tpt: str, bpt: str):
             return
         try:
             art.status, art.progress = "gen", 10; db.session.commit()
-            art.title = _unique_title(art.keyword, tpt)
+            art.title   = _unique_title(art.keyword, tpt)
             art.progress = 30; db.session.commit()
 
             outline = _outline(art.keyword, art.title, bpt)
             art.progress = 50; db.session.commit()
 
-            art.body = _compose_body(art.keyword, outline, bpt)
+            art.body    = _compose_body(art.keyword, outline, bpt)
             art.progress = 80; db.session.commit()
 
-            # 画像取得――本文が短い場合はキーワードのみで再検索
-            if not art.body or len(art.body) < MIN_BODY_CHARS_DEFAULT:
-                art.image_url = fetch_featured_image("", art.keyword)
-            else:
-                art.image_url = fetch_featured_image(art.body, art.keyword)
+            # 画像取得: 先頭H2 or キーワードで強化クエリ
+            body_html = art.body or ""
+            match = re.search(r"<h2\b[^>]*>(.*?)</h2>", body_html, re.IGNORECASE)
+            query = match.group(1) if match else art.keyword
+            art.image_url = fetch_featured_image(body_html, query or art.keyword)
 
             art.status, art.progress = "done", 100
             art.updated_at = datetime.utcnow()
@@ -261,9 +222,9 @@ def _generate(app, aid: int, tpt: str, bpt: str):
         finally:
             db.session.commit()
 
-# ══════════════════════════════════════════════
-# enqueue_generation  (予約時刻をセット)
-# ══════════════════════════════════════════════
+# ──────────────────────────────
+# enqueue_generation
+# ──────────────────────────────
 def enqueue_generation(
     user_id: int,
     keywords: List[str],
@@ -272,16 +233,14 @@ def enqueue_generation(
     site_id: int | None = None
 ) -> None:
     app = current_app._get_current_object()
-
-    # 生成本数を事前に算出し予約スロットを作成
-    total = sum(random.randint(1, 3) for _ in keywords[:40])
+    total = sum(random.randint(1,3) for _ in keywords[:40])
     slots = iter(_generate_slots(total))
 
     def bg():
         with app.app_context():
             ids: List[int] = []
             for kw in keywords[:40]:
-                for _ in range(random.randint(1, 3)):
+                for _ in range(random.randint(1,3)):
                     art = Article(
                         keyword      = kw.strip(),
                         user_id      = user_id,
