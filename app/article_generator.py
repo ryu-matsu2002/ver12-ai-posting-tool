@@ -7,13 +7,12 @@
   - 本文見出し構成 + class付与
   - 文字数範囲（2500字〜3000字など）での下限・上限制御
   - 画像取得: 本文先頭 H2 + キーワード でクエリ強化
-  - スケジュールは「翌日」以降のUTCスロット
+  - スケジュールは「翌日」以降のUTCスロット（JST 10-20時、それぞれ１時間ずつ）
 """
 
 from __future__ import annotations
-import os, re, random, threading, logging, math
+import os, re, random, threading, logging
 from datetime import datetime, timedelta, date, time
-from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Tuple
 
 from difflib import SequenceMatcher
@@ -43,31 +42,37 @@ TITLE_DUP_THRESH       = 0.80
 # スケジュール設定
 # ──────────────────────────────
 JST        = pytz.timezone("Asia/Tokyo")
-POST_HOURS = list(range(10, 21))
-LAMBDA     = 4
-MAX_PERDAY = 5
-
-def _poisson_rand(lambda_: float = LAMBDA) -> int:
-    L, k, p = math.exp(-lambda_), 0, 1.0
-    while p > L:
-        k += 1
-        p *= random.random()
-    return k or 1
+POST_HOURS = list(range(10, 21))  # JST 10–20時
+MAX_PERDAY = len(POST_HOURS)
 
 def _generate_slots(n: int) -> List[datetime]:
     """
-    明日の00:00から必要数のUTCスロットを返す
+    次の日以降のJST10–21時から、
+    ・分をランダム(1–59)にして時刻をざっくりずらし
+    ・前スロットから2時間以上あけ
+    を満たすn個のUTC日時を返す
     """
+    # 1) 候補リスト生成 (必要十分な日数)
+    candidates: List[datetime] = []
+    day = date.today() + timedelta(days=1)
+    # とりあえず n*POST_HOURS 日分を作っておく
+    days_needed = (n * 2) // len(POST_HOURS) + 2
+    for _ in range(days_needed):
+        for h in POST_HOURS:
+            minute = random.randint(1, 59)  # ちょうど00分を避ける
+            dt_local = datetime.combine(day, time(hour=h, minute=minute), tzinfo=JST)
+            candidates.append(dt_local.astimezone(pytz.utc))
+        day += timedelta(days=1)
+    candidates.sort()
+
+    # 2) 2時間以上あけて貪欲に選択
     slots: List[datetime] = []
-    cur = date.today() + timedelta(days=1)   # ← 明日スタート
-    while len(slots) < n:
-        cnt = min(MAX_PERDAY, _poisson_rand())
-        hrs = random.sample(POST_HOURS, min(cnt, len(POST_HOURS)))
-        for h in hrs:
-            dt_local = datetime.combine(cur, time(hour=h), tzinfo=JST)
-            slots.append(dt_local.astimezone(pytz.utc))
-        cur += timedelta(days=1)
-    return sorted(slots)[:n]
+    for dt in candidates:
+        if not slots or dt >= slots[-1] + timedelta(hours=2):
+            slots.append(dt)
+            if len(slots) == n:
+                break
+    return slots
 
 # ──────────────────────────────
 # コンテンツ生成設定
@@ -115,11 +120,14 @@ def _title_once(kw: str, pt: str, retry: bool) -> str:
     extra = "\n※既存と類似するため、異なる切り口にしてください。" if retry else ""
     usr   = f"{pt}{extra}\n\n▼ 条件\n- KW を含める\n- 末尾は？\n▼ KW: {kw}"
     sys   = SAFE_SYS + "Q&A形式タイトルを1行で返してください。"
-    return _chat([{"role":"system","content":sys},
-                  {"role":"user","content":usr}],
-                 TOKENS["title"], TEMP["title"])
+    return _chat(
+        [{"role":"system","content":sys},
+         {"role":"user","content":usr}],
+        TOKENS["title"], TEMP["title"]
+    )
 
 def _unique_title(kw: str, pt: str) -> str:
+    # DB と既生成分を合わせて重複チェック
     history = [
         t[0] for t in db.session.query(Article.title)
                     .filter(Article.keyword==kw, Article.title.isnot(None))
@@ -128,6 +136,8 @@ def _unique_title(kw: str, pt: str) -> str:
     for i in range(MAX_TITLE_RETRY):
         cand = _title_once(kw, pt, retry=(i>0))
         if not any(_similar(cand, h) for h in history):
+            # DB に追加して次回も参照可能に
+            history.append(cand)
             break
     return cand
 
@@ -140,23 +150,27 @@ def _outline(kw: str, title: str, pt: str) -> str:
         + "必ず Markdown形式の##/###で6見出し以上の詳細アウトラインを返してください。"
     )
     usr = f"{pt}\n\n▼ KW:{kw}\n▼ TITLE:{title}"
-    return _chat([{"role":"system","content":sys},
-                  {"role":"user","content":usr}],
-                 TOKENS["outline"], TEMP["outline"])
+    return _chat(
+        [{"role":"system","content":sys},
+         {"role":"user","content":usr}],
+        TOKENS["outline"], TEMP["outline"]
+    )
 
 def _parse_outline(raw: str) -> List[Tuple[str,List[str]]]:
     blocks, cur, subs = [], None, []
     for ln in raw.splitlines():
         s = ln.strip()
-        if not s: 
+        if not s:
             continue
         if s.startswith("## "):
-            if cur: blocks.append((cur, subs))
+            if cur:
+                blocks.append((cur, subs))
             cur, subs = s[3:], []
         elif s.startswith("### "):
             subs.append(s[4:])
         else:
-            if cur: blocks.append((cur, subs))
+            if cur:
+                blocks.append((cur, subs))
             cur, subs = s, []
     if cur:
         blocks.append((cur, subs))
@@ -176,9 +190,11 @@ def _block_html(
           "- <h2>/<h3>にclass=\"wp-heading\"付与"
     )
     usr   = f"{pt}\n\n▼ KW:{kw}\n▼ H2:{h2}\n▼ H3s\n{h3txt}"
-    return _chat([{"role":"system","content":sys},
-                  {"role":"user","content":usr}],
-                 TOKENS["block"], TEMP["block"])
+    return _chat(
+        [{"role":"system","content":sys},
+         {"role":"user","content":usr}],
+        TOKENS["block"], TEMP["block"]
+    )
 
 def _compose_body(kw: str, outline: str, pt: str) -> str:
     # ① 範囲指定 (e.g. "2500字から3000字")
@@ -187,22 +203,24 @@ def _compose_body(kw: str, outline: str, pt: str) -> str:
         min_chars, max_chars = map(int, m_range.groups())
     else:
         m = re.search(r"(\d{3,5})\s*字", pt)
-        min_chars, max_chars = (int(m.group(1)), None) if m else (MIN_BODY_CHARS_DEFAULT, None)
+        if m:
+            min_chars, max_chars = int(m.group(1)), None
+        else:
+            min_chars, max_chars = MIN_BODY_CHARS_DEFAULT, None
 
-    parts = [
-        _block_html(
-            kw, h2, h3s,
-            random.choice(PERSONAS),
-            pt
-        )
-        for h2, h3s in _parse_outline(outline)
-    ]
+    # 見出し数/長さ制限: H2は先頭6つ, H3は≤30字かつ各最大3つ
+    blocks = _parse_outline(outline)[:6]
+    parts: List[str] = []
+    for h2, h3s in blocks:
+        limited_h3 = [h for h in h3s if len(h) <= 30][:2]
+        parts.append(_block_html(kw, h2, limited_h3, random.choice(PERSONAS), pt))
+
     html = "\n\n".join(parts)
     html = re.sub(
         r"<h([23])(?![^>]*wp-heading)>",
-        r'<h\1 class="wp-heading">',
-        html
+        r'<h\1 class="wp-heading">', html
     )
+
     if len(html) < min_chars:
         html += '\n\n<h2 class="wp-heading">まとめ</h2><p>要点を整理しました。</p>'
 
@@ -212,11 +230,17 @@ def _compose_body(kw: str, outline: str, pt: str) -> str:
         last_p = snippet.rfind("</p>")
         html = snippet[:last_p+4] if last_p != -1 else snippet
 
-    return html
+    # ④ 重複行は省いて返す
+    seen: set[str] = set()
+    out: List[str] = []
+    for ln in html.splitlines():
+        txt = ln.strip()
+        if not txt or txt not in seen:
+            out.append(ln)
+            if txt:
+                seen.add(txt)
+    return "\n".join(out)
 
-# ══════════════════════════════════════════════
-# 生成タスク
-# ══════════════════════════════════════════════
 def _generate(app, aid: int, tpt: str, bpt: str):
     with app.app_context():
         art = Article.query.get(aid)
@@ -276,8 +300,8 @@ def enqueue_generation(
                     ids.append(art.id)
             db.session.commit()
 
-        with ThreadPoolExecutor(max_workers=3) as ex:
-            for aid in ids:
-                ex.submit(_generate, app, aid, title_prompt, body_prompt)
+        # タイトル重複防止のため直列実行
+        for aid in ids:
+            _generate(app, aid, title_prompt, body_prompt)
 
     threading.Thread(target=bg, daemon=True).start()

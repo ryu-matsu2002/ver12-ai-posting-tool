@@ -5,31 +5,27 @@
 {% block content %}
 <h2 class="text-2xl font-semibold mb-6">記事一覧</h2>
 
-{# ───────── サイトフィルタ ───────── #}
+{# サイトフィルタ #}
 <form method="get" class="mb-6 flex items-center flex-wrap gap-3">
   <label for="siteFilter" class="font-medium shrink-0">投稿先サイトで絞り込み:</label>
-  <select
-    id="siteFilter"
-    name="site_id"
-    onchange="this.form.submit()"
-    class="p-2 rounded border dark:bg-gray-700 dark:border-gray-600 min-w-[200px]"
-  >
+  <select id="siteFilter" name="site_id" onchange="this.form.submit()"
+          class="p-2 rounded border dark:bg-gray-700 dark:border-gray-600 min-w-[200px]">
     <option value="">―― 全サイト ――</option>
     {% for s in sites %}
-      <option
-        value="{{ s.id }}"
-        {% if s.id == site_id %}selected{% endif %}
-      >
+      <option value="{{ s.id }}" {% if s.id == site_id %}selected{% endif %}>
         {{ s.name }}
       </option>
     {% endfor %}
   </select>
   <noscript>
-    <button type="submit" class="py-1 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded">適用</button>
+    <button type="submit"
+            class="py-1 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded">
+      適用
+    </button>
   </noscript>
 </form>
 
-{# ───────── 一覧テーブル ───────── #}
+{# 一覧テーブル #}
 <div class="overflow-x-auto">
   <table class="min-w-full bg-white dark:bg-gray-800 text-sm">
     <thead>

@@ -2,11 +2,9 @@
 """
 WordPress 投稿ユーティリティ
 ────────────────────────────────────────
-・ユーザが登録した Site モデル (url / username / app_pass) を用いて
-  WordPress REST API へ記事を即時投稿するヘルパ関数群
-・アプリパスワード (Basic 認証) 前提
-・アイキャッチ (image_url) があれば /media へアップロード
-・投稿前に <h2>, <h3>, <p> へ装飾用のクラス／インライン style を付与
+・Basic 認証 (Application Password) 前提
+・アイキャッチ → /media → ID を取得
+・本文に <h2>,<h3>,<p> のスタイル/クラスをインライン付与
 """
 
 from __future__ import annotations
@@ -18,6 +16,8 @@ import re
 from typing import Optional
 
 import requests
+from flask import current_app
+
 
 # タイムアウト（秒）
 TIMEOUT = int(os.getenv("WP_API_TIMEOUT", "15"))
@@ -34,10 +34,6 @@ def _basic_auth_header(username: str, app_pass: str) -> dict[str, str]:
 # アイキャッチ画像アップロード
 # ──────────────────────────────
 def _upload_featured_image(site, image_url: str) -> Optional[int]:
-    """
-    image_url → ダウンロード → site へ /media POST
-    成功時 media ID、失敗時 None
-    """
     try:
         r = requests.get(image_url, timeout=TIMEOUT)
         r.raise_for_status()
@@ -108,23 +104,20 @@ def _decorate_html(html: str) -> str:
 # 公開 API : 記事投稿
 # ──────────────────────────────
 def post_to_wp(site, article) -> str:
-    """
-    Site と Article を受け取り、WordPress へ publish 投稿。
-    戻り値: 投稿先 URL（エラー時は例外送出）
-    """
     # 1. アイキャッチ
     featured_id: Optional[int] = None
     if article.image_url:
         featured_id = _upload_featured_image(site, article.image_url)
 
-    # 2. コンテンツ装飾
+    # 2. 本文装飾
     styled_body = _decorate_html(article.body or "")
 
-    # 3. REST 呼び出し
+    # 3. 投稿 API
     api  = f"{site.url.rstrip('/')}/wp-json/wp/v2/posts"
     hdrs = _basic_auth_header(site.username, site.app_pass)
+    hdrs["Content-Type"] = "application/json"
 
-    payload: dict = {
+    payload = {
         "title":   article.title,
         "content": styled_body,
         "status":  "publish",
@@ -133,5 +126,7 @@ def post_to_wp(site, article) -> str:
         payload["featured_media"] = featured_id
 
     resp = requests.post(api, headers=hdrs, json=payload, timeout=TIMEOUT)
+    if resp.status_code == 403:
+        current_app.logger.error(f"WP 403 Forbidden: {api} → {resp.text}")
     resp.raise_for_status()
     return resp.json().get("link", "")

@@ -60,6 +60,7 @@ def logout():
     logout_user()
     return redirect(url_for(".login"))
 
+
 # ───────────────────────────── Dashboard
 @bp.route("/")
 @login_required
@@ -177,6 +178,7 @@ def log():
     q = Article.query.filter_by(user_id=current_user.id)
     if site_id:
         q = q.filter_by(site_id=site_id)
+    # scheduled_at を昇順、null を末尾、作成日時降順
     q = q.order_by(
         nulls_last(asc(Article.scheduled_at)),
         Article.created_at.desc()
