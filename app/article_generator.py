@@ -44,39 +44,41 @@ TITLE_DUP_THRESH       = 0.80
 # ──────────────────────────────
 JST        = pytz.timezone("Asia/Tokyo")
 POST_HOURS = list(range(10, 21))  # JST 10–20時
-MAX_PERDAY = len(POST_HOURS)
 
 def _generate_slots(n: int) -> List[datetime]:
     """
-    翌日から最大1か月先までの JST 10–20時（分は1–59のランダム）を候補に、
-    2時間以上あけた n 個の UTC datetime を返す
+    ・翌日以降の JST 10–20時 から、
+      1日あたり 1～5 本（平均約4本）をランダムに選び、
+      分はランダム(1–59)でずらした UTC datetime リストを返す。
+    ・必ず n 個のスロットを返し、None は含まない。
     """
-    # 候補生成範囲：翌日～1か月後まで
-    start = date.today() + timedelta(days=1)
-    end   = date.today() + timedelta(days=30)
+    slots: List[datetime] = []
+    day = date.today() + timedelta(days=1)
 
-    # 全候補を収集
-    candidates: List[datetime] = []
-    day = start
-    while day <= end:
-        for h in POST_HOURS:
-            minute   = random.randint(1, 59)
+    # 必要数に達するまで日付を進める
+    while len(slots) < n:
+        remaining = n - len(slots)
+
+        # １日あたりの投稿本数をランダムに決定（重み付けで平均約4本）
+        posts_today = random.choices(
+            [1, 2, 3, 4, 5],
+            weights=[1, 1, 1, 3, 4],
+            k=1
+        )[0]
+        posts_today = min(posts_today, remaining)
+
+        # その日のうち何時に投稿するか、重複なくランダムに選択
+        chosen_hours = random.sample(POST_HOURS, posts_today)
+        for h in sorted(chosen_hours):
+            minute = random.randint(1, 59)
+            # JST のローカル datetime を作成して UTC に変換
             dt_local = datetime.combine(day, time(hour=h, minute=minute), tzinfo=JST)
-            candidates.append(dt_local.astimezone(pytz.utc))
+            slots.append(dt_local.astimezone(pytz.utc))
+
         day += timedelta(days=1)
 
-    # 昇順にソート
-    candidates.sort()
-
-    # 2時間以上あけたスロットを n 個だけピックアップ
-    slots: List[datetime] = []
-    for dt in candidates:
-        if not slots or dt >= slots[-1] + timedelta(hours=2):
-            slots.append(dt)
-            if len(slots) == n:
-                break
-
-    return slots
+    # 必ず n 個返す（余分があれば切り捨て）
+    return slots[:n]
 
 # ──────────────────────────────
 # コンテンツ生成設定
@@ -187,8 +189,8 @@ def _block_html(
     sys   = (
         SAFE_SYS
         + "以下制約でH2セクションをHTML生成:\n"
-        + "- 記事全体は約3000字以内になるように調整\n"
-        + "- 小見出し（H2）は20字以内で簡潔に\n"
+        + "- 記事全体は2000〜3000字以内になるように調整\n"
+        + "- 小見出し（H2）は10字以内で簡潔に\n"
         + "- 400-600字で本文を生成\n"
         + "- 結論→理由→具体例×3→再結論\n"
         + "- 具体例は<h3 class=\"wp-heading\">で示す\n"
@@ -203,76 +205,59 @@ def _block_html(
     )
 
 def _compose_body(kw: str, outline_raw: str, pt: str) -> str:
-    # ① 範囲指定 (e.g. "2500字から3000字")
-    m_range = re.search(r"(\d{3,5})\s*字から\s*(\d{3,5})\s*字", pt)
-    if m_range:
-        min_chars, max_chars = map(int, m_range.groups())
+    # ① ユーザー指定／デフォルトの字数範囲取得
+    m = re.search(r"(\d{3,5})\s*字から\s*(\d{3,5})\s*字", pt)
+    if m:
+        min_chars, max_chars = map(int, m.groups())
     else:
-        m = re.search(r"(\d{3,5})\s*字", pt)
-        if m:
-            min_chars, max_chars = int(m.group(1)), None
+        m2 = re.search(r"(\d{3,5})\s*字", pt)
+        if m2:
+            min_chars, max_chars = int(m2.group(1)), None
         else:
             min_chars, max_chars = MIN_BODY_CHARS_DEFAULT, None
+    # デフォルト上限を必ず3000字に
+    MAX_TOTAL = max_chars or 3000
 
-    # ─ H2小見出しは先頭6本、かつ20字以内にガード ─
+    # ─ H2小見出しは4本まで、かつ20字以内にガード ─
     max_h2_len = 20
     parsed = _parse_outline(outline_raw)
-    raw_blocks: List[Tuple[str, List[str]]] = []
-    for h2, h3s in parsed[:6]:
+    raw_blocks = []
+    for h2, h3s in parsed[:4]:                # ← 6→4 に減らす
         if len(h2) > max_h2_len:
             h2 = h2[:max_h2_len] + "…"
         raw_blocks.append((h2, h3s))
 
     # 各ブロックごとに本文生成
-    parts: List[str] = []
+    parts = []
     for h2, h3s in raw_blocks:
-        filtered_h3 = [h for h in h3s if len(h) <= 10][:3]
-        parts.append(
-            _block_html(
-                kw,
-                h2,
-                filtered_h3,
-                random.choice(PERSONAS),
-                pt
-            )
-        )
+        h3_filtered = [h for h in h3s if len(h) <= 10][:3]
+        parts.append(_block_html(kw, h2, h3_filtered, random.choice(PERSONAS), pt))
 
-    # 生成された HTML 本文
+    # 生成された HTML
     html = "\n\n".join(parts)
-    html = re.sub(
-        r"<h([23])(?![^>]*wp-heading)>",
-        r'<h\1 class="wp-heading">', html
-    )
+    html = re.sub(r"<h([23])(?![^>]*wp-heading)>", r'<h\1 class="wp-heading">', html)
 
-    # ③ 下限未満ならまとめ追加
+    # ③ 下限未満ならまとめ
     if len(html) < min_chars:
         html += '\n\n<h2 class="wp-heading">まとめ</h2><p>要点を整理しました。</p>'
 
-    # ④ ユーザ指定の上限超過時に切り詰め
-    if max_chars and len(html) > max_chars:
-        snippet = html[:max_chars]
-        last_p = snippet.rfind("</p>")
-        html = snippet[:last_p + 4] if last_p != -1 else snippet
-
-    # ⑤ 重複パラグラフ除去
-    lines = html.splitlines()
-    seen, filtered = set(), []
+    # ④ 重複行削除
+    lines, seen, out = html.splitlines(), set(), []
     for ln in lines:
-        text = ln.strip()
-        if not text or text not in seen:
-            filtered.append(ln)
-            if text:
-                seen.add(text)
+        txt = ln.strip()
+        if not txt or txt not in seen:
+            out.append(ln)
+            if txt:
+                seen.add(txt)
+    html = "\n".join(out)
 
-    # ⑥ 全体文字数上限ガード（プロンプト指定 or デフォルト3000字）
-    html_final = "\n".join(filtered)
-    max_total = max_chars if max_chars else MAX_BODY_CHARS_DEFAULT
-    if max_total and len(html_final) > max_total:
-        snippet = html_final[:max_total]
+    # ⑤ 最終的に3000字以内に切り詰め
+    if len(html) > MAX_TOTAL:
+        snippet = html[:MAX_TOTAL]
         last_p = snippet.rfind("</p>")
-        html_final = snippet[: last_p + 4] if last_p != -1 else snippet
+        html = snippet[: last_p+4] if last_p != -1 else snippet
 
-    return html_final
+    return html
 
 
 def _generate(app, aid: int, tpt: str, bpt: str):
