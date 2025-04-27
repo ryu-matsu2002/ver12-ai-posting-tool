@@ -35,6 +35,7 @@ TEMP   = {"title": 0.40, "outline": 0.45, "block": 0.70}
 CTX_LIMIT              = 4096
 SHRINK                 = 0.75
 MIN_BODY_CHARS_DEFAULT = 2_000
+MAX_BODY_CHARS_DEFAULT = 3_000
 MAX_TITLE_RETRY        = 7
 TITLE_DUP_THRESH       = 0.80
 
@@ -186,6 +187,7 @@ def _block_html(
     sys   = (
         SAFE_SYS
         + "以下制約でH2セクションをHTML生成:\n"
+        + "- 記事全体は約3000字以内になるように調整\n"
         + "- 小見出し（H2）は20字以内で簡潔に\n"
         + "- 400-600字で本文を生成\n"
         + "- 結論→理由→具体例×3→再結論\n"
@@ -212,14 +214,16 @@ def _compose_body(kw: str, outline_raw: str, pt: str) -> str:
         else:
             min_chars, max_chars = MIN_BODY_CHARS_DEFAULT, None
 
-    # ─ H2小見出しは6本まで、かつ20字以内にガード
+    # ─ H2小見出しは6本まで、かつ20字以内にガード ─
     max_h2_len = 20
     parsed = _parse_outline(outline_raw)
-    raw_blocks = []
+    raw_blocks: List[Tuple[str, List[str]]] = []
     for h2, h3s in parsed[:6]:
         if len(h2) > max_h2_len:
             h2 = h2[:max_h2_len] + "…"
-        raw_blocks.append((h2, h3s))    
+        raw_blocks.append((h2, h3s))
+
+    # 各ブロックごとに本文生成
     parts: List[str] = []
     for h2, h3s in raw_blocks:
         filtered_h3 = [h for h in h3s if len(h) <= 10][:3]
@@ -244,11 +248,11 @@ def _compose_body(kw: str, outline_raw: str, pt: str) -> str:
     if len(html) < min_chars:
         html += '\n\n<h2 class="wp-heading">まとめ</h2><p>要点を整理しました。</p>'
 
-    # ④ 上限超過時に切り詰め
+    # ④ ユーザ指定の上限超過時に切り詰め
     if max_chars and len(html) > max_chars:
         snippet = html[:max_chars]
         last_p = snippet.rfind("</p>")
-        html = snippet[:last_p+4] if last_p != -1 else snippet
+        html = snippet[:last_p + 4] if last_p != -1 else snippet
 
     # ⑤ 重複パラグラフ除去
     lines = html.splitlines()
@@ -260,8 +264,16 @@ def _compose_body(kw: str, outline_raw: str, pt: str) -> str:
             if text:
                 seen.add(text)
 
-    # 関数内に return を含める
-    return "\n".join(filtered)
+    # ⑥ 全体文字数上限ガード（プロンプト指定 or デフォルト3000字）
+    html_final = "\n".join(filtered)
+    max_total = max_chars if max_chars else MAX_BODY_CHARS_DEFAULT
+    if max_total and len(html_final) > max_total:
+        snippet = html_final[:max_total]
+        last_p = snippet.rfind("</p>")
+        html_final = snippet[: last_p + 4] if last_p != -1 else snippet
+
+    return html_final
+
 
 def _generate(app, aid: int, tpt: str, bpt: str):
     with app.app_context():
@@ -279,10 +291,10 @@ def _generate(app, aid: int, tpt: str, bpt: str):
             art.body    = _compose_body(art.keyword, outline, bpt)
             art.progress = 80; db.session.commit()
 
-            # 画像取得: 本文先頭 H2 + キーワード
-            match = re.search(r"<h2\b[^>]*>(.*?)</h2>", art.body or "", re.IGNORECASE)
-            first_h2 = match.group(1) if match else ""
-            headings = re.findall(r"<h2\b[^>]*>(.*?)</h2>", art.body or "", re.IGNORECASE)[:2]
+            # 画像取得: タイトル＋先頭2つのH2を使ったクエリ
+            headings = re.findall(
+                r"<h2\b[^>]*>(.*?)</h2>", art.body or "", re.IGNORECASE
+            )[:2]
             query = " ".join([art.keyword, art.title] + headings).strip()
             art.image_url = fetch_featured_image(query)
 

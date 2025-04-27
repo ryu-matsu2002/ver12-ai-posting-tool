@@ -17,13 +17,15 @@ from typing import Optional
 
 import requests
 from requests.exceptions import HTTPError
+from requests.auth import HTTPBasicAuth
 from flask import current_app
 
 # タイムアウト（秒）
 TIMEOUT = int(os.getenv("WP_API_TIMEOUT", "15"))
 
+
 # ──────────────────────────────
-# 認証ヘッダー
+# 認証ヘッダー (アイキャッチ用アップロードでは従来手法を使用)
 # ──────────────────────────────
 def _basic_auth_header(username: str, app_pass: str) -> dict[str, str]:
     token = base64.b64encode(f"{username}:{app_pass}".encode()).decode()
@@ -103,6 +105,11 @@ def _decorate_html(html: str) -> str:
 # 公開 API : 記事投稿
 # ──────────────────────────────
 def post_to_wp(site, article) -> str:
+    """
+    site: models.Site インスタンス（url, username, app_pass）
+    article: models.Article インスタンス（title, body, image_url）
+    戻り値: 投稿先の記事URL
+    """
     # 1. アイキャッチ
     featured_id: Optional[int] = None
     if article.image_url:
@@ -112,10 +119,7 @@ def post_to_wp(site, article) -> str:
     styled_body = _decorate_html(article.body or "")
 
     # 3. 投稿 API
-    api  = f"{site.url.rstrip('/')}/wp-json/wp/v2/posts"
-    headers = _basic_auth_header(site.username, site.app_pass)
-    headers["Content-Type"] = "application/json"
-
+    api = f"{site.url.rstrip('/')}/wp-json/wp/v2/posts"
     payload = {
         "title":   article.title,
         "content": styled_body,
@@ -124,18 +128,36 @@ def post_to_wp(site, article) -> str:
     if featured_id:
         payload["featured_media"] = featured_id
 
-    # リクエスト送信
-    resp = requests.post(api, headers=headers, json=payload, timeout=TIMEOUT)
+    # Basic 認証は requests.auth に任せる
+    auth = HTTPBasicAuth(site.username, site.app_pass)
 
-    # デバッグログ：リクエスト／レスポンス情報
-    current_app.logger.debug("WP Request URL: %s", resp.request.url)
-    current_app.logger.debug("WP Request Headers: %s", resp.request.headers)
-    current_app.logger.debug("WP Request Body: %s", resp.request.body)
+    # ヘッダー
+    headers = {
+        "Accept":       "application/json",
+        "Content-Type": "application/json",
+    }
+
+    # --- デバッグログ: リクエスト詳細 ---
+    current_app.logger.debug("WP POST URL: %s", api)
+    current_app.logger.debug("WP Payload: %s", payload)
+    current_app.logger.debug("WP Username: %s", site.username)
+
+    resp = requests.post(
+        api,
+        json=payload,
+        auth=auth,
+        headers=headers,
+        timeout=TIMEOUT
+    )
+
+    # --- デバッグログ: レスポンス詳細 ---
+    current_app.logger.debug("WP Response status: %s", resp.status_code)
+    current_app.logger.debug("WP Response body: %s", resp.text)
 
     try:
         resp.raise_for_status()
-    except HTTPError as e:
-        current_app.logger.exception("WP 投稿失敗 [%s]: %s", resp.status_code, resp.text)
+    except HTTPError:
+        current_app.logger.error("WordPress 投稿失敗 [%s]: %s", resp.status_code, resp.text)
         raise
 
     return resp.json().get("link", "")
