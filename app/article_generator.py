@@ -196,28 +196,38 @@ def _compose_body(kw: str, outline_raw: str, pt: str) -> str:
             min_chars, max_chars = MIN_BODY_CHARS_DEFAULT, None
 
     # ② 見出し数/長さ制限：H2は先頭3つ、H3は≤10字かつ各最大3つ
-    blocks = _parse_outline(outline_raw)[:3]
+    raw_blocks = _parse_outline(outline_raw)[:3]
     parts: List[str] = []
-    for h2, h3s in blocks:
+    for h2, h3s in raw_blocks:
         filtered_h3 = [h for h in h3s if len(h) <= 10][:3]
-        parts.append(_block_html(kw, h2, filtered_h3, random.choice(PERSONAS), pt))
+        parts.append(
+            _block_html(
+                kw,
+                h2,
+                filtered_h3,
+                random.choice(PERSONAS),
+                pt
+            )
+        )
 
+    # 生成された HTML 本文
     html = "\n\n".join(parts)
     html = re.sub(
         r"<h([23])(?![^>]*wp-heading)>",
         r'<h\1 class="wp-heading">', html
     )
 
+    # ③ 下限未満ならまとめ追加
     if len(html) < min_chars:
         html += '\n\n<h2 class="wp-heading">まとめ</h2><p>要点を整理しました。</p>'
 
-    # ③ 上限超過時に切り詰め
+    # ④ 上限超過時に切り詰め
     if max_chars and len(html) > max_chars:
         snippet = html[:max_chars]
         last_p = snippet.rfind("</p>")
         html = snippet[:last_p+4] if last_p != -1 else snippet
 
-    # ④ 重複パラグラフ除去
+    # ⑤ 重複パラグラフ除去
     lines = html.splitlines()
     seen, filtered = set(), []
     for ln in lines:
@@ -226,6 +236,8 @@ def _compose_body(kw: str, outline_raw: str, pt: str) -> str:
             filtered.append(ln)
             if text:
                 seen.add(text)
+
+    # 関数内に return を含める
     return "\n".join(filtered)
 
 def _generate(app, aid: int, tpt: str, bpt: str):
