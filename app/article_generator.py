@@ -191,7 +191,7 @@ def _block_html(
         + "以下制約でH2セクションをHTML生成:\n"
         + "- 記事全体は2000〜3000字以内になるように調整\n"
         + "- 小見出し（H2）は10字以内で簡潔に\n"
-        + "- 400-600字で本文を生成\n"
+        + "- 600-800字で本文を生成\n"
         + "- 結論→理由→具体例×3→再結論\n"
         + "- 具体例は<h3 class=\"wp-heading\">で示す\n"
         + f"- 視点:{persona}\n"
@@ -205,7 +205,9 @@ def _block_html(
     )
 
 def _compose_body(kw: str, outline_raw: str, pt: str) -> str:
-    # ① ユーザー指定／デフォルトの字数範囲取得
+    """アウトライン → 本文 HTML 生成（2000〜3000字以内を保証）"""
+
+    # ───────────────────────── ① 字数レンジ抽出
     m = re.search(r"(\d{3,5})\s*字から\s*(\d{3,5})\s*字", pt)
     if m:
         min_chars, max_chars = map(int, m.groups())
@@ -215,47 +217,66 @@ def _compose_body(kw: str, outline_raw: str, pt: str) -> str:
             min_chars, max_chars = int(m2.group(1)), None
         else:
             min_chars, max_chars = MIN_BODY_CHARS_DEFAULT, None
-    # デフォルト上限を必ず3000字に
-    MAX_TOTAL = max_chars or 3000
+    MAX_TOTAL = max_chars or 3000   # ← デフォルト上限は 3,000 字
 
-    # ─ H2小見出しは4本まで、かつ20字以内にガード ─
+    # ───────────────────────── ② ブロック生成（H2×3本）
     max_h2_len = 20
     parsed = _parse_outline(outline_raw)
-    raw_blocks = []
-    for h2, h3s in parsed[:4]:                # ← 6→4 に減らす
+    raw_blocks: list[tuple[str, list[str]]] = []
+
+    for h2, h3s in parsed[:3]:      # 先頭３ブロックのみに絞る
         if len(h2) > max_h2_len:
             h2 = h2[:max_h2_len] + "…"
         raw_blocks.append((h2, h3s))
 
-    # 各ブロックごとに本文生成
-    parts = []
+    parts: list[str] = []
     for h2, h3s in raw_blocks:
         h3_filtered = [h for h in h3s if len(h) <= 10][:3]
-        parts.append(_block_html(kw, h2, h3_filtered, random.choice(PERSONAS), pt))
+        section = _block_html(
+            kw,
+            h2,
+            h3_filtered,
+            random.choice(PERSONAS),
+            pt
+        )
 
-    # 生成された HTML
+        # ★ 開始 <p> と終了 </p> の数が合わなければ補完して閉じる
+        if section.count("<p") != section.count("</p>"):
+            section += "</p>"
+
+        parts.append(section)
+
+    # ───────────────────────── ③ パーツ結合＋class 付与
     html = "\n\n".join(parts)
-    html = re.sub(r"<h([23])(?![^>]*wp-heading)>", r'<h\1 class="wp-heading">', html)
+    html = re.sub(
+        r"<h([23])(?![^>]*wp-heading)>",
+        r'<h\1 class="wp-heading">',
+        html
+    )
 
-    # ③ 下限未満ならまとめ
+    # ───────────────────────── ④ 下限未満なら「まとめ」追記
     if len(html) < min_chars:
-        html += '\n\n<h2 class="wp-heading">まとめ</h2><p>要点を整理しました。</p>'
+        html += (
+            '\n\n<h2 class="wp-heading">まとめ</h2>'
+            '<p>本記事のポイントを簡潔に振り返りました。</p>'
+        )
 
-    # ④ 重複行削除
-    lines, seen, out = html.splitlines(), set(), []
-    for ln in lines:
+    # ───────────────────────── ⑤ 重複行（まるごと一致）除去
+    seen: set[str] = set()
+    filtered_lines: list[str] = []
+    for ln in html.splitlines():
         txt = ln.strip()
         if not txt or txt not in seen:
-            out.append(ln)
+            filtered_lines.append(ln)
             if txt:
                 seen.add(txt)
-    html = "\n".join(out)
+    html = "\n".join(filtered_lines)
 
-    # ⑤ 最終的に3000字以内に切り詰め
+    # ───────────────────────── ⑥ 上限 3,000 字ガード（超過時末尾トリム）
     if len(html) > MAX_TOTAL:
         snippet = html[:MAX_TOTAL]
         last_p = snippet.rfind("</p>")
-        html = snippet[: last_p+4] if last_p != -1 else snippet
+        html = snippet[: last_p + 4] if last_p != -1 else snippet
 
     return html
 
