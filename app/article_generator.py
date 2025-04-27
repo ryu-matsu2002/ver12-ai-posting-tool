@@ -46,20 +46,27 @@ POST_HOURS = list(range(10, 21))  # JST 10–20時
 MAX_PERDAY = len(POST_HOURS)
 
 def _generate_slots(n: int) -> List[datetime]:
-    """
-    明日以降の J ST 10–20時のうち、必要数だけ
-    1時間ごとに埋めて UTC datetime で返す
-    """
-    slots: List[datetime] = []
-    cur = date.today() + timedelta(days=1)
-    while len(slots) < n:
+    # 候補リストを多めに作成
+    candidates: List[datetime] = []
+    day = date.today() + timedelta(days=1)
+    # ２日分くらい候補を作る
+    for _ in range(2):
         for h in POST_HOURS:
-            if len(slots) >= n:
+            minute = random.randint(1, 59)
+            dt_local = datetime.combine(day, time(hour=h, minute=minute), tzinfo=JST)
+            candidates.append(dt_local.astimezone(pytz.utc))
+        day += timedelta(days=1)
+    # 昇順ソート
+    candidates.sort()
+
+    # ２時間以上開けたスロットを n 個だけ選ぶ
+    slots: List[datetime] = []
+    for dt in candidates:
+        if not slots or dt >= slots[-1] + timedelta(hours=2):
+            slots.append(dt)
+            if len(slots) == n:
                 break
-            dt_local = datetime.combine(cur, time(hour=h), tzinfo=JST)
-            slots.append(dt_local.astimezone(pytz.utc))
-        cur += timedelta(days=1)
-    return slots[:n]
+    return slots
 
 # ──────────────────────────────
 # コンテンツ生成設定
@@ -169,8 +176,8 @@ def _block_html(
     h3txt = "\n".join(f"### {h}" for h in h3s) if h3s else ""
     sys   = (
         SAFE_SYS
-        + "以下制約でH2セクションをHTML生成:\n"
-          "- 400-600字\n"
+        + "- 以下制約でH2セクションをHTML生成:\n"
+          "- 200-300字\n"
           "- 結論→理由→具体例×3→再結論\n"
           "- 具体例は<h3 class=\"wp-heading\">で示す\n"
           f"- 視点:{persona}\n"
@@ -259,8 +266,8 @@ def _generate(app, aid: int, tpt: str, bpt: str):
             # 画像取得: 本文先頭 H2 + キーワード
             match = re.search(r"<h2\b[^>]*>(.*?)</h2>", art.body or "", re.IGNORECASE)
             first_h2 = match.group(1) if match else ""
-            query    = f"{art.keyword} {first_h2}".strip()
-            art.image_url = fetch_featured_image(art.body or "", query)
+            query = f"{art.keyword} {art.title} {first_h2}".strip()
+            art.image_url = fetch_featured_image(query)
 
             art.status, art.progress = "done", 100
             art.updated_at = datetime.utcnow()

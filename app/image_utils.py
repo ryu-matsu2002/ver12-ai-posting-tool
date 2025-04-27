@@ -1,19 +1,21 @@
-# ─────────────────────────────────────────────
-# app/image_utils.py   – v4 (2025-05-XX)
-# ─────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────────
+# app/image_utils.py   – v5 (2025-05-XX)
+# ───────────────────────────────────────────────────────────────
 """
 ・Pixabay → Unsplash → デフォルト画像 の順でフォールバック
-・検索クエリを「キーワード＋本文先頭 H2 見出し」など複合化
-・エラー時や全て 0 件なら社内 CDN 等のDEFAULT_IMAGE_URLを返却
+・検索クエリは呼び出し側で「キーワード＋タイトル＋見出し」などを組み立て
+・エラー時や全て 0 件なら社内 CDN 等の DEFAULT_IMAGE_URL を返却
 """
 
 from __future__ import annotations
-import os, re, requests, random, logging
+import os
+import requests
+import logging
 from typing import List, Optional
 
 # ───── 環境変数 ─────
-PIXABAY_API_KEY    = os.getenv("PIXABAY_API_KEY", "")
-DEFAULT_IMAGE_URL  = os.getenv("DEFAULT_IMAGE_URL", "/static/default-thumb.jpg")
+PIXABAY_API_KEY   = os.getenv("PIXABAY_API_KEY", "")
+DEFAULT_IMAGE_URL = os.getenv("DEFAULT_IMAGE_URL", "/static/default-thumb.jpg")
 
 # ══════════════════════════════════════════════
 # Pixabay 検索
@@ -36,19 +38,30 @@ def _search_pixabay(query: str, per_page: int = 20) -> List[dict]:
         logging.debug("Pixabay API error (%s): %s", query, e)
         return []
 
-def _pick_pixabay(hits: List[dict], keyword: str = "") -> Optional[str]:
+def _pick_pixabay(hits: List[dict], keywords: List[str]) -> Optional[str]:
+    """
+    hits: Pixabay から返ってきたヒット一覧
+    keywords: 検索クエリを split() した単語リスト
+    タグ中により多くマッチする画像ほど優先的に返す
+    """
     if not hits:
         return None
-    random.shuffle(hits)
-    for h in hits:
-        tags = h.get("tags", "").lower()
-        if keyword and keyword.lower() not in tags:
-            continue
+
+    def score(hit: dict) -> int:
+        tags = hit.get("tags", "").lower()
+        # 各キーワードの出現回数をスコア化
+        return sum(1 for kw in keywords if kw.lower() in tags)
+
+    # スコアが高い順にソート
+    candidates = sorted(hits, key=score, reverse=True)
+    for h in candidates:
         w, hgt = h.get("imageWidth", 0), h.get("imageHeight", 1)
+        # 縦横比が適切なものを優先
         if hgt and 0.5 < w / hgt < 3:
             return h.get("webformatURL")
-    # 条件に合うものが無ければ最初のヒット
-    return hits[0].get("webformatURL")
+
+    # どれも比率NGなら、スコアトップを返す
+    return candidates[0].get("webformatURL")
 
 # ══════════════════════════════════════════════
 # Unsplash Source（Pixabayフォールバック）
@@ -60,33 +73,25 @@ def _unsplash_src(query: str) -> str:
 # ══════════════════════════════════════════════
 # Public API
 # ══════════════════════════════════════════════
-def fetch_featured_image(body: str, keyword: str = "") -> str:
+def fetch_featured_image(query: str) -> str:
     """
-    1) 検索語を「keyword + 本文先頭 H2 見出し」から組み立て
-    2) Pixabay でヒット→条件に合うものを返却
-    3) Pixabay 0件 or エラー→Unsplash Source
+    1) 呼び出し側で組み立てた query を受け取る
+    2) Pixabay でヒット → タグ一致度と縦横比で最適なものを返却
+    3) Pixabay 0件 or エラー → Unsplash Source
     4) それもエラーなら DEFAULT_IMAGE_URL
     """
-    # --- クエリ組み立て ---
-    # 本文中の最初の <h2> を抽出
-    heading_match = re.search(r"<h2\b[^>]*>(.*?)</h2>", body or "", re.IGNORECASE)
-    parts = []
-    if keyword:
-        parts.append(keyword.strip())
-    if heading_match:
-        parts.append(heading_match.group(1).strip())
-    query = " ".join(parts).strip() or (body or "")[:50].strip()
-
     # --- Pixabay検索 ---
     try:
         hits = _search_pixabay(query)
-        url = _pick_pixabay(hits, keyword=query)
+        # query をスペース区切りでキーワードリスト化
+        keywords = query.split()
+        url = _pick_pixabay(hits, keywords)
         if url:
             return url
     except Exception:
         logging.debug("Pixabay fallback failed for query: %s", query)
 
-    # --- Unsplashフォールバック ---
+    # --- Unsplash フォールバック ---
     try:
         return _unsplash_src(query)
     except Exception:
