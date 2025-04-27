@@ -23,6 +23,8 @@ from openai import OpenAI, BadRequestError
 from . import db
 from .models import Article
 from .image_utils import fetch_featured_image
+from sqlalchemy import func
+from .article_generator import MAX_PERDAY
 
 # ──────────────────────────────
 # OpenAI 共通設定
@@ -45,40 +47,43 @@ TITLE_DUP_THRESH       = 0.80
 JST        = pytz.timezone("Asia/Tokyo")
 POST_HOURS = list(range(10, 21))  # JST 10–20時
 
-def _generate_slots(n: int) -> List[datetime]:
+def _generate_slots(app, n: int) -> List[datetime]:
     """
-    ・翌日以降の JST 10–20時 から、
-      1日あたり 1～5 本（平均約4本）をランダムに選び、
-      分はランダム(1–59)でずらした UTC datetime リストを返す。
-    ・必ず n 個のスロットを返し、None は含まない。
+    DB に既に入っている scheduled_at を参照し、
+    1 日あたり MAX_PERDAY (=5) 本まで詰めて予約スロットを返す。
     """
+    with app.app_context():
+        # ── ① 既存予約を JST 日付ごとに集計
+        rows = (
+            db.session.query(
+                func.date(func.timezone('Asia/Tokyo', Article.scheduled_at)).label("jst_date"),
+                func.count(Article.id)
+            )
+            .filter(Article.scheduled_at.isnot(None))
+            .group_by("jst_date")
+            .all()
+        )
+        booked_per_day = {row.jst_date: row[1] for row in rows}
+
+    # ── ② これから作るスロット
     slots: List[datetime] = []
-    day = date.today() + timedelta(days=1)
+    day = date.today() + timedelta(days=1)  # 翌日スタート
 
-    # 必要数に達するまで日付を進める
     while len(slots) < n:
-        remaining = n - len(slots)
-
-        # １日あたりの投稿本数をランダムに決定（重み付けで平均約4本）
-        posts_today = random.choices(
-            [1, 2, 3, 4, 5],
-            weights=[1, 1, 1, 3, 4],
-            k=1
-        )[0]
-        posts_today = min(posts_today, remaining)
-
-        # その日のうち何時に投稿するか、重複なくランダムに選択
-        chosen_hours = random.sample(POST_HOURS, posts_today)
-        for h in sorted(chosen_hours):
-            minute = random.randint(1, 59)
-            # JST のローカル datetime を作成して UTC に変換
-            dt_local = datetime.combine(day, time(hour=h, minute=minute), tzinfo=JST)
-            slots.append(dt_local.astimezone(pytz.utc))
-
+        # 既に予約されている本数
+        booked = booked_per_day.get(day, 0)
+        remaining_today = MAX_PERDAY - booked
+        if remaining_today > 0:
+            need = min(remaining_today, n - len(slots))
+            hours = random.sample(POST_HOURS, need)
+            for h in sorted(hours):
+                minute = random.randint(1, 59)
+                dt_local = datetime.combine(day, time(hour=h, minute=minute), tzinfo=JST)
+                slots.append(dt_local.astimezone(pytz.utc))
+        # 次の日へ
         day += timedelta(days=1)
 
-    # 必ず n 個返す（余分があれば切り捨て）
-    return slots[:n]
+    return slots
 
 # ──────────────────────────────
 # コンテンツ生成設定
@@ -204,79 +209,70 @@ def _block_html(
         TOKENS["block"], TEMP["block"]
     )
 
+# ─────────────────────────────────────────────
+# _compose_body (3ブロック / 2500字ターゲット版)
+# ─────────────────────────────────────────────
 def _compose_body(kw: str, outline_raw: str, pt: str) -> str:
-    """アウトライン → 本文 HTML 生成（2000〜3000字以内を保証）"""
+    """
+    * 先頭 H2 を 3 本だけ使って本文を生成
+    * 生成後に 2 200〜2 800 字に収まるよう長さを最終調整
+    """
+    TARGET = 2500          # 目標文字数
+    RANGE  = 300           # ±許容幅
 
-    # ───────────────────────── ① 字数レンジ抽出
-    m = re.search(r"(\d{3,5})\s*字から\s*(\d{3,5})\s*字", pt)
-    if m:
-        min_chars, max_chars = map(int, m.groups())
-    else:
-        m2 = re.search(r"(\d{3,5})\s*字", pt)
-        if m2:
-            min_chars, max_chars = int(m2.group(1)), None
-        else:
-            min_chars, max_chars = MIN_BODY_CHARS_DEFAULT, None
-    MAX_TOTAL = max_chars or 3000   # ← デフォルト上限は 3,000 字
-
-    # ───────────────────────── ② ブロック生成（H2×3本）
-    max_h2_len = 20
+    # ─ 1) アウトライン先頭 3 本を取得し H2 ガード（20字以内）
     parsed = _parse_outline(outline_raw)
-    raw_blocks: list[tuple[str, list[str]]] = []
-
-    for h2, h3s in parsed[:3]:      # 先頭３ブロックのみに絞る
+    max_h2_len = 20
+    h2_blocks: list[tuple[str, list[str]]] = []
+    for h2, h3s in parsed[:3]:
         if len(h2) > max_h2_len:
             h2 = h2[:max_h2_len] + "…"
-        raw_blocks.append((h2, h3s))
+        h2_blocks.append((h2, h3s))
 
+    # ─ 2) 各ブロックを生成（600〜800字を AI に依頼）
     parts: list[str] = []
-    for h2, h3s in raw_blocks:
-        h3_filtered = [h for h in h3s if len(h) <= 10][:3]
+    for h2, h3s in h2_blocks:
+        h3_filtered = [h for h in h3s if len(h) <= 10][:2]   # H3 は最大 2 本
         section = _block_html(
             kw,
             h2,
             h3_filtered,
             random.choice(PERSONAS),
-            pt
+            pt + "\n\n※記事全体は 2500 字前後にしてください"
         )
-
-        # ★ 開始 <p> と終了 </p> の数が合わなければ補完して閉じる
+        # 未閉じ <p> の補完
         if section.count("<p") != section.count("</p>"):
             section += "</p>"
-
         parts.append(section)
 
-    # ───────────────────────── ③ パーツ結合＋class 付与
+    # ─ 3) パーツ結合＋class 付与
     html = "\n\n".join(parts)
-    html = re.sub(
-        r"<h([23])(?![^>]*wp-heading)>",
-        r'<h\1 class="wp-heading">',
-        html
-    )
+    html = re.sub(r"<h([23])(?![^>]*wp-heading)>",
+                  r'<h\1 class="wp-heading">', html)
 
-    # ───────────────────────── ④ 下限未満なら「まとめ」追記
-    if len(html) < min_chars:
-        html += (
-            '\n\n<h2 class="wp-heading">まとめ</h2>'
-            '<p>本記事のポイントを簡潔に振り返りました。</p>'
-        )
-
-    # ───────────────────────── ⑤ 重複行（まるごと一致）除去
-    seen: set[str] = set()
-    filtered_lines: list[str] = []
+    # ─ 4) 重複行除去
+    seen, cleaned = set(), []
     for ln in html.splitlines():
         txt = ln.strip()
         if not txt or txt not in seen:
-            filtered_lines.append(ln)
+            cleaned.append(ln)
             if txt:
                 seen.add(txt)
-    html = "\n".join(filtered_lines)
+    html = "\n".join(cleaned)
 
-    # ───────────────────────── ⑥ 上限 3,000 字ガード（超過時末尾トリム）
-    if len(html) > MAX_TOTAL:
-        snippet = html[:MAX_TOTAL]
-        last_p = snippet.rfind("</p>")
-        html = snippet[: last_p + 4] if last_p != -1 else snippet
+    # ─ 5) 文字数が多過ぎる場合は末尾トリム
+    max_len = TARGET + RANGE
+    if len(html) > max_len:
+        snippet = html[:max_len]
+        last_p  = snippet.rfind("</p>")
+        html    = snippet[:last_p + 4] if last_p != -1 else snippet
+
+    # ─ 6) 文字数が少な過ぎる場合はまとめセクションで補う
+    if len(html) < TARGET - RANGE:
+        html += (
+            '\n\n<h2 class="wp-heading">まとめ</h2>'
+            '<p>この記事では AI 副業を安全に始めるポイントを整理しました。</p>'
+        )
 
     return html
 
@@ -320,8 +316,8 @@ def enqueue_generation(
     site_id: int | None = None
 ) -> None:
     app = current_app._get_current_object()
-    total = sum(random.randint(1,3) for _ in keywords[:40])
-    slots = iter(_generate_slots(total))
+    total = sum(random.randint(1, 3) for _ in keywords[:40])
+    slots = iter(_generate_slots(app, total))
 
     def bg():
         with app.app_context():
