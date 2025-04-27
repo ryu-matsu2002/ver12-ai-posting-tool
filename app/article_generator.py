@@ -24,7 +24,6 @@ from . import db
 from .models import Article
 from .image_utils import fetch_featured_image
 from sqlalchemy import func
-from .article_generator import MAX_PERDAY
 
 # ──────────────────────────────
 # OpenAI 共通設定
@@ -48,6 +47,7 @@ JST        = pytz.timezone("Asia/Tokyo")
 POST_HOURS = list(range(10, 21))  # JST 10–20時
 
 def _generate_slots(app, n: int) -> List[datetime]:
+    global MAX_PERDAY, POST_HOURS, JST
     """
     DB に既に入っている scheduled_at を参照し、
     1 日あたり MAX_PERDAY (=5) 本まで詰めて予約スロットを返す。
