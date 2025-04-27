@@ -13,6 +13,7 @@ import base64
 import mimetypes
 import os
 import re
+import logging
 from typing import Optional
 
 import requests
@@ -25,7 +26,7 @@ TIMEOUT = int(os.getenv("WP_API_TIMEOUT", "15"))
 
 
 # ──────────────────────────────
-# 認証ヘッダー (アイキャッチ用アップロードでは従来手法を使用)
+# 認証ヘッダー (アイキャッチ用アップロードでも利用可)
 # ──────────────────────────────
 def _basic_auth_header(username: str, app_pass: str) -> dict[str, str]:
     token = base64.b64encode(f"{username}:{app_pass}".encode()).decode()
@@ -39,12 +40,15 @@ def _upload_featured_image(site, image_url: str) -> Optional[int]:
     try:
         r = requests.get(image_url, timeout=TIMEOUT)
         r.raise_for_status()
-    except Exception:
+    except Exception as e:
+        current_app.logger.error("Featured image download failed: %s", e)
         return None
 
     filename = os.path.basename(image_url.split("?")[0])
     ctype = mimetypes.guess_type(filename)[0] or "image/jpeg"
 
+    # Basic auth for media upload
+    auth = HTTPBasicAuth(site.username, site.app_pass)
     headers = {
         **_basic_auth_header(site.username, site.app_pass),
         "Content-Disposition": f'attachment; filename="{filename}"',
@@ -52,11 +56,19 @@ def _upload_featured_image(site, image_url: str) -> Optional[int]:
     }
     endpoint = f"{site.url.rstrip('/')}/wp-json/wp/v2/media"
 
+    current_app.logger.debug("Media upload → URL: %s", endpoint)
+    current_app.logger.debug("Media headers: %s", headers)
+
     try:
-        up = requests.post(endpoint, headers=headers, data=r.content, timeout=TIMEOUT)
+        up = requests.post(endpoint, headers=headers, auth=auth, data=r.content, timeout=TIMEOUT)
+        current_app.logger.debug("Media upload response: %s", up.status_code)
+        current_app.logger.debug("Media upload body: %s", up.text)
         up.raise_for_status()
-        return up.json().get("id")
-    except Exception:
+        media_id = up.json().get("id")
+        current_app.logger.debug("Uploaded media ID: %s", media_id)
+        return media_id
+    except Exception as e:
+        current_app.logger.error("Media upload failed [%s]: %s", getattr(up, "status_code", None), getattr(up, "text", e))
         return None
 
 
@@ -128,16 +140,14 @@ def post_to_wp(site, article) -> str:
     if featured_id:
         payload["featured_media"] = featured_id
 
-    # Basic 認証は requests.auth に任せる
+    # Basic 認証
     auth = HTTPBasicAuth(site.username, site.app_pass)
-
-    # ヘッダー
     headers = {
         "Accept":       "application/json",
         "Content-Type": "application/json",
     }
 
-    # --- デバッグログ: リクエスト詳細 ---
+    # デバッグログ: リクエスト詳細
     current_app.logger.debug("WP POST URL: %s", api)
     current_app.logger.debug("WP Payload: %s", payload)
     current_app.logger.debug("WP Username: %s", site.username)
@@ -150,7 +160,7 @@ def post_to_wp(site, article) -> str:
         timeout=TIMEOUT
     )
 
-    # --- デバッグログ: レスポンス詳細 ---
+    # デバッグログ: レスポンス詳細
     current_app.logger.debug("WP Response status: %s", resp.status_code)
     current_app.logger.debug("WP Response body: %s", resp.text)
 

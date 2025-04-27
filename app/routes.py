@@ -22,6 +22,7 @@ from .forms import (
 )
 from .article_generator import enqueue_generation
 from .wp_client import post_to_wp
+from .wp_client import _decorate_html
 
 JST = timezone("Asia/Tokyo")
 bp = Blueprint("main", __name__)
@@ -202,7 +203,9 @@ def preview(article_id: int):
     art = Article.query.get_or_404(article_id)
     if art.user_id != current_user.id:
         abort(403)
-    return render_template("preview.html", article=art)
+    from .wp_client import _decorate_html
+    styled = _decorate_html(art.body or "")
+    return render_template("preview.html", article=art, styled_body=styled)
 
 
 # ───────────────────────────── WordPress 即時投稿

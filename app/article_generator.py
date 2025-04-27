@@ -214,11 +214,15 @@ def _compose_body(kw: str, outline_raw: str, pt: str) -> str:
         else:
             min_chars, max_chars = MIN_BODY_CHARS_DEFAULT, None
 
-    # ─ H2小見出しは6本まで、かつ20字以内にガード ─
+    # ■ 動的ブロック数：max_chars（指定 or デフォルト）÷ 平均450字
     max_h2_len = 20
     parsed = _parse_outline(outline_raw)
+    # 冒頭で計算済みの max_chars をそのまま使う
+    max_total = max_chars or MAX_BODY_CHARS_DEFAULT
+    avg_block = 450
+    n_blocks = max(1, min(len(parsed), max_total // avg_block))
     raw_blocks: List[Tuple[str, List[str]]] = []
-    for h2, h3s in parsed[:6]:
+    for h2, h3s in parsed[:n_blocks]:
         if len(h2) > max_h2_len:
             h2 = h2[:max_h2_len] + "…"
         raw_blocks.append((h2, h3s))
