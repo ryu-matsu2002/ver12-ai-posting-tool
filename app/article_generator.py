@@ -38,7 +38,7 @@ SHRINK                 = 0.75
 MIN_BODY_CHARS_DEFAULT = 2_000
 MAX_BODY_CHARS_DEFAULT = 3_000
 MAX_TITLE_RETRY        = 7
-TITLE_DUP_THRESH       = 0.80
+TITLE_DUP_THRESH = 0.90
 
 # ──────────────────────────────
 # スケジュール設定
@@ -48,41 +48,36 @@ POST_HOURS = list(range(10, 21))  # JST 10–20時
 MAX_PERDAY = 5
 
 def _generate_slots(app, n: int) -> List[datetime]:
-    global MAX_PERDAY, POST_HOURS, JST
+    """
+    既存予約を JST 日付単位で集計し、
+    1 日あたり MAX_PERDAY (=5) 本まで埋めたら翌日に送る。
+    """
+    global MAX_PERDAY, POST_HOURS, JST         # IDE 警告回避用
 
-    """
-    DB に既に入っている scheduled_at を参照し、
-    1 日あたり MAX_PERDAY (=5) 本まで詰めて予約スロットを返す。
-    """
+    # ── ① 既存予約を DB から取得（JST 変換して date 抽出）
     with app.app_context():
-        # ── ① 既存予約を JST 日付ごとに集計
         rows = (
             db.session.query(
-                func.date(func.timezone('Asia/Tokyo', Article.scheduled_at)).label("jst_date"),
+                func.date(func.timezone('Asia/Tokyo', Article.scheduled_at)),
                 func.count(Article.id)
             )
             .filter(Article.scheduled_at.isnot(None))
-            .group_by("jst_date")
+            .group_by(1)
             .all()
         )
-        booked_per_day = {row.jst_date: row[1] for row in rows}
+    booked: dict[date, int] = {row[0]: row[1] for row in rows}
 
-    # ── ② これから作るスロット
-    slots: List[datetime] = []
-    day = date.today() + timedelta(days=1)  # 翌日スタート
-
+    # ── ② 空き枠に従って n 個のスロットを作る
+    slots: list[datetime] = []
+    day = date.today() + timedelta(days=1)      # 翌日スタート
     while len(slots) < n:
-        # 既に予約されている本数
-        booked = booked_per_day.get(day, 0)
-        remaining_today = MAX_PERDAY - booked
-        if remaining_today > 0:
-            need = min(remaining_today, n - len(slots))
-            hours = random.sample(POST_HOURS, need)
-            for h in sorted(hours):
+        remain_today = MAX_PERDAY - booked.get(day, 0)
+        if remain_today > 0:
+            need = min(remain_today, n - len(slots))
+            for h in sorted(random.sample(POST_HOURS, need)):
                 minute = random.randint(1, 59)
-                dt_local = datetime.combine(day, time(hour=h, minute=minute), tzinfo=JST)
-                slots.append(dt_local.astimezone(pytz.utc))
-        # 次の日へ
+                local = datetime.combine(day, time(h, minute), tzinfo=JST)
+                slots.append(local.astimezone(pytz.utc))
         day += timedelta(days=1)
 
     return slots
@@ -215,64 +210,52 @@ def _block_html(
 # _compose_body (3ブロック / 2500字ターゲット版)
 # ─────────────────────────────────────────────
 def _compose_body(kw: str, outline_raw: str, pt: str) -> str:
-    """
-    プロンプトの希望文字数レンジから
-    ・必要な H2 ブロック数を動的決定（≒目標字数 / 700）
-    ・本文を生成しトリムしない
-    """
+    """ブロック数を目標字数から動的決定（2〜6 本）し、上限カットは行わない。"""
 
-    # ───────── ① 字数レンジを読む（なければデフォルト 2,500〜∞）
+    # ── 字数レンジ取得（指定なし→2500〜∞）
     m = re.search(r"(\d{3,5})\s*字から\s*(\d{3,5})\s*字", pt)
     if m:
         min_chars, max_chars = map(int, m.groups())
     else:
         m2 = re.search(r"(\d{3,5})\s*字", pt)
         min_chars = int(m2.group(1)) if m2 else 2500
-        max_chars = None         # ← 上限なし
+        max_chars = None                     # 上限なし
 
-    # ───────── ② ブロック数を動的決定
-    target = (min_chars + (max_chars or min_chars)) // 2
-    est_blocks = max(2, min(6, round(target / 700)))   # 700字/ブロック想定
-    parsed = _parse_outline(outline_raw)[:est_blocks]
+    # ── ブロック数を決める   目標 ≒ 平均(下限+上限)/700 字
+    target      = (min_chars + (max_chars or min_chars)) // 2
+    n_blocks    = max(2, min(6, round(target / 700)))    # 2〜6 本
+    parsed      = _parse_outline(outline_raw)[:n_blocks]
 
-    # ───────── ③ 各 H2 の長さをガード
-    max_h2_len = 20
-    raw_blocks: list[tuple[str, list[str]]] = []
+    max_h2_len  = 20
+    parts: list[str] = []
     for h2, h3s in parsed:
         if len(h2) > max_h2_len:
             h2 = h2[:max_h2_len] + "…"
-        raw_blocks.append((h2, h3s))
-
-    # ───────── ④ セクション生成
-    parts: list[str] = []
-    for h2, h3s in raw_blocks:
         h3_f = [h for h in h3s if len(h) <= 10][:3]
-        section = _block_html(kw, h2, h3_f, random.choice(PERSONAS), pt)
-        if section.count("<p") != section.count("</p>"):  # 未閉じ p を補完
-            section += "</p>"
-        parts.append(section)
+        sec  = _block_html(kw, h2, h3_f, random.choice(PERSONAS), pt)
 
-    # ───────── ⑤ 結合＋クラス付与
+        # 未閉じ <p> があれば補完
+        if sec.count("<p") != sec.count("</p>"):
+            sec += "</p>"
+        parts.append(sec)
+
     html = "\n\n".join(parts)
     html = re.sub(r"<h([23])(?![^>]*wp-heading)>", r'<h\1 class="wp-heading">', html)
 
-    # ───────── ⑥ 必要なら「まとめ」を補完（最小文字数未満）
+    # まとめ追加（最小字数未満）
     if len(html) < min_chars:
-        html += (
-            '\n\n<h2 class="wp-heading">まとめ</h2>'
-            '<p>この記事の要点を振り返りました。</p>'
-        )
+        html += '\n\n<h2 class="wp-heading">まとめ</h2><p>要点を整理しました。</p>'
 
-    # ───────── ⑦ 重複行を除去（連続生成の冗長防止）
-    seen, cleaned = set(), []
+    # 重複行除去
+    seen, uniq = set(), []
     for ln in html.splitlines():
         t = ln.strip()
         if not t or t not in seen:
-            cleaned.append(ln)
+            uniq.append(ln)
             if t:
                 seen.add(t)
 
-    return "\n".join(cleaned)
+    return "\n".join(uniq)
 
 
 
