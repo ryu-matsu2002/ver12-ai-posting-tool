@@ -128,9 +128,10 @@ def post_to_wp(site, article) -> str:
 
     # **Basic 認証ヘッダーを自前で付与**
     headers = {
-        **_basic_auth_header(site.username, site.app_pass),
-        "Content-Type": "application/json",
-        "Accept":       "application/json",
+    "Accept":       "application/json",
+    "Content-Type": "application/json",
+    # 一部ホスティングで requests デフォルト UA が WAF に弾かれる対策
+    "User-Agent":   "Mozilla/5.0 (compatible; AI-Posting-Tool/1.0)",
     }
 
     # --- デバッグログ: リクエスト詳細 ---

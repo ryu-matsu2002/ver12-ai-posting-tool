@@ -56,13 +56,16 @@ def _generate_slots(app, n: int) -> List[datetime]:
 
     # ── ① 既存予約を DB から取得（JST 変換して date 抽出）
     with app.app_context():
+        # func.date(...) はSELECT句でエイリアスを付け、
+        # そのエイリアス（列オブジェクト）で group_by する
+        jst_date = func.date(
+            func.timezone("Asia/Tokyo", Article.scheduled_at)
+        ).label("jst_date")
+
         rows = (
-            db.session.query(
-                func.date(func.timezone('Asia/Tokyo', Article.scheduled_at)),
-                func.count(Article.id)
-            )
+            db.session.query(jst_date, func.count(Article.id))
             .filter(Article.scheduled_at.isnot(None))
-            .group_by(1)
+            .group_by(jst_date)
             .all()
         )
     booked: dict[date, int] = {row[0]: row[1] for row in rows}
