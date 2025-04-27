@@ -7,7 +7,7 @@
   - 本文見出し構成 + class付与
   - 文字数範囲（2500字〜3000字など）での下限・上限制御
   - 画像取得: 本文先頭 H2 + キーワード でクエリ強化
-  - スケジュールは「翌日」以降のUTCスロット（JST 10-20時、それぞれ１時間ずつ）
+  - スケジュールは「翌日」以降のUTCスロット（JST 10-20時、2時間間隔）
 """
 
 from __future__ import annotations
@@ -47,25 +47,22 @@ MAX_PERDAY = len(POST_HOURS)
 
 def _generate_slots(n: int) -> List[datetime]:
     """
-    次の日以降のJST10–21時から、
-    ・分をランダム(1–59)にして時刻をざっくりずらし
-    ・前スロットから2時間以上あけ
-    を満たすn個のUTC日時を返す
+    次の日以降のJST10–20時から、
+    ・分をランダム(1–59)にして時刻をずらし
+    ・前スロットから2時間以上あける
+    を満たす n 個のUTC日時を返す
     """
-    # 1) 候補リスト生成 (必要十分な日数)
     candidates: List[datetime] = []
     day = date.today() + timedelta(days=1)
-    # とりあえず n*POST_HOURS 日分を作っておく
     days_needed = (n * 2) // len(POST_HOURS) + 2
     for _ in range(days_needed):
         for h in POST_HOURS:
-            minute = random.randint(1, 59)  # ちょうど00分を避ける
+            minute = random.randint(1, 59)
             dt_local = datetime.combine(day, time(hour=h, minute=minute), tzinfo=JST)
             candidates.append(dt_local.astimezone(pytz.utc))
         day += timedelta(days=1)
     candidates.sort()
 
-    # 2) 2時間以上あけて貪欲に選択
     slots: List[datetime] = []
     for dt in candidates:
         if not slots or dt >= slots[-1] + timedelta(hours=2):
@@ -88,9 +85,9 @@ SAFE_SYS = (
     "公序良俗に反する表現・誤情報・個人情報や差別的・政治的主張は禁止します。"
 )
 
-# ══════════════════════════════════════════════
+# ──────────────────────────────
 # Chat API wrapper
-# ══════════════════════════════════════════════
+# ──────────────────────────────
 def _tok(txt: str) -> int:
     return int(len(txt) * 0.45)
 
@@ -110,9 +107,9 @@ def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float) -> str:
             return call(int(max_t * SHRINK))
         raise
 
-# ══════════════════════════════════════════════
+# ──────────────────────────────
 # タイトル生成
-# ══════════════════════════════════════════════
+# ──────────────────────────────
 def _similar(a: str, b: str) -> bool:
     return SequenceMatcher(None, a, b).ratio() >= TITLE_DUP_THRESH
 
@@ -127,7 +124,6 @@ def _title_once(kw: str, pt: str, retry: bool) -> str:
     )
 
 def _unique_title(kw: str, pt: str) -> str:
-    # DB と既生成分を合わせて重複チェック
     history = [
         t[0] for t in db.session.query(Article.title)
                     .filter(Article.keyword==kw, Article.title.isnot(None))
@@ -136,14 +132,13 @@ def _unique_title(kw: str, pt: str) -> str:
     for i in range(MAX_TITLE_RETRY):
         cand = _title_once(kw, pt, retry=(i>0))
         if not any(_similar(cand, h) for h in history):
-            # DB に追加して次回も参照可能に
             history.append(cand)
             break
     return cand
 
-# ══════════════════════════════════════════════
+# ──────────────────────────────
 # アウトライン & 本文生成
-# ══════════════════════════════════════════════
+# ──────────────────────────────
 def _outline(kw: str, title: str, pt: str) -> str:
     sys = (
         SAFE_SYS
@@ -160,20 +155,16 @@ def _parse_outline(raw: str) -> List[Tuple[str,List[str]]]:
     blocks, cur, subs = [], None, []
     for ln in raw.splitlines():
         s = ln.strip()
-        if not s:
-            continue
+        if not s: continue
         if s.startswith("## "):
-            if cur:
-                blocks.append((cur, subs))
+            if cur: blocks.append((cur, subs))
             cur, subs = s[3:], []
         elif s.startswith("### "):
             subs.append(s[4:])
         else:
-            if cur:
-                blocks.append((cur, subs))
+            if cur: blocks.append((cur, subs))
             cur, subs = s, []
-    if cur:
-        blocks.append((cur, subs))
+    if cur: blocks.append((cur, subs))
     return blocks
 
 def _block_html(
@@ -183,11 +174,12 @@ def _block_html(
     sys   = (
         SAFE_SYS
         + "以下制約でH2セクションをHTML生成:\n"
-          "- 600-800字\n"
-          "- 結論→理由→具体例×3→再結論\n"
-          "- 具体例は<h3 class=\"wp-heading\">で示す\n"
-          f"- 視点:{persona}\n"
-          "- <h2>/<h3>にclass=\"wp-heading\"付与"
+-       "- 600-800字\n"
++       "- 400-600字\n"  # ← 修正：1ブロックあたりの文字数を下限400～上限600に
+        "- 結論→理由→具体例×3→再結論\n"
+        "- 具体例は<h3 class=\"wp-heading\">で示す\n"
+        f"- 視点:{persona}\n"
+        "- <h2>/<h3>にclass=\"wp-heading\"付与"
     )
     usr   = f"{pt}\n\n▼ KW:{kw}\n▼ H2:{h2}\n▼ H3s\n{h3txt}"
     return _chat(
@@ -208,12 +200,16 @@ def _compose_body(kw: str, outline: str, pt: str) -> str:
         else:
             min_chars, max_chars = MIN_BODY_CHARS_DEFAULT, None
 
-    # 見出し数/長さ制限: H2は先頭6つ, H3は≤30字かつ各最大3つ
-    blocks = _parse_outline(outline)[:6]
+    # ② 見出し数/長さ制限: H2は先頭6つ, H3は≤30字かつ最大2つ
+    blocks = _parse_outline(outline)[:6]                         # ← 修正：H2を6本まで
     parts: List[str] = []
     for h2, h3s in blocks:
-        limited_h3 = [h for h in h3s if len(h) <= 30][:2]
-        parts.append(_block_html(kw, h2, limited_h3, random.choice(PERSONAS), pt))
+        limited_h3 = [h for h in h3s if len(h) <= 30][:2]       # ← 修正：H3を30字以内かつ2つまで
+        parts.append(_block_html(
+            kw, h2, limited_h3,
+            random.choice(PERSONAS),
+            pt
+        ))
 
     html = "\n\n".join(parts)
     html = re.sub(
@@ -221,16 +217,17 @@ def _compose_body(kw: str, outline: str, pt: str) -> str:
         r'<h\1 class="wp-heading">', html
     )
 
+    # ③ 下限未満ならまとめ追加
     if len(html) < min_chars:
         html += '\n\n<h2 class="wp-heading">まとめ</h2><p>要点を整理しました。</p>'
 
-    # ③ 上限超過時に切り詰め
+    # ④ 上限超過時に切り詰め
     if max_chars and len(html) > max_chars:
         snippet = html[:max_chars]
         last_p = snippet.rfind("</p>")
         html = snippet[:last_p+4] if last_p != -1 else snippet
 
-    # ④ 重複行は省いて返す
+    # ⑤ 重複行を削除
     seen: set[str] = set()
     out: List[str] = []
     for ln in html.splitlines():
@@ -239,6 +236,7 @@ def _compose_body(kw: str, outline: str, pt: str) -> str:
             out.append(ln)
             if txt:
                 seen.add(txt)
+
     return "\n".join(out)
 
 def _generate(app, aid: int, tpt: str, bpt: str):
