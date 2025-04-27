@@ -168,24 +168,42 @@ def _parse_outline(raw: str) -> List[Tuple[str,List[str]]]:
     return blocks
 
 def _block_html(
-    kw: str, h2: str, h3s: List[str], persona: str, pt: str
+    kw: str,
+    h2: str,
+    h3s: List[str],
+    persona: str,
+    pt: str
 ) -> str:
+    # H3 見出しを Markdown 形式で連結
     h3txt = "\n".join(f"### {h}" for h in h3s) if h3s else ""
-    sys   = (
+
+    # システムプロンプトを組み立て
+    sys = (
         SAFE_SYS
         + "以下制約でH2セクションをHTML生成:\n"
--       "- 600-800字\n"
-+       "- 400-600字\n"  # ← 修正：1ブロックあたりの文字数を下限400～上限600に
-        "- 結論→理由→具体例×3→再結論\n"
-        "- 具体例は<h3 class=\"wp-heading\">で示す\n"
-        f"- 視点:{persona}\n"
-        "- <h2>/<h3>にclass=\"wp-heading\"付与"
+        + "- 400-600字\n"
+        + "- 結論→理由→具体例×3→再結論\n"
+        + "- 具体例は<h3 class=\"wp-heading\">で示す\n"
+        + f"- 視点:{persona}\n"
+        + "- <h2>/<h3>にclass=\"wp-heading\"付与"
     )
-    usr   = f"{pt}\n\n▼ KW:{kw}\n▼ H2:{h2}\n▼ H3s\n{h3txt}"
+
+    # ユーザープロンプトを組み立て
+    usr = (
+        f"{pt}\n\n"
+        f"▼ KW: {kw}\n"
+        f"▼ H2: {h2}\n"
+        f"▼ H3s\n{h3txt}"
+    )
+
+    # OpenAI チャット API を呼び出し
     return _chat(
-        [{"role":"system","content":sys},
-         {"role":"user","content":usr}],
-        TOKENS["block"], TEMP["block"]
+        [
+            {"role": "system", "content": sys},
+            {"role": "user",   "content": usr}
+        ],
+        TOKENS["block"],
+        TEMP["block"]
     )
 
 def _compose_body(kw: str, outline: str, pt: str) -> str:
