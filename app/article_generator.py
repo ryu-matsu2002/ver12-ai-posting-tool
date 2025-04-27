@@ -276,10 +276,9 @@ def _generate(app, aid: int, tpt: str, bpt: str):
             art.progress = 80; db.session.commit()
 
             # 画像取得: タイトル＋先頭2つのH2を使ったクエリ
-            headings = re.findall(
-                r"<h2\b[^>]*>(.*?)</h2>", art.body or "", re.IGNORECASE
-            )[:2]
-            query = " ".join([art.keyword, art.title] + headings).strip()
+            h2s     = re.findall(r"<h2\b[^>]*>(.*?)</h2>", art.body or "", re.I)[:2]
+            tokens  = [art.keyword, art.title, *h2s]
+            query   = " ".join(dict.fromkeys(tokens))          # 重複除去で順序保持
             art.image_url = fetch_featured_image(query)
 
             art.status, art.progress = "done", 100
