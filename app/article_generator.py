@@ -216,67 +216,64 @@ def _block_html(
 # ─────────────────────────────────────────────
 def _compose_body(kw: str, outline_raw: str, pt: str) -> str:
     """
-    * 先頭 H2 を 3 本だけ使って本文を生成
-    * 生成後に 2 200〜2 800 字に収まるよう長さを最終調整
+    プロンプトの希望文字数レンジから
+    ・必要な H2 ブロック数を動的決定（≒目標字数 / 700）
+    ・本文を生成しトリムしない
     """
-    TARGET = 2500          # 目標文字数
-    RANGE  = 300           # ±許容幅
 
-    # ─ 1) アウトライン先頭 3 本を取得し H2 ガード（20字以内）
-    parsed = _parse_outline(outline_raw)
+    # ───────── ① 字数レンジを読む（なければデフォルト 2,500〜∞）
+    m = re.search(r"(\d{3,5})\s*字から\s*(\d{3,5})\s*字", pt)
+    if m:
+        min_chars, max_chars = map(int, m.groups())
+    else:
+        m2 = re.search(r"(\d{3,5})\s*字", pt)
+        min_chars = int(m2.group(1)) if m2 else 2500
+        max_chars = None         # ← 上限なし
+
+    # ───────── ② ブロック数を動的決定
+    target = (min_chars + (max_chars or min_chars)) // 2
+    est_blocks = max(2, min(6, round(target / 700)))   # 700字/ブロック想定
+    parsed = _parse_outline(outline_raw)[:est_blocks]
+
+    # ───────── ③ 各 H2 の長さをガード
     max_h2_len = 20
-    h2_blocks: list[tuple[str, list[str]]] = []
-    for h2, h3s in parsed[:3]:
+    raw_blocks: list[tuple[str, list[str]]] = []
+    for h2, h3s in parsed:
         if len(h2) > max_h2_len:
             h2 = h2[:max_h2_len] + "…"
-        h2_blocks.append((h2, h3s))
+        raw_blocks.append((h2, h3s))
 
-    # ─ 2) 各ブロックを生成（600〜800字を AI に依頼）
+    # ───────── ④ セクション生成
     parts: list[str] = []
-    for h2, h3s in h2_blocks:
-        h3_filtered = [h for h in h3s if len(h) <= 10][:2]   # H3 は最大 2 本
-        section = _block_html(
-            kw,
-            h2,
-            h3_filtered,
-            random.choice(PERSONAS),
-            pt + "\n\n※記事全体は 2500 字前後にしてください"
-        )
-        # 未閉じ <p> の補完
-        if section.count("<p") != section.count("</p>"):
+    for h2, h3s in raw_blocks:
+        h3_f = [h for h in h3s if len(h) <= 10][:3]
+        section = _block_html(kw, h2, h3_f, random.choice(PERSONAS), pt)
+        if section.count("<p") != section.count("</p>"):  # 未閉じ p を補完
             section += "</p>"
         parts.append(section)
 
-    # ─ 3) パーツ結合＋class 付与
+    # ───────── ⑤ 結合＋クラス付与
     html = "\n\n".join(parts)
-    html = re.sub(r"<h([23])(?![^>]*wp-heading)>",
-                  r'<h\1 class="wp-heading">', html)
+    html = re.sub(r"<h([23])(?![^>]*wp-heading)>", r'<h\1 class="wp-heading">', html)
 
-    # ─ 4) 重複行除去
-    seen, cleaned = set(), []
-    for ln in html.splitlines():
-        txt = ln.strip()
-        if not txt or txt not in seen:
-            cleaned.append(ln)
-            if txt:
-                seen.add(txt)
-    html = "\n".join(cleaned)
-
-    # ─ 5) 文字数が多過ぎる場合は末尾トリム
-    max_len = TARGET + RANGE
-    if len(html) > max_len:
-        snippet = html[:max_len]
-        last_p  = snippet.rfind("</p>")
-        html    = snippet[:last_p + 4] if last_p != -1 else snippet
-
-    # ─ 6) 文字数が少な過ぎる場合はまとめセクションで補う
-    if len(html) < TARGET - RANGE:
+    # ───────── ⑥ 必要なら「まとめ」を補完（最小文字数未満）
+    if len(html) < min_chars:
         html += (
             '\n\n<h2 class="wp-heading">まとめ</h2>'
-            '<p>この記事では AI 副業を安全に始めるポイントを整理しました。</p>'
+            '<p>この記事の要点を振り返りました。</p>'
         )
 
-    return html
+    # ───────── ⑦ 重複行を除去（連続生成の冗長防止）
+    seen, cleaned = set(), []
+    for ln in html.splitlines():
+        t = ln.strip()
+        if not t or t not in seen:
+            cleaned.append(ln)
+            if t:
+                seen.add(t)
+
+    return "\n".join(cleaned)
+
 
 
 def _generate(app, aid: int, tpt: str, bpt: str):
