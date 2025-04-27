@@ -45,9 +45,11 @@ TITLE_DUP_THRESH       = 0.80
 # ──────────────────────────────
 JST        = pytz.timezone("Asia/Tokyo")
 POST_HOURS = list(range(10, 21))  # JST 10–20時
+MAX_PERDAY = 5
 
 def _generate_slots(app, n: int) -> List[datetime]:
     global MAX_PERDAY, POST_HOURS, JST
+
     """
     DB に既に入っている scheduled_at を参照し、
     1 日あたり MAX_PERDAY (=5) 本まで詰めて予約スロットを返す。
