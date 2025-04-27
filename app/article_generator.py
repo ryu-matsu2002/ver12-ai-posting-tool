@@ -46,26 +46,35 @@ POST_HOURS = list(range(10, 21))  # JST 10–20時
 MAX_PERDAY = len(POST_HOURS)
 
 def _generate_slots(n: int) -> List[datetime]:
-    # 候補リストを多めに作成
+    """
+    翌日から最大1か月先までの JST 10–20時（分は1–59のランダム）を候補に、
+    2時間以上あけた n 個の UTC datetime を返す
+    """
+    # 候補生成範囲：翌日～1か月後まで
+    start = date.today() + timedelta(days=1)
+    end   = date.today() + timedelta(days=30)
+
+    # 全候補を収集
     candidates: List[datetime] = []
-    day = date.today() + timedelta(days=1)
-    # ２日分くらい候補を作る
-    for _ in range(2):
+    day = start
+    while day <= end:
         for h in POST_HOURS:
-            minute = random.randint(1, 59)
+            minute   = random.randint(1, 59)
             dt_local = datetime.combine(day, time(hour=h, minute=minute), tzinfo=JST)
             candidates.append(dt_local.astimezone(pytz.utc))
         day += timedelta(days=1)
-    # 昇順ソート
+
+    # 昇順にソート
     candidates.sort()
 
-    # ２時間以上開けたスロットを n 個だけ選ぶ
+    # 2時間以上あけたスロットを n 個だけピックアップ
     slots: List[datetime] = []
     for dt in candidates:
         if not slots or dt >= slots[-1] + timedelta(hours=2):
             slots.append(dt)
             if len(slots) == n:
                 break
+
     return slots
 
 # ──────────────────────────────
@@ -141,7 +150,7 @@ def _unique_title(kw: str, pt: str) -> str:
 def _outline(kw: str, title: str, pt: str) -> str:
     sys = (
         SAFE_SYS
-        + "必ず Markdown形式の##/###で6見出し以上の詳細アウトラインを返してください。"
+        + "必ず Markdown形式の##/###で6見出し以上の**小見出し（各20字以内）**のアウトラインを返してください。"
     )
     usr = f"{pt}\n\n▼ KW:{kw}\n▼ TITLE:{title}"
     return _chat(
@@ -176,12 +185,13 @@ def _block_html(
     h3txt = "\n".join(f"### {h}" for h in h3s) if h3s else ""
     sys   = (
         SAFE_SYS
-        + "- 以下制約でH2セクションをHTML生成:\n"
-          "- 200-300字\n"
-          "- 結論→理由→具体例×3→再結論\n"
-          "- 具体例は<h3 class=\"wp-heading\">で示す\n"
-          f"- 視点:{persona}\n"
-          "- <h2>/<h3>にclass=\"wp-heading\"付与"
+        + "以下制約でH2セクションをHTML生成:\n"
+        + "- 小見出し（H2）は20字以内で簡潔に\n"
+        + "- 400-600字で本文を生成\n"
+        + "- 結論→理由→具体例×3→再結論\n"
+        + "- 具体例は<h3 class=\"wp-heading\">で示す\n"
+        + f"- 視点:{persona}\n"
+        + "- <h2>/<h3>にclass=\"wp-heading\"付与"
     )
     usr   = f"{pt}\n\n▼ KW:{kw}\n▼ H2:{h2}\n▼ H3s\n{h3txt}"
     return _chat(
@@ -202,8 +212,14 @@ def _compose_body(kw: str, outline_raw: str, pt: str) -> str:
         else:
             min_chars, max_chars = MIN_BODY_CHARS_DEFAULT, None
 
-    # ② 見出し数/長さ制限：H2は先頭3つ、H3は≤10字かつ各最大3つ
-    raw_blocks = _parse_outline(outline_raw)[:3]
+    # ─ H2小見出しは6本まで、かつ20字以内にガード
+    max_h2_len = 20
+    parsed = _parse_outline(outline_raw)
+    raw_blocks = []
+    for h2, h3s in parsed[:6]:
+        if len(h2) > max_h2_len:
+            h2 = h2[:max_h2_len] + "…"
+        raw_blocks.append((h2, h3s))    
     parts: List[str] = []
     for h2, h3s in raw_blocks:
         filtered_h3 = [h for h in h3s if len(h) <= 10][:3]
@@ -266,7 +282,8 @@ def _generate(app, aid: int, tpt: str, bpt: str):
             # 画像取得: 本文先頭 H2 + キーワード
             match = re.search(r"<h2\b[^>]*>(.*?)</h2>", art.body or "", re.IGNORECASE)
             first_h2 = match.group(1) if match else ""
-            query = f"{art.keyword} {art.title} {first_h2}".strip()
+            headings = re.findall(r"<h2\b[^>]*>(.*?)</h2>", art.body or "", re.IGNORECASE)[:2]
+            query = " ".join([art.keyword, art.title] + headings).strip()
             art.image_url = fetch_featured_image(query)
 
             art.status, art.progress = "done", 100

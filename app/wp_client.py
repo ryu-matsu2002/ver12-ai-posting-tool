@@ -1,4 +1,5 @@
 # app/wp_client.py
+
 """
 WordPress 投稿ユーティリティ
 ────────────────────────────────────────
@@ -8,7 +9,6 @@ WordPress 投稿ユーティリティ
 """
 
 from __future__ import annotations
-
 import base64
 import mimetypes
 import os
@@ -16,8 +16,8 @@ import re
 from typing import Optional
 
 import requests
+from requests.exceptions import HTTPError
 from flask import current_app
-
 
 # タイムアウト（秒）
 TIMEOUT = int(os.getenv("WP_API_TIMEOUT", "15"))
@@ -76,7 +76,6 @@ _H3_STYLE  = (
 _P_CLASS   = 'class="tw-paragraph mb-6 leading-relaxed"'
 _tag_pat   = re.compile(r"<(/?)(h2|h3|p)(\s[^>]*)?>", re.I)
 
-
 def _decorate_html(html: str) -> str:
     """
     <h2>,<h3>,<p> に装飾をインライン付与。
@@ -114,8 +113,8 @@ def post_to_wp(site, article) -> str:
 
     # 3. 投稿 API
     api  = f"{site.url.rstrip('/')}/wp-json/wp/v2/posts"
-    hdrs = _basic_auth_header(site.username, site.app_pass)
-    hdrs["Content-Type"] = "application/json"
+    headers = _basic_auth_header(site.username, site.app_pass)
+    headers["Content-Type"] = "application/json"
 
     payload = {
         "title":   article.title,
@@ -125,8 +124,18 @@ def post_to_wp(site, article) -> str:
     if featured_id:
         payload["featured_media"] = featured_id
 
-    resp = requests.post(api, headers=hdrs, json=payload, timeout=TIMEOUT)
-    if resp.status_code == 403:
-        current_app.logger.error(f"WP 403 Forbidden: {api} → {resp.text}")
-    resp.raise_for_status()
+    # リクエスト送信
+    resp = requests.post(api, headers=headers, json=payload, timeout=TIMEOUT)
+
+    # デバッグログ：リクエスト／レスポンス情報
+    current_app.logger.debug("WP Request URL: %s", resp.request.url)
+    current_app.logger.debug("WP Request Headers: %s", resp.request.headers)
+    current_app.logger.debug("WP Request Body: %s", resp.request.body)
+
+    try:
+        resp.raise_for_status()
+    except HTTPError as e:
+        current_app.logger.exception("WP 投稿失敗 [%s]: %s", resp.status_code, resp.text)
+        raise
+
     return resp.json().get("link", "")

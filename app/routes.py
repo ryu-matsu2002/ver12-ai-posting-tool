@@ -5,7 +5,7 @@ from datetime import datetime
 
 from flask import (
     Blueprint, render_template, redirect, url_for,
-    flash, request, abort, g, jsonify
+    flash, request, abort, g, jsonify, current_app
 )
 from flask_login import (
     login_user, logout_user, login_required, current_user
@@ -71,6 +71,7 @@ def dashboard():
     g.posted         = Article.query.filter_by(user_id=current_user.id, status="posted").count()
     return render_template("dashboard.html")
 
+
 # ───────────────────────────── プロンプト CRUD
 @bp.route("/prompts", methods=["GET", "POST"])
 @login_required
@@ -109,6 +110,7 @@ def api_prompt(pid: int):
         abort(403)
     return jsonify({"title_pt": pt.title_pt, "body_pt": pt.body_pt})
 
+
 # ───────────────────────────── WP サイト CRUD
 @bp.route("/sites", methods=["GET", "POST"])
 @login_required
@@ -140,12 +142,12 @@ def delete_site(sid: int):
     flash("サイトを削除しました", "success")
     return redirect(url_for(".sites"))
 
+
 # ───────────────────────────── 記事生成
 @bp.route("/generate", methods=["GET", "POST"])
 @login_required
 def generate():
     form = GenerateForm()
-
     form.genre_select.choices = [(0, "― 使わない ―")] + [
         (p.id, p.genre)
         for p in PromptTemplate.query.filter_by(user_id=current_user.id)
@@ -170,6 +172,7 @@ def generate():
 
     return render_template("generate.html", form=form)
 
+
 # ───────────────────────────── 生成ログ
 @bp.route("/log")
 @login_required
@@ -191,6 +194,7 @@ def log():
         jst=JST
     )
 
+
 # ───────────────────────────── プレビュー
 @bp.route("/preview/<int:article_id>")
 @login_required
@@ -199,6 +203,7 @@ def preview(article_id: int):
     if art.user_id != current_user.id:
         abort(403)
     return render_template("preview.html", article=art)
+
 
 # ───────────────────────────── WordPress 即時投稿
 @bp.post("/article/<int:id>/post")
@@ -218,8 +223,12 @@ def post_article(id):
         db.session.commit()
         flash(f"WordPress へ投稿しました: {url}", "success")
     except Exception as e:
+        # ロールバック＆詳細ログ出力
+        current_app.logger.exception("即時投稿失敗: %s", e)
+        db.session.rollback()
         flash(f"投稿失敗: {e}", "danger")
     return redirect(url_for(".log"))
+
 
 # ───────────────────────────── 記事編集・削除・再試行
 @bp.route("/article/<int:id>/edit", methods=["GET", "POST"])

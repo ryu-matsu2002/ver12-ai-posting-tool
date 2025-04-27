@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 import os
+import random
 import requests
 import logging
 from typing import List, Optional
@@ -52,16 +53,17 @@ def _pick_pixabay(hits: List[dict], keywords: List[str]) -> Optional[str]:
         # 各キーワードの出現回数をスコア化
         return sum(1 for kw in keywords if kw.lower() in tags)
 
-    # スコアが高い順にソート
-    candidates = sorted(hits, key=score, reverse=True)
-    for h in candidates:
+    # スコア順にソートし、上位5件だけをランダム
+    top_n = sorted(hits, key=score, reverse=True)[:5]
+    random.shuffle(top_n)
+    for h in top_n:
         w, hgt = h.get("imageWidth", 0), h.get("imageHeight", 1)
-        # 縦横比が適切なものを優先
         if hgt and 0.5 < w / hgt < 3:
             return h.get("webformatURL")
 
-    # どれも比率NGなら、スコアトップを返す
-    return candidates[0].get("webformatURL")
+    # 上位5件がすべてNGなら、元のヒットからランダムで返却
+    fallback = random.choice(hits)
+    return fallback.get("webformatURL")
 
 # ══════════════════════════════════════════════
 # Unsplash Source（Pixabayフォールバック）
