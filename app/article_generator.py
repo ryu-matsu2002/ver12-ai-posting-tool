@@ -1,6 +1,6 @@
-# ─────────────────────────────────────────────
+# ──────────────────────────────────────────────
 # app/article_generator.py   – v10 (2025-05-XX)
-# ─────────────────────────────────────────────
+# ──────────────────────────────────────────────
 """
 ● 記事生成 + 予約投稿時刻自動決定
   - タイトル重複判定
@@ -24,6 +24,7 @@ from . import db
 from .models import Article
 from .image_utils import fetch_featured_image
 from sqlalchemy import func
+from threading import Event
 
 # ──────────────────────────────
 # OpenAI 共通設定
@@ -105,6 +106,7 @@ PERSONAS = [
 SAFE_SYS = (
     "あなたは一流の日本語 SEO ライターです。"
     "公序良俗に反する表現・誤情報・個人情報や差別的・政治的主張は禁止します。"
+    "SEOを意識した見出しや本文を構成し、読者にとって有益な情報を提供してください。"  # SEOに特化した指示
 )
 
 # ══════════════════════════════════════════════
@@ -133,7 +135,7 @@ def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float) -> str:
         return _call(max_t)
     except BadRequestError as e:
         if "max_tokens" in str(e):
-            return _call(int(max_t * SHRINK))
+            return _call(int(max_t * SHRINK))  # max_tokens に合った値で再試行
         raise
 
 # ══════════════════════════════════════════════
@@ -309,10 +311,6 @@ def enqueue_generation(
     body_prompt: str,
     site_id: int | None = None,
 ) -> None:
-    """
-    各キーワードにつき 1-3 本生成（40 KW / 日まで）。
-    生成直後に scheduled_at を必ずセット。
-    """
     app = current_app._get_current_object()
 
     copies = [random.randint(1, 3) for _ in keywords[:40]]
@@ -337,8 +335,20 @@ def enqueue_generation(
                     ids.append(art.id)
             db.session.commit()
 
-        for aid in ids:       # タイトル重複を避けたいので直列生成
+        # タイトル重複を避けたいので直列生成
+        for aid in ids:
             from .article_generator import _generate
-            _generate(app, aid, title_prompt, body_prompt)
+            _generate_and_wait(app, aid, title_prompt, body_prompt)  # 完了するまで待機
 
     threading.Thread(target=background, daemon=True).start()
+
+def _generate_and_wait(app, aid, tpt, bpt):
+    """非同期タスクが完了するまで待機する"""
+    event = Event()
+
+    def background():
+        _generate(app, aid, tpt, bpt)
+        event.set()  # 完了したことを通知
+
+    threading.Thread(target=background, daemon=True).start()
+    event.wait()  # 完了するまで待機
