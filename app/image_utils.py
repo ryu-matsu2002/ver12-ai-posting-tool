@@ -56,9 +56,13 @@ def _search_pixabay(query: str, per_page: int = MAX_PER_PAGE) -> List[dict]:
     }
     try:
         r = requests.get("https://pixabay.com/api/", params=params,
-                         timeout=PIXABAY_TIMEOUT)
+                     timeout=PIXABAY_TIMEOUT)
+        if r.status_code == 400:        # Pixabay が key/param で 400 を返すことがある
+            logging.warning("Pixabay 400 for %s – fallthrough to Unsplash", query)
+        return []
         r.raise_for_status()
         return r.json().get("hits", [])
+    
     except Exception as e:
         logging.debug("Pixabay API error (%s): %s", query, e)
         return []
