@@ -26,20 +26,27 @@ from .image_utils import fetch_featured_image
 from sqlalchemy import func
 
 # ──────────────────────────────
-# OpenAI 共通設定
+# OpenAI 共通設定                ★ 修正
 # ──────────────────────────────
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
 MODEL  = os.getenv("OPENAI_MODEL", "gpt-4-turbo")
-TOKENS = {"title": 80, "outline": 400, "block": 950}
-TEMP   = {"title": 0.40, "outline": 0.45, "block": 0.70}
+
+TOKENS = {
+    "title":   80,       # そのまま
+    "outline": 400,      # そのまま
+    "block":   1600,     # ★ 950 → 1600（600〜800字×3ブロックでも途切れない）
+}
+
+TEMP = {"title": 0.40, "outline": 0.45, "block": 0.70}
 
 CTX_LIMIT              = 4096
 SHRINK                 = 0.75
-AVG_BLOCK_CHARS = 450
+
+AVG_BLOCK_CHARS        = 600   # ★ 450 → 600（実際の1ブロック平均に合わせる）
 MIN_BODY_CHARS_DEFAULT = 1800
 MAX_BODY_CHARS_DEFAULT = 3000
 MAX_TITLE_RETRY        = 7
-TITLE_DUP_THRESH = 0.90
+TITLE_DUP_THRESH       = 0.90
 
 # ──────────────────────────────
 # スケジュール設定
