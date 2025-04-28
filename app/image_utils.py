@@ -26,8 +26,8 @@ MAX_PER_PAGE      = 30
 
 # ビジネス系タグ
 _BUSINESS_TAGS = {
-    "money","business","office","finance","analysis","marketing",
-    "startup","strategy","computer","statistics","success"
+    "money", "business", "office", "finance", "analysis", "marketing",
+    "startup", "strategy", "computer", "statistics", "success"
 }
 
 # 画像利用履歴 (pid→timestamp) / console 再起動でリセット
@@ -67,8 +67,18 @@ def _search_pixabay(query: str, per_page: int = MAX_PER_PAGE) -> List[dict]:
         return r.json().get("hits", [])
     except Exception as e:
         logging.debug("Pixabay API error (%s): %s", query, e)
-        return []
+        # リトライ機能の追加
+        return _retry_search_pixabay(query)
 
+# リトライ機能の追加
+def _retry_search_pixabay(query: str, retries: int = 3) -> List[dict]:
+    for attempt in range(retries):
+        try:
+            return _search_pixabay(query)  # 再度検索を試みる
+        except Exception as e:
+            logging.error(f"Attempt {attempt + 1} failed for query '{query}': {e}")
+            if attempt == retries - 1:
+                return []  # 最後の試行でも失敗した場合は空リストを返す
 
 # ══════════════════════════════════════════════
 # スコアリング & 選択
@@ -113,6 +123,7 @@ def _unsplash_src(query: str) -> str:
     short = " ".join(words)[:120]
     q = requests.utils.quote(short)
     return f"https://source.unsplash.com/featured/1200x630/?{q}"
+
 # ══════════════════════════════════════════════
 # Public API
 # ══════════════════════════════════════════════

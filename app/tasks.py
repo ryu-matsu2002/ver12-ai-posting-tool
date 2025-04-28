@@ -41,6 +41,20 @@ def _auto_post_job(app):
             except Exception as e:
                 current_app.logger.exception(f"Auto-post failed for Article {art.id}: {e}")
                 db.session.rollback()
+                # リトライ処理を追加
+                retry_attempts = 3
+                for attempt in range(retry_attempts):
+                    try:
+                        url = post_to_wp(art.site, art)
+                        art.posted_at = now
+                        art.status = "posted"
+                        db.session.commit()
+                        current_app.logger.info(f"Retry Auto-posted Article {art.id} -> {url}")
+                        break
+                    except Exception as retry_exception:
+                        current_app.logger.exception(f"Retry {attempt + 1} failed for Article {art.id}: {retry_exception}")
+                        if attempt == retry_attempts - 1:
+                            current_app.logger.error(f"Failed to auto-post Article {art.id} after {retry_attempts} attempts")
 
 
 def init_scheduler(app):
@@ -52,11 +66,11 @@ def init_scheduler(app):
     scheduler.add_job(
         func=_auto_post_job,
         trigger="interval",
-        minutes=1,
+        minutes=5,  # 間隔を5分に変更
         args=[app],
         id="auto_post_job",
         replace_existing=True,
         max_instances=1
     )
     scheduler.start()
-    app.logger.info("Scheduler started: auto_post_job every 1 minute")
+    app.logger.info("Scheduler started: auto_post_job every 5 minutes")

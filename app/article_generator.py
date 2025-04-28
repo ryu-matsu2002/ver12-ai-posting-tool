@@ -1,14 +1,7 @@
 # ──────────────────────────────────────────────
-# app/article_generator.py   – v10 (2025-05-XX)
+# app/article_generator.py
+# 記事生成 + 予約投稿時刻自動決定
 # ──────────────────────────────────────────────
-"""
-● 記事生成 + 予約投稿時刻自動決定
-  - タイトル重複判定
-  - 本文見出し構成 + class 付与
-  - 目標文字数レンジ（例: 2 000〜3 000 字）の厳守
-  - 画像取得: キーワード + タイトル + 先頭 H2 をクエリ
-  - スケジュールは翌日以降の JST 10-20 時 → UTC 変換
-"""
 
 from __future__ import annotations
 import os, re, random, threading, logging
@@ -92,6 +85,7 @@ def _generate_slots(app, n: int) -> List[datetime]:
         if (day - date.today()).days > 365:          # 無限ループ安全弁
             raise RuntimeError("slot generation runaway")
 
+    current_app.logger.debug(f"Generated {n} slots for posting: {slots}")
     return slots[:n]
 
 # ──────────────────────────────
@@ -352,4 +346,3 @@ def _generate_and_wait(app, aid, tpt, bpt):
 
     threading.Thread(target=background, daemon=True).start()
     event.wait()  # 完了するまで待機
-

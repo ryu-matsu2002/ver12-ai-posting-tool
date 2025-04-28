@@ -10,12 +10,13 @@ services:
       - key: OPENAI_API_KEY
         fromSecret: OPENAI_API_KEY
 
-  - # services:
-#   - type: worker
-#     name: aipt-worker
-#     env: python
-#     buildCommand: pip install -r requirements.txt
-#     startCommand: celery -A worker.celery worker --loglevel=info
+  # Celery Worker 設定 (コメントを外して有効化する)
+  # - type: worker
+  #   name: aipt-worker
+  #   env: python
+  #   buildCommand: pip install -r requirements.txt
+  #   startCommand: celery -A worker.celery worker --loglevel=info
+
 databases:
   - name: redis
-    ipAllowList: []
+    ipAllowList: []  # 必要に応じてIPアドレスを追加

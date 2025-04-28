@@ -1,3 +1,4 @@
+# ──────────────────────────────────────────────
 # app/forms.py
 
 from flask_wtf import FlaskForm
@@ -9,7 +10,7 @@ from wtforms import (
     SelectField,
     IntegerField,         # ← 新規追加
 )
-from wtforms.validators import DataRequired, Email, Length, EqualTo, URL, Optional
+from wtforms.validators import DataRequired, Email, Length, EqualTo, URL, Optional, NumberRange
 
 class LoginForm(FlaskForm):
     email    = StringField("Email",    validators=[DataRequired(), Email()])
@@ -38,7 +39,7 @@ class GenerateForm(FlaskForm):
     body_length   = IntegerField(
         "本文文字数下限 (字)",       # ← 新規追加
         default=2000,               # ← デフォルト 2000 字
-        validators=[Optional()]
+        validators=[Optional(), NumberRange(min=1, message="文字数は1文字以上でなければなりません。")]
     )
     genre_select  = SelectField(
         "保存済みプロンプト",
@@ -53,6 +54,12 @@ class GenerateForm(FlaskForm):
         validators=[Optional()]
     )
     submit        = SubmitField("生成開始")
+
+    def validate_keywords(self, field):
+        # キーワード数が40個を超えていないかを検証
+        keywords = field.data.splitlines()
+        if len(keywords) > 40:
+            raise ValueError("キーワードは最大40個までです。")
 
 class PromptForm(FlaskForm):
     genre    = StringField("ジャンル名", validators=[DataRequired(), Length(max=100)])

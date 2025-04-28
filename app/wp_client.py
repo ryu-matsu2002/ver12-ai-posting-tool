@@ -142,14 +142,12 @@ def post_to_wp(site, article) -> str:
     current_app.logger.debug("WP Request Headers: %s", headers)
     current_app.logger.debug("WP Request Payload: %s", payload)
 
-    resp = requests.post(api, headers=headers, json=payload, timeout=TIMEOUT)
-
-    # --- デバッグログ: レスポンス詳細 ---
-    current_app.logger.debug("WP Response status: %s", resp.status_code)
-    current_app.logger.debug("WP Response body: %s", resp.text)
-
     try:
+        resp = requests.post(api, headers=headers, json=payload, timeout=TIMEOUT)
         resp.raise_for_status()
+        # --- デバッグログ: レスポンス詳細 ---
+        current_app.logger.debug("WP Response status: %s", resp.status_code)
+        current_app.logger.debug("WP Response body: %s", resp.text)
     except HTTPError as e:
         current_app.logger.error("WordPress 投稿失敗 [%s]: %s", resp.status_code, resp.text)
         raise
