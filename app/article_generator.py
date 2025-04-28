@@ -26,11 +26,10 @@ from .image_utils import fetch_featured_image
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
 MODEL  = os.getenv("OPENAI_MODEL", "gpt-4-turbo")
 
-TOKENS = {
+TOKENS: dict[str, int] = {
     "title":   80,
     "outline": 400,
-    # 1 ブロック最大 1 400 字 ≒ 780 token 程度を想定
-    "block_max": 900,             # 動的設定用の上限値
+    "block_max": 1000,       # ← 直接定義。後から書き換えない
 }
 
 TEMP = {"title": 0.4, "outline": 0.45, "block": 0.7}
@@ -147,11 +146,8 @@ def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float) -> str:
 
     def _call(m: int) -> str:
         res = client.chat.completions.create(
-            model=MODEL,
-            messages=msgs,
-            max_tokens=m,
-            temperature=temp,
-            timeout=120,
+            model=MODEL, messages=msgs,
+            max_tokens=m, temperature=temp, timeout=120
         )
         return res.choices[0].message.content.strip()
 
@@ -160,10 +156,12 @@ def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float) -> str:
     except BadRequestError as e:
         if "max_tokens" in str(e):
             return _call(int(max_t * SHRINK))
-        # ChatGPT が “” を返す／理由不明で例外にならない場合
-    if not (_res := _call(int(max_t * 0.7))):
+
+    # ここに来るのは ChatGPT が "" を返した場合だけ
+    fallback = _call(int(max_t * 0.7))
+    if not fallback:
         raise RuntimeError("ChatGPT returned empty string twice")
-    return _res
+    return fallback
 
 # ══════════════════════════════════════════════
 # タイトル生成

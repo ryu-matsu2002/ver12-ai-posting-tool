@@ -44,9 +44,11 @@ def _mark_used(url: str) -> None:
 # ══════════════════════════════════════════════
 # Pixabay 検索
 # ══════════════════════════════════════════════
+
 def _search_pixabay(query: str, per_page: int = MAX_PER_PAGE) -> List[dict]:
     if not PIXABAY_API_KEY or not query:
         return []
+
     params = {
         "key": PIXABAY_API_KEY,
         "q": query,
@@ -56,16 +58,16 @@ def _search_pixabay(query: str, per_page: int = MAX_PER_PAGE) -> List[dict]:
     }
     try:
         r = requests.get("https://pixabay.com/api/", params=params,
-                     timeout=PIXABAY_TIMEOUT)
-        if r.status_code == 400:        # Pixabay が key/param で 400 を返すことがある
+                         timeout=PIXABAY_TIMEOUT)
+        if r.status_code == 400:
             logging.warning("Pixabay 400 for %s – fallthrough to Unsplash", query)
-        return []
-        r.raise_for_status()
+            return []                       # ← ここで即 return
+        r.raise_for_status()                # ★ 400 以外の例外だけ拾う
         return r.json().get("hits", [])
-    
     except Exception as e:
         logging.debug("Pixabay API error (%s): %s", query, e)
         return []
+
 
 # ══════════════════════════════════════════════
 # スコアリング & 選択
