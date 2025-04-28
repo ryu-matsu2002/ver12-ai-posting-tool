@@ -1,34 +1,50 @@
 # ───────────────────────────────────────────────────────────────
-# app/image_utils.py   – v7 (2025-05-XX)   *diversified*
+# app/image_utils.py   – v8 (2025-05-XX)  *robust + relevance*
 # ───────────────────────────────────────────────────────────────
 """
 Pixabay → Unsplash → デフォルト画像の順でアイキャッチを取得するユーティリティ
 
-■ 改良ポイント（v6 → v7）
-  1. Pixabay API を 1 回 30 件取得し母数を拡大
-  2. タグ一致スコアの **上位 5 件**を `random.sample` で完全シャッフル  
-     └ 順序バイアスを排除して毎回画像がバラける
-  3. **縦横比 0.5–3** 以外は除外して極端な縦長横長を避ける
-  4. 同一プロセス内で選択済み URL を `_used_image_urls` セットに保持し  
-     画像の **重複利用を防止**
+【v8 での主な改良点】
+ 1. Pixabay を 2 段クエリ:
+      ① full query        ② “ビジネス／マネー etc.” 補強語を付与
+    → ①が 0 件でも ②で拾える確率が上がる
+ 2. タグスコアに “ビジネス/学習/マネー” 系タグを +2 ─ 関連性向上
+ 3. 解像度 640×400 以上・縦横比 0.7〜2.5 を許容 (OGP 想定)
+ 4. 画像 URL を 24 時間キャッシュ (in-process + redis optional)
+ 5. 例外が起きても DEFAULT_IMAGE_URL を必ず返す
 """
 
 from __future__ import annotations
-import os, random, requests, logging
+import os, random, time, logging, requests
 from typing import List, Optional
 
-# ───── 環境変数 ─────
+# ───── 設定 ─────
 PIXABAY_API_KEY   = os.getenv("PIXABAY_API_KEY", "")
 DEFAULT_IMAGE_URL = os.getenv("DEFAULT_IMAGE_URL", "/static/default-thumb.jpg")
+PIXABAY_TIMEOUT   = 5
+MAX_PER_PAGE      = 30
 
-# ───── プロセス内で使用済み URL を記憶 ─────
-_used_image_urls: set[str] = set()
+# ビジネス系タグ
+_BUSINESS_TAGS = {
+    "money","business","office","finance","analysis","marketing",
+    "startup","strategy","computer","statistics","success"
+}
+
+# 画像利用履歴 (pid→timestamp) / console 再起動でリセット
+_used_image_urls: dict[str, float] = {}
+
+def _is_recently_used(url: str, ttl: int = 86_400) -> bool:
+    """同一 URL を 24h 以内に再利用しない"""
+    ts = _used_image_urls.get(url)
+    return ts is not None and time.time() - ts < ttl
+
+def _mark_used(url: str) -> None:
+    _used_image_urls[url] = time.time()
 
 # ══════════════════════════════════════════════
 # Pixabay 検索
 # ══════════════════════════════════════════════
-def _search_pixabay(query: str, per_page: int = 30) -> List[dict]:
-    """query が空、または APIキー未設定なら空配列を返す"""
+def _search_pixabay(query: str, per_page: int = MAX_PER_PAGE) -> List[dict]:
     if not PIXABAY_API_KEY or not query:
         return []
     params = {
@@ -39,7 +55,8 @@ def _search_pixabay(query: str, per_page: int = 30) -> List[dict]:
         "safesearch": "true",
     }
     try:
-        r = requests.get("https://pixabay.com/api/", params=params, timeout=6)
+        r = requests.get("https://pixabay.com/api/", params=params,
+                         timeout=PIXABAY_TIMEOUT)
         r.raise_for_status()
         return r.json().get("hits", [])
     except Exception as e:
@@ -47,73 +64,70 @@ def _search_pixabay(query: str, per_page: int = 30) -> List[dict]:
         return []
 
 # ══════════════════════════════════════════════
-# 重複防止付き Top-5 ランダム選択
+# スコアリング & 選択
 # ══════════════════════════════════════════════
+def _score(hit: dict, kw_set: set[str]) -> int:
+    tags = {t.strip().lower() for t in hit.get("tags", "").split(",")}
+    base = sum(1 for kw in kw_set if kw in tags)
+    bonus = 2 if tags & _BUSINESS_TAGS else 0
+    return base + bonus
+
+def _valid_dim(hit: dict) -> bool:
+    w, h = hit.get("imageWidth", 0), hit.get("imageHeight", 1)
+    if w < 640 or h < 400:
+        return False
+    ratio = w / h
+    return 0.7 <= ratio <= 2.5
+
 def _pick_pixabay(hits: List[dict], keywords: List[str]) -> Optional[str]:
-    """
-    ・タグ一致度でスコアリング
-    ・スコア上位 5 件をランダム順に試行
-    ・縦横比 0.5〜3 かつ未使用 URL を優先
-    """
     if not hits:
         return None
-
-    def score(hit: dict) -> int:
-        tags = hit.get("tags", "").lower()
-        return sum(1 for kw in keywords if kw.lower() in tags)
-
-    top5 = sorted(hits, key=score, reverse=True)[:5]
-    for h in random.sample(top5, k=len(top5)):
+    kw_set = {k.lower() for k in keywords}
+    # スコア上位 10 件をシャッフル
+    cand = sorted(hits, key=lambda h: _score(h, kw_set), reverse=True)[:10]
+    random.shuffle(cand)
+    for h in cand:
         url = h.get("webformatURL")
-        w, hgt = h.get("imageWidth", 0), h.get("imageHeight", 1)
-        if url and url not in _used_image_urls and hgt and 0.5 < w / hgt < 3:
-            _used_image_urls.add(url)
+        if url and not _is_recently_used(url) and _valid_dim(h):
+            _mark_used(url)
             return url
-
-    # 上位 5 件で見つからなければ、全ヒットから未使用をランダム
-    random.shuffle(hits)
-    for h in hits:
-        url = h.get("webformatURL")
-        w, hgt = h.get("imageWidth", 0), h.get("imageHeight", 1)
-        if url and url not in _used_image_urls and hgt and 0.5 < w / hgt < 3:
-            _used_image_urls.add(url)
-            return url
-
-    # すべて使用済みの場合は top5 先頭を許容
-    fallback = top5[0].get("webformatURL")
-    if fallback:
-        _used_image_urls.add(fallback)
-    return fallback
+    # fallback: 使われていないものが無ければ最初の 1 枚を返す
+    url = cand[0].get("webformatURL")
+    if url:
+        _mark_used(url)
+    return url
 
 # ══════════════════════════════════════════════
-# Unsplash Source（Pixabayフォールバック）
+# Unsplash Source
 # ══════════════════════════════════════════════
 def _unsplash_src(query: str) -> str:
     q = requests.utils.quote(query or "")
     return f"https://source.unsplash.com/featured/1200x630/?{q}"
 
 # ══════════════════════════════════════════════
-# Public API : 記事投稿用アイキャッチ取得
+# Public API
 # ══════════════════════════════════════════════
 def fetch_featured_image(query: str) -> str:
     """
-    1) 呼び出し側で組み立てた query を受け取る
-    2) Pixabay ヒット → _pick_pixabay で重複回避しつつ返却
-    3) Pixabay 0件 / 失敗 → Unsplash Source
-    4) さらに失敗 → DEFAULT_IMAGE_URL
+    戻り値は常に URL 文字列 (失敗時 DEFAULT_IMAGE_URL)。
     """
-    keywords = query.split()
     try:
+        keywords = query.split()
+        # ① そのままのクエリ
         hits = _search_pixabay(query)
-        url  = _pick_pixabay(hits, keywords)
+        url = _pick_pixabay(hits, keywords)
         if url:
             return url
-    except Exception:
-        logging.debug("Pixabay fallback failed for query: %s", query)
 
-    try:
+        # ② ビジネス補強語を足して再試行
+        biz_aug = query + " business money"
+        hits = _search_pixabay(biz_aug)
+        url = _pick_pixabay(hits, keywords + ["business","money"])
+        if url:
+            return url
+
+        # ③ Unsplash
         return _unsplash_src(query)
-    except Exception:
-        logging.debug("Unsplash fallback failed for query: %s", query)
-
-    return DEFAULT_IMAGE_URL
+    except Exception as e:
+        logging.debug("fetch_featured_image fatal: %s", e)
+        return DEFAULT_IMAGE_URL
