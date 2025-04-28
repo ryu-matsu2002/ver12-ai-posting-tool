@@ -38,9 +38,9 @@ TEMP = {"title": 0.4, "outline": 0.45, "block": 0.7}
 CTX_LIMIT              = 4096
 SHRINK                 = 0.8          # BadRequest 時のリトライ係数
 
-AVG_BLOCK_CHARS        = 550          # 経験値ベースの 1 ブロック平均
-MIN_BODY_CHARS_DEFAULT = 1800
-MAX_BODY_CHARS_DEFAULT = 3000
+AVG_BLOCK_CHARS        = 500          # 経験値ベースの 1 ブロック平均
+MIN_BODY_CHARS_DEFAULT = 1900
+MAX_BODY_CHARS_DEFAULT = 2100
 MAX_TITLE_RETRY        = 7
 TITLE_DUP_THRESH       = 0.9
 
