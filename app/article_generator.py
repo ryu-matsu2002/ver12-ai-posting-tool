@@ -375,12 +375,23 @@ def _generate(app, aid: int, tpt: str, bpt: str):
             art.progress = 80
             db.session.commit()
 
-            # アイキャッチ（失敗してもデフォルトを返すので例外にはしない）
+            # 画像取得（失敗してもデフォルトを返すので例外にはしない）
             h2s   = re.findall(r"<h2\b[^>]*>(.*?)</h2>", art.body or "", re.I)[:2]
             query = " ".join(dict.fromkeys([art.keyword, art.title, *h2s]))
-            art.image_url = fetch_featured_image(query)
+            url   = fetch_featured_image(query)
 
-            # 完了
+# ---- ★ 500byte 超は自動で詰めてから保存 ----------------
+            if len(url.encode()) > 500:
+    # 末尾クエリを落として再チェック
+                base = url.split("?", 1)[0]
+                if len(base.encode()) > 500:
+        # それでも長いなら最後を省略
+                   base = base.encode()[:497].decode("utf-8", "ignore") + "..."
+            url = base
+
+            art.image_url = url  # ← 再フェッチしない！
+
+# 完了
             art.status, art.progress = "done", 100
             art.updated_at = datetime.utcnow()
 

@@ -107,9 +107,11 @@ def _pick_pixabay(hits: List[dict], keywords: List[str]) -> Optional[str]:
 # Unsplash Source
 # ══════════════════════════════════════════════
 def _unsplash_src(query: str) -> str:
-    q = requests.utils.quote(query or "")
+    # ── 120字・最大6語に縮める ───────────────────
+    words = query.split()[:6]
+    short = " ".join(words)[:120]
+    q = requests.utils.quote(short)
     return f"https://source.unsplash.com/featured/1200x630/?{q}"
-
 # ══════════════════════════════════════════════
 # Public API
 # ══════════════════════════════════════════════
