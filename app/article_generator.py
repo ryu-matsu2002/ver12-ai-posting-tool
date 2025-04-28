@@ -352,3 +352,4 @@ def _generate_and_wait(app, aid, tpt, bpt):
 
     threading.Thread(target=background, daemon=True).start()
     event.wait()  # 完了するまで待機
+

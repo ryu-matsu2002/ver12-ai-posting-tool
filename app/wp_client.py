@@ -39,7 +39,7 @@ def _upload_featured_image(site, image_url: str) -> Optional[int]:
             "Referer": "https://pixabay.com/",
         }
         r = requests.get(image_url, headers=dl_headers, timeout=TIMEOUT)
-        r.raise_for_status()
+        r.raise_for_status()  # エラーが発生した場合例外を投げる
     except Exception as e:
         current_app.logger.error("Featured image download failed: %s", e)
         return None
