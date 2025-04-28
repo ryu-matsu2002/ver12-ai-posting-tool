@@ -50,11 +50,12 @@ TITLE_DUP_THRESH       = 0.90            # 類似度 0.9 以上を重複とみ�
 JST        = pytz.timezone("Asia/Tokyo")
 POST_HOURS = list(range(10, 21))         # JST 10-20 時
 MAX_PERDAY = 5
+AVERAGE_POSTS = 4 
 
 def _generate_slots(app, n: int) -> List[datetime]:
     """
-    既存予約を JST 日単位で集計し MAX_PERDAY 以内で空きを割り当て。
-    戻り値は必ず n 個の UTC datetime。
+    既存予約をJST日単位で集計しMAX_PERDAY以内で空きを割り当て
+    戻り値は必ずn個のUTC datetime
     """
     if n <= 0:
         return []
@@ -75,14 +76,15 @@ def _generate_slots(app, n: int) -> List[datetime]:
     while len(slots) < n:
         remain = MAX_PERDAY - booked.get(day, 0)
         if remain > 0:
-            need = min(remain, n - len(slots))
+            # 記事数は平均4を目指して、最大5件に制限
+            need = min(random.randint(1, AVERAGE_POSTS), remain, n - len(slots))
             for h in sorted(random.sample(POST_HOURS, need)):
                 minute = random.randint(1, 59)
                 local  = datetime.combine(day, time(h, minute), tzinfo=JST)
                 slots.append(local.astimezone(timezone.utc))
         day += timedelta(days=1)
 
-        if (day - date.today()).days > 365:          # 無限ループ安全弁
+        if (day - date.today()).days > 365:  # 無限ループ防止
             raise RuntimeError("slot generation runaway")
 
     current_app.logger.debug(f"Generated {n} slots for posting: {slots}")
@@ -91,15 +93,9 @@ def _generate_slots(app, n: int) -> List[datetime]:
 # ──────────────────────────────
 # コンテンツ生成設定
 # ──────────────────────────────
-PERSONAS = [
-    "節約志向の学生", "ビジネス渡航が多い会社員",
-    "小さな子供連れファミリー", "リタイア後の移住者",
-    "ペット同伴で移動する読者",
-]
 
 SAFE_SYS = (
     "あなたは一流の日本語 SEO ライターです。"
-    "公序良俗に反する表現・誤情報・個人情報や差別的・政治的主張は禁止します。"
     "SEOを意識した見出しや本文を構成し、読者にとって有益な情報を提供してください。"  # SEOに特化した指示
 )
 
@@ -155,6 +151,7 @@ def _unique_title(kw: str, pt: str) -> str:
     cand = ""
     for i in range(MAX_TITLE_RETRY):
         cand = _title_once(kw, pt, retry=i > 0)
+        # 類似度を1.0（完全に異なるタイトルを生成）
         if not any(_similar(cand, h) for h in history):
             history.append(cand)
             break
@@ -164,7 +161,8 @@ def _unique_title(kw: str, pt: str) -> str:
 # アウトライン & 本文生成
 # ══════════════════════════════════════════════
 def _outline(kw: str, title: str, pt: str) -> str:
-    sys = SAFE_SYS + "## / ### で 6〜8 個の見出しを Markdown で返してください。各 H2 は 15 字以内。"
+    # 動的に見出し数を決める
+    sys = SAFE_SYS + "## / ### で見出しを生成し、記事の内容に合わせて柔軟に調整します。"
     usr = f"{pt}\n\n▼ KW: {kw}\n▼ TITLE: {title}"
     return _chat(
         [{"role": "system", "content": sys},
@@ -237,7 +235,7 @@ def _compose_body(kw: str, outline_raw: str, pt: str) -> str:
         h2  = (h2[:15] + "…") if len(h2) > 15 else h2
         h3s = [h for h in h3s if len(h) <= 10][:3]
         parts.append(
-            _block_html(kw, h2, h3s, random.choice(PERSONAS), pt)
+            _block_html(kw, h2, h3s, "default_persona", pt)  # "default_persona" を追加
         )
 
     html = "\n\n".join(parts)
