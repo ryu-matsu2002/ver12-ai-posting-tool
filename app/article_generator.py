@@ -38,11 +38,12 @@ TEMP = {"title": 0.4, "outline": 0.45, "block": 0.7}
 CTX_LIMIT              = 4096
 SHRINK                 = 0.8          # BadRequest 時のリトライ係数
 
-AVG_BLOCK_CHARS        = 500          # 経験値ベースの 1 ブロック平均
-MIN_BODY_CHARS_DEFAULT = 1900
-MAX_BODY_CHARS_DEFAULT = 2100
-MAX_TITLE_RETRY        = 7
+MIN_BODY_CHARS_DEFAULT = 1800   # 下限
+MAX_BODY_CHARS_DEFAULT = 2100   # 上限を 2100 に絞る
+AVG_BLOCK_CHARS        = 500    # ブロック平均も 500 に
+TOKENS["block_max"]    = 1000   # 余裕を持たせる
 TITLE_DUP_THRESH       = 0.9
+MAX_TITLE_RETRY        = 7
 
 # ──────────────────────────────
 # スケジュール設定（1 日 ≤5 本、端数分）
@@ -159,7 +160,10 @@ def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float) -> str:
     except BadRequestError as e:
         if "max_tokens" in str(e):
             return _call(int(max_t * SHRINK))
-        raise
+        # ChatGPT が “” を返す／理由不明で例外にならない場合
+    if not (_res := _call(int(max_t * 0.7))):
+        raise RuntimeError("ChatGPT returned empty string twice")
+    return _res
 
 # ══════════════════════════════════════════════
 # タイトル生成
@@ -344,35 +348,52 @@ def _compose_body(kw: str, outline_raw: str, pt: str) -> str:
 
 
 
+# ──────────────────────────────
+# 生成ワーカー
+# ──────────────────────────────
 def _generate(app, aid: int, tpt: str, bpt: str):
     with app.app_context():
         art = Article.query.get(aid)
         if not art or art.status != "pending":
             return
+
         try:
-            art.status, art.progress = "gen", 10; db.session.commit()
-            art.title   = _unique_title(art.keyword, tpt)
-            art.progress = 30; db.session.commit()
+            # 進捗: 開始
+            art.status, art.progress = "gen", 10
+            db.session.commit()
 
+            # タイトル
+            art.title = _unique_title(art.keyword, tpt)
+            art.progress = 30
+            db.session.commit()
+
+            # アウトライン
             outline = _outline(art.keyword, art.title, bpt)
-            art.progress = 50; db.session.commit()
+            art.progress = 50
+            db.session.commit()
 
-            art.body    = _compose_body(art.keyword, outline, bpt)
-            art.progress = 80; db.session.commit()
+            # 本文
+            art.body = _compose_body(art.keyword, outline, bpt)
+            art.progress = 80
+            db.session.commit()
 
-            # 画像取得: タイトル＋先頭2つのH2を使ったクエリ
-            h2s     = re.findall(r"<h2\b[^>]*>(.*?)</h2>", art.body or "", re.I)[:2]
-            tokens  = [art.keyword, art.title, *h2s]
-            query   = " ".join(dict.fromkeys(tokens))          # 重複除去で順序保持
+            # アイキャッチ（失敗してもデフォルトを返すので例外にはしない）
+            h2s   = re.findall(r"<h2\b[^>]*>(.*?)</h2>", art.body or "", re.I)[:2]
+            query = " ".join(dict.fromkeys([art.keyword, art.title, *h2s]))
             art.image_url = fetch_featured_image(query)
 
+            # 完了
             art.status, art.progress = "done", 100
             art.updated_at = datetime.utcnow()
+
         except Exception as e:
             logging.exception("記事生成失敗: %s", e)
             art.status, art.body = "error", f"Error: {e}"
+
         finally:
+            # 生成成功／失敗にかかわらずセッションを確実に反映
             db.session.commit()
+
 
 def enqueue_generation(
     user_id: int,
