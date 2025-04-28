@@ -1,12 +1,7 @@
+# ──────────────────────────────────────────────
 # app/wp_client.py
-
-"""
-WordPress 投稿ユーティリティ
-────────────────────────────────────────
-・Basic 認証 (Application Password) 前提
-・アイキャッチ → /media → ID を取得
-・本文に <h2>,<h3>,<p> のスタイル/クラスをインライン付与
-"""
+# WordPress 投稿ユーティリティ
+# ──────────────────────────────────────────────
 
 from __future__ import annotations
 import base64
@@ -14,8 +9,8 @@ import mimetypes
 import os
 import re
 import logging
+import time
 from typing import Optional
-
 import requests
 from requests.exceptions import HTTPError
 from flask import current_app
@@ -119,7 +114,7 @@ def post_to_wp(site, article) -> str:
     # 1) アイキャッチ
     featured_id: Optional[int] = None
     if article.image_url:
-        featured_id = _upload_featured_image(site, article.image_url)
+        featured_id = _upload_featured_image_with_retry(site, article.image_url)
 
     # 2) 本文装飾
     styled_body = _decorate_html(article.body or "")
@@ -160,3 +155,39 @@ def post_to_wp(site, article) -> str:
         raise
 
     return resp.json().get("link", "")
+
+# 画像アップロード時のリトライ機能
+def _upload_featured_image_with_retry(site, image_url, retries=3, delay=5):
+    for attempt in range(retries):
+        featured_id = _upload_featured_image(site, image_url)
+        if featured_id:
+            return featured_id
+        else:
+            current_app.logger.error(f"Attempt {attempt + 1} failed to upload image: {image_url}")
+            if attempt < retries - 1:
+                time.sleep(delay)
+    return None  # リトライしても失敗した場合
+
+# ──────────────────────────────────────────────
+# 画像ダウンロード時のリトライ機能
+# ──────────────────────────────────────────────
+def _download_with_retry(url, retries=3, delay=5):
+    dl_headers = {  # dl_headersを関数内で定義
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0 Safari/537.36"
+        ),
+        "Referer": "https://pixabay.com/",  # 画像の提供元URLなど
+    }
+    for attempt in range(retries):
+        try:
+            r = requests.get(url, headers=dl_headers, timeout=TIMEOUT)
+            r.raise_for_status()  # エラーが発生した場合例外を投げる
+            return r
+        except Exception as e:
+            current_app.logger.error(f"Download attempt {attempt + 1} failed: {e}")
+            if attempt < retries - 1:
+                time.sleep(delay)
+            else:
+                return None  # すべてのリトライが失敗した場合はNoneを返す
