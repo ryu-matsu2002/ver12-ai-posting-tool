@@ -1,8 +1,13 @@
 # ─────────────────────────────────────────────
-# app/article_generator.py   – v9-dynlen (2025-05-XX)
+# app/article_generator.py   – v7-full+ (2025-05-XX)
 # ─────────────────────────────────────────────
 """
-● 文字数レンジを厳守し、途中で途切れない本文を生成する完全版
+● 記事生成 + 予約投稿時刻自動決定
+  - タイトル重複判定
+  - 本文見出し構成 + class付与
+  - 文字数範囲（2500字〜3000字など）での下限・上限制御
+  - 画像取得: 本文先頭 H2 + キーワード でクエリ強化
+  - スケジュールは「翌日」以降のUTCスロット（JST 10-20時、それぞれ１時間ずつ）
 """
 
 from __future__ import annotations
@@ -14,110 +19,92 @@ from difflib import SequenceMatcher
 import pytz
 from flask import current_app
 from openai import OpenAI, BadRequestError
-from sqlalchemy import func
 
 from . import db
 from .models import Article
 from .image_utils import fetch_featured_image
+from sqlalchemy import func
 
 # ──────────────────────────────
-# OpenAI 共通設定
+# OpenAI 共通設定                ★ 修正
 # ──────────────────────────────
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
 MODEL  = os.getenv("OPENAI_MODEL", "gpt-4-turbo")
 
-TOKENS: dict[str, int] = {
-    "title":   80,
-    "outline": 400,
-    "block_max": 1000,       # ← 直接定義。後から書き換えない
+TOKENS = {
+    "title":   80,       # そのまま
+    "outline": 400,      # そのまま
+    "block":   1600,     # ★ 950 → 1600（600〜800字×3ブロックでも途切れない）
 }
 
-TEMP = {"title": 0.4, "outline": 0.45, "block": 0.7}
+TEMP = {"title": 0.40, "outline": 0.45, "block": 0.70}
 
 CTX_LIMIT              = 4096
-SHRINK                 = 0.8          # BadRequest 時のリトライ係数
+SHRINK                 = 0.75
 
-MIN_BODY_CHARS_DEFAULT = 1800   # 下限
-MAX_BODY_CHARS_DEFAULT = 2100   # 上限を 2100 に絞る
-AVG_BLOCK_CHARS        = 500    # ブロック平均も 500 に
-TOKENS["block_max"]    = 1000   # 余裕を持たせる
-TITLE_DUP_THRESH       = 0.9
+AVG_BLOCK_CHARS        = 600   # ★ 450 → 600（実際の1ブロック平均に合わせる）
+MIN_BODY_CHARS_DEFAULT = 1800
+MAX_BODY_CHARS_DEFAULT = 3000
 MAX_TITLE_RETRY        = 7
+TITLE_DUP_THRESH       = 0.85
 
 # ──────────────────────────────
-# スケジュール設定（1 日 ≤5 本、端数分）
+# スケジュール設定
 # ──────────────────────────────
-JST         = pytz.timezone("Asia/Tokyo")
+JST        = pytz.timezone("Asia/Tokyo")
+POST_HOURS = list(range(10, 21))  # JST 10–20時
+MAX_PERDAY = 5
 
-# 2 時間間隔でベースとなる “時” を固定（きり良い間隔は保つ）
-BASE_HOURS  = [10, 12, 14, 16, 18]
-
-# 0,15,30,45 を避けた “端数分” 候補
-ODD_MINUTES = [3, 17, 23, 33, 37, 43, 47, 53]
-
-MAX_PERDAY  = 5          # hard-limit
-AVG_PERDAY  = 4          # あくまで「目安」— 超える場合もあります
-# ──────────────────────────────
 def _generate_slots(app, n: int) -> List[datetime]:
     """
-    ・1 日あたり BASE_HOURS×ODD_MINUTES から最大 5 本割当て
-    ・平均 4 本程度に収束（確率的）
-    ・既存予約を考慮して空き枠に入れる
+    既存予約を JST 日付単位で集計し、
+    1 日あたり MAX_PERDAY 本まで埋めていく。
+
+    戻り値は **必ず n 個** の UTC DateTime。
+    slot が 1 件も取れなければ RuntimeError。
     """
     if n <= 0:
         return []
 
-    # ① 既存予約を JST 日単位で集計
+    # ── ① 既存予約を DB から取得（JST に変換 → date 抽出）
     with app.app_context():
-        jst_date = func.date(func.timezone("Asia/Tokyo", Article.scheduled_at)).label("jst_date")
+        jst_date = func.date(
+            func.timezone("Asia/Tokyo", Article.scheduled_at)
+        ).label("jst_date")
+
         rows = (
             db.session.query(jst_date, func.count(Article.id))
             .filter(Article.scheduled_at.isnot(None))
             .group_by(jst_date)
             .all()
         )
+
     booked_per_day: dict[date, int] = {row[0]: row[1] for row in rows}
 
-    # ② スロット割当て
+    # ── ② 空き枠に従ってスロット作成
     slots: list[datetime] = []
-    day = date.today() + timedelta(days=1)
+    day = date.today() + timedelta(days=1)        # 翌日スタート
 
     while len(slots) < n:
-        already   = booked_per_day.get(day, 0)
-        # その日の割当本数を決定（平均 4 本前後）
-        available = min(MAX_PERDAY - already, n - len(slots))
-        if available > 0:
-            # 「出来れば 4 本」に寄せるため乱数で決定
-            today_quota = min(
-                available,
-                random.choices(                # 4 本が最頻になるよう重み付け
-                    population=[1, 2, 3, 4, 5],
-                    weights   =[5, 15, 25, 35, 20],
-                    k=1
-                )[0]
-            )
-
-            # 空き時間帯からランダムに today_quota 件選択
-            candidates = []
-            for h in BASE_HOURS:
-                for m in ODD_MINUTES:
-                    local = datetime.combine(day, time(h, m), tzinfo=JST)
-                    candidates.append(local)
-
-            random.shuffle(candidates)
-            for local in candidates[:today_quota]:
+        remaining_today = MAX_PERDAY - booked_per_day.get(day, 0)
+        if remaining_today > 0:
+            needed = min(remaining_today, n - len(slots))
+            # POST_HOURS から needed 本ランダム抽出して整列
+            for h in sorted(random.sample(POST_HOURS, needed)):
+                minute = random.randint(1, 59)
+                local  = datetime.combine(day, time(h, minute), tzinfo=JST)
                 slots.append(local.astimezone(timezone.utc))
-                if len(slots) >= n:
-                    break
-
+        # 次の日へ
         day += timedelta(days=1)
 
-        # 安全ブレーク（12 か月先まで）
-        if (day - date.today()).days > 365:
-            raise RuntimeError("slot generation runaway")
+        # 念のため無限ループ防止（理論上あり得ないが）
+        if len(slots) > n * 10:
+            break
+
+    if len(slots) < n:
+        raise RuntimeError("slot generation failed (不足)")
 
     return slots[:n]
-
 
 # ──────────────────────────────
 # コンテンツ生成設定
@@ -133,35 +120,27 @@ SAFE_SYS = (
     "公序良俗に反する表現・誤情報・個人情報や差別的・政治的主張は禁止します。"
 )
 
-# ──────────────────────────────
-# Chat API ラッパ
-# ──────────────────────────────
-def _tok_est(text: str) -> int:
-    """ざっくり文字数→token 変換（日本語 1token≒1.8字）"""
-    return int(len(text) / 1.8)
+# ══════════════════════════════════════════════
+# Chat API wrapper
+# ══════════════════════════════════════════════
+def _tok(txt: str) -> int:
+    return int(len(txt) * 0.45)
 
 def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float) -> str:
-    prompt_tok = sum(_tok_est(m["content"]) for m in msgs)
-    max_t = min(max_t, max(256, CTX_LIMIT - prompt_tok - 64))
-
-    def _call(m: int) -> str:
+    prompt = sum(_tok(m["content"]) for m in msgs)
+    max_t  = min(max_t, max(256, CTX_LIMIT - prompt - 64))
+    def call(m: int) -> str:
         res = client.chat.completions.create(
             model=MODEL, messages=msgs,
             max_tokens=m, temperature=temp, timeout=120
         )
         return res.choices[0].message.content.strip()
-
     try:
-        return _call(max_t)
+        return call(max_t)
     except BadRequestError as e:
         if "max_tokens" in str(e):
-            return _call(int(max_t * SHRINK))
-
-    # ここに来るのは ChatGPT が "" を返した場合だけ
-    fallback = _call(int(max_t * 0.7))
-    if not fallback:
-        raise RuntimeError("ChatGPT returned empty string twice")
-    return fallback
+            return call(int(max_t * SHRINK))
+        raise
 
 # ══════════════════════════════════════════════
 # タイトル生成
@@ -229,45 +208,26 @@ def _parse_outline(raw: str) -> List[Tuple[str,List[str]]]:
         blocks.append((cur, subs))
     return blocks
 
-# ──────────────────────────────
-# セクション生成（動的長さ）
-# ──────────────────────────────
 def _block_html(
-    kw: str,
-    h2: str,
-    h3s: List[str],
-    persona: str,
-    pt: str,
-    target_chars: int,
+    kw: str, h2: str, h3s: List[str], persona: str, pt: str
 ) -> str:
-    low = int(target_chars * 0.9)
-    high = int(target_chars * 1.1)
-    h3_mark = "\n".join(f"### {h}" for h in h3s) if h3s else ""
-
-    sys = (
-        "あなたは一流の日本語 SEO ライターです。"
-        f"以下の条件で <h2> セクションを HTML で生成してください。\n"
-        f"- 小見出し (H2) は {h2}\n"
-        f"- 本文は {low}〜{high} 字で完結させる\n"
-        "- 構成: 結論→理由→具体例×3→要点まとめ\n"
-        "- 具体例は <h3 class=\"wp-heading\"> で示す\n"
-        "- H2/H3 には class=\"wp-heading\" を必ず付ける\n"
-        "- 同じ言い回し・語尾を２行以上続けず、重複を避け、具体データ（数値・事例・統計）を必ず１つ盛り込む\n"
-        f"- 視点: {persona}\n"
+    h3txt = "\n".join(f"### {h}" for h in h3s) if h3s else ""
+    sys   = (
+        SAFE_SYS
+        + "以下制約でH2セクションをHTML生成:\n"
+        + "- 記事全体は2000〜3000字以内になるように調整\n"
+        + "- 小見出し（H2）は10字以内で簡潔に\n"
+        + "- 600-800字で本文を生成\n"
+        + "- 結論→理由→具体例×3→再結論\n"
+        + "- 具体例は<h3 class=\"wp-heading\">で示す\n"
+        + f"- 視点:{persona}\n"
+        + "- <h2>/<h3>にclass=\"wp-heading\"付与"
     )
-    usr = (
-        f"{pt}\n\n▼ キーワード: {kw}\n"
-        f"▼ H2: {h2}\n"
-        f"▼ H3 候補:\n{h3_mark}"
-    )
-
-    # 動的 token 上限
-    max_tok = min(TOKENS["block_max"], _tok_est(str(target_chars)) + 150)
+    usr   = f"{pt}\n\n▼ KW:{kw}\n▼ H2:{h2}\n▼ H3s\n{h3txt}"
     return _chat(
-        [{"role": "system", "content": sys},
-         {"role": "user",   "content": usr}],
-        max_tok,
-        TEMP["block"]
+        [{"role":"system","content":sys},
+         {"role":"user","content":usr}],
+        TOKENS["block"], TEMP["block"]
     )
 
 def _parse_range(pt: str) -> tuple[int, int | None]:
@@ -279,131 +239,103 @@ def _parse_range(pt: str) -> tuple[int, int | None]:
     return MIN_BODY_CHARS_DEFAULT, None
 
 # ─────────────────────────────────────────────
-# _compose_body  – 目標文字数を厳守して生成
+# _compose_body (3ブロック / 2500字ターゲット版)
 # ─────────────────────────────────────────────
 def _compose_body(kw: str, outline_raw: str, pt: str) -> str:
-    # ① プロンプトから目標文字数レンジを取得
-    def _range_in_pt(p: str) -> tuple[int, int | None]:
-        if m := re.search(r"(\d{3,5})\s*字から\s*(\d{3,5})\s*字", p):
-            return int(m.group(1)), int(m.group(2))
-        if m := re.search(r"(\d{3,5})\s*字", p):
-            return int(m.group(1)), None
-        return MIN_BODY_CHARS_DEFAULT, None
-
-    min_chars, max_chars_user = _range_in_pt(pt)
+    # ① 字数レンジ取得
+    min_chars, max_chars_user = _parse_range(pt)
     max_total = max_chars_user or MAX_BODY_CHARS_DEFAULT
 
-    # ② アウトラインを解析
-    blocks = _parse_outline(outline_raw)
-    if not blocks:
-        raise RuntimeError("outline parse failed")
+    # ② アウトライン → [(h2, [h3...]), …]
+    parsed = _parse_outline(outline_raw)
 
-    # ③ 必要ブロック数を決定
-    need_blocks = min(len(blocks), max(
-        3,
-        round(max_total / AVG_BLOCK_CHARS)
-    ))
-    blocks = blocks[:need_blocks]
+    # ==  ブロック数を動的に決定  ===========================
+    #   必要ブロック  = ceiling(max_total / AVG_BLOCK_CHARS)
+    need_blocks = max(3, min(len(parsed), (max_total + AVG_BLOCK_CHARS - 1) // AVG_BLOCK_CHARS))
+    parsed = parsed[:need_blocks]           # 取り過ぎない
 
-    # ④ 各ブロックを順次生成（残り文字数で動的割当て）
-    html_parts: List[str] = []
-    remaining = max_total
-    remaining_blocks = len(blocks)
-
-    for h2, h3s in blocks:
-        target = round(remaining / remaining_blocks)
-        section = _block_html(
-            kw, h2, h3s[:3], random.choice(PERSONAS), pt, target_chars=target
+    # ==  H2/H3 をガードしながら HTML 生成  ==================
+    max_h2_len = 20
+    parts: List[str] = []
+    for h2, h3s in parsed:
+        if len(h2) > max_h2_len:
+            h2 = h2[:max_h2_len] + "…"
+        h3s = [h for h in h3s if len(h) <= 10][:3]
+        parts.append(
+            _block_html(kw, h2, h3s,
+                        random.choice(PERSONAS),
+                        pt)
         )
-        html_parts.append(section)
 
-        # 更新
-        remaining -= len(section)
-        remaining_blocks -= 1
+    html = "\n\n".join(parts)
+    html = re.sub(r"<h([23])(?![^>]*wp-heading)>",
+                  r'<h\1 class="wp-heading">', html)
 
-    body_html = "\n\n".join(html_parts)
+    # ==  まとめ追加（下限補填）  =============================
+    if len(html) < min_chars:
+        html += '\n\n<h2 class="wp-heading">まとめ</h2><p>要点を整理しました。</p>'
 
-    # ⑤ 下限不足ならまとめセクションで補完
-    if len(body_html) < min_chars:
-        add = (
-            "<h2 class=\"wp-heading\">まとめ</h2>"
-            "<p>この記事の要点を簡潔に振り返りました。</p>"
-        )
-        body_html += "\n\n" + add
+    # ==  重複段落除去  ======================================
+    out, seen = [], set()
+    for ln in html.splitlines():
+        txt = ln.strip()
+        if not txt or txt not in seen:
+            out.append(ln)
+            if txt:
+                seen.add(txt)
+    html = "\n".join(out)
 
-    # ⑥ 上限超過時は安全に切り詰めて末尾に要約
-    if len(body_html) > max_total:
-        snippet = body_html[:max_total]
-        cut = max(snippet.rfind("</p>"), snippet.rfind("</h2>"), snippet.rfind("</h3>"))
-        snippet = snippet[:cut + 5] if cut != -1 else snippet
-        snippet += (
-            "\n\n<p><!-- notice: 長さ超過のため自動トリム。全文はプレビューで確認 --></p>"
-        )
-        body_html = snippet
+    # ==  上限超過時に安全に切り詰め  ========================
+    if len(html) > max_total:
+        snippet = html[:max_total]
+        # 閉じタグを後ろから探す（p/h2/h3 のどれか）
+        cut_at = max(snippet.rfind("</p>"),
+                     snippet.rfind("</h2>"),
+                     snippet.rfind("</h3>"))
+        html = snippet[:cut_at + 5] if cut_at != -1 else snippet
 
-    logging.debug("compose_body len=%s  (target≤%s)", len(body_html), max_total)
-    return body_html
+    # ==  デバッグログ（任意）  ==============================
+    logging.debug("compose_body: len=%s  (max_total=%s)", len(html), max_total)
+
+    return html
 
 
 
 
-# ──────────────────────────────
-# 生成ワーカー
-# ──────────────────────────────
 def _generate(app, aid: int, tpt: str, bpt: str):
     with app.app_context():
         art = Article.query.get(aid)
         if not art or art.status != "pending":
             return
-
         try:
-            # 進捗: 開始
-            art.status, art.progress = "gen", 10
-            db.session.commit()
+            art.status, art.progress = "gen", 10; db.session.commit()
+            art.title   = _unique_title(art.keyword, tpt)
+            art.progress = 30; db.session.commit()
 
-            # タイトル
-            art.title = _unique_title(art.keyword, tpt)
-            art.progress = 30
-            db.session.commit()
-
-            # アウトライン
             outline = _outline(art.keyword, art.title, bpt)
-            art.progress = 50
-            db.session.commit()
+            art.progress = 50; db.session.commit()
 
-            # 本文
-            art.body = _compose_body(art.keyword, outline, bpt)
-            art.progress = 80
-            db.session.commit()
+            art.body    = _compose_body(art.keyword, outline, bpt)
+            art.progress = 80; db.session.commit()
 
-            # 画像取得（失敗してもデフォルトを返すので例外にはしない）
-            h2s   = re.findall(r"<h2\b[^>]*>(.*?)</h2>", art.body or "", re.I)[:2]
-            query = " ".join(dict.fromkeys([art.keyword, art.title, *h2s]))
-            url   = fetch_featured_image(query)
-
-# ---- ★ 500byte 超は自動で詰めてから保存 ----------------
+            # 画像取得: タイトル＋先頭2つのH2を使ったクエリ
+            h2s     = re.findall(r"<h2\b[^>]*>(.*?)</h2>", art.body or "", re.I)[:2]
+            tokens  = [art.keyword, art.title, *h2s]
+            query   = " ".join(dict.fromkeys(tokens))          # 重複除去で順序保持
+            url = fetch_featured_image(query)
             if len(url.encode()) > 500:
-    # 末尾クエリを落として再チェック
-                base = url.split("?", 1)[0]
-                if len(base.encode()) > 500:
-        # それでも長いなら最後を省略
-                   base = base.encode()[:497].decode("utf-8", "ignore") + "..."
-            url = base
-
-            art.image_url = url  # ← 再フェッチしない！
-
-# 完了
+               base = url.split("?", 1)[0]
+               if len(base.encode()) > 500:
+                   base = base.encode()[:497].decode("utf-8","ignore") + "…"
+               url = base
+            art.image_url = url
             art.status, art.progress = "done", 100
             art.updated_at = datetime.utcnow()
-
         except Exception as e:
             logging.exception("記事生成失敗: %s", e)
             art.status, art.body = "error", f"Error: {e}"
-
         finally:
-            # 生成成功／失敗にかかわらずセッションを確実に反映
             db.session.commit()
-
 
 def enqueue_generation(
     user_id: int,
