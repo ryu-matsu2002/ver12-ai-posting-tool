@@ -87,7 +87,7 @@ def _pick_pixabay(hits: List[dict], keywords: List[str]) -> Optional[str]:
     cand = sorted(hits, key=lambda h: _score(h, kw_set), reverse=True)[:10]
     random.shuffle(cand)
     for h in cand:
-        url = h.get("webformatURL")
+        url = h.get("largeImageURL") or h.get("webformatURL")
         if url and not _is_recently_used(url) and _valid_dim(h):
             _mark_used(url)
             return url

@@ -35,7 +35,15 @@ def _basic_auth_header(username: str, app_pass: str) -> dict[str, str]:
 # ──────────────────────────────
 def _upload_featured_image(site, image_url: str) -> Optional[int]:
     try:
-        r = requests.get(image_url, timeout=TIMEOUT)
+        dl_headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0 Safari/537.36"
+        ),
+            "Referer":    "https://pixabay.com/",
+        }
+        r = requests.get(image_url, headers=dl_headers, timeout=TIMEOUT)
         r.raise_for_status()
     except Exception as e:
         current_app.logger.error("Featured image download failed: %s", e)
