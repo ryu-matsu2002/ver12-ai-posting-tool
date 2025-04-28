@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from flask_login import UserMixin
-from sqlalchemy import DateTime, Enum
+from sqlalchemy import DateTime
 from . import db
 
 # ──── ユーザ ────
@@ -35,8 +35,8 @@ class Site(db.Model):
 class PromptTemplate(db.Model):
     id       = db.Column(db.Integer, primary_key=True)
     genre    = db.Column(db.String(100), nullable=False)
-    title_prompt = db.Column(db.Text,       nullable=False)  # 名前を変更（title_pt -> title_prompt）
-    body_prompt  = db.Column(db.Text,       nullable=False)  # 名前を変更（body_pt -> body_prompt）
+    title_pt = db.Column(db.Text,       nullable=False)
+    body_pt  = db.Column(db.Text,       nullable=False)
     user_id  = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
 
 
@@ -67,8 +67,3 @@ class Article(db.Model):
 
     site_id     = db.Column(db.Integer, db.ForeignKey("site.id"))
     user_id     = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
-    
-    # ステータスを列挙型に変更
-    # status = db.Column(Enum('pending', 'gen', 'done', 'error', name="article_status_enum"), default="pending")
-
-
