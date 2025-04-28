@@ -48,6 +48,7 @@ def _mark_used(url: str) -> None:
 def _search_pixabay(query: str, per_page: int = MAX_PER_PAGE) -> List[dict]:
     if not PIXABAY_API_KEY or not query:
         return []
+    query = query.replace("　", " ").strip()
 
     params = {
         "key": PIXABAY_API_KEY,
