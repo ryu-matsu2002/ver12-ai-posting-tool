@@ -38,10 +38,10 @@ def _upload_featured_image(site, image_url: str) -> Optional[int]:
         dl_headers = {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0 Safari/537.36"
-        ),
-            "Referer":    "https://pixabay.com/",
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0 Safari/537.36"
+            ),
+            "Referer": "https://pixabay.com/",
         }
         r = requests.get(image_url, headers=dl_headers, timeout=TIMEOUT)
         r.raise_for_status()
@@ -127,20 +127,19 @@ def post_to_wp(site, article) -> str:
     # 3) WordPress REST API 投稿
     api = f"{site.url.rstrip('/')}/wp-json/wp/v2/posts"
     payload = {
-        "title":   article.title,
+        "title": article.title,
         "content": styled_body,
-        "status":  "publish",
+        "status": "publish",
     }
     if featured_id:
         payload["featured_media"] = featured_id
 
     # ---- 必須ヘッダー（Authorization を忘れない！） ----
     headers = {
-        **_basic_auth_header(site.username, site.app_pass),   # ← 追加
-        "Accept":       "application/json",
+        **_basic_auth_header(site.username, site.app_pass),  # Basic 認証
+        "Accept": "application/json",
         "Content-Type": "application/json",
-        # WAF が curl/requests UA を弾く対策
-        "User-Agent":   "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",  # WAF 対策
     }
 
     # --- デバッグログ: リクエスト詳細 ---
