@@ -128,6 +128,7 @@ def post_to_wp(site, article) -> str:
 
     # **Basic 認証ヘッダーを自前で付与**
     headers = {
+    **_basic_auth_header(site.username, site.app_pass),
     "Accept":       "application/json",
     "Content-Type": "application/json",
     # 一部ホスティングで requests デフォルト UA が WAF に弾かれる対策

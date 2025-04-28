@@ -213,52 +213,59 @@ def _block_html(
 # _compose_body (3ブロック / 2500字ターゲット版)
 # ─────────────────────────────────────────────
 def _compose_body(kw: str, outline_raw: str, pt: str) -> str:
-    """ブロック数を目標字数から動的決定（2〜6 本）し、上限カットは行わない。"""
-
-    # ── 字数レンジ取得（指定なし→2500〜∞）
-    m = re.search(r"(\d{3,5})\s*字から\s*(\d{3,5})\s*字", pt)
+    """
+    ▷ 目標文字数 : 2 500 字前後（ユーザが「◯◯字」と指示した時は優先）
+    ▷ ブロック数 : 目標字数 / 平均 450 字（≧1, ≦6）
+    """
+    # ① ユーザ指定 or デフォルト値
+    m = re.search(r"(\d{3,5})\s*字(?:から\s*(\d{3,5})\s*字)?", pt)
     if m:
-        min_chars, max_chars = map(int, m.groups())
+        min_chars = int(m.group(1))
+        max_chars = int(m.group(2) or m.group(1))
     else:
-        m2 = re.search(r"(\d{3,5})\s*字", pt)
-        min_chars = int(m2.group(1)) if m2 else 2500
-        max_chars = None                     # 上限なし
+        min_chars, max_chars = 2_000, 3_000          # ← ここがデフォルト
 
-    # ── ブロック数を決める   目標 ≒ 平均(下限+上限)/700 字
-    target      = (min_chars + (max_chars or min_chars)) // 2
-    n_blocks    = max(2, min(6, round(target / 700)))    # 2〜6 本
-    parsed      = _parse_outline(outline_raw)[:n_blocks]
+    # ② H2/H3 のパース & ブロック数決定
+    parsed = _parse_outline(outline_raw)             # List[Tuple[h2, h3s]]
+    avg_block = 450
+    n_blocks  = max(1, min(len(parsed), max_chars // avg_block, 6))
 
-    max_h2_len  = 20
-    parts: list[str] = []
-    for h2, h3s in parsed:
-        if len(h2) > max_h2_len:
-            h2 = h2[:max_h2_len] + "…"
-        h3_f = [h for h in h3s if len(h) <= 10][:3]
-        sec  = _block_html(kw, h2, h3_f, random.choice(PERSONAS), pt)
+    # ③ 選抜 & H2 長さ制限
+    blocks: list[tuple[str, list[str]]] = []
+    for h2, h3s in parsed[:n_blocks]:
+        h2 = (h2[:20] + "…") if len(h2) > 20 else h2
+        h3s = [h for h in h3s if len(h) <= 10][:3]
+        blocks.append((h2, h3s))
 
-        # 未閉じ <p> があれば補完
-        if sec.count("<p") != sec.count("</p>"):
-            sec += "</p>"
-        parts.append(sec)
-
+    # ④ ブロックごとに本文生成
+    parts: list[str] = [
+        _block_html(kw, h2, h3s, random.choice(PERSONAS), pt) for h2, h3s in blocks
+    ]
     html = "\n\n".join(parts)
     html = re.sub(r"<h([23])(?![^>]*wp-heading)>", r'<h\1 class="wp-heading">', html)
 
-    # まとめ追加（最小字数未満）
+    # ⑤ 下限に満たなければ まとめ 追記
     if len(html) < min_chars:
-        html += '\n\n<h2 class="wp-heading">まとめ</h2><p>要点を整理しました。</p>'
+        html += "\n\n<h2 class=\"wp-heading\">まとめ</h2><p>要点を整理しました。</p>"
 
-    # 重複行除去
-    seen, uniq = set(), []
+    # ⑥ 重複行除去
+    seen, unique_lines = set(), []
     for ln in html.splitlines():
         t = ln.strip()
         if not t or t not in seen:
-            uniq.append(ln)
+            unique_lines.append(ln)
             if t:
                 seen.add(t)
+    html = "\n".join(unique_lines)
 
-    return "\n".join(uniq)
+    # ⑦ 安全トリム（max_chars を厳守し HTML を壊さない）
+    if len(html) > max_chars:
+        snippet = html[: max_chars]
+        last_p  = snippet.rfind("</p>")
+        html    = snippet[: last_p + 4] if last_p != -1 else snippet
+
+    return html
+
 
 
 
