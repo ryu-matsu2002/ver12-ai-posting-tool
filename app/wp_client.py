@@ -126,13 +126,13 @@ def post_to_wp(site, article) -> str:
     if featured_id:
         payload["featured_media"] = featured_id
 
-    # **Basic 認証ヘッダーを自前で付与**
+    # ---- 必須ヘッダー（Authorization を忘れない！） ----
     headers = {
-    **_basic_auth_header(site.username, site.app_pass),
-    "Accept":       "application/json",
-    "Content-Type": "application/json",
-    # 一部ホスティングで requests デフォルト UA が WAF に弾かれる対策
-    "User-Agent":   "Mozilla/5.0 (compatible; AI-Posting-Tool/1.0)",
+        **_basic_auth_header(site.username, site.app_pass),   # ← 追加
+        "Accept":       "application/json",
+        "Content-Type": "application/json",
+        # WAF が curl/requests UA を弾く対策
+        "User-Agent":   "Mozilla/5.0 (compatible; AI-Posting-Tool/1.0)",
     }
 
     # --- デバッグログ: リクエスト詳細 ---

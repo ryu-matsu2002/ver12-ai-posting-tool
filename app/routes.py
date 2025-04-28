@@ -23,6 +23,7 @@ from .forms import (
 from .article_generator import enqueue_generation
 from .wp_client import post_to_wp
 from .wp_client import _decorate_html
+from .article_generator import _generate_slots, JST
 
 JST = timezone("Asia/Tokyo")
 bp = Blueprint("main", __name__)
@@ -178,21 +179,41 @@ def generate():
 @bp.route("/log")
 @login_required
 def log():
+    """
+    ログページを開いたタイミングで
+    scheduled_at が NULL の記事を自動で補完してから表示。
+    """
     site_id = request.args.get("site_id", type=int)
+
+    # 1) NULL の記事を取得
+    unscheduled = Article.query.filter(
+        Article.user_id == current_user.id,
+        Article.scheduled_at.is_(None),
+    ).all()
+
+    if unscheduled:
+        # まとめて slot を発行して埋める
+        slots = iter(_generate_slots(current_app, len(unscheduled)))
+        for art in unscheduled:
+            art.scheduled_at = next(slots)
+        db.session.commit()
+
+    # 2) 一覧取得
     q = Article.query.filter_by(user_id=current_user.id)
     if site_id:
         q = q.filter_by(site_id=site_id)
-    # scheduled_at を昇順、null を末尾、作成日時降順
+
     q = q.order_by(
         nulls_last(asc(Article.scheduled_at)),
-        Article.created_at.desc()
+        Article.created_at.desc(),
     )
+
     return render_template(
         "log.html",
         articles=q.all(),
         sites=Site.query.filter_by(user_id=current_user.id).all(),
         site_id=site_id,
-        jst=JST
+        jst=JST,
     )
 
 

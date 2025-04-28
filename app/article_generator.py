@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 import os, re, random, threading, logging
-from datetime import datetime, timedelta, date, time
+from datetime import datetime, date, time, timedelta, timezone
 from typing import List, Dict, Tuple
 
 from difflib import SequenceMatcher
@@ -35,8 +35,9 @@ TEMP   = {"title": 0.40, "outline": 0.45, "block": 0.70}
 
 CTX_LIMIT              = 4096
 SHRINK                 = 0.75
-MIN_BODY_CHARS_DEFAULT = 2_000
-MAX_BODY_CHARS_DEFAULT = 3_000
+AVG_BLOCK_CHARS = 450
+MIN_BODY_CHARS_DEFAULT = 1800
+MAX_BODY_CHARS_DEFAULT = 3000
 MAX_TITLE_RETRY        = 7
 TITLE_DUP_THRESH = 0.90
 
@@ -50,14 +51,16 @@ MAX_PERDAY = 5
 def _generate_slots(app, n: int) -> List[datetime]:
     """
     既存予約を JST 日付単位で集計し、
-    1 日あたり MAX_PERDAY (=5) 本まで埋めたら翌日に送る。
-    """
-    global MAX_PERDAY, POST_HOURS, JST         # IDE 警告回避用
+    1 日あたり MAX_PERDAY 本まで埋めていく。
 
-    # ── ① 既存予約を DB から取得（JST 変換して date 抽出）
+    戻り値は **必ず n 個** の UTC DateTime。
+    slot が 1 件も取れなければ RuntimeError。
+    """
+    if n <= 0:
+        return []
+
+    # ── ① 既存予約を DB から取得（JST に変換 → date 抽出）
     with app.app_context():
-        # func.date(...) はSELECT句でエイリアスを付け、
-        # そのエイリアス（列オブジェクト）で group_by する
         jst_date = func.date(
             func.timezone("Asia/Tokyo", Article.scheduled_at)
         ).label("jst_date")
@@ -68,22 +71,33 @@ def _generate_slots(app, n: int) -> List[datetime]:
             .group_by(jst_date)
             .all()
         )
-    booked: dict[date, int] = {row[0]: row[1] for row in rows}
 
-    # ── ② 空き枠に従って n 個のスロットを作る
+    booked_per_day: dict[date, int] = {row[0]: row[1] for row in rows}
+
+    # ── ② 空き枠に従ってスロット作成
     slots: list[datetime] = []
-    day = date.today() + timedelta(days=1)      # 翌日スタート
+    day = date.today() + timedelta(days=1)        # 翌日スタート
+
     while len(slots) < n:
-        remain_today = MAX_PERDAY - booked.get(day, 0)
-        if remain_today > 0:
-            need = min(remain_today, n - len(slots))
-            for h in sorted(random.sample(POST_HOURS, need)):
+        remaining_today = MAX_PERDAY - booked_per_day.get(day, 0)
+        if remaining_today > 0:
+            needed = min(remaining_today, n - len(slots))
+            # POST_HOURS から needed 本ランダム抽出して整列
+            for h in sorted(random.sample(POST_HOURS, needed)):
                 minute = random.randint(1, 59)
-                local = datetime.combine(day, time(h, minute), tzinfo=JST)
-                slots.append(local.astimezone(pytz.utc))
+                local  = datetime.combine(day, time(h, minute), tzinfo=JST)
+                slots.append(local.astimezone(timezone.utc))
+        # 次の日へ
         day += timedelta(days=1)
 
-    return slots
+        # 念のため無限ループ防止（理論上あり得ないが）
+        if len(slots) > n * 10:
+            break
+
+    if len(slots) < n:
+        raise RuntimeError("slot generation failed (不足)")
+
+    return slots[:n]
 
 # ──────────────────────────────
 # コンテンツ生成設定
@@ -209,60 +223,72 @@ def _block_html(
         TOKENS["block"], TEMP["block"]
     )
 
+def _parse_range(pt: str) -> tuple[int, int | None]:
+    """プロンプトから「○○字から△△字」or「○○字」パターンを抽出"""
+    if m := re.search(r"(\d{3,5})\s*字から\s*(\d{3,5})\s*字", pt):
+        return int(m.group(1)), int(m.group(2))
+    if m := re.search(r"(\d{3,5})\s*字", pt):
+        return int(m.group(1)), None
+    return MIN_BODY_CHARS_DEFAULT, None
+
 # ─────────────────────────────────────────────
 # _compose_body (3ブロック / 2500字ターゲット版)
 # ─────────────────────────────────────────────
 def _compose_body(kw: str, outline_raw: str, pt: str) -> str:
-    """
-    ▷ 目標文字数 : 2 500 字前後（ユーザが「◯◯字」と指示した時は優先）
-    ▷ ブロック数 : 目標字数 / 平均 450 字（≧1, ≦6）
-    """
-    # ① ユーザ指定 or デフォルト値
-    m = re.search(r"(\d{3,5})\s*字(?:から\s*(\d{3,5})\s*字)?", pt)
-    if m:
-        min_chars = int(m.group(1))
-        max_chars = int(m.group(2) or m.group(1))
-    else:
-        min_chars, max_chars = 2_000, 3_000          # ← ここがデフォルト
+    # ① 字数レンジ取得
+    min_chars, max_chars_user = _parse_range(pt)
+    max_total = max_chars_user or MAX_BODY_CHARS_DEFAULT
 
-    # ② H2/H3 のパース & ブロック数決定
-    parsed = _parse_outline(outline_raw)             # List[Tuple[h2, h3s]]
-    avg_block = 450
-    n_blocks  = max(1, min(len(parsed), max_chars // avg_block, 6))
+    # ② アウトライン → [(h2, [h3...]), …]
+    parsed = _parse_outline(outline_raw)
 
-    # ③ 選抜 & H2 長さ制限
-    blocks: list[tuple[str, list[str]]] = []
-    for h2, h3s in parsed[:n_blocks]:
-        h2 = (h2[:20] + "…") if len(h2) > 20 else h2
+    # ==  ブロック数を動的に決定  ===========================
+    #   必要ブロック  = ceiling(max_total / AVG_BLOCK_CHARS)
+    need_blocks = max(3, min(len(parsed), (max_total + AVG_BLOCK_CHARS - 1) // AVG_BLOCK_CHARS))
+    parsed = parsed[:need_blocks]           # 取り過ぎない
+
+    # ==  H2/H3 をガードしながら HTML 生成  ==================
+    max_h2_len = 20
+    parts: List[str] = []
+    for h2, h3s in parsed:
+        if len(h2) > max_h2_len:
+            h2 = h2[:max_h2_len] + "…"
         h3s = [h for h in h3s if len(h) <= 10][:3]
-        blocks.append((h2, h3s))
+        parts.append(
+            _block_html(kw, h2, h3s,
+                        random.choice(PERSONAS),
+                        pt)
+        )
 
-    # ④ ブロックごとに本文生成
-    parts: list[str] = [
-        _block_html(kw, h2, h3s, random.choice(PERSONAS), pt) for h2, h3s in blocks
-    ]
     html = "\n\n".join(parts)
-    html = re.sub(r"<h([23])(?![^>]*wp-heading)>", r'<h\1 class="wp-heading">', html)
+    html = re.sub(r"<h([23])(?![^>]*wp-heading)>",
+                  r'<h\1 class="wp-heading">', html)
 
-    # ⑤ 下限に満たなければ まとめ 追記
+    # ==  まとめ追加（下限補填）  =============================
     if len(html) < min_chars:
-        html += "\n\n<h2 class=\"wp-heading\">まとめ</h2><p>要点を整理しました。</p>"
+        html += '\n\n<h2 class="wp-heading">まとめ</h2><p>要点を整理しました。</p>'
 
-    # ⑥ 重複行除去
-    seen, unique_lines = set(), []
+    # ==  重複段落除去  ======================================
+    out, seen = [], set()
     for ln in html.splitlines():
-        t = ln.strip()
-        if not t or t not in seen:
-            unique_lines.append(ln)
-            if t:
-                seen.add(t)
-    html = "\n".join(unique_lines)
+        txt = ln.strip()
+        if not txt or txt not in seen:
+            out.append(ln)
+            if txt:
+                seen.add(txt)
+    html = "\n".join(out)
 
-    # ⑦ 安全トリム（max_chars を厳守し HTML を壊さない）
-    if len(html) > max_chars:
-        snippet = html[: max_chars]
-        last_p  = snippet.rfind("</p>")
-        html    = snippet[: last_p + 4] if last_p != -1 else snippet
+    # ==  上限超過時に安全に切り詰め  ========================
+    if len(html) > max_total:
+        snippet = html[:max_total]
+        # 閉じタグを後ろから探す（p/h2/h3 のどれか）
+        cut_at = max(snippet.rfind("</p>"),
+                     snippet.rfind("</h2>"),
+                     snippet.rfind("</h3>"))
+        html = snippet[:cut_at + 5] if cut_at != -1 else snippet
+
+    # ==  デバッグログ（任意）  ==============================
+    logging.debug("compose_body: len=%s  (max_total=%s)", len(html), max_total)
 
     return html
 
@@ -304,32 +330,41 @@ def enqueue_generation(
     keywords: List[str],
     title_prompt: str,
     body_prompt: str,
-    site_id: int | None = None
+    site_id: int | None = None,
 ) -> None:
+    """
+    1 キーワードにつき 1〜3 本の記事を生成（上限 40 キーワード）。
+    生成直後に scheduled_at を必ず埋める。
+    """
     app = current_app._get_current_object()
-    total = sum(random.randint(1, 3) for _ in keywords[:40])
-    slots = iter(_generate_slots(app, total))
 
-    def bg():
+    # 生成予定本数を先に算出して slot 確保
+    copies_each_kw = [random.randint(1, 3) for _ in keywords[:40]]
+    total_posts    = sum(copies_each_kw)
+    slots_iter     = iter(_generate_slots(app, total_posts))
+
+    def background():
         with app.app_context():
-            ids: List[int] = []
-            for kw in keywords[:40]:
-                for _ in range(random.randint(1,3)):
+            article_ids: list[int] = []
+            for kw, copies in zip(keywords[:40], copies_each_kw):
+                for _ in range(copies):
                     art = Article(
                         keyword      = kw.strip(),
                         user_id      = user_id,
                         site_id      = site_id,
                         status       = "pending",
                         progress     = 0,
-                        scheduled_at = next(slots, None)
+                        scheduled_at = next(slots_iter, None),  # ← 必ずセット
                     )
                     db.session.add(art)
-                    db.session.flush()
-                    ids.append(art.id)
+                    db.session.flush()          # art.id を確定
+                    article_ids.append(art.id)
+
             db.session.commit()
 
-        # タイトル重複防止のため直列実行
-        for aid in ids:
+        # タイトル重複を避けるため直列生成
+        for aid in article_ids:
+            from .article_generator import _generate  # 遅延 import
             _generate(app, aid, title_prompt, body_prompt)
 
-    threading.Thread(target=bg, daemon=True).start()
+    threading.Thread(target=background, daemon=True).start()
