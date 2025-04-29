@@ -297,6 +297,8 @@ def _generate(app, aid: int, tpt: str, bpt: str):
                 if len(url.encode()) > 500:
                     url = url.encode()[:497].decode("utf-8", "ignore") + "…"
             art.image_url = url
+            # post_to_wp が見るのは featured_image_url
+            art.featured_image_url = url
 
             art.status, art.progress = "done", 100
             art.updated_at = datetime.utcnow()
