@@ -1,10 +1,9 @@
 # ───────────────────────────────────────────────────────────────
-# app/wp_client.py  (修正版)
+# app/wp_client.py  (修正版 v3)
 # WordPress 投稿ユーティリティ
 # ───────────────────────────────────────────────────────────────
 
 from __future__ import annotations
-import base64
 import mimetypes
 import os
 import re
@@ -15,38 +14,36 @@ import requests
 from requests.exceptions import HTTPError
 from flask import current_app
 
+# タイムアウト（秒）
 TIMEOUT = int(os.getenv("WP_API_TIMEOUT", "15"))
-
-def _basic_auth_header(username: str, app_pass: str) -> dict[str, str]:
-    token = base64.b64encode(f"{username}:{app_pass}".encode()).decode()
-    return {"Authorization": f"Basic {token}"}
 
 # ──────────────────────────────────────────────────
 # アイキャッチ画像アップロード（multipart/form-data）
 # ──────────────────────────────────────────────────
 def _upload_featured_image(site, image_url: str) -> Optional[int]:
-    # 1) 画像ダウンロード
     try:
         dl_headers = {"User-Agent":"Mozilla/5.0","Referer":"https://pixabay.com/"}
-        r = requests.get(image_url, headers=dl_headers, timeout=TIMEOUT)
-        r.raise_for_status()
-        content = r.content
+        resp = requests.get(image_url, headers=dl_headers, timeout=TIMEOUT)
+        resp.raise_for_status()
+        content = resp.content
     except Exception as e:
         current_app.logger.error("◆Download failed: %s", e)
         return None
 
-    # 2) WP へ multipart upload
-    filename = os.path.basename(image_url.split("?")[0])
-    ctype = mimetypes.guess_type(filename)[0] or "image/jpeg"
+    filename = os.path.basename(image_url.split("?",1)[0])
+    ctype    = mimetypes.guess_type(filename)[0] or "image/jpeg"
     endpoint = f"{site.url.rstrip('/')}/wp-json/wp/v2/media"
 
     files = {"file": (filename, content, ctype)}
-    headers = {**_basic_auth_header(site.username, site.app_pass),
-               "Accept": "application/json"}
 
     current_app.logger.debug("Media POST to %s files=%s", endpoint, files.keys())
     try:
-        up = requests.post(endpoint, headers=headers, files=files, timeout=TIMEOUT)
+        up = requests.post(
+            endpoint,
+            auth=(site.username, site.app_pass),
+            files=files,
+            timeout=TIMEOUT
+        )
         current_app.logger.debug("Media upload status: %s body: %s", up.status_code, up.text)
         up.raise_for_status()
         return up.json().get("id")
@@ -90,28 +87,30 @@ def _decorate_html(html: str) -> str:
 # 記事投稿
 # ──────────────────────────────────────────────────
 def post_to_wp(site, article) -> str:
-    # upload featured image
+    # 1) アイキャッチ
     featured_id = None
     if article.image_url:
         featured_id = _upload_featured_image_with_retry(site, article.image_url)
 
-    # decorate body
+    # 2) 本文装飾
     styled = _decorate_html(article.body or "")
 
+    # 3) 投稿 API
     api = f"{site.url.rstrip('/')}/wp-json/wp/v2/posts"
     payload = {"title":article.title, "content":styled, "status":"publish"}
     if featured_id:
         payload["featured_media"] = featured_id
 
-    headers = {
-        **_basic_auth_header(site.username, site.app_pass),
-        "Content-Type":"application/json",
-        "Accept":"application/json"
-    }
+    current_app.logger.debug("WP POST %s", api)
+    current_app.logger.debug("Payload: %s", payload)
 
-    current_app.logger.debug("WP POST %s\nHeaders:%s\nPayload:%s", api, headers, payload)
     try:
-        r = requests.post(api, headers=headers, json=payload, timeout=TIMEOUT)
+        r = requests.post(
+            api,
+            auth=(site.username, site.app_pass),
+            json=payload,
+            timeout=TIMEOUT
+        )
         current_app.logger.debug("WP resp %s: %s", r.status_code, r.text)
         r.raise_for_status()
         return r.json().get("link","")

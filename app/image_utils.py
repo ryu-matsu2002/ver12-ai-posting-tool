@@ -1,31 +1,33 @@
 # ───────────────────────────────────────────────────────────────
-# app/image_utils.py   – v8-fixed (2025-05-XX)  *ensure-thumb*
+# app/image_utils.py   – v8-fixed2 (2025-05-XX)  *always-thumb*
 # ───────────────────────────────────────────────────────────────
 
 """
 Pixabay → Unsplash → デフォルト画像の順でアイキャッチを取得するユーティリティ
 
-この改訂版では、
- 1. DEFAULT_IMAGE_URL を絶対 URL に
- 2. 画像サイズフィルタを緩和し必ず何らかの URL を返す
-を行い、プレビュー・WordPress 投稿時に “thumb” になる問題を解消します。
+この改訂版では fetch_featured_image が絶対に文字列を返し、
+None を返さないことでプレビュー／WP投稿時に “thumb” のまま
+表示されなくなる問題を解消します。
 """
 
 from __future__ import annotations
 import os, random, time, logging, requests
-from typing import List, Optional
+from typing import List
+from flask import current_app
 
 # ───── 設定 ─────
-# アプリのルート URL（例: https://example.com）
-ROOT_URL              = os.getenv("APP_ROOT_URL", "https://your-domain.com")
-PIXABAY_API_KEY       = os.getenv("PIXABAY_API_KEY", "")
-DEFAULT_IMAGE_URL     = os.getenv(
-    "DEFAULT_IMAGE_URL",
-    f"{ROOT_URL}/static/default-thumb.jpg"
+ROOT_URL            = os.getenv("APP_ROOT_URL", "https://your-domain.com")
+PIXABAY_API_KEY     = os.getenv("PIXABAY_API_KEY", "")
+PIXABAY_TIMEOUT     = 5
+MAX_PER_PAGE        = 30
+RECENTLY_USED_TTL   = int(os.getenv("IMAGE_CACHE_TTL", "86400"))  # 24h
+DEFAULT_IMAGE_PATH  = os.getenv("DEFAULT_IMAGE_URL", "/static/default-thumb.jpg")
+# プレビュー表示／WP 投稿時に使う絶対 URL
+DEFAULT_IMAGE_URL   = (
+    DEFAULT_IMAGE_PATH.startswith("http")
+    and DEFAULT_IMAGE_PATH
+    or f"{ROOT_URL}{DEFAULT_IMAGE_PATH}"
 )
-PIXABAY_TIMEOUT       = 5
-MAX_PER_PAGE          = 30
-RECENTLY_USED_TTL     = int(os.getenv("IMAGE_CACHE_TTL", "86400"))  # 24h
 
 # ビジネス系タグ（関連性向上）
 _BUSINESS_TAGS = {
@@ -73,7 +75,7 @@ def _search_pixabay(query: str, per_page: int = MAX_PER_PAGE) -> List[dict]:
 # スコアリング & 選択
 # ══════════════════════════════════════════════
 def _score(hit: dict, kw_set: set[str]) -> int:
-    tags = {t.strip().lower() for t in hit.get("tags","").split(",")}
+    tags  = {t.strip().lower() for t in hit.get("tags","").split(",")}
     base  = sum(1 for kw in kw_set if kw in tags)
     bonus = 2 if tags & _BUSINESS_TAGS else 0
     return base + bonus
@@ -85,28 +87,26 @@ def _valid_dim(hit: dict) -> bool:
     ratio = w/h
     return 0.5 <= ratio <= 3.0
 
-def _pick_pixabay(hits: List[dict], keywords: List[str]) -> Optional[str]:
+def _pick_pixabay(hits: List[dict], keywords: List[str]) -> str:
+    # Optional[str] → str に変更。必ず最後は文字列を返す
     if not hits:
-        return None
+        return DEFAULT_IMAGE_URL
     kw_set = {k.lower() for k in keywords}
     top = sorted(hits, key=lambda h: _score(h, kw_set), reverse=True)[:10]
     random.shuffle(top)
-    # 未使用＆サイズOK
     for h in top:
         url = h.get("largeImageURL") or h.get("webformatURL")
         if url and not _is_recently_used(url) and _valid_dim(h):
             _mark_used(url)
             return url
-    # 未使用のみ
+    # フォールバック順序
     for h in top:
         url = h.get("largeImageURL") or h.get("webformatURL")
         if url and not _is_recently_used(url):
             _mark_used(url)
             return url
-    # 最後にどれか一つ
-    url = top[0].get("largeImageURL") or top[0].get("webformatURL")
-    if url:
-        _mark_used(url)
+    url = top[0].get("largeImageURL") or top[0].get("webformatURL") or DEFAULT_IMAGE_URL
+    _mark_used(url)
     return url
 
 # ══════════════════════════════════════════════
@@ -123,7 +123,8 @@ def _unsplash_src(query: str) -> str:
 # ══════════════════════════════════════════════
 def fetch_featured_image(query: str) -> str:
     """
-    常に URL を返す。Pixabay→Augmented Pixabay→Unsplash→DEFAULT の順。
+    絶対に文字列を返す。
+    Pixabay→Augmented Pixabay→Unsplash→DEFAULT_URL の順。
     """
     try:
         keywords = query.split()
@@ -133,9 +134,8 @@ def fetch_featured_image(query: str) -> str:
         if url:
             return url
         # 2. ビジネス補強
-        aug  = query + " business money"
-        hits = _search_pixabay(aug)
-        url  = _pick_pixabay(hits, keywords+["business","money"])
+        hits = _search_pixabay(query + " business money")
+        url  = _pick_pixabay(hits, keywords + ["business","money"])
         if url:
             return url
         # 3. Unsplash
