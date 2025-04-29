@@ -299,3 +299,15 @@ def retry_article(id: int):
     )
     flash("再試行のキューに登録しました", "success")
     return redirect(url_for(".log"))
+
+@bp.route("/debug-post/<int:aid>")
+@login_required
+def debug_post(aid):
+    art = Article.query.get_or_404(aid)
+    if art.user_id != current_user.id:
+        abort(403)
+    try:
+        url = post_to_wp(art.site, art)
+        return f"SUCCESS: {url}"
+    except Exception as e:
+        return f"ERROR: {e}", 500

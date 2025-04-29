@@ -38,6 +38,7 @@ def create_app() -> Flask:
     db.init_app(app)
     login_manager.init_app(app)
     migrate.init_app(app, db)
+    app.logger.setLevel("DEBUG")
 
     # ─── Blueprints 登録とスケジューラ起動 ───────
     with app.app_context():
