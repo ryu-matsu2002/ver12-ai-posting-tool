@@ -222,38 +222,46 @@ def _parse_range(pt: str) -> Tuple[int, int | None]:
 # 本文組み立て
 # ─────────────────────────────────────────────
 def _compose_body(kw: str, outline_raw: str, pt: str) -> str:
+    # ユーザー指定 ※字数範囲
     min_chars, max_chars_user = _parse_range(pt)
     max_total = max_chars_user or MAX_BODY_CHARS_DEFAULT
 
+    # アウトライン全部をパース
     outline = _parse_outline(outline_raw)
-    need = max(3, min(len(outline),
-                      (max_total + AVG_BLOCK_CHARS - 1) // AVG_BLOCK_CHARS))
-    outline = outline[:need]
 
+    # １．各セクションを必ず生成
     parts: List[str] = []
     for h2, h3s in outline:
-        h2  = (h2[:15] + "…") if len(h2) > 15 else h2
-        h3s = [h for h in h3s if len(h) <= 10][:3]
-        parts.append(
-            _block_html(kw, h2, h3s, "default_persona", pt)  # "default_persona" を追加
-        )
+        # H2/H3 長さ制限
+        h2_short = (h2[:15] + "…") if len(h2) > 15 else h2
+        h3s_limited = [h for h in h3s if len(h) <= 10][:3]
+        block_html = _block_html(kw, h2_short, h3s_limited, "default_persona", pt)
+        parts.append(block_html)
 
-    html = "\n\n".join(parts)
-    html = re.sub(r"<h([23])(?![^>]*wp-heading)>",
-                  r'<h\1 class="wp-heading">', html)
+    # ２．まとめを別枠で生成
+    summary_prompt_sys = SAFE_SYS + "以下の本文を要約して、<h2 class=\"wp-heading\">まとめ</h2><p>～</p> を HTML で返してください。"
+    summary_prompt_usr = "\n\n".join(parts) + "\n\n▼ 上記をまとめてください。"
+    summary_html = _chat(
+        [
+            {"role":"system","content":summary_prompt_sys},
+            {"role":"user","content":summary_prompt_usr}
+        ],
+        TOKENS["block"], TEMP["block"]
+    ).strip()
+    # 強制的にタグ付与
+    if not summary_html.startswith("<h2"):
+        summary_html = '<h2 class="wp-heading">まとめ</h2><p>' + summary_html + '</p>'
 
-    if len(html) < min_chars:
-        html += '\n\n<h2 class="wp-heading">まとめ</h2><p>この記事の要点を簡潔に振り返りました。</p>'
+    # ３．結合＆トリミング
+    full = "\n\n".join(parts + [summary_html])
+    # 超過時は末尾を最寄り閉タグでカット
+    if len(full) > max_total:
+        snippet = full[:max_total]
+        cut = max(snippet.rfind("</p>"), snippet.rfind("</h2>"), snippet.rfind("</h3>"))
+        full = snippet[:cut+5] if cut != -1 else snippet
 
-    if len(html) > max_total:
-        snippet = html[:max_total]
-        cut = max(snippet.rfind("</p>"),
-                  snippet.rfind("</h2>"),
-                  snippet.rfind("</h3>"))
-        html = snippet[:cut + 5] if cut != -1 else snippet
-
-    logging.debug("compose_body len=%s (max=%s)", len(html), max_total)
-    return html
+    logging.debug("compose_body len=%s (max=%s)", len(full), max_total)
+    return full
 
 # ──────────────────────────────
 # 生成ワーカー

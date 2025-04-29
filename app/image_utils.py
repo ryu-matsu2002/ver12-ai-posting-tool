@@ -5,8 +5,10 @@
 """
 Pixabay → Unsplash → デフォルト画像の順でアイキャッチを取得するユーティリティ
 
-この改訂版では、画像サイズフィルタを緩和し、
-必ず何らかの URL を返すことで WordPress のサムネイル設定を安定化します。
+この改訂版では、
+ 1. DEFAULT_IMAGE_URL を絶対 URL に
+ 2. 画像サイズフィルタを緩和し必ず何らかの URL を返す
+を行い、プレビュー・WordPress 投稿時に “thumb” になる問題を解消します。
 """
 
 from __future__ import annotations
@@ -14,16 +16,22 @@ import os, random, time, logging, requests
 from typing import List, Optional
 
 # ───── 設定 ─────
+# アプリのルート URL（例: https://example.com）
+ROOT_URL              = os.getenv("APP_ROOT_URL", "https://your-domain.com")
 PIXABAY_API_KEY       = os.getenv("PIXABAY_API_KEY", "")
-DEFAULT_IMAGE_URL     = os.getenv("DEFAULT_IMAGE_URL", "/static/default-thumb.jpg")
+DEFAULT_IMAGE_URL     = os.getenv(
+    "DEFAULT_IMAGE_URL",
+    f"{ROOT_URL}/static/default-thumb.jpg"
+)
 PIXABAY_TIMEOUT       = 5
 MAX_PER_PAGE          = 30
-RECENTLY_USED_TTL     = int(os.getenv("IMAGE_CACHE_TTL", "86400"))  # 24h(@default)
+RECENTLY_USED_TTL     = int(os.getenv("IMAGE_CACHE_TTL", "86400"))  # 24h
 
-# ビジネス系タグ（＋関連性向上）
+# ビジネス系タグ（関連性向上）
 _BUSINESS_TAGS = {
-    "money", "business", "office", "finance", "analysis", "marketing",
-    "startup", "strategy", "computer", "statistics", "success"
+    "money","business","office","finance","analysis",
+    "marketing","startup","strategy","computer",
+    "statistics","success"
 }
 
 # 画像利用履歴 (url→timestamp)
@@ -42,7 +50,7 @@ def _mark_used(url: str) -> None:
 def _search_pixabay(query: str, per_page: int = MAX_PER_PAGE) -> List[dict]:
     if not PIXABAY_API_KEY or not query:
         return []
-    query = query.replace("　", " ").strip()
+    query = query.replace("　"," ").strip()
     params = {
         "key": PIXABAY_API_KEY,
         "q": query,
@@ -66,16 +74,14 @@ def _search_pixabay(query: str, per_page: int = MAX_PER_PAGE) -> List[dict]:
 # ══════════════════════════════════════════════
 def _score(hit: dict, kw_set: set[str]) -> int:
     tags = {t.strip().lower() for t in hit.get("tags","").split(",")}
-    base = sum(1 for kw in kw_set if kw in tags)
+    base  = sum(1 for kw in kw_set if kw in tags)
     bonus = 2 if tags & _BUSINESS_TAGS else 0
     return base + bonus
 
 def _valid_dim(hit: dict) -> bool:
-    # サイズチェックは緩和：640×400 未満でも許容
     w, h = hit.get("imageWidth",0), hit.get("imageHeight",1)
-    if w <= 0 or h <= 0:
+    if w<=0 or h<=0:
         return False
-    # 縦横比のみチェック
     ratio = w/h
     return 0.5 <= ratio <= 3.0
 
@@ -83,16 +89,15 @@ def _pick_pixabay(hits: List[dict], keywords: List[str]) -> Optional[str]:
     if not hits:
         return None
     kw_set = {k.lower() for k in keywords}
-    # スコア上位 10 件
     top = sorted(hits, key=lambda h: _score(h, kw_set), reverse=True)[:10]
     random.shuffle(top)
-    # まずは未使用＆サイズOK
+    # 未使用＆サイズOK
     for h in top:
         url = h.get("largeImageURL") or h.get("webformatURL")
-        if url and (not _is_recently_used(url)) and _valid_dim(h):
+        if url and not _is_recently_used(url) and _valid_dim(h):
             _mark_used(url)
             return url
-    # 次に未使用のみ
+    # 未使用のみ
     for h in top:
         url = h.get("largeImageURL") or h.get("webformatURL")
         if url and not _is_recently_used(url):
@@ -124,17 +129,15 @@ def fetch_featured_image(query: str) -> str:
         keywords = query.split()
         # 1. 素のクエリ
         hits = _search_pixabay(query)
-        url = _pick_pixabay(hits, keywords)
+        url  = _pick_pixabay(hits, keywords)
         if url:
             return url
-
         # 2. ビジネス補強
-        aug = query + " business money"
+        aug  = query + " business money"
         hits = _search_pixabay(aug)
-        url = _pick_pixabay(hits, keywords + ["business","money"])
+        url  = _pick_pixabay(hits, keywords+["business","money"])
         if url:
             return url
-
         # 3. Unsplash
         return _unsplash_src(query)
     except Exception as e:
