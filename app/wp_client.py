@@ -1,7 +1,7 @@
-# ──────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────────
 # app/wp_client.py
 # WordPress 投稿ユーティリティ
-# ──────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────────
 
 from __future__ import annotations
 import base64
@@ -39,7 +39,7 @@ def _upload_featured_image(site, image_url: str) -> Optional[int]:
             "Referer": "https://pixabay.com/",
         }
         r = requests.get(image_url, headers=dl_headers, timeout=TIMEOUT)
-        r.raise_for_status()  # エラーが発生した場合例外を投げる
+        r.raise_for_status()
     except Exception as e:
         current_app.logger.error("Featured image download failed: %s", e)
         return None
@@ -65,8 +65,23 @@ def _upload_featured_image(site, image_url: str) -> Optional[int]:
         up.raise_for_status()
         return up.json().get("id")
     except Exception as e:
-        current_app.logger.error("Media upload failed [%s]: %s", getattr(up, "status_code", None), getattr(up, "text", e))
+        current_app.logger.error(
+            "Media upload failed [%s]: %s",
+            getattr(up, "status_code", None),
+            getattr(up, "text", e)
+        )
         return None
+
+# 画像アップロード時のリトライ機能
+def _upload_featured_image_with_retry(site, image_url: str, retries=3, delay=5) -> Optional[int]:
+    for attempt in range(retries):
+        featured_id = _upload_featured_image(site, image_url)
+        if featured_id:
+            return featured_id
+        current_app.logger.error(f"Attempt {attempt + 1} failed to upload image: {image_url}")
+        if attempt < retries - 1:
+            time.sleep(delay)
+    return None  # リトライしても失敗した場合
 
 # ──────────────────────────────
 # HTML 装飾インジェクション
@@ -129,15 +144,14 @@ def post_to_wp(site, article) -> str:
     if featured_id:
         payload["featured_media"] = featured_id
 
-    # ---- 必須ヘッダー（Authorization を忘れない！） ----
     headers = {
-        **_basic_auth_header(site.username, site.app_pass),  # Basic 認証
+        **_basic_auth_header(site.username, site.app_pass),
         "Accept": "application/json",
         "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",  # WAF 対策
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) "
+                      "Gecko/20100101 Firefox/124.0",
     }
 
-    # --- デバッグログ: リクエスト詳細 ---
     current_app.logger.debug("WP POST URL: %s", api)
     current_app.logger.debug("WP Request Headers: %s", headers)
     current_app.logger.debug("WP Request Payload: %s", payload)
@@ -145,47 +159,34 @@ def post_to_wp(site, article) -> str:
     try:
         resp = requests.post(api, headers=headers, json=payload, timeout=TIMEOUT)
         resp.raise_for_status()
-        # --- デバッグログ: レスポンス詳細 ---
         current_app.logger.debug("WP Response status: %s", resp.status_code)
         current_app.logger.debug("WP Response body: %s", resp.text)
-    except HTTPError as e:
+    except HTTPError:
         current_app.logger.error("WordPress 投稿失敗 [%s]: %s", resp.status_code, resp.text)
         raise
 
     return resp.json().get("link", "")
 
-# 画像アップロード時のリトライ機能
-def _upload_featured_image_with_retry(site, image_url, retries=3, delay=5):
-    for attempt in range(retries):
-        featured_id = _upload_featured_image(site, image_url)
-        if featured_id:
-            return featured_id
-        else:
-            current_app.logger.error(f"Attempt {attempt + 1} failed to upload image: {image_url}")
-            if attempt < retries - 1:
-                time.sleep(delay)
-    return None  # リトライしても失敗した場合
-
 # ──────────────────────────────────────────────
 # 画像ダウンロード時のリトライ機能
 # ──────────────────────────────────────────────
-def _download_with_retry(url, retries=3, delay=5):
-    dl_headers = {  # dl_headersを関数内で定義
+def _download_with_retry(url: str, retries=3, delay=5):
+    dl_headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/124.0 Safari/537.36"
         ),
-        "Referer": "https://pixabay.com/",  # 画像の提供元URLなど
+        "Referer": "https://pixabay.com/",
     }
     for attempt in range(retries):
         try:
             r = requests.get(url, headers=dl_headers, timeout=TIMEOUT)
-            r.raise_for_status()  # エラーが発生した場合例外を投げる
+            r.raise_for_status()
             return r
         except Exception as e:
             current_app.logger.error(f"Download attempt {attempt + 1} failed: {e}")
             if attempt < retries - 1:
                 time.sleep(delay)
             else:
-                return None  # すべてのリトライが失敗した場合はNoneを返す
+                return None

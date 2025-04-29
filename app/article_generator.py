@@ -277,7 +277,12 @@ def _generate(app, aid: int, tpt: str, bpt: str):
 
             # 画像クエリ: keyword + title + 先頭 2 H2
             h2s   = re.findall(r"<h2\b[^>]*>(.*?)</h2>", art.body or "", re.I)[:2]
-            query = " ".join(dict.fromkeys([art.keyword, art.title, *h2s]))
+            h3s   = re.findall(r"<h3\b[^>]*>(.*?)</h3>", art.body or "", re.I)[:2]
+            summary = art.body.split("。")[0]
+
+            query = " ".join(dict.fromkeys(
+                [art.keyword, art.title, *h2s, *h3s, summary]
+            ))
             url   = fetch_featured_image(query)
             if len(url.encode()) > 500:                 # DB 500byte 制限対策
                 url = url.split("?", 1)[0]
