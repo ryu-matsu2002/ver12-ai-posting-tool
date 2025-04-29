@@ -11,13 +11,18 @@ APP_PASSWORD = "your-application-password"                     # 発行したア
 TIMEOUT      = 15                                              # タイムアウト秒
 # ——————————
 
-# Basic 認証ヘッダーを作る
-def make_auth_header(user: str, pwd: str) -> dict[str,str]:
+def make_auth_header(user: str, pwd: str) -> dict[str, str]:
+    """
+    Basic 認証ヘッダーを作る
+    """
     token = base64.b64encode(f"{user}:{pwd}".encode()).decode()
     return {"Authorization": f"Basic {token}"}
 
-# 1) アイキャッチ画像をアップロードし、メディア ID を取得
 def upload_featured_image(image_path: str) -> int:
+    """
+    アイキャッチ画像を /media エンドポイントへアップロードし、
+    返却されたメディア ID を返す
+    """
     headers = make_auth_header(USER, APP_PASSWORD)
     # ファイルの MIME タイプ推定
     mime = requests.utils.guess_filename(image_path) or "application/octet-stream"
@@ -27,40 +32,50 @@ def upload_featured_image(image_path: str) -> int:
     resp.raise_for_status()
     return resp.json()["id"]
 
-# 2) 記事を投稿（即時公開 or 予約投稿）
-def post_article(
-    title: str,
-    content: str,
-    featured_media_id: int | None = None,
-    categories: list[int] | None = None,
-    publish_datetime: datetime | None = None
-) -> dict:
+def post_to_wp(
+    site,      # サイトモデル（.url/.username/.app_pass を持つ）
+    art        # 記事モデル（.title/.body/.featured_image_url/.categories を持つ）
+) -> str:
+    """
+    記事を WordPress に投稿し、公開された記事の URL を返す。
+    既存の post_article を post_to_wp にリネームしてエクスポート。
+    """
+    # もしアイキャッチ画像 URL があれば先にアップロードして ID を取得
+    featured_id = None
+    if art.featured_image_url:
+        featured_id = upload_featured_image(art.featured_image_url)
+
+    # 本文とタイトルを組み立て
     headers = make_auth_header(USER, APP_PASSWORD) | {"Content-Type": "application/json"}
     data = {
-        "title": title,
-        "content": content,
-        "status": "publish" if publish_datetime is None else "future"
+        "title": art.title,
+        "content": art.body,
+        "status": "publish"  # 即時公開。予約投稿にする場合は "future" と date フィールドを追加。
     }
-    if featured_media_id:
-        data["featured_media"] = featured_media_id
-    if categories:
-        data["categories"] = categories
-    if publish_datetime:
-        # ISO 8601 形式でスケジュール
-        data["date"] = publish_datetime.isoformat()
+    if featured_id:
+        data["featured_media"] = featured_id
+    if getattr(art, "categories", None):
+        data["categories"] = art.categories
+
+    # 投稿
     resp = requests.post(API_POSTS, headers=headers, json=data, timeout=TIMEOUT)
     resp.raise_for_status()
-    return resp.json()
+    result = resp.json()
 
-# — 使用例 —
+    # 公開 URL を返す
+    return result.get("link", "")
+
+# alias: もし他コードが post_article を呼んでいる場合の互換性維持
+post_article = post_to_wp
+
+# — 使用例 — (スクリプト単体実行時のみ)
 if __name__ == "__main__":
-    # 画像アップロード（アイキャッチ）
-    img_id = upload_featured_image("path/to/eyecatch.jpg")
-    # 記事投稿（即時公開）
-    result = post_article(
-        title="こんにちは世界",
-        content="<p>自動投稿テストです。</p>",
-        featured_media_id=img_id,
-        categories=[2,5]
-    )
-    print("投稿完了:", result["link"])
+    class DummyArt:
+        title = "こんにちは世界"
+        body = "<p>自動投稿テストです。</p>"
+        featured_image_url = "path/to/eyecatch.jpg"
+        categories = [2, 5]
+
+    art = DummyArt()
+    url = post_to_wp(None, art)
+    print("投稿完了:", url)
