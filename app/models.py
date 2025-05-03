@@ -4,6 +4,7 @@ from datetime import datetime
 from flask_login import UserMixin
 from sqlalchemy import DateTime
 from . import db
+from app import db
 
 # ──── ユーザ ────
 class User(db.Model, UserMixin):
@@ -42,10 +43,12 @@ class PromptTemplate(db.Model):
 
 # ──── 記事 ────
 class Article(db.Model):
-    id          = db.Column(db.Integer, primary_key=True)
+    __tablename__ = 'articles'
+    id = db.Column(db.Integer, primary_key=True)
     keyword     = db.Column(db.String(255), nullable=False)
-    title       = db.Column(db.Text)
-    body        = db.Column(db.Text)
+    title = db.Column(db.String(255), nullable=False)
+    body = db.Column(db.Text, nullable=True)
+    featured_image = db.Column(db.String(255), nullable=True)  # アイキャッチ画像のURLを保存するカラムを追加
     image_url   = db.Column(db.String(500))
     status      = db.Column(db.String(20),  default="pending")   # pending/gen/done/error
     progress    = db.Column(db.Integer,     default=0)           # 0-100

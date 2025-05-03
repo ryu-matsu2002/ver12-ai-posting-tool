@@ -1,136 +1,95 @@
 import base64
 import mimetypes
-import re
+import os
 import requests
-from datetime import datetime
+from requests.exceptions import HTTPError
 from flask import current_app
-
-# ──────────────────────────────────────────────
-# WordPress 投稿ユーティリティ
-# ──────────────────────────────────────────────
-# ・Site インスタンスの .url, .username, .app_pass を使って動的に投稿
-# ・本文の <h2>,<h3>,<p> に Tailwind CSS クラスを付与
-# ・リモート URL／ローカルファイル両対応でアイキャッチ画像をアップロード
-# ──────────────────────────────────────────────
+from .models import Site, Article
 
 # タイムアウト（秒）
-TIMEOUT = 15
+TIMEOUT = 30  # タイムアウトを30秒に設定
 
-def make_auth_header(username: str, app_pass: str) -> dict[str, str]:
-    """
-    Basic 認証ヘッダーを作る
-    """
-    token = base64.b64encode(f"{username}:{app_pass}".encode()).decode()
-    return {"Authorization": f"Basic {token}"}
-
-def _decorate_html(html: str) -> str:
-    """
-    本文中の <h2>, <h3>, <p> タグに装飾用の Tailwind CSS クラスを追加する
-    """
-    html = re.sub(r'<h2(?![^>]*class=)', '<h2 class="text-xl font-bold mt-4 mb-2"', html)
-    html = re.sub(r'<h3(?![^>]*class=)', '<h3 class="text-lg font-semibold mt-3 mb-1"', html)
-    html = re.sub(r'<p(?![^>]*class=)', '<p class="mb-4 leading-relaxed"', html)
-    return html
-
-def upload_featured_image(
-    image_path: str,
-    api_media: str,
-    username: str,
-    app_pass: str
-) -> int:
-    """
-    アイキャッチ画像を /media エンドポイントへアップロードし、
-    返却されたメディア ID を返す
-    （image_path が URL なら先にダウンロード、ファイルパスなら直接 open） 
-    """
-    current_app.logger.debug(f"Uploading image [{image_path}] to [{api_media}] as [{username}]")
-    headers = make_auth_header(username, app_pass)
-
-    # MIME タイプ決定
-    mime_type, _ = mimetypes.guess_type(image_path)
-    mime = mime_type or "application/octet-stream"
-
-    # リモート URL の場合は先に取得
-    if image_path.startswith("http://") or image_path.startswith("https://"):
-        resp = requests.get(image_path, timeout=TIMEOUT)
-        resp.raise_for_status()
-        data = resp.content
-        filename = image_path.rsplit("/", 1)[-1] or "upload.jpg"
-        files = {"file": (filename, data, mime)}
-    else:
-        # ローカルファイル
-        with open(image_path, "rb") as f:
-            files = {"file": (image_path, f, mime)}
-
-    resp = requests.post(api_media, headers=headers, files=files, timeout=TIMEOUT)
-    resp.raise_for_status()
-    media_id = resp.json().get("id")
-    current_app.logger.debug(f"Uploaded media ID: {media_id}")
-    return media_id
-
-def post_to_wp(site, art) -> str:
-    """
-    記事を WordPress に投稿し、公開された記事の URL を返す。
-    """
-    # ─ 動的エンドポイント生成 ─
-    base = site.url.rstrip("/")
-    api_posts = f"{base}/wp-json/wp/v2/posts"
-    api_media = f"{base}/wp-json/wp/v2/media"
-
-    current_app.logger.debug(f"Posting Article#{art.id} to {api_posts} as {site.username}")
-    headers = make_auth_header(site.username, site.app_pass) | {"Content-Type": "application/json"}
-    # デバッグ追加
-    current_app.logger.debug(f"AUTHORIZATION header being sent: {headers['Authorization']}")
-    current_app.logger.debug(f"Auth header (truncated): {headers['Authorization'][:30]}...")
-
-    # 本文装飾
-    body = _decorate_html(art.body or "")
-
-    # アイキャッチ画像 ID を取得
-    featured_id = None
-    img_url = getattr(art, "featured_image_url", None) or getattr(art, "image_url", None)
-    if img_url:
-        try:
-            featured_id = upload_featured_image(img_url, api_media, site.username, site.app_pass)
-        except Exception as e:
-            current_app.logger.warning(f"Failed uploading featured image: {e}")
-
-    # 投稿 payload
-    data: dict = {
-        "title": art.title,
-        "content": body,
-        "status": "publish"
+# Basic認証ヘッダーを作成する関数
+def _basic_auth_header(username: str, app_pass: str) -> dict:
+    token = base64.b64encode(f'{username}:{app_pass}'.encode('utf-8')).decode('utf-8')
+    return {
+        'Authorization': f'Basic {token}',
+        'Content-Type': 'application/json'
     }
-    if featured_id:
-        data["featured_media"] = featured_id
-    if getattr(art, "categories", None):
-        data["categories"] = art.categories
 
-    # 投稿実行
-    resp = requests.post(api_posts, headers=headers, json=data, timeout=TIMEOUT)
-    resp.raise_for_status()
-    result = resp.json()
-    link = result.get("link", "")
-    current_app.logger.info(f"Posted Article#{art.id} to {link}")
-    return link
+# 画像をWordPressにアップロードする関数
+def upload_image_to_wp(site_url: str, image_path: str, username: str, app_pass: str):
+    url = f"{site_url}/wp-json/wp/v2/media"
+    headers = _basic_auth_header(username, app_pass)
 
-# 互換性維持エイリアス
-post_article = post_to_wp
+    mime_type, _ = mimetypes.guess_type(image_path)
+    if mime_type is None:
+        mime_type = 'image/jpeg'
 
-# — スクリプト単体実行テスト用 —
-if __name__ == "__main__":
-    class DummySite:
-        url = "https://business-search-abroad.com"
-        username = "your-username"
-        app_pass = "your-app-password"
+    with open(image_path, 'rb') as image_file:
+        files = {
+            'file': (os.path.basename(image_path), image_file, mime_type)
+        }
+        response = requests.post(url, headers=headers, files=files, timeout=TIMEOUT)
 
-    class DummyArt:
-        id = 0
-        title = "テスト投稿"
-        body = "<h2>見出し</h2><p>本文</p>"
-        featured_image_url = "https://via.placeholder.com/600x400"
-        categories = []
+    if response.status_code == 201:
+        data = response.json()
+        return data["id"], data["source_url"]
+    else:
+        print(f"詳細なエラー: {response.json()}")
+        raise HTTPError(f"画像のアップロードに失敗しました: {response.status_code}, {response.text}")
 
-    site = DummySite()
-    art = DummyArt()
-    print("Result URL:", post_to_wp(site, art))
+# 投稿を行うメイン関数（統一版）
+def post_to_wp(site: Site, art: Article) -> str:
+    url = f"{site.url}/wp-json/wp/v2/posts"
+    headers = _basic_auth_header(site.username, site.app_pass)
+
+    # featured_media の初期化
+    featured_media_id = None
+
+    # 画像をアップロードする場合
+    if art.image_url and art.image_url.startswith("http"):
+        try:
+            # 一時ファイルとして画像を保存
+            response = requests.get(art.image_url, timeout=10)
+            ext = os.path.splitext(art.image_url)[-1].split("?")[0] or ".jpg"
+            temp_path = f"temp_featured_image{ext}"
+            with open(temp_path, "wb") as f:
+                f.write(response.content)
+
+            # WordPress へアップロード
+            featured_media_id, uploaded_url = upload_image_to_wp(
+                site.url, temp_path, site.username, site.app_pass
+            )
+
+            # DB に画像URL保存
+            art.featured_image = uploaded_url
+
+            # 一時ファイル削除
+            os.remove(temp_path)
+
+        except Exception as e:
+            current_app.logger.warning(f"アイキャッチ画像のアップロード失敗: {e}")
+
+    # 投稿データの準備
+    post_data = {
+        "title": art.title,
+        "content": art.body,
+        "status": "publish",
+    }
+    if featured_media_id:
+        post_data["featured_media"] = featured_media_id
+
+    # WordPress へ投稿
+    response = requests.post(url, json=post_data, headers=headers, timeout=TIMEOUT)
+    if response.status_code == 201:
+        return response.json().get("link") or "success"
+    else:
+        raise HTTPError(f"記事の作成に失敗: {response.status_code}, {response.text}")
+
+# デザイン装飾用（記事プレビューなど）
+def _decorate_html(content: str) -> str:
+    content = content.replace('<h2>', '<h2 style="font-size: 24px; color: blue;">')
+    content = content.replace('<h3>', '<h3 style="font-size: 20px; color: green;">')
+    content = content.replace('<p>',  '<p style="font-family: Arial, sans-serif; line-height: 1.6;">')
+    return content

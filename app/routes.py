@@ -1,6 +1,3 @@
-# ──────────────────────────────────────────────
-# app/routes.py
-
 from __future__ import annotations
 from datetime import datetime
 
@@ -21,15 +18,14 @@ from .forms import (
     LoginForm, RegisterForm,
     GenerateForm, PromptForm, ArticleForm, SiteForm
 )
-from .article_generator import enqueue_generation
-from .wp_client import post_to_wp
-from .wp_client import _decorate_html
-from .article_generator import _generate_slots, JST
+from .article_generator import enqueue_generation, _generate_slots
+from .wp_client import post_to_wp, _decorate_html
 
 JST = timezone("Asia/Tokyo")
 bp = Blueprint("main", __name__)
 
-# ───────────────────────────── 認証
+
+# ─────────── 認証
 @bp.route("/login", methods=["GET", "POST"])
 def login():
     form = LoginForm()
@@ -64,7 +60,7 @@ def logout():
     return redirect(url_for(".login"))
 
 
-# ───────────────────────────── Dashboard
+# ─────────── Dashboard
 @bp.route("/")
 @login_required
 def dashboard():
@@ -75,7 +71,7 @@ def dashboard():
     return render_template("dashboard.html")
 
 
-# ───────────────────────────── プロンプト CRUD
+# ─────────── プロンプト CRUD
 @bp.route("/prompts", methods=["GET", "POST"])
 @login_required
 def prompts():
@@ -114,7 +110,7 @@ def api_prompt(pid: int):
     return jsonify({"title_pt": pt.title_pt, "body_pt": pt.body_pt})
 
 
-# ───────────────────────────── WP サイト CRUD
+# ─────────── WP サイト CRUD
 @bp.route("/sites", methods=["GET", "POST"])
 @login_required
 def sites():
@@ -146,7 +142,7 @@ def delete_site(sid: int):
     return redirect(url_for(".sites"))
 
 
-# ───────────────────────────── 記事生成
+# ─────────── 記事生成
 @bp.route("/generate", methods=["GET", "POST"])
 @login_required
 def generate():
@@ -176,34 +172,27 @@ def generate():
     return render_template("generate.html", form=form)
 
 
-# ───────────────────────────── 生成ログ
+# ─────────── 生成ログ
 @bp.route("/log")
 @login_required
 def log():
-    """
-    ログページを開いたタイミングで
-    scheduled_at が NULL の記事を自動で補完してから表示。
-    """
     site_id = request.args.get("site_id", type=int)
 
-    # 1) NULL の記事を取得
+    # 未スケジュール記事の slot 自動割当
     unscheduled = Article.query.filter(
         Article.user_id == current_user.id,
         Article.scheduled_at.is_(None),
     ).all()
-
     if unscheduled:
-        # まとめて slot を発行して埋める
         slots = iter(_generate_slots(current_app, len(unscheduled)))
         for art in unscheduled:
             art.scheduled_at = next(slots)
         db.session.commit()
 
-    # 2) 一覧取得
+    # 記事取得
     q = Article.query.filter_by(user_id=current_user.id)
     if site_id:
         q = q.filter_by(site_id=site_id)
-
     q = q.order_by(
         nulls_last(asc(Article.scheduled_at)),
         Article.created_at.desc(),
@@ -218,19 +207,18 @@ def log():
     )
 
 
-# ───────────────────────────── プレビュー
+# ─────────── プレビュー
 @bp.route("/preview/<int:article_id>")
 @login_required
 def preview(article_id: int):
     art = Article.query.get_or_404(article_id)
     if art.user_id != current_user.id:
         abort(403)
-    from .wp_client import _decorate_html
     styled = _decorate_html(art.body or "")
     return render_template("preview.html", article=art, styled_body=styled)
 
 
-# ───────────────────────────── WordPress 即時投稿
+# ─────────── WordPress 即時投稿
 @bp.post("/article/<int:id>/post")
 @login_required
 def post_article(id):
@@ -244,18 +232,18 @@ def post_article(id):
     try:
         url = post_to_wp(art.site, art)
         art.posted_at = datetime.utcnow()
-        art.status    = "posted"
+        art.status = "posted"
         db.session.commit()
         flash(f"WordPress へ投稿しました: {url}", "success")
     except Exception as e:
-        # ロールバック＆詳細ログ出力
         current_app.logger.exception("即時投稿失敗: %s", e)
         db.session.rollback()
         flash(f"投稿失敗: {e}", "danger")
+
     return redirect(url_for(".log"))
 
 
-# ───────────────────────────── 記事編集・削除・再試行
+# ─────────── 記事編集・削除・再試行
 @bp.route("/article/<int:id>/edit", methods=["GET", "POST"])
 @login_required
 def edit_article(id):
@@ -288,17 +276,33 @@ def retry_article(id: int):
     art = Article.query.get_or_404(id)
     if art.user_id != current_user.id:
         abort(403)
-    art.status, art.progress = "pending", 0
+
+    # ユーザーに紐づくプロンプトを取得（最初の1件）
+    prompt = PromptTemplate.query.filter_by(user_id=current_user.id).first()
+    if not prompt:
+        flash("プロンプトテンプレートが見つかりません。先にプロンプトを作成してください。", "danger")
+        return redirect(url_for(".prompts"))
+
+    # 記事の状態をリセット
+    art.title = None
+    art.body = None
+    art.featured_image = None
+    art.image_url = None
+    art.status = "pending"
+    art.progress = 0
     db.session.commit()
+
+    # 再生成をキューに登録
     enqueue_generation(
         current_user.id,
         [art.keyword],
-        art.title_pt or "",
-        art.body_pt  or "",
+        prompt.title_pt,
+        prompt.body_pt,
         art.site_id
     )
     flash("再試行のキューに登録しました", "success")
     return redirect(url_for(".log"))
+
 
 @bp.route("/debug-post/<int:aid>")
 @login_required

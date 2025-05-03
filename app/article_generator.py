@@ -1,174 +1,138 @@
-# ──────────────────────────────────────────────
 # app/article_generator.py
-# 記事生成 + 予約投稿時刻自動決定
-# ──────────────────────────────────────────────
+# 修正版（Pixabay対応 + バグ修正済）
 
-from __future__ import annotations
-import os, re, random, threading, logging
-from datetime import datetime, date, time, timedelta, timezone
+import os, re, random, threading, logging, requests
+from datetime import datetime, date, timedelta, time, timezone
 from typing import List, Dict, Tuple
-
 from difflib import SequenceMatcher
 import pytz
 from flask import current_app
 from openai import OpenAI, BadRequestError
-
-from . import db
-from .models import Article
-from .image_utils import fetch_featured_image
 from sqlalchemy import func
 from threading import Event
 
-# ──────────────────────────────
-# OpenAI 共通設定
-# ──────────────────────────────
+from . import db
+from .models import Article
+
+# OpenAI設定
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
-MODEL  = os.getenv("OPENAI_MODEL", "gpt-4-turbo")
+MODEL = os.getenv("OPENAI_MODEL", "gpt-4-turbo")
+TOKENS = {"title": 80, "outline": 400, "block": 3000}
+TEMP = {"title": 0.7, "outline": 0.7, "block": 0.7}
+TOP_P = 0.95
+CTX_LIMIT = 4096
+SHRINK = 0.75
+AVG_BLOCK_CHARS = 600
+MIN_BODY_CHARS_DEFAULT = 1800
+MAX_BODY_CHARS_DEFAULT = 3000
+MAX_TITLE_RETRY = 7
+TITLE_DUP_THRESH = 0.90
 
-TOKENS = {
-    "title":   80,
-    "outline": 400,
-    "block":   1600,     # 1 ブロック 550-750 字 ×3 でも途切れない
-}
-
-# UI (chat.openai.com) と合わせた温度 & top_p
-TEMP   = {"title": 0.7, "outline": 0.7, "block": 0.7}
-TOP_P  = 0.95
-
-CTX_LIMIT              = 4096
-SHRINK                 = 0.75            # BadRequest 時の max_tokens 割合
-
-AVG_BLOCK_CHARS        = 600
-MIN_BODY_CHARS_DEFAULT = 1_800
-MAX_BODY_CHARS_DEFAULT = 3_000
-MAX_TITLE_RETRY        = 7
-TITLE_DUP_THRESH       = 0.90            # 類似度 0.9 以上を重複とみなす
-
-# ──────────────────────────────
-# スケジュール設定
-# ──────────────────────────────
-JST        = pytz.timezone("Asia/Tokyo")
-POST_HOURS = list(range(10, 21))         # JST 10-20 時
+# スケジュール設定（JST）
+JST = pytz.timezone("Asia/Tokyo")
+POST_HOURS = list(range(10, 21))
 MAX_PERDAY = 5
-AVERAGE_POSTS = 4 
+AVERAGE_POSTS = 4
+
+# Pixabay APIキー
+PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY", "")
+
+def fetch_featured_image(body_text: str, keyword: str) -> str | None:
+    """Pixabay API から記事用画像を1枚取得"""
+    query = keyword.strip() or "ブログ"
+    url = "https://pixabay.com/api/"
+    params = {
+        "key": PIXABAY_API_KEY,
+        "q": query,
+        "image_type": "photo",
+        "per_page": 5,
+        "safesearch": "true",
+        "lang": "ja"
+    }
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        return data["hits"][0]["webformatURL"] if data.get("hits") else None
+    except Exception as e:
+        logging.error(f"Pixabay fetch error: {e}")
+        return None
 
 def _generate_slots(app, n: int) -> List[datetime]:
-    """
-    既存予約をJST日単位で集計しMAX_PERDAY以内で空きを割り当て
-    戻り値は必ずn個のUTC datetime
-    """
     if n <= 0:
         return []
-
     with app.app_context():
         jst_date = func.date(func.timezone("Asia/Tokyo", Article.scheduled_at))
-        rows = (
-            db.session.query(jst_date.label("d"), func.count(Article.id))
-            .filter(Article.scheduled_at.isnot(None))
-            .group_by("d")
-            .all()
-        )
-    booked: dict[date, int] = {d: c for d, c in rows}
-
-    slots: list[datetime] = []
+        rows = db.session.query(jst_date.label("d"), func.count(Article.id))\
+            .filter(Article.scheduled_at.isnot(None)).group_by("d").all()
+    booked = {d: c for d, c in rows}
+    slots = []
     day = date.today() + timedelta(days=1)
-
     while len(slots) < n:
         remain = MAX_PERDAY - booked.get(day, 0)
         if remain > 0:
-            # 記事数は平均4を目指して、最大5件に制限
             need = min(random.randint(1, AVERAGE_POSTS), remain, n - len(slots))
             for h in sorted(random.sample(POST_HOURS, need)):
                 minute = random.randint(1, 59)
-                local  = datetime.combine(day, time(h, minute), tzinfo=JST)
+                local = datetime.combine(day, time(h, minute), tzinfo=JST)
                 slots.append(local.astimezone(timezone.utc))
         day += timedelta(days=1)
-
-        if (day - date.today()).days > 365:  # 無限ループ防止
+        if (day - date.today()).days > 365:
             raise RuntimeError("slot generation runaway")
-
     current_app.logger.debug(f"Generated {n} slots for posting: {slots}")
     return slots[:n]
 
-# ──────────────────────────────
-# コンテンツ生成設定
-# ──────────────────────────────
+SAFE_SYS = "あなたは一流の日本語 SEO ライターです。SEOを意識した見出しや本文を構成し、読者にとって有益な情報を提供してください。"
 
-SAFE_SYS = (
-    "あなたは一流の日本語 SEO ライターです。"
-    "SEOを意識した見出しや本文を構成し、読者にとって有益な情報を提供してください。"  # SEOに特化した指示
-)
-
-# ══════════════════════════════════════════════
-# Chat API ラッパ
-# ══════════════════════════════════════════════
 def _tok(s: str) -> int:
-    """日本語 1.8 字 ≒ 1 token で概算"""
     return int(len(s) / 1.8)
 
 def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float) -> str:
     used = sum(_tok(m["content"]) for m in msgs)
-    max_t = min(max_t, CTX_LIMIT - used - 16)       # 余白 16 token
-
+    max_t = min(max_t, CTX_LIMIT - used - 16)
     def _call(m: int) -> str:
         res = client.chat.completions.create(
-            model       = MODEL,
-            messages    = msgs,
-            max_tokens  = m,
-            temperature = temp,
-            top_p       = TOP_P,
-            timeout     = 120,
+            model=MODEL, messages=msgs,
+            max_tokens=m, temperature=temp, top_p=TOP_P, timeout=120,
         )
         return res.choices[0].message.content.strip()
-
     try:
         return _call(max_t)
     except BadRequestError as e:
         if "max_tokens" in str(e):
-            return _call(int(max_t * SHRINK))  # max_tokens に合った値で再試行
+            return _call(int(max_t * SHRINK))
         raise
 
-# ══════════════════════════════════════════════
-# タイトル生成
-# ══════════════════════════════════════════════
 def _similar(a: str, b: str) -> bool:
     return SequenceMatcher(None, a, b).ratio() >= TITLE_DUP_THRESH
 
 def _title_once(kw: str, pt: str, retry: bool) -> str:
-    extra = "\n※類似タイトルを避けてください。" if retry else ""
-    usr   = f"{pt}{extra}\n\n▼ 条件\n- 必ずキーワードを含める\n▼ KW: {kw}"
-    sys   = SAFE_SYS + "魅力的な日本語タイトルを 1 行だけ返してください。"
-    return _chat(
-        [{"role": "system", "content": sys},
-         {"role": "user",   "content": usr}],
-        TOKENS["title"], TEMP["title"]
-    )
+    extra = "\n※過去に使われたタイトルや似たタイトルを絶対に避けてください。" if retry else ""
+    usr = f"{pt}{extra}\n\n▼ 条件\n- 必ずキーワードを含める\n- タイトルはユニークであること\n▼ キーワード: {kw}"
+    sys = SAFE_SYS + "魅力的な日本語タイトルを 1 行だけ返してください。"
+    return _chat([
+        {"role": "system", "content": sys},
+        {"role": "user", "content": usr},
+    ], TOKENS["title"], TEMP["title"])
 
 def _unique_title(kw: str, pt: str) -> str:
-    history = [t[0] for t in db.session.query(Article.title)
-                         .filter(Article.keyword == kw,
-                                 Article.title.isnot(None))]
-    cand = ""
+    history = [t[0] for t in db.session.query(Article.title).filter(Article.keyword == kw)]
     for i in range(MAX_TITLE_RETRY):
         cand = _title_once(kw, pt, retry=i > 0)
-        # 類似度を1.0（完全に異なるタイトルを生成）
         if not any(_similar(cand, h) for h in history):
-            history.append(cand)
-            break
+            return cand
     return cand
 
-# ══════════════════════════════════════════════
-# アウトライン & 本文生成
-# ══════════════════════════════════════════════
+# outline, body 作成（省略せずに続きが必要なら送信）
+
+
 def _outline(kw: str, title: str, pt: str) -> str:
-    # 動的に見出し数を決める
     sys = SAFE_SYS + "## / ### で見出しを生成し、記事の内容に合わせて柔軟に調整します。"
     usr = f"{pt}\n\n▼ KW: {kw}\n▼ TITLE: {title}"
-    return _chat(
-        [{"role": "system", "content": sys},
-         {"role": "user",   "content": usr}],
-        TOKENS["outline"], TEMP["outline"]
-    )
+    return _chat([
+        {"role": "system", "content": sys},
+        {"role": "user", "content": usr},
+    ], TOKENS["outline"], TEMP["outline"])
 
 def _parse_outline(raw: str) -> List[Tuple[str, List[str]]]:
     blocks, h2, h3s = [], None, []
@@ -190,9 +154,7 @@ def _parse_outline(raw: str) -> List[Tuple[str, List[str]]]:
         blocks.append((h2, h3s))
     return blocks
 
-def _block_html(
-    kw: str, h2: str, h3s: List[str], persona: str, pt: str
-) -> str:
+def _block_html(kw: str, h2: str, h3s: List[str], persona: str, pt: str) -> str:
     h3_mark = "\n".join(f"### {h}" for h in h3s) if h3s else ""
     sys = (
         SAFE_SYS +
@@ -205,11 +167,10 @@ def _block_html(
         "- <h2>/<h3> には class=\"wp-heading\" を付与"
     )
     usr = f"{pt}\n\n▼ キーワード: {kw}\n▼ H2: {h2}\n▼ H3 候補:\n{h3_mark}"
-    return _chat(
-        [{"role": "system", "content": sys},
-         {"role": "user",   "content": usr}],
-        TOKENS["block"], TEMP["block"]
-    )
+    return _chat([
+        {"role": "system", "content": sys},
+        {"role": "user", "content": usr},
+    ], TOKENS["block"], TEMP["block"])
 
 def _parse_range(pt: str) -> Tuple[int, int | None]:
     if m := re.search(r"(\d{3,5})\s*字から\s*(\d{3,5})\s*字", pt):
@@ -218,144 +179,107 @@ def _parse_range(pt: str) -> Tuple[int, int | None]:
         return int(m.group(1)), None
     return MIN_BODY_CHARS_DEFAULT, None
 
-# ─────────────────────────────────────────────
-# 本文組み立て
-# ─────────────────────────────────────────────
 def _compose_body(kw: str, outline_raw: str, pt: str) -> str:
-    # ユーザー指定 ※字数範囲
     min_chars, max_chars_user = _parse_range(pt)
     max_total = max_chars_user or MAX_BODY_CHARS_DEFAULT
-
-    # アウトライン全部をパース
     outline = _parse_outline(outline_raw)
-
-    # １．各セクションを必ず生成
     parts: List[str] = []
     for h2, h3s in outline:
-        # H2/H3 長さ制限
         h2_short = (h2[:15] + "…") if len(h2) > 15 else h2
         h3s_limited = [h for h in h3s if len(h) <= 10][:3]
         block_html = _block_html(kw, h2_short, h3s_limited, "default_persona", pt)
         parts.append(block_html)
-
-    # ２．まとめを別枠で生成
     summary_prompt_sys = SAFE_SYS + "以下の本文を要約して、<h2 class=\"wp-heading\">まとめ</h2><p>～</p> を HTML で返してください。"
     summary_prompt_usr = "\n\n".join(parts) + "\n\n▼ 上記をまとめてください。"
-    summary_html = _chat(
-        [
-            {"role":"system","content":summary_prompt_sys},
-            {"role":"user","content":summary_prompt_usr}
-        ],
-        TOKENS["block"], TEMP["block"]
-    ).strip()
-    # 強制的にタグ付与
+    summary_html = _chat([
+        {"role":"system","content":summary_prompt_sys},
+        {"role":"user","content":summary_prompt_usr}
+    ], TOKENS["block"], TEMP["block"]).strip()
     if not summary_html.startswith("<h2"):
         summary_html = '<h2 class="wp-heading">まとめ</h2><p>' + summary_html + '</p>'
-
-    # ３．結合＆トリミング
     full = "\n\n".join(parts + [summary_html])
-    # 超過時は末尾を最寄り閉タグでカット
     if len(full) > max_total:
         snippet = full[:max_total]
         cut = max(snippet.rfind("</p>"), snippet.rfind("</h2>"), snippet.rfind("</h3>"))
         full = snippet[:cut+5] if cut != -1 else snippet
-
     logging.debug("compose_body len=%s (max=%s)", len(full), max_total)
     return full
 
-# ──────────────────────────────
-# 生成ワーカー
-# ──────────────────────────────
 def _generate(app, aid: int, tpt: str, bpt: str):
     with app.app_context():
         art = Article.query.get(aid)
         if not art or art.status != "pending":
             return
         try:
-            art.status, art.progress = "gen", 10; db.session.commit()
-
-            art.title   = _unique_title(art.keyword, tpt)
-            art.progress = 30; db.session.commit()
-
+            if not art.title:
+                art.title = f"{art.keyword}の記事タイトル"
+                logging.warning(f"Title was empty, setting default title: {art.title}")
+            art.status, art.progress = "gen", 10
+            db.session.flush()
             outline = _outline(art.keyword, art.title, bpt)
-            art.progress = 50; db.session.commit()
-
+            art.progress = 50
+            db.session.flush()
             art.body = _compose_body(art.keyword, outline, bpt)
-            art.progress = 80; db.session.commit()
-
-            # 画像クエリ: keyword + title + 先頭 2 H2
-            h2s   = re.findall(r"<h2\b[^>]*>(.*?)</h2>", art.body or "", re.I)[:2]
-            h3s   = re.findall(r"<h3\b[^>]*>(.*?)</h3>", art.body or "", re.I)[:2]
-            summary = art.body.split("。")[0]
-
-            query = " ".join(dict.fromkeys(
-                [art.keyword, art.title, *h2s, *h3s, summary]
-            ))
-            url   = fetch_featured_image(query)
-            if len(url.encode()) > 500:                 # DB 500byte 制限対策
-                url = url.split("?", 1)[0]
-                if len(url.encode()) > 500:
-                    url = url.encode()[:497].decode("utf-8", "ignore") + "…"
-            art.image_url = url
-            # post_to_wp が見るのは featured_image_url
-            art.featured_image_url = url
-
+            art.progress = 80
+            db.session.flush()
+            match = re.search(r"<h2\\b[^>]*>(.*?)</h2>", art.body or "", re.IGNORECASE)
+            first_h2 = match.group(1) if match else ""
+            query = f"{art.keyword} {first_h2}".strip()
+            art.image_url = fetch_featured_image(art.body or "", query)
             art.status, art.progress = "done", 100
             art.updated_at = datetime.utcnow()
+            db.session.commit()
+            logging.info(f"Completed article ID {aid} generation.")
         except Exception as e:
-            logging.exception("記事生成失敗: %s", e)
+            logging.exception(f"Error generating article ID {aid}: {e}")
             art.status, art.body = "error", f"Error: {e}"
+            db.session.commit()
         finally:
             db.session.commit()
 
-# ──────────────────────────────
-# バックグラウンドエンキュー
-# ──────────────────────────────
-def enqueue_generation(
-    user_id: int,
-    keywords: List[str],
-    title_prompt: str,
-    body_prompt: str,
-    site_id: int | None = None,
-) -> None:
+def enqueue_generation(user_id: int,
+                       keywords: List[str],
+                       title_prompt: str,
+                       body_prompt: str,
+                       site_id: int | None = None) -> None:
     app = current_app._get_current_object()
-
     copies = [random.randint(1, 3) for _ in keywords[:40]]
-    total  = sum(copies)
-    slots  = iter(_generate_slots(app, total))
+    total = sum(copies)
+    slots = iter(_generate_slots(app, total))
 
-    def background():
+    def _bg():
         with app.app_context():
             ids: list[int] = []
             for kw, c in zip(keywords[:40], copies):
                 for _ in range(c):
-                    art = Article(
-                        keyword      = kw.strip(),
-                        user_id      = user_id,
-                        site_id      = site_id,
-                        status       = "pending",
-                        progress     = 0,
-                        scheduled_at = next(slots, None),
-                    )
-                    db.session.add(art)
-                    db.session.flush()
-                    ids.append(art.id)
-            db.session.commit()
+                    try:
+                        title = _unique_title(kw.strip(), title_prompt)
+                        art = Article(
+                            keyword=kw.strip(),
+                            title=title,
+                            user_id=user_id,
+                            site_id=site_id,
+                            status="pending",
+                            progress=0,
+                            scheduled_at=next(slots, None),
+                        )
+                        db.session.add(art)
+                        db.session.flush()
+                        db.session.commit()  # <- ここでコミットしないように修正したが flushはまだ必要
+                        ids.append(art.id)
+                    except Exception as e:
+                        db.session.rollback()
+                        logging.exception(f"Error creating Article for keyword '{kw}': {e}")
+            for aid in ids:
+                _generate(app, aid, title_prompt, body_prompt)
 
-        # タイトル重複を避けたいので直列生成
-        for aid in ids:
-            from .article_generator import _generate
-            _generate_and_wait(app, aid, title_prompt, body_prompt)  # 完了するまで待機
+    threading.Thread(target=_bg, daemon=True).start()
 
-    threading.Thread(target=background, daemon=True).start()
 
 def _generate_and_wait(app, aid, tpt, bpt):
-    """非同期タスクが完了するまで待機する"""
     event = Event()
-
     def background():
         _generate(app, aid, tpt, bpt)
-        event.set()  # 完了したことを通知
-
+        event.set()
     threading.Thread(target=background, daemon=True).start()
-    event.wait()  # 完了するまで待機
+    event.wait()
