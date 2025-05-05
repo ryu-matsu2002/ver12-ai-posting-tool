@@ -6,8 +6,10 @@ from requests.exceptions import HTTPError
 from flask import current_app
 from .models import Site, Article
 
+# タイムアウト（秒）
 TIMEOUT = 30
 
+# 投稿用のヘッダー作成（application/json 用）
 def _post_headers(username: str, app_pass: str, referer: str) -> dict:
     token = base64.b64encode(f'{username}:{app_pass}'.encode('utf-8')).decode('utf-8')
     return {
@@ -19,6 +21,7 @@ def _post_headers(username: str, app_pass: str, referer: str) -> dict:
         'Connection': 'keep-alive'
     }
 
+# 画像アップロード用のヘッダー作成（Content-Typeなし）
 def _upload_headers(username: str, app_pass: str, referer: str) -> dict:
     token = base64.b64encode(f'{username}:{app_pass}'.encode('utf-8')).decode('utf-8')
     return {
@@ -29,6 +32,7 @@ def _upload_headers(username: str, app_pass: str, referer: str) -> dict:
         'Connection': 'keep-alive'
     }
 
+# 画像をWordPressにアップロードする関数
 def upload_image_to_wp(site_url: str, image_path: str, username: str, app_pass: str):
     url = f"{site_url}/wp-json/wp/v2/media"
     headers = _upload_headers(username, app_pass, site_url)
@@ -52,8 +56,10 @@ def upload_image_to_wp(site_url: str, image_path: str, username: str, app_pass: 
         except Exception:
             error = response.text
         current_app.logger.warning(f"画像のアップロードに失敗: {response.status_code}, {error}")
+        current_app.logger.warning(f"画像アップ失敗ヘッダー: {response.headers}")
         raise HTTPError(f"画像のアップロードに失敗しました: {response.status_code}, {error}")
 
+# 投稿を行うメイン関数
 def post_to_wp(site: Site, art: Article) -> str:
     url = f"{site.url}/wp-json/wp/v2/posts"
     headers = _post_headers(site.username, site.app_pass, site.url)
@@ -80,7 +86,7 @@ def post_to_wp(site: Site, art: Article) -> str:
 
     post_data = {
         "title": art.title,
-        "content": f'<div class="ai-content">{_decorate_html(art.body)}</div>',
+        "content": _decorate_html(art.body),
         "status": "publish",
     }
     if featured_media_id:
@@ -106,9 +112,11 @@ def post_to_wp(site: Site, art: Article) -> str:
                     "- ユーザーが 投稿者 以上の権限を持っているか\n"
                     "- サーバーの .htaccess に Authorization ヘッダーの許可設定があるか"
                 )
+
         current_app.logger.error(f"記事の作成に失敗: {response.status_code}, {error}")
         raise HTTPError(f"記事の作成に失敗: {response.status_code}, {error}")
 
+# デザイン装飾用
 def _decorate_html(content: str) -> str:
     content = content.replace('<h2>', '<h2 style="font-size: 24px; color: blue;">')
     content = content.replace('<h3>', '<h3 style="font-size: 20px; color: green;">')
