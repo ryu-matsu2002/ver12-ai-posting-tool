@@ -6,22 +6,32 @@ from requests.exceptions import HTTPError
 from flask import current_app
 from .models import Site, Article
 
-# タイムアウト（秒）
 TIMEOUT = 30
 
-# Basic認証ヘッダーを作成する関数（User-Agent追加済み）
-def _basic_auth_header(username: str, app_pass: str) -> dict:
+def _post_headers(username: str, app_pass: str, referer: str) -> dict:
     token = base64.b64encode(f'{username}:{app_pass}'.encode('utf-8')).decode('utf-8')
     return {
         'Authorization': f'Basic {token}',
         'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'Referer': referer,
+        'Accept': 'application/json',
+        'Connection': 'keep-alive'
     }
 
-# 画像をWordPressにアップロードする関数
+def _upload_headers(username: str, app_pass: str, referer: str) -> dict:
+    token = base64.b64encode(f'{username}:{app_pass}'.encode('utf-8')).decode('utf-8')
+    return {
+        'Authorization': f'Basic {token}',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'Referer': referer,
+        'Accept': '*/*',
+        'Connection': 'keep-alive'
+    }
+
 def upload_image_to_wp(site_url: str, image_path: str, username: str, app_pass: str):
     url = f"{site_url}/wp-json/wp/v2/media"
-    headers = _basic_auth_header(username, app_pass)
+    headers = _upload_headers(username, app_pass, site_url)
 
     mime_type, _ = mimetypes.guess_type(image_path)
     if mime_type is None:
@@ -37,13 +47,16 @@ def upload_image_to_wp(site_url: str, image_path: str, username: str, app_pass: 
         data = response.json()
         return data["id"], data["source_url"]
     else:
-        print(f"詳細なエラー: {response.json()}")
-        raise HTTPError(f"画像のアップロードに失敗しました: {response.status_code}, {response.text}")
+        try:
+            error = response.json()
+        except Exception:
+            error = response.text
+        current_app.logger.warning(f"画像のアップロードに失敗: {response.status_code}, {error}")
+        raise HTTPError(f"画像のアップロードに失敗しました: {response.status_code}, {error}")
 
-# 投稿を行うメイン関数（統一版）
 def post_to_wp(site: Site, art: Article) -> str:
     url = f"{site.url}/wp-json/wp/v2/posts"
-    headers = _basic_auth_header(site.username, site.app_pass)
+    headers = _post_headers(site.username, site.app_pass, site.url)
 
     featured_media_id = None
 
@@ -67,19 +80,35 @@ def post_to_wp(site: Site, art: Article) -> str:
 
     post_data = {
         "title": art.title,
-        "content": art.body,
+        "content": f'<div class="ai-content">{_decorate_html(art.body)}</div>',
         "status": "publish",
     }
     if featured_media_id:
         post_data["featured_media"] = featured_media_id
 
     response = requests.post(url, json=post_data, headers=headers, timeout=TIMEOUT)
+
     if response.status_code == 201:
         return response.json().get("link") or "success"
     else:
-        raise HTTPError(f"記事の作成に失敗: {response.status_code}, {response.text}")
+        try:
+            error = response.json()
+        except Exception:
+            error = response.text
 
-# デザイン装飾用
+        if response.status_code == 401:
+            code = error.get("code")
+            if code == "rest_cannot_create":
+                raise HTTPError(
+                    "401エラー: 投稿権限がないか、Basic認証がブロックされています。"
+                    "\n以下を確認してください：\n"
+                    "- サイトURLが https:// で始まっているか\n"
+                    "- ユーザーが 投稿者 以上の権限を持っているか\n"
+                    "- サーバーの .htaccess に Authorization ヘッダーの許可設定があるか"
+                )
+        current_app.logger.error(f"記事の作成に失敗: {response.status_code}, {error}")
+        raise HTTPError(f"記事の作成に失敗: {response.status_code}, {error}")
+
 def _decorate_html(content: str) -> str:
     content = content.replace('<h2>', '<h2 style="font-size: 24px; color: blue;">')
     content = content.replace('<h3>', '<h3 style="font-size: 20px; color: green;">')
