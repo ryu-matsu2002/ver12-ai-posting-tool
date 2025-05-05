@@ -21,8 +21,10 @@ def _post_headers(username: str, app_pass: str, site_url: str) -> dict:
         'Content-Type': 'application/json',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0',
         'Referer': f'{site_url}/wp-admin',
-        'Accept': 'application/json',
+        'Origin': site_url,
+        'Accept': '*/*, application/json',
     }
+
 
 
 # 画像アップロード用のヘッダー作成（Content-Typeなし）
