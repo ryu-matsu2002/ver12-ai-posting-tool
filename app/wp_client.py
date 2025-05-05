@@ -14,29 +14,27 @@ def normalize_url(url: str) -> str:
     return url.rstrip('/')
 
 # 投稿用のヘッダー作成（application/json 用）
-def _post_headers(username: str, app_pass: str, site_url: str) -> dict:
+def _post_headers(username: str, app_pass: str, referer: str) -> dict:
     token = base64.b64encode(f'{username}:{app_pass}'.encode('utf-8')).decode('utf-8')
     return {
         'Authorization': f'Basic {token}',
         'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0',
-        'Referer': f'{site_url}/wp-admin',
-        'Origin': site_url,
-        'Accept': '*/*, application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'Referer': referer,
+        'Accept': 'application/json',
+        'Connection': 'keep-alive'
     }
 
-
-
 # 画像アップロード用のヘッダー作成（Content-Typeなし）
-def _upload_headers(username: str, app_pass: str, site_url: str) -> dict:
+def _upload_headers(username: str, app_pass: str, referer: str) -> dict:
     token = base64.b64encode(f'{username}:{app_pass}'.encode('utf-8')).decode('utf-8')
     return {
         'Authorization': f'Basic {token}',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0',
-        'Referer': f'{site_url}/wp-admin',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'Referer': referer,
         'Accept': '*/*',
+        'Connection': 'keep-alive'
     }
-
 
 # 画像をWordPressにアップロードする関数
 def upload_image_to_wp(site_url: str, image_path: str, username: str, app_pass: str):
