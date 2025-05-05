@@ -18,7 +18,7 @@ from .forms import (
     LoginForm, RegisterForm,
     GenerateForm, PromptForm, ArticleForm, SiteForm
 )
-from .article_generator import enqueue_generation, _generate_slots
+from .article_generator import enqueue_generation
 from .wp_client import post_to_wp, _decorate_html
 
 JST = timezone("Asia/Tokyo")
@@ -178,15 +178,28 @@ def generate():
 def log():
     site_id = request.args.get("site_id", type=int)
 
-    # 未スケジュール記事の slot 自動割当
+    # 未スケジュール記事の slot をサイトごとに自動割当
+    from collections import defaultdict
+    from .article_generator import _generate_slots_per_site  # ← 必須
+
     unscheduled = Article.query.filter(
         Article.user_id == current_user.id,
         Article.scheduled_at.is_(None),
     ).all()
+
     if unscheduled:
-        slots = iter(_generate_slots(current_app, len(unscheduled)))
+        # サイトごとに分類
+        site_map = defaultdict(list)
         for art in unscheduled:
-            art.scheduled_at = next(slots)
+            if art.site_id:  # site_id が None の記事は無視
+                site_map[art.site_id].append(art)
+
+        # 各サイトごとにスロットを生成して割当
+        for site_id, articles in site_map.items():
+            slots = iter(_generate_slots_per_site(current_app, site_id, len(articles)))
+            for art in articles:
+                art.scheduled_at = next(slots)
+
         db.session.commit()
 
     # 記事取得
@@ -205,6 +218,7 @@ def log():
         site_id=site_id,
         jst=JST,
     )
+
 
 
 # ─────────── プレビュー

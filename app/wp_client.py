@@ -9,6 +9,10 @@ from .models import Site, Article
 # タイムアウト（秒）
 TIMEOUT = 30
 
+# URL正規化
+def normalize_url(url: str) -> str:
+    return url.rstrip('/')
+
 # 投稿用のヘッダー作成（application/json 用）
 def _post_headers(username: str, app_pass: str, referer: str) -> dict:
     token = base64.b64encode(f'{username}:{app_pass}'.encode('utf-8')).decode('utf-8')
@@ -34,6 +38,7 @@ def _upload_headers(username: str, app_pass: str, referer: str) -> dict:
 
 # 画像をWordPressにアップロードする関数
 def upload_image_to_wp(site_url: str, image_path: str, username: str, app_pass: str):
+    site_url = normalize_url(site_url)
     url = f"{site_url}/wp-json/wp/v2/media"
     headers = _upload_headers(username, app_pass, site_url)
 
@@ -56,13 +61,13 @@ def upload_image_to_wp(site_url: str, image_path: str, username: str, app_pass: 
         except Exception:
             error = response.text
         current_app.logger.warning(f"画像のアップロードに失敗: {response.status_code}, {error}")
-        current_app.logger.warning(f"画像アップ失敗ヘッダー: {response.headers}")
         raise HTTPError(f"画像のアップロードに失敗しました: {response.status_code}, {error}")
 
 # 投稿を行うメイン関数
 def post_to_wp(site: Site, art: Article) -> str:
-    url = f"{site.url}/wp-json/wp/v2/posts"
-    headers = _post_headers(site.username, site.app_pass, site.url)
+    site_url = normalize_url(site.url)
+    url = f"{site_url}/wp-json/wp/v2/posts"
+    headers = _post_headers(site.username, site.app_pass, site_url)
 
     featured_media_id = None
 
@@ -75,7 +80,7 @@ def post_to_wp(site: Site, art: Article) -> str:
                 f.write(response.content)
 
             featured_media_id, uploaded_url = upload_image_to_wp(
-                site.url, temp_path, site.username, site.app_pass
+                site_url, temp_path, site.username, site.app_pass
             )
 
             art.featured_image = uploaded_url
@@ -86,7 +91,7 @@ def post_to_wp(site: Site, art: Article) -> str:
 
     post_data = {
         "title": art.title,
-        "content": _decorate_html(art.body),
+        "content": f'<div class="ai-content">{_decorate_html(art.body)}</div>',
         "status": "publish",
     }
     if featured_media_id:
@@ -113,12 +118,15 @@ def post_to_wp(site: Site, art: Article) -> str:
                     "- サーバーの .htaccess に Authorization ヘッダーの許可設定があるか"
                 )
 
+        elif response.status_code == 403:
+            raise HTTPError("403エラー: サーバー側でアクセスが拒否されました。WAFやセキュリティ設定をご確認ください。")
+
         current_app.logger.error(f"記事の作成に失敗: {response.status_code}, {error}")
         raise HTTPError(f"記事の作成に失敗: {response.status_code}, {error}")
 
-# デザイン装飾用
+# デザイン装飾用（style属性を排除しclassに変換）
 def _decorate_html(content: str) -> str:
-    content = content.replace('<h2>', '<h2 style="font-size: 24px; color: blue;">')
-    content = content.replace('<h3>', '<h3 style="font-size: 20px; color: green;">')
-    content = content.replace('<p>',  '<p style="font-family: Arial, sans-serif; line-height: 1.6;">')
+    content = content.replace('<h2>', '<h2 class="ai-h2">')
+    content = content.replace('<h3>', '<h3 class="ai-h3">')
+    content = content.replace('<p>',  '<p class="ai-p">')
     return content

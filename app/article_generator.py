@@ -58,29 +58,45 @@ def fetch_featured_image(body_text: str, keyword: str) -> str | None:
         logging.error(f"Pixabay fetch error: {e}")
         return None
 
-def _generate_slots(app, n: int) -> List[datetime]:
+def _generate_slots_per_site(app, site_id: int, n: int) -> List[datetime]:
+    """
+    特定のサイトごとに、1日3～5記事（平均4記事）ルールに従って投稿スロットを生成する。
+    """
     if n <= 0:
         return []
+
     with app.app_context():
+        # JST で日単位にすでに何件スケジュールされているか取得
         jst_date = func.date(func.timezone("Asia/Tokyo", Article.scheduled_at))
         rows = db.session.query(jst_date.label("d"), func.count(Article.id))\
-            .filter(Article.scheduled_at.isnot(None)).group_by("d").all()
+            .filter(
+                Article.site_id == site_id,
+                Article.scheduled_at.isnot(None)
+            ).group_by("d").all()
+
+    # 日付ごとの予約数を dict に
     booked = {d: c for d, c in rows}
     slots = []
     day = date.today() + timedelta(days=1)
+
     while len(slots) < n:
+        # その日の残り投稿枠を計算
         remain = MAX_PERDAY - booked.get(day, 0)
         if remain > 0:
+            # ランダムで 1～5件、ただし remain/n に応じて調整
             need = min(random.randint(1, AVERAGE_POSTS), remain, n - len(slots))
             for h in sorted(random.sample(POST_HOURS, need)):
                 minute = random.randint(1, 59)
                 local = datetime.combine(day, time(h, minute), tzinfo=JST)
-                slots.append(local.astimezone(timezone.utc))
+                slots.append(local.astimezone(timezone.utc))  # UTC に変換して保存
         day += timedelta(days=1)
+
         if (day - date.today()).days > 365:
             raise RuntimeError("slot generation runaway")
-    current_app.logger.debug(f"Generated {n} slots for posting: {slots}")
+
+    current_app.logger.debug(f"Generated {n} slots for site {site_id}: {slots}")
     return slots[:n]
+
 
 SAFE_SYS = "あなたは一流の日本語 SEO ライターです。SEOを意識した見出しや本文を構成し、読者にとって有益な情報を提供してください。"
 
@@ -241,11 +257,16 @@ def enqueue_generation(user_id: int,
                        keywords: List[str],
                        title_prompt: str,
                        body_prompt: str,
-                       site_id: int | None = None) -> None:
+                       site_id: int) -> None:
+    if site_id is None:
+        raise ValueError("site_id is required for scheduling")
+
     app = current_app._get_current_object()
     copies = [random.randint(1, 3) for _ in keywords[:40]]
     total = sum(copies)
-    slots = iter(_generate_slots(app, total))
+
+    # サイトごとのスケジュール生成関数を使用
+    slots = iter(_generate_slots_per_site(app, site_id, total))
 
     def _bg():
         with app.app_context():
@@ -265,7 +286,7 @@ def enqueue_generation(user_id: int,
                         )
                         db.session.add(art)
                         db.session.flush()
-                        db.session.commit()  # <- ここでコミットしないように修正したが flushはまだ必要
+                        db.session.commit()
                         ids.append(art.id)
                     except Exception as e:
                         db.session.rollback()
@@ -274,6 +295,8 @@ def enqueue_generation(user_id: int,
                 _generate(app, aid, title_prompt, body_prompt)
 
     threading.Thread(target=_bg, daemon=True).start()
+
+
 
 
 def _generate_and_wait(app, aid, tpt, bpt):
