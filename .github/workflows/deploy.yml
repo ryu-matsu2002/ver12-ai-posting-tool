@@ -21,3 +21,4 @@ jobs:
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         source: "."
         target: "/var/www/ver12-ai-posting-tool"
+        
