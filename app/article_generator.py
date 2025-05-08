@@ -16,7 +16,7 @@ from .models import Article
 
 # OpenAI設定
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
-MODEL = os.getenv("OPENAI_MODEL", "gpt-4-turbo")
+MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 TOKENS = {"title": 80, "outline": 400, "block": 3000}
 TEMP = {"title": 0.7, "outline": 0.7, "block": 0.7}
 TOP_P = 0.95
