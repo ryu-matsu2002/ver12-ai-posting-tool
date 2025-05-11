@@ -21,6 +21,19 @@ from .forms import (
 from .article_generator import enqueue_generation
 from .wp_client import post_to_wp, _decorate_html
 
+# --- 既存の import の下に追加 ---
+import re
+import logging
+from datetime import datetime
+
+from .article_generator import (
+    _unique_title,
+    _outline,
+    _compose_body,
+    fetch_featured_image
+)
+
+
 JST = timezone("Asia/Tokyo")
 bp = Blueprint("main", __name__)
 
@@ -297,25 +310,42 @@ def retry_article(id: int):
         flash("プロンプトテンプレートが見つかりません。先にプロンプトを作成してください。", "danger")
         return redirect(url_for(".prompts"))
 
-    # 記事の状態をリセット
-    art.title = None
-    art.body = None
-    art.featured_image = None
-    art.image_url = None
-    art.status = "pending"
-    art.progress = 0
-    db.session.commit()
+    try:
+        # ✅ タイトル生成（失敗時に例外を出すよう _unique_title() 側で調整済み）
+        title = _unique_title(art.keyword, prompt.title_pt)
+        if not title or title.strip() == "":
+            raise ValueError("タイトルの生成に失敗しました")
 
-    # 再生成をキューに登録
-    enqueue_generation(
-        current_user.id,
-        [art.keyword],
-        prompt.title_pt,
-        prompt.body_pt,
-        art.site_id
-    )
-    flash("再試行のキューに登録しました", "success")
-    return redirect(url_for(".log"))
+        # ✅ アウトライン + 本文生成
+        outline = _outline(art.keyword, title, prompt.body_pt)
+        body = _compose_body(art.keyword, outline, prompt.body_pt)
+        if not body or body.strip() == "":
+            raise ValueError("本文の生成に失敗しました")
+
+        # ✅ アイキャッチ画像（optional）
+        match = re.search(r"<h2\b[^>]*>(.*?)</h2>", body or "", re.IGNORECASE)
+        first_h2 = match.group(1) if match else ""
+        query = f"{art.keyword} {first_h2}".strip()
+        image_url = fetch_featured_image(query)
+
+        # ✅ 正常なデータとして保存
+        art.title = title
+        art.body = body
+        art.image_url = image_url
+        art.status = "done"
+        art.progress = 100
+        art.updated_at = datetime.utcnow()
+        db.session.commit()
+
+        flash("記事の再生成が完了しました", "success")
+
+    except Exception as e:
+        db.session.rollback()
+        logging.exception(f"[再生成失敗] article_id={id} keyword={art.keyword} error={e}")
+        flash("記事の再生成に失敗しました", "danger")
+
+    return redirect(url_for(".log", site_id=art.site_id))
+
 
 
 @bp.route("/debug-post/<int:aid>")

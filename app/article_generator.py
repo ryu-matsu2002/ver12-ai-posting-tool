@@ -6,25 +6,26 @@ from datetime import datetime, date, timedelta, time, timezone
 from typing import List, Dict, Tuple
 from difflib import SequenceMatcher
 import pytz
+import re
 from flask import current_app
 from openai import OpenAI, BadRequestError
 from sqlalchemy import func
 from threading import Event
-
+from .image_utils import fetch_featured_image
 from . import db
 from .models import Article
 
 # OpenAI設定
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-TOKENS = {"title": 80, "outline": 400, "block": 3000}
-TEMP = {"title": 0.7, "outline": 0.7, "block": 0.7}
-TOP_P = 0.95
-CTX_LIMIT = 4096
-SHRINK = 0.75
+TOKENS = {"title": 120, "outline": 800, "block": 3000}
+TEMP = {"title": 0.6, "outline": 0.65, "block": 0.7}
+TOP_P = 0.9
+CTX_LIMIT = 12000
+SHRINK = 0.6
 AVG_BLOCK_CHARS = 600
 MIN_BODY_CHARS_DEFAULT = 1800
-MAX_BODY_CHARS_DEFAULT = 3000
+MAX_BODY_CHARS_DEFAULT = 4000
 MAX_TITLE_RETRY = 7
 TITLE_DUP_THRESH = 0.90
 
@@ -34,29 +35,6 @@ POST_HOURS = list(range(10, 21))
 MAX_PERDAY = 5
 AVERAGE_POSTS = 4
 
-# Pixabay APIキー
-PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY", "")
-
-def fetch_featured_image(body_text: str, keyword: str) -> str | None:
-    """Pixabay API から記事用画像を1枚取得"""
-    query = keyword.strip() or "ブログ"
-    url = "https://pixabay.com/api/"
-    params = {
-        "key": PIXABAY_API_KEY,
-        "q": query,
-        "image_type": "photo",
-        "per_page": 5,
-        "safesearch": "true",
-        "lang": "ja"
-    }
-    try:
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        return data["hits"][0]["webformatURL"] if data.get("hits") else None
-    except Exception as e:
-        logging.error(f"Pixabay fetch error: {e}")
-        return None
 
 def _generate_slots_per_site(app, site_id: int, n: int) -> List[datetime]:
     """
@@ -103,21 +81,59 @@ SAFE_SYS = "あなたは一流の日本語 SEO ライターです。SEOを意識
 def _tok(s: str) -> int:
     return int(len(s) / 1.8)
 
+def clean_gpt_output(text: str) -> str:
+    text = re.sub(r"```(?:html)?", "", text)
+    text = re.sub(r"```", "", text)
+    return text.strip()
+
+
 def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float) -> str:
     used = sum(_tok(m["content"]) for m in msgs)
-    max_t = min(max_t, CTX_LIMIT - used - 16)
+    available = CTX_LIMIT - used - 16
+    max_t = min(max_t, available)
+    if max_t < 1:
+        logging.error(f"max_tokens below minimum: {max_t} (used: {used})")
+        raise ValueError("Calculated max_tokens is below minimum.")
+
     def _call(m: int) -> str:
         res = client.chat.completions.create(
-            model=MODEL, messages=msgs,
-            max_tokens=m, temperature=temp, top_p=TOP_P, timeout=120,
+            model=MODEL,
+            messages=msgs,
+            max_tokens=m,
+            temperature=temp,
+            top_p=TOP_P,
+            timeout=120,
         )
-        return res.choices[0].message.content.strip()
+        finish = res.choices[0].finish_reason
+        content = res.choices[0].message.content.strip()
+
+        # ✅ usageログの保護付き表示
+        usage = getattr(res, "usage", None)
+        if usage:
+            logging.info(
+                f"[ChatGPT] finish_reason={finish} | tokens: prompt={usage.prompt_tokens}, "
+                f"completion={usage.completion_tokens}, total={usage.total_tokens}"
+            )
+
+        if finish == "length":
+            logging.warning("⚠️ OpenAI response was cut off due to max_tokens.")
+            content += "\n<p><em>※この文章はトークン上限で途中終了した可能性があります。</em></p>"
+
+        content = re.sub(r"^```html\s*", "", content, flags=re.IGNORECASE)
+        content = re.sub(r"^```\s*", "", content)
+        content = re.sub(r"\s*```$", "", content)
+        content = clean_gpt_output(content)
+        return content
+
     try:
         return _call(max_t)
     except BadRequestError as e:
         if "max_tokens" in str(e):
-            return _call(int(max_t * SHRINK))
+            retry_t = max(1, int(max_t * SHRINK))
+            return _call(retry_t)
         raise
+
+
 
 def _similar(a: str, b: str) -> bool:
     return SequenceMatcher(None, a, b).ratio() >= TITLE_DUP_THRESH
@@ -137,7 +153,8 @@ def _unique_title(kw: str, pt: str) -> str:
         cand = _title_once(kw, pt, retry=i > 0)
         if not any(_similar(cand, h) for h in history):
             return cand
-    return cand
+    logging.error(f"[タイトル生成失敗] keyword={kw}")
+    raise ValueError(f"タイトル生成に失敗しました: {kw}")
 
 # outline, body 作成（省略せずに続きが必要なら送信）
 
@@ -193,35 +210,99 @@ def _parse_range(pt: str) -> Tuple[int, int | None]:
         return int(m.group(1)), int(m.group(2))
     if m := re.search(r"(\d{3,5})\s*字", pt):
         return int(m.group(1)), None
-    return MIN_BODY_CHARS_DEFAULT, None
+
+    pt_len = len(pt)
+    if pt_len < 500:
+        return 800, 1200
+    elif pt_len < 1000:
+        return 1200, 1800
+    elif pt_len < 1500:
+        return 1800, 2400
+    else:
+        return 2200, 3000
+
 
 def _compose_body(kw: str, outline_raw: str, pt: str) -> str:
     min_chars, max_chars_user = _parse_range(pt)
     max_total = max_chars_user or MAX_BODY_CHARS_DEFAULT
     outline = _parse_outline(outline_raw)
     parts: List[str] = []
+
     for h2, h3s in outline:
         h2_short = (h2[:15] + "…") if len(h2) > 15 else h2
         h3s_limited = [h for h in h3s if len(h) <= 10][:3]
         block_html = _block_html(kw, h2_short, h3s_limited, "default_persona", pt)
         parts.append(block_html)
-    summary_prompt_sys = SAFE_SYS + "以下の本文を要約して、<h2 class=\"wp-heading\">まとめ</h2><p>～</p> を HTML で返してください。"
+
+    # 🔰 まとめセクション生成
+    summary_prompt_sys = (
+        SAFE_SYS +
+        "以下の本文を要約して、<h2 class=\"wp-heading\">まとめ</h2><p>～</p> を HTML で返してください。\n"
+        "・最後に読了感があるように結論やおすすめなどで締めくくってください。"
+    )
     summary_prompt_usr = "\n\n".join(parts) + "\n\n▼ 上記をまとめてください。"
+
     summary_html = _chat([
-        {"role":"system","content":summary_prompt_sys},
-        {"role":"user","content":summary_prompt_usr}
+        {"role": "system", "content": summary_prompt_sys},
+        {"role": "user", "content": summary_prompt_usr}
     ], TOKENS["block"], TEMP["block"]).strip()
+
+    # 🔧 応答が <h2> から始まらなければ明示的に囲む
     if not summary_html.startswith("<h2"):
         summary_html = '<h2 class="wp-heading">まとめ</h2><p>' + summary_html + '</p>'
+
     full = "\n\n".join(parts + [summary_html])
+
+    # 🔧 長すぎる場合は安全に切り取る
     if len(full) > max_total:
         snippet = full[:max_total]
-        cut = max(snippet.rfind("</p>"), snippet.rfind("</h2>"), snippet.rfind("</h3>"))
-        full = snippet[:cut+5] if cut != -1 else snippet
+
+        # 🔧 最後の <p>, <h2>, <h3> の終了タグ位置を探す
+        cut = max(
+            snippet.rfind("</p>"),
+            snippet.rfind("</h2>"),
+            snippet.rfind("</h3>")
+        )
+
+        # 🔧 安全にタグごとカット、それでも見つからなければそのまま切る
+        full = snippet[:cut + 5] if cut != -1 else snippet
+
+        # 🔧 不完全タグで終わってたら <p> で閉じる
+        if not full.strip().endswith("</p>"):
+            full += "</p>"
+
+        logging.warning("⚠️ 本文が最大長を超えたため安全に切り取りました")
+
     logging.debug("compose_body len=%s (max=%s)", len(full), max_total)
     return full
 
+def _parse_range(pt: str) -> Tuple[int, int | None]:
+    """
+    ユーザーの本文プロンプトの文字数に応じて、生成する本文の長さ（文字数）を調整する。
+    ユーザーが「○○字から○○字」と明示した場合はその指定を優先。
+    """
+    # ユーザーが明示的に文字数範囲を指定している場合
+    if m := re.search(r"(\d{3,5})\s*字から\s*(\d{3,5})\s*字", pt):
+        return int(m.group(1)), int(m.group(2))
+    if m := re.search(r"(\d{3,5})\s*字", pt):
+        return int(m.group(1)), None
+
+    # 🔧 自動調整（プロンプトの長さベース）
+    pt_len = len(pt)
+
+    if pt_len < 500:
+        return 800, 1200
+    elif pt_len < 1000:
+        return 1200, 1800
+    elif pt_len < 1500:
+        return 1800, 2400
+    else:
+        return 2200, 3000
+
+
+
 def _generate(app, aid: int, tpt: str, bpt: str):
+
     with app.app_context():
         art = Article.query.get(aid)
         if not art or art.status != "pending":
@@ -230,26 +311,40 @@ def _generate(app, aid: int, tpt: str, bpt: str):
             if not art.title:
                 art.title = f"{art.keyword}の記事タイトル"
                 logging.warning(f"Title was empty, setting default title: {art.title}")
+
             art.status, art.progress = "gen", 10
             db.session.flush()
+
+            # ✅ STEP1: アウトライン生成
             outline = _outline(art.keyword, art.title, bpt)
             art.progress = 50
             db.session.flush()
+
+            # ✅ STEP2: 本文生成
             art.body = _compose_body(art.keyword, outline, bpt)
             art.progress = 80
             db.session.flush()
-            match = re.search(r"<h2\\b[^>]*>(.*?)</h2>", art.body or "", re.IGNORECASE)
+
+            # ✅ STEP3: アイキャッチ画像取得（キーワード + h2 で精度強化）
+            match = re.search(r"<h2\b[^>]*>(.*?)</h2>", art.body or "", re.IGNORECASE)
             first_h2 = match.group(1) if match else ""
             query = f"{art.keyword} {first_h2}".strip()
-            art.image_url = fetch_featured_image(art.body or "", query)
-            art.status, art.progress = "done", 100
+            art.image_url = fetch_featured_image(query)  # ✅ 1引数に統一
+
+            # ✅ STEP4: 完了処理
+            art.status = "done"
+            art.progress = 100
             art.updated_at = datetime.utcnow()
             db.session.commit()
+
             logging.info(f"Completed article ID {aid} generation.")
+
         except Exception as e:
             logging.exception(f"Error generating article ID {aid}: {e}")
-            art.status, art.body = "error", f"Error: {e}"
+            art.status = "error"
+            art.body = f"Error: {e}"
             db.session.commit()
+
         finally:
             db.session.commit()
 
