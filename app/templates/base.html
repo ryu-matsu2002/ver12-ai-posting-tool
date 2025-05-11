@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ja" class="h-full" data-theme="light">
+<html lang="ja" class="h-full">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -8,79 +8,84 @@
   <!-- Tailwind (JIT CDN) -->
   <script src="https://cdn.tailwindcss.com/3.4.4"></script>
 
-  <!-- Google Fonts・Material Icons -->
+  <!-- Google Fonts・Material Icons -->
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 
-  <!-- ダークモード切替 -->
+  <!-- Tailwind 設定 -->
   <script>
     tailwind.config = {
       darkMode: 'class',
-      theme: { extend: { fontFamily: { sans: ['Roboto', 'sans-serif'] } } }
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Roboto', 'sans-serif']
+          },
+          colors: {
+            primary: '#031f6f',
+            primaryDark: '#02194e',
+            primaryHover: '#2546b0'
+          }
+        }
+      }
     };
-    function toggleTheme() {
-      document.documentElement.classList.toggle('dark');
-      localStorage.theme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
-    }
-    (()=>{ if(localStorage.theme==='dark'){document.documentElement.classList.add('dark')} })();
   </script>
 </head>
 
-<body class="h-full flex bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200">
+<body class="h-full flex bg-primary text-white">
 
   <!-- ===== SIDEBAR ===== -->
-  <aside class="w-60 shrink-0 h-full bg-white dark:bg-gray-800 border-r dark:border-gray-700 shadow-md flex flex-col">
-    <h1 class="text-xl font-semibold px-6 py-4 border-b dark:border-gray-700">AI Posting Tool</h1>
+  <aside class="w-60 shrink-0 h-full bg-primaryDark border-r border-gray-700 shadow-md flex flex-col">
+    <h1 class="text-xl font-semibold px-6 py-4 border-b border-gray-700">AI Posting Tool</h1>
 
     <nav class="flex-1 py-4 space-y-1">
       <a href="{{ url_for('main.dashboard') }}"
-         class="block px-6 py-2 hover:bg-blue-50 dark:hover:bg-gray-700 rounded-r-full
-                {{ 'font-semibold bg-blue-100 dark:bg-gray-700' if request.path=='/' else '' }}">
+         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
+                {{ 'font-semibold bg-[#0f2fa6]' if request.path=='/' else '' }}">
         <span class="material-icons align-middle mr-2">dashboard</span>Dashboard
       </a>
       <a href="{{ url_for('main.generate') }}"
-         class="block px-6 py-2 hover:bg-blue-50 dark:hover:bg-gray-700 rounded-r-full
-                {{ '/generate' in request.path and 'font-semibold bg-blue-100 dark:bg-gray-700' }}">
+         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
+                {{ '/generate' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">edit</span>記事生成
       </a>
       <a href="{{ url_for('main.prompts') }}"
-         class="block px-6 py-2 hover:bg-blue-50 dark:hover:bg-gray-700 rounded-r-full
-                {{ '/prompts' in request.path and 'font-semibold bg-blue-100 dark:bg-gray-700' }}">
+         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
+                {{ '/prompts' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">notes</span>プロンプト
       </a>
-      <!-- ここを追加 -->
       <a href="{{ url_for('main.sites') }}"
-         class="block px-6 py-2 hover:bg-blue-50 dark:hover:bg-gray-700 rounded-r-full
-                {{ '/sites' in request.path and 'font-semibold bg-blue-100 dark:bg-gray-700' }}">
+         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
+                {{ '/sites' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">storage</span>サイト管理
       </a>
       <a href="{{ url_for('main.log') }}"
-         class="block px-6 py-2 hover:bg-blue-50 dark:hover:bg-gray-700 rounded-r-full
-                {{ '/log' in request.path and 'font-semibold bg-blue-100 dark:bg-gray-700' }}">
+         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
+                {{ '/log' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">article</span>ログ
       </a>
       <a href="{{ url_for('main.login') }}"
-         class="block px-6 py-2 hover:bg-blue-50 dark:hover:bg-gray-700 rounded-r-full
-                {{ '/login' in request.path and 'font-semibold bg-blue-100 dark:bg-gray-700' }}">
+         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
+                {{ '/login' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">login</span>Login
       </a>
     </nav>
 
-    <div class="px-6 py-4 border-t dark:border-gray-700 flex items-center justify-between">
-      <button onclick="toggleTheme()" class="material-icons text-gray-500 dark:text-gray-300">dark_mode</button>
-      <a href="{{ url_for('main.logout') }}" class="text-sm text-red-500 hover:underline">Logout</a>
+    <div class="px-6 py-4 border-t border-gray-700 flex items-center justify-between">
+      <button onclick="toggleTheme()" class="material-icons text-gray-300">dark_mode</button>
+      <a href="{{ url_for('main.logout') }}" class="text-sm text-red-400 hover:underline">Logout</a>
     </div>
   </aside>
 
   <!-- ===== MAIN ===== -->
-  <main class="flex-1 overflow-y-auto p-8">
+  <main class="flex-1 overflow-y-auto p-8 bg-white text-black">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         <div class="space-y-2 mb-6">
           {% for cat, msg in messages %}
             <div class="p-3 rounded text-sm
-                        {{ 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' if cat=='success'
-                           else 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' }}">
+                        {{ 'bg-green-100 text-green-800' if cat=='success'
+                           else 'bg-red-100 text-red-800' }}">
               {{ msg }}
             </div>
           {% endfor %}
