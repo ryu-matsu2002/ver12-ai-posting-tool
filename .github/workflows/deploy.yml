@@ -21,7 +21,17 @@ jobs:
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         source: "."
         target: "/var/www/ver12-ai-posting-tool"
-        
+
+    - name: Install Python dependencies inside venv
+      uses: appleboy/ssh-action@v0.1.10
+      with:
+        host: 85.131.245.98
+        username: root
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        script: |
+          cd /var/www/ver12-ai-posting-tool
+          ./venv/bin/pip install -r requirements.txt
+
     - name: Restart Flask App on Xserver
       uses: appleboy/ssh-action@v0.1.10
       with:
@@ -31,5 +41,4 @@ jobs:
         script: |
           cd /var/www/ver12-ai-posting-tool
           git pull origin main
-          source venv/bin/activate
           sudo systemctl restart ai-posting.service
