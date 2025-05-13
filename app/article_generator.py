@@ -1,12 +1,11 @@
 # app/article_generator.py
-# 修正版（Pixabay対応 + バグ修正済）
+# 最新版：プロンプト100%反映 + タイトル/本文出力バグ修正済
 
 import os, re, random, threading, logging, requests
 from datetime import datetime, date, timedelta, time, timezone
 from typing import List, Dict, Tuple
 from difflib import SequenceMatcher
 import pytz
-import re
 from flask import current_app
 from openai import OpenAI, BadRequestError
 from sqlalchemy import func
@@ -18,81 +17,57 @@ from .models import Article
 # OpenAI設定
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-TOKENS = {"title": 120, "outline": 800, "block": 3000}
-TEMP = {"title": 0.6, "outline": 0.65, "block": 0.7}
+
+# 🔧 token数制限（本文切れ対策）
+TOKENS = {
+    "title": 120,
+    "outline": 800,
+    "block": 3600
+}
+
+# 🔧 温度設定（出力のブレ抑制）
+TEMP = {
+    "title": 0.6,
+    "outline": 0.65,
+    "block": 0.65
+}
+
 TOP_P = 0.9
 CTX_LIMIT = 12000
-SHRINK = 0.6
-AVG_BLOCK_CHARS = 600
-MIN_BODY_CHARS_DEFAULT = 1800
+SHRINK = 0.85
 MAX_BODY_CHARS_DEFAULT = 4000
 MAX_TITLE_RETRY = 7
 TITLE_DUP_THRESH = 0.90
-
-# スケジュール設定（JST）
 JST = pytz.timezone("Asia/Tokyo")
 POST_HOURS = list(range(10, 21))
 MAX_PERDAY = 5
 AVERAGE_POSTS = 4
 
-
-def _generate_slots_per_site(app, site_id: int, n: int) -> List[datetime]:
-    """
-    特定のサイトごとに、1日3～5記事（平均4記事）ルールに従って投稿スロットを生成する。
-    """
-    if n <= 0:
-        return []
-
-    with app.app_context():
-        # JST で日単位にすでに何件スケジュールされているか取得
-        jst_date = func.date(func.timezone("Asia/Tokyo", Article.scheduled_at))
-        rows = db.session.query(jst_date.label("d"), func.count(Article.id))\
-            .filter(
-                Article.site_id == site_id,
-                Article.scheduled_at.isnot(None)
-            ).group_by("d").all()
-
-    # 日付ごとの予約数を dict に
-    booked = {d: c for d, c in rows}
-    slots = []
-    day = date.today() + timedelta(days=1)
-
-    while len(slots) < n:
-        # その日の残り投稿枠を計算
-        remain = MAX_PERDAY - booked.get(day, 0)
-        if remain > 0:
-            # ランダムで 1～5件、ただし remain/n に応じて調整
-            need = min(random.randint(1, AVERAGE_POSTS), remain, n - len(slots))
-            for h in sorted(random.sample(POST_HOURS, need)):
-                minute = random.randint(1, 59)
-                local = datetime.combine(day, time(h, minute), tzinfo=JST)
-                slots.append(local.astimezone(timezone.utc))  # UTC に変換して保存
-        day += timedelta(days=1)
-
-        if (day - date.today()).days > 365:
-            raise RuntimeError("slot generation runaway")
-
-    current_app.logger.debug(f"Generated {n} slots for site {site_id}: {slots}")
-    return slots[:n]
-
-
-SAFE_SYS = "あなたは一流の日本語 SEO ライターです。SEOを意識した見出しや本文を構成し、読者にとって有益な情報を提供してください。"
-
-def _tok(s: str) -> int:
-    return int(len(s) / 1.8)
-
+# ============================================
+# 🔧 安全な出力クリーニング関数
+# GPTが <html> や <body> で囲んでくるケースを除去
+# ============================================
 def clean_gpt_output(text: str) -> str:
     text = re.sub(r"```(?:html)?", "", text)
     text = re.sub(r"```", "", text)
+    text = re.sub(r"<!DOCTYPE html>.*?<body.*?>", "", text, flags=re.DOTALL|re.IGNORECASE)
+    text = re.sub(r"</body>.*?</html>", "", text, flags=re.DOTALL|re.IGNORECASE)
     return text.strip()
 
+# ============================================
+# 🔧 トークンカウント（概算）
+# ============================================
+def _tok(s: str) -> int:
+    return int(len(s) / 1.8)
 
+# ============================================
+# 🔧 OpenAIチャット呼び出し関数
+# ============================================
 def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float) -> str:
     used = sum(_tok(m["content"]) for m in msgs)
     available = CTX_LIMIT - used - 16
     max_t = min(max_t, available)
     if max_t < 1:
-        logging.error(f"max_tokens below minimum: {max_t} (used: {used})")
         raise ValueError("Calculated max_tokens is below minimum.")
 
     def _call(m: int) -> str:
@@ -104,26 +79,14 @@ def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float) -> str:
             top_p=TOP_P,
             timeout=120,
         )
-        finish = res.choices[0].finish_reason
         content = res.choices[0].message.content.strip()
-
-        # ✅ usageログの保護付き表示
-        usage = getattr(res, "usage", None)
-        if usage:
-            logging.info(
-                f"[ChatGPT] finish_reason={finish} | tokens: prompt={usage.prompt_tokens}, "
-                f"completion={usage.completion_tokens}, total={usage.total_tokens}"
-            )
+        finish = res.choices[0].finish_reason
 
         if finish == "length":
             logging.warning("⚠️ OpenAI response was cut off due to max_tokens.")
-            content += "\n<p><em>※この文章はトークン上限で途中終了した可能性があります。</em></p>"
+            content += "<p><em>※この文章はトークン上限で途中終了した可能性があります。</em></p>"
 
-        content = re.sub(r"^```html\s*", "", content, flags=re.IGNORECASE)
-        content = re.sub(r"^```\s*", "", content)
-        content = re.sub(r"\s*```$", "", content)
-        content = clean_gpt_output(content)
-        return content
+        return clean_gpt_output(content)
 
     try:
         return _call(max_t)
@@ -133,211 +96,217 @@ def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float) -> str:
             return _call(retry_t)
         raise
 
-
-
+# ============================================
+# 🔧 タイトル類似性チェック
+# ============================================
 def _similar(a: str, b: str) -> bool:
     return SequenceMatcher(None, a, b).ratio() >= TITLE_DUP_THRESH
 
+# ============================================
+# ✅ 修正済み：タイトル生成（HTML排除・1行制限）
+# ============================================
 def _title_once(kw: str, pt: str, retry: bool) -> str:
     extra = "\n※過去に使われたタイトルや似たタイトルを絶対に避けてください。" if retry else ""
-    usr = f"{pt}{extra}\n\n▼ 条件\n- 必ずキーワードを含める\n- タイトルはユニークであること\n▼ キーワード: {kw}"
-    sys = SAFE_SYS + "魅力的な日本語タイトルを 1 行だけ返してください。"
+    usr = f"{pt}{extra}\n\n▼ 条件\n- 必ずキーワードを含める\n- タイトルはユニークであること\n- 出力は1行だけ\n- キーワード順は変更不可\n▼ キーワード: {kw}"
+    sys = "あなたはSEOに強い日本語ライターです。絶対にタイトル1行のみを出力してください。"
     return _chat([
         {"role": "system", "content": sys},
         {"role": "user", "content": usr},
     ], TOKENS["title"], TEMP["title"])
 
+# ============================================
+# 🔧 タイトルの一意性保証
+# ============================================
 def _unique_title(kw: str, pt: str) -> str:
     history = [t[0] for t in db.session.query(Article.title).filter(Article.keyword == kw)]
     for i in range(MAX_TITLE_RETRY):
         cand = _title_once(kw, pt, retry=i > 0)
         if not any(_similar(cand, h) for h in history):
             return cand
-    logging.error(f"[タイトル生成失敗] keyword={kw}")
     raise ValueError(f"タイトル生成に失敗しました: {kw}")
 
-# outline, body 作成（省略せずに続きが必要なら送信）
+# ============================================
+# ✅ ユーザーの希望文字数をGPTに明示して長さ不足を防止
+# ============================================
+def _compose_body(kw: str, pt: str, format: str = "html", self_review: bool = False) -> str:
+    """
+    SEO記事本文を生成する関数（追記なし・構造強制・装飾ガイドライン付き）
 
+    Args:
+        kw: キーワード
+        pt: ユーザープロンプト
+        format: "html" または "markdown"
+        self_review: True で自己添削を実行
 
-def _outline(kw: str, title: str, pt: str) -> str:
-    sys = SAFE_SYS + "## / ### で見出しを生成し、記事の内容に合わせて柔軟に調整します。"
-    usr = f"{pt}\n\n▼ KW: {kw}\n▼ TITLE: {title}"
-    return _chat([
-        {"role": "system", "content": sys},
-        {"role": "user", "content": usr},
-    ], TOKENS["outline"], TEMP["outline"])
-
-def _parse_outline(raw: str) -> List[Tuple[str, List[str]]]:
-    blocks, h2, h3s = [], None, []
-    for ln in raw.splitlines():
-        s = ln.strip()
-        if not s:
-            continue
-        if s.startswith("## "):
-            if h2:
-                blocks.append((h2, h3s))
-            h2, h3s = s[3:], []
-        elif s.startswith("### "):
-            h3s.append(s[4:])
-        else:
-            if h2:
-                blocks.append((h2, h3s))
-            h2, h3s = s, []
-    if h2:
-        blocks.append((h2, h3s))
-    return blocks
-
-def _block_html(kw: str, h2: str, h3s: List[str], persona: str, pt: str) -> str:
-    h3_mark = "\n".join(f"### {h}" for h in h3s) if h3s else ""
-    sys = (
-        SAFE_SYS +
-        "以下の条件で <h2> セクションを HTML 生成してください。\n"
-        "- この H2 ブロックは 550〜750 字でまとめる\n"
-        "- 小見出し(H2) は 15 字以内\n"
-        "- 構成: 結論→理由→具体例×3→再結論\n"
-        "- 具体例は <h3 class=\"wp-heading\"> で示す\n"
-        f"- 視点: {persona}\n"
-        "- <h2>/<h3> には class=\"wp-heading\" を付与"
-    )
-    usr = f"{pt}\n\n▼ キーワード: {kw}\n▼ H2: {h2}\n▼ H3 候補:\n{h3_mark}"
-    return _chat([
-        {"role": "system", "content": sys},
-        {"role": "user", "content": usr},
-    ], TOKENS["block"], TEMP["block"])
-
-def _parse_range(pt: str) -> Tuple[int, int | None]:
-    if m := re.search(r"(\d{3,5})\s*字から\s*(\d{3,5})\s*字", pt):
-        return int(m.group(1)), int(m.group(2))
-    if m := re.search(r"(\d{3,5})\s*字", pt):
-        return int(m.group(1)), None
-
-    pt_len = len(pt)
-    if pt_len < 500:
-        return 800, 1200
-    elif pt_len < 1000:
-        return 1200, 1800
-    elif pt_len < 1500:
-        return 1800, 2400
-    else:
-        return 2200, 3000
-
-
-def _compose_body(kw: str, outline_raw: str, pt: str) -> str:
+    Returns:
+        本文（HTMLまたはMarkdown形式）
+    """
     min_chars, max_chars_user = _parse_range(pt)
     max_total = max_chars_user or MAX_BODY_CHARS_DEFAULT
-    outline = _parse_outline(outline_raw)
-    parts: List[str] = []
 
-    for h2, h3s in outline:
-        h2_short = (h2[:15] + "…") if len(h2) > 15 else h2
-        h3s_limited = [h for h in h3s if len(h) <= 10][:3]
-        block_html = _block_html(kw, h2_short, h3s_limited, "default_persona", pt)
-        parts.append(block_html)
+    # 📌形式に応じた構成/装飾指示
+    if format == "markdown":
+        structure_helper = (
+            "\n- Markdown形式で出力してください（## 見出し、### サブ見出し、- 箇条書き、**強調**）"
+            "\n- ## 見出しは3〜5個までにしてください"
+            "\n- 番号付き小見出し（1.〜など）は ### を使ってください"
+            "\n- 最後は ## まとめ セクションで必ず締めてください"
+        )
+    else:
+        structure_helper = (
+            "\n- HTML形式で出力してください"
+            "\n- <h2 class='wp-heading'>…</h2> を3〜5個使ってください"
+            "\n- 番号付き小見出し（1.〜など）は <h3 class='wp-heading'>…</h3> を使ってください"
+            "\n- 箇条書きには <ul><li>…</li></ul> を使ってください"
+            "\n- 最後は <h2 class='wp-heading'>まとめ</h2> で締めてください"
+        )
 
-    # 🔰 まとめセクション生成
-    summary_prompt_sys = (
-        SAFE_SYS +
-        "以下の本文を要約して、<h2 class=\"wp-heading\">まとめ</h2><p>～</p> を HTML で返してください。\n"
-        "・最後に読了感があるように結論やおすすめなどで締めくくってください。"
+    # 📌文字数制約を強く指示
+    char_instruction = f"\n- 本文は必ず {min_chars}〜{max_total} 字の範囲で書いてください"
+
+    system_prompt = (
+        "あなたは一流のSEO記事ライターです。"
+        "以下のルールとユーザーの指示に100%従い、構造的で高品質な記事を生成してください。"
+        f"{structure_helper}{char_instruction}"
     )
-    summary_prompt_usr = "\n\n".join(parts) + "\n\n▼ 上記をまとめてください。"
+    user_prompt = f"キーワード: {kw}\n\n▼ ユーザーの指示:\n{pt}"
 
-    summary_html = _chat([
-        {"role": "system", "content": summary_prompt_sys},
-        {"role": "user", "content": summary_prompt_usr}
-    ], TOKENS["block"], TEMP["block"]).strip()
+    # ✅1回のみ生成
+    full = _chat([
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ], TOKENS["block"], TEMP["block"])
 
-    # 🔧 応答が <h2> から始まらなければ明示的に囲む
-    if not summary_html.startswith("<h2"):
-        summary_html = '<h2 class="wp-heading">まとめ</h2><p>' + summary_html + '</p>'
+    # ✅自己添削オプション（任意）
+    if self_review:
+        logging.info("🧠 自己添削モードを実行中...")
+        full = _chat([
+            {"role": "system", "content": "あなたはSEO記事の編集者です。以下の記事を添削し、構成と論理を強化してください。"},
+            {"role": "user", "content": full}
+        ], TOKENS["block"], TEMP["block"])
 
-    full = "\n\n".join(parts + [summary_html])
-
-    # 🔧 長すぎる場合は安全に切り取る
+    # ✅文字数制限超過対応
     if len(full) > max_total:
         snippet = full[:max_total]
-
-        # 🔧 最後の <p>, <h2>, <h3> の終了タグ位置を探す
         cut = max(
             snippet.rfind("</p>"),
             snippet.rfind("</h2>"),
-            snippet.rfind("</h3>")
+            snippet.rfind("</h3>"),
+            snippet.rfind("</li>") if format == "html" else snippet.rfind("\n")
         )
-
-        # 🔧 安全にタグごとカット、それでも見つからなければそのまま切る
         full = snippet[:cut + 5] if cut != -1 else snippet
-
-        # 🔧 不完全タグで終わってたら <p> で閉じる
-        if not full.strip().endswith("</p>"):
+        if format == "html" and not full.strip().endswith("</p>"):
             full += "</p>"
-
         logging.warning("⚠️ 本文が最大長を超えたため安全に切り取りました")
 
-    logging.debug("compose_body len=%s (max=%s)", len(full), max_total)
     return full
 
+
+# ============================================
+# 🔧 文字数レンジをプロンプトから自動推定
+# ============================================
 def _parse_range(pt: str) -> Tuple[int, int | None]:
     """
-    ユーザーの本文プロンプトの文字数に応じて、生成する本文の長さ（文字数）を調整する。
-    ユーザーが「○○字から○○字」と明示した場合はその指定を優先。
+    ユーザープロンプトの文字数に応じて、必要な本文の長さを推定。
+    - 明示的な「○○字から○○字」があれば優先
+    - なければプロンプト長さに応じて強めに指示（最小2200字以上）
     """
-    # ユーザーが明示的に文字数範囲を指定している場合
     if m := re.search(r"(\d{3,5})\s*字から\s*(\d{3,5})\s*字", pt):
         return int(m.group(1)), int(m.group(2))
     if m := re.search(r"(\d{3,5})\s*字", pt):
         return int(m.group(1)), None
 
-    # 🔧 自動調整（プロンプトの長さベース）
     pt_len = len(pt)
-
     if pt_len < 500:
-        return 800, 1200
+        return 2200, 2600
     elif pt_len < 1000:
-        return 1200, 1800
+        return 2400, 3000
     elif pt_len < 1500:
-        return 1800, 2400
+        return 2500, 3200
     else:
-        return 2200, 3000
+        return 2700, 3500
 
 
+# ============================================
+# 🔧 投稿スロット生成（1日3〜5記事ルール）
+# ============================================
+def _generate_slots_per_site(app, site_id: int, n: int) -> List[datetime]:
+    if n <= 0:
+        return []
+    with app.app_context():
+        jst_date = func.date(func.timezone("Asia/Tokyo", Article.scheduled_at))
+        rows = db.session.query(jst_date.label("d"), func.count(Article.id))\
+            .filter(Article.site_id == site_id, Article.scheduled_at.isnot(None))\
+            .group_by("d").all()
+    booked = {d: c for d, c in rows}
+    slots, day = [], date.today() + timedelta(days=1)
+    while len(slots) < n:
+        remain = MAX_PERDAY - booked.get(day, 0)
+        if remain > 0:
+            need = min(random.randint(1, AVERAGE_POSTS), remain, n - len(slots))
+            for h in sorted(random.sample(POST_HOURS, need)):
+                minute = random.randint(1, 59)
+                local = datetime.combine(day, time(h, minute), tzinfo=JST)
+                slots.append(local.astimezone(timezone.utc))
+        day += timedelta(days=1)
+        if (day - date.today()).days > 365:
+            raise RuntimeError("slot generation runaway")
+    return slots[:n]
 
-def _generate(app, aid: int, tpt: str, bpt: str):
+# ============================================
+# 🔧 単体記事生成処理（タイトル→本文→画像→完了）
+# ============================================
+def _generate(app, aid: int, tpt: str, bpt: str, format: str = "html", self_review: bool = False):
+    """
+    単体記事生成関数（1記事ごとに呼び出される）
+    - タイトル生成
+    - 本文生成（format / self_review オプション対応）
+    - アイキャッチ画像取得
 
+    Args:
+        app: Flaskアプリケーション
+        aid: Article ID
+        tpt: タイトルプロンプト
+        bpt: 本文プロンプト
+        format: "html" または "markdown"
+        self_review: True の場合、GPTに自己添削を依頼する
+    """
     with app.app_context():
         art = Article.query.get(aid)
         if not art or art.status != "pending":
             return
+
         try:
             if not art.title:
                 art.title = f"{art.keyword}の記事タイトル"
-                logging.warning(f"Title was empty, setting default title: {art.title}")
 
             art.status, art.progress = "gen", 10
             db.session.flush()
 
-            # ✅ STEP1: アウトライン生成
-            outline = _outline(art.keyword, art.title, bpt)
+            # タイトルがある前提で本文生成へ（進捗50%）
             art.progress = 50
             db.session.flush()
 
-            # ✅ STEP2: 本文生成
-            art.body = _compose_body(art.keyword, outline, bpt)
+            # ✅ 新しいオプション付き本文生成
+            art.body = _compose_body(
+                kw=art.keyword,
+                pt=bpt,
+                format=format,
+                self_review=self_review
+            )
             art.progress = 80
             db.session.flush()
 
-            # ✅ STEP3: アイキャッチ画像取得（キーワード + h2 で精度強化）
+            # ✅ アイキャッチ画像（1つ目のh2見出しを参照）
             match = re.search(r"<h2\b[^>]*>(.*?)</h2>", art.body or "", re.IGNORECASE)
             first_h2 = match.group(1) if match else ""
             query = f"{art.keyword} {first_h2}".strip()
-            art.image_url = fetch_featured_image(query)  # ✅ 1引数に統一
+            art.image_url = fetch_featured_image(query)
 
-            # ✅ STEP4: 完了処理
             art.status = "done"
             art.progress = 100
             art.updated_at = datetime.utcnow()
             db.session.commit()
-
-            logging.info(f"Completed article ID {aid} generation.")
 
         except Exception as e:
             logging.exception(f"Error generating article ID {aid}: {e}")
@@ -345,22 +314,29 @@ def _generate(app, aid: int, tpt: str, bpt: str):
             art.body = f"Error: {e}"
             db.session.commit()
 
-        finally:
-            db.session.commit()
 
-def enqueue_generation(user_id: int,
-                       keywords: List[str],
-                       title_prompt: str,
-                       body_prompt: str,
-                       site_id: int) -> None:
+# ============================================
+# 🔧 非同期一括生成（enqueue）
+# ============================================
+def enqueue_generation(
+    user_id: int,
+    keywords: List[str],
+    title_prompt: str,
+    body_prompt: str,
+    site_id: int,
+    format: str = "html",         # ← 追加：Markdown対応
+    self_review: bool = False     # ← 追加：自己添削フラグ
+) -> None:
+    """
+    指定ユーザーに対して複数キーワードの記事を非同期で一括生成キューへ追加。
+    format と self_review オプションで記事品質と出力形式を制御できる。
+    """
     if site_id is None:
         raise ValueError("site_id is required for scheduling")
 
     app = current_app._get_current_object()
     copies = [random.randint(1, 3) for _ in keywords[:40]]
     total = sum(copies)
-
-    # サイトごとのスケジュール生成関数を使用
     slots = iter(_generate_slots_per_site(app, site_id, total))
 
     def _bg():
@@ -386,14 +362,17 @@ def enqueue_generation(user_id: int,
                     except Exception as e:
                         db.session.rollback()
                         logging.exception(f"Error creating Article for keyword '{kw}': {e}")
+
+            # ✅ 各記事の生成処理（format / self_review オプションも反映）
             for aid in ids:
-                _generate(app, aid, title_prompt, body_prompt)
+                _generate(app, aid, title_prompt, body_prompt, format=format, self_review=self_review)
 
     threading.Thread(target=_bg, daemon=True).start()
 
 
-
-
+# ============================================
+# 🔧 同期生成用（主に再生成用）
+# ============================================
 def _generate_and_wait(app, aid, tpt, bpt):
     event = Event()
     def background():

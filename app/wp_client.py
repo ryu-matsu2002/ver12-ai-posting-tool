@@ -74,22 +74,34 @@ def post_to_wp(site: Site, art: Article) -> str:
     featured_media_id = None
 
     if art.image_url and art.image_url.startswith("http"):
-        try:
-            response = requests.get(art.image_url, timeout=10)
-            ext = os.path.splitext(art.image_url)[-1].split("?")[0] or ".jpg"
-            temp_path = f"temp_featured_image{ext}"
-            with open(temp_path, "wb") as f:
-                f.write(response.content)
+       try:
+           response = requests.get(art.image_url, timeout=10)
 
-            featured_media_id, uploaded_url = upload_image_to_wp(
-                site_url, temp_path, site.username, site.app_pass
-            )
+        # ★ Content-Type チェック（画像でなければ中止）
+           content_type = response.headers.get("Content-Type", "")
+           if not content_type.startswith("image/"):
+               raise ValueError(f"取得先が画像ではありません: {content_type}")
 
-            art.featured_image = uploaded_url
-            os.remove(temp_path)
+        # ★ 拡張子が不明な場合は .jpg をデフォルトに
+           ext = os.path.splitext(art.image_url)[-1].split("?")[0]
+           if not ext.lower() in ['.jpg', '.jpeg', '.png']:
+                ext = '.jpg'
 
-        except Exception as e:
-            current_app.logger.warning(f"アイキャッチ画像のアップロード失敗: {e}")
+           temp_path = f"temp_featured_image{ext}"
+           with open(temp_path, "wb") as f:
+               f.write(response.content)
+
+           featured_media_id, uploaded_url = upload_image_to_wp(
+               site_url, temp_path, site.username, site.app_pass
+           )
+
+           art.featured_image = uploaded_url
+           os.remove(temp_path)
+
+       except Exception as e:  
+           current_app.logger.warning(f"アイキャッチ画像のアップロード失敗: {e}")
+
+
 
     post_data = {
         "title": art.title,

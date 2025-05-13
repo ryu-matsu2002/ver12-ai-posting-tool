@@ -126,20 +126,32 @@ def fetch_featured_image(query: str) -> str:
     絶対に文字列を返す。
     Pixabay→Augmented Pixabay→Unsplash→DEFAULT_URL の順。
     """
+    def is_safe_image(url: str) -> bool:
+        return url.lower().endswith(('.jpg', '.jpeg', '.png'))
+
     try:
         keywords = query.split()
+
         # 1. 素のクエリ
         hits = _search_pixabay(query)
         url  = _pick_pixabay(hits, keywords)
-        if url:
+        if url and is_safe_image(url):
             return url
+
         # 2. ビジネス補強
         hits = _search_pixabay(query + " business money")
         url  = _pick_pixabay(hits, keywords + ["business","money"])
-        if url:
+        if url and is_safe_image(url):
             return url
+
         # 3. Unsplash
-        return _unsplash_src(query)
+        unsplash_url = _unsplash_src(query)
+        if is_safe_image(unsplash_url):
+            return unsplash_url
+
+        # fallback
+        return DEFAULT_IMAGE_URL
     except Exception as e:
         logging.error("fetch_featured_image fatal: %s", e)
         return DEFAULT_IMAGE_URL
+

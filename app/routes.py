@@ -28,7 +28,6 @@ from datetime import datetime
 
 from .article_generator import (
     _unique_title,
-    _outline,
     _compose_body,
     fetch_featured_image
 )
@@ -317,8 +316,7 @@ def retry_article(id: int):
             raise ValueError("タイトルの生成に失敗しました")
 
         # ✅ アウトライン + 本文生成
-        outline = _outline(art.keyword, title, prompt.body_pt)
-        body = _compose_body(art.keyword, outline, prompt.body_pt)
+        body = _compose_body(art.keyword, prompt.body_pt)
         if not body or body.strip() == "":
             raise ValueError("本文の生成に失敗しました")
 
