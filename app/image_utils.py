@@ -12,6 +12,7 @@ None を返さないことでプレビュー／WP投稿時に “thumb” のま
 
 from __future__ import annotations
 import os, random, time, logging, requests
+import re
 from typing import List
 from flask import current_app
 
@@ -123,35 +124,74 @@ def _unsplash_src(query: str) -> str:
 # ══════════════════════════════════════════════
 def fetch_featured_image(query: str) -> str:
     """
-    絶対に文字列を返す。
-    Pixabay→Augmented Pixabay→Unsplash→DEFAULT_URL の順。
+    高精度なアイキャッチ画像を取得する。
+    クエリから不要語除去・英語化・補強語追加・Pixabay→Unsplash→デフォルトの順で対応。
     """
     def is_safe_image(url: str) -> bool:
         return url.lower().endswith(('.jpg', '.jpeg', '.png'))
 
+    def clean_and_translate(query: str) -> str:
+        stopwords = {"の", "に", "で", "を", "と", "が", "は", "から", "ため", "こと", "について", "方法", "おすすめ", "完全ガイド"}
+        jp_to_en = {
+            "ピラティス": "pilates", "腰痛": "back pain", "改善": "improvement", "福岡": "fukuoka",
+            "英語": "english", "副業": "side job", "ブログ": "blog", "ビジネス": "business",
+            "旅行": "travel", "脱毛": "hair removal", "メイク": "makeup", "占い": "fortune telling"
+        }
+        keywords = [w for w in re.split(r"[\\s　]+", query) if w and w not in stopwords]
+        translated = [jp_to_en.get(w, w) for w in keywords]
+        return " ".join(translated)
+
     try:
-        keywords = query.split()
+        base_query = clean_and_translate(query)
+        keywords = base_query.split()
 
         # 1. 素のクエリ
-        hits = _search_pixabay(query)
+        hits = _search_pixabay(base_query)
         url  = _pick_pixabay(hits, keywords)
         if url and is_safe_image(url):
             return url
 
-        # 2. ビジネス補強
-        hits = _search_pixabay(query + " business money")
-        url  = _pick_pixabay(hits, keywords + ["business","money"])
+        # 2. 補強検索（補助語追加）
+        enhanced_query = f"{base_query} woman person lifestyle"
+        hits = _search_pixabay(enhanced_query)
+        url = _pick_pixabay(hits, keywords + ["woman", "person", "lifestyle"])
         if url and is_safe_image(url):
             return url
 
-        # 3. Unsplash
-        unsplash_url = _unsplash_src(query)
+        # 3. Unsplash fallback
+        unsplash_url = _unsplash_src(base_query)
         if is_safe_image(unsplash_url):
             return unsplash_url
 
-        # fallback
         return DEFAULT_IMAGE_URL
+
     except Exception as e:
         logging.error("fetch_featured_image fatal: %s", e)
         return DEFAULT_IMAGE_URL
 
+
+def fetch_featured_image_from_body(body_html: str, keyword: str) -> str:
+    from bs4 import BeautifulSoup
+
+    def extract_top_topics(html: str) -> List[str]:
+        soup = BeautifulSoup(html, "html.parser")
+        # h2とh3をすべて取得し、見出し語句の上位3件を選定
+        headings = soup.find_all(["h2", "h3"])
+        phrases = [h.get_text().strip() for h in headings]
+        return phrases[:3] if phrases else [keyword]
+
+    try:
+        topics = extract_top_topics(body_html)
+        queries = [f"{keyword} {t}" for t in topics]
+
+        for query in queries:
+            hits = _search_pixabay(query)
+            url = _pick_pixabay(hits, query.split())
+            if url and url.lower().endswith((".jpg", ".jpeg", ".png")):
+                return url
+
+        # 最後に Unsplash fallback
+        return _unsplash_src(f"{keyword} {topics[0]}")
+    except Exception as e:
+        logging.error(f"画像選定失敗: {e}")
+        return DEFAULT_IMAGE_URL

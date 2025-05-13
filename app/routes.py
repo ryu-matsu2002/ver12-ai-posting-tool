@@ -25,11 +25,12 @@ from .wp_client import post_to_wp, _decorate_html
 import re
 import logging
 from datetime import datetime
+from .image_utils import fetch_featured_image  # ← ✅ 正しい
+
 
 from .article_generator import (
     _unique_title,
     _compose_body,
-    fetch_featured_image
 )
 
 

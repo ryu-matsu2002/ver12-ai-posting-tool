@@ -10,7 +10,7 @@ from flask import current_app
 from openai import OpenAI, BadRequestError
 from sqlalchemy import func
 from threading import Event
-from .image_utils import fetch_featured_image
+from .image_utils import fetch_featured_image_from_body  # ← 追加
 from . import db
 from .models import Article
 
@@ -301,7 +301,7 @@ def _generate(app, aid: int, tpt: str, bpt: str, format: str = "html", self_revi
             match = re.search(r"<h2\b[^>]*>(.*?)</h2>", art.body or "", re.IGNORECASE)
             first_h2 = match.group(1) if match else ""
             query = f"{art.keyword} {first_h2}".strip()
-            art.image_url = fetch_featured_image(query)
+            art.image_url = fetch_featured_image_from_body(art.body, art.keyword)
 
             art.status = "done"
             art.progress = 100
