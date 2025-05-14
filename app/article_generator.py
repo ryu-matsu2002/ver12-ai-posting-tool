@@ -335,7 +335,7 @@ def enqueue_generation(
         raise ValueError("site_id is required for scheduling")
 
     app = current_app._get_current_object()
-    copies = [random.randint(1, 3) for _ in keywords[:40]]
+    copies = [random.randint(2, 3) for _ in keywords[:40]]
     total = sum(copies)
     slots = iter(_generate_slots_per_site(app, site_id, total))
 
