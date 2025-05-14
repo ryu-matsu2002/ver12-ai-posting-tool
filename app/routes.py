@@ -78,9 +78,13 @@ def logout():
 @login_required
 def dashboard():
     g.total_articles = Article.query.filter_by(user_id=current_user.id).count()
-    g.generating     = Article.query.filter_by(user_id=current_user.id, status="gen").count()
+    g.generating     = Article.query.filter(
+        Article.user_id == current_user.id,
+        Article.status.in_(["pending", "gen"])
+    ).count()
     g.done           = Article.query.filter_by(user_id=current_user.id, status="done").count()
     g.posted         = Article.query.filter_by(user_id=current_user.id, status="posted").count()
+    g.error          = Article.query.filter_by(user_id=current_user.id, status="error").count()  # ←追加
     return render_template("dashboard.html")
 
 
