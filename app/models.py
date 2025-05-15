@@ -15,7 +15,7 @@ class User(db.Model, UserMixin):
 
     # リレーション
     prompts  = db.relationship("PromptTemplate", backref="user", lazy=True)
-    articles = db.relationship("Article",        backref="user", lazy=True)
+    articles = db.relationship("Article", backref="user", lazy='selectin')
     sites    = db.relationship("Site",           backref="user", lazy=True)
 
 
@@ -29,7 +29,7 @@ class Site(db.Model):
     user_id  = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
 
     # リレーション
-    articles = db.relationship("Article", backref="site", lazy=True)
+    articles = db.relationship("Article", backref="site", lazy='selectin')
 
 
 # ──── プロンプト ────

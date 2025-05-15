@@ -13,6 +13,7 @@ from threading import Event
 from .image_utils import fetch_featured_image_from_body  # ← 追加
 from . import db
 from .models import Article
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # OpenAI設定
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
@@ -314,9 +315,13 @@ def _generate(app, aid: int, tpt: str, bpt: str, format: str = "html", self_revi
             art.body = f"Error: {e}"
             db.session.commit()
 
+        finally:
+            # ✅ セッション明示的に解放（接続プールの無駄な保持を防止）
+            db.session.close()    
+
 
 # ============================================
-# 🔧 非同期一括生成（enqueue）
+# 🔧 非同期一括生成（enqueue）【修正版】
 # ============================================
 def enqueue_generation(
     user_id: int,
@@ -324,12 +329,11 @@ def enqueue_generation(
     title_prompt: str,
     body_prompt: str,
     site_id: int,
-    format: str = "html",         # ← 追加：Markdown対応
-    self_review: bool = False     # ← 追加：自己添削フラグ
+    format: str = "html",
+    self_review: bool = False
 ) -> None:
     """
-    指定ユーザーに対して複数キーワードの記事を非同期で一括生成キューへ追加。
-    format と self_review オプションで記事品質と出力形式を制御できる。
+    複数記事を並列生成キューに追加。ThreadPoolExecutor により同時並列生成。
     """
     if site_id is None:
         raise ValueError("site_id is required for scheduling")
@@ -342,6 +346,8 @@ def enqueue_generation(
     def _bg():
         with app.app_context():
             ids: list[int] = []
+
+            # DBへの記事登録処理（生成前）
             for kw, c in zip(keywords[:40], copies):
                 for _ in range(c):
                     try:
@@ -357,15 +363,24 @@ def enqueue_generation(
                         )
                         db.session.add(art)
                         db.session.flush()
-                        db.session.commit()
                         ids.append(art.id)
                     except Exception as e:
                         db.session.rollback()
-                        logging.exception(f"Error creating Article for keyword '{kw}': {e}")
+                        logging.exception(f"[登録失敗] keyword='{kw}': {e}")
+            db.session.commit()
 
-            # ✅ 各記事の生成処理（format / self_review オプションも反映）
-            for aid in ids:
-                _generate(app, aid, title_prompt, body_prompt, format=format, self_review=self_review)
+            # 並列生成処理
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                futures = []
+                for aid in ids:
+                    futures.append(executor.submit(
+                        _generate, app, aid, title_prompt, body_prompt, format, self_review
+                    ))
+                for future in as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        logging.exception(f"[並列生成中の例外] {e}")
 
     threading.Thread(target=_bg, daemon=True).start()
 

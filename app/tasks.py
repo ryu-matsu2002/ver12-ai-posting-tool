@@ -9,58 +9,61 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from . import db
 from .models import Article
 from .wp_client import post_to_wp  # 統一された WordPress 投稿関数
+from sqlalchemy.orm import selectinload
+
 
 # グローバルな APScheduler インスタンス（__init__.py で start されています）
 scheduler = BackgroundScheduler(timezone="UTC")
 
 
 def _auto_post_job(app):
-    """
-    scheduled_at を過ぎた status="done" の記事を
-    WordPress に自動投稿し、status="posted" に更新するジョブ。
-    """
     with app.app_context():
-        now = datetime.now(pytz.utc)  # tz-aware now
+        now = datetime.now(pytz.utc)
 
-        pending = (
-            Article.query
-                   .filter(Article.status == "done",
-                           Article.scheduled_at <= now)
-                   .all()
-        )
+        try:
+            pending = (
+                db.session.query(Article)
+                .filter(Article.status == "done", Article.scheduled_at <= now)
+                .options(selectinload(Article.site))
+                .order_by(Article.scheduled_at.asc())
+                .limit(20)
+                .all()
+            )
 
-        for art in pending:
-            if not art.site:
-                current_app.logger.warning(f"記事 {art.id} の投稿先サイト未設定")
-                continue
+            for art in pending:
+                if not art.site:
+                    current_app.logger.warning(f"記事 {art.id} の投稿先サイト未設定")
+                    continue
 
-            try:
-                url = post_to_wp(art.site, art)
-                art.posted_at = now
-                art.status = "posted"
-                db.session.commit()
-                current_app.logger.info(f"Auto-posted Article {art.id} -> {url}")
-            except Exception as e:
-                current_app.logger.exception(f"Auto-post failed for Article {art.id}: {e}")
-                db.session.rollback()
+                try:
+                    url = post_to_wp(art.site, art)
+                    art.posted_at = now
+                    art.status = "posted"
+                    db.session.commit()
+                    current_app.logger.info(f"Auto-posted Article {art.id} -> {url}")
 
-                retry_attempts = 3
-                for attempt in range(retry_attempts):
-                    try:
-                        url = post_to_wp(art.site, art)
-                        art.posted_at = now
-                        art.status = "posted"
-                        db.session.commit()
-                        current_app.logger.info(f"Retry Auto-posted Article {art.id} -> {url}")
-                        break
-                    except Exception as retry_exception:
-                        current_app.logger.exception(
-                            f"Retry {attempt + 1} failed for Article {art.id}: {retry_exception}"
-                        )
-                        if attempt == retry_attempts - 1:
-                            current_app.logger.error(
-                                f"Failed to auto-post Article {art.id} after {retry_attempts} attempts"
+                except Exception as e:
+                    db.session.rollback()
+                    current_app.logger.warning(f"初回投稿失敗: Article {art.id} {e}")
+
+                    retry_attempts = 3
+                    for attempt in range(retry_attempts):
+                        try:
+                            url = post_to_wp(art.site, art)
+                            art.posted_at = now
+                            art.status = "posted"
+                            db.session.commit()
+                            current_app.logger.info(f"Retry Success: Article {art.id} -> {url}")
+                            break
+                        except Exception as retry_exception:
+                            db.session.rollback()
+                            current_app.logger.warning(
+                                f"Retry {attempt + 1} failed for Article {art.id}: {retry_exception}"
                             )
+
+        finally:
+            db.session.close()
+
 
 
 def init_scheduler(app):

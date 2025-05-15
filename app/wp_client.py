@@ -2,6 +2,7 @@ import base64
 import mimetypes
 import os
 import requests
+import time
 from requests.exceptions import HTTPError
 from flask import current_app
 from .models import Site, Article
@@ -111,32 +112,24 @@ def post_to_wp(site: Site, art: Article) -> str:
     if featured_media_id:
         post_data["featured_media"] = featured_media_id
 
-    response = requests.post(url, json=post_data, headers=headers, timeout=TIMEOUT)
-
-    if response.status_code == 201:
-        return response.json().get("link") or "success"
-    else:
+    for attempt in range(3):
         try:
-            error = response.json()
-        except Exception:
-            error = response.text
-
-        if response.status_code == 401:
-            code = error.get("code")
-            if code == "rest_cannot_create":
-                raise HTTPError(
-                    "401エラー: 投稿権限がないか、Basic認証がブロックされています。"
-                    "\n以下を確認してください：\n"
-                    "- サイトURLが https:// で始まっているか\n"
-                    "- ユーザーが 投稿者 以上の権限を持っているか\n"
-                    "- サーバーの .htaccess に Authorization ヘッダーの許可設定があるか"
-                )
-
-        elif response.status_code == 403:
-            raise HTTPError("403エラー: サーバー側でアクセスが拒否されました。WAFやセキュリティ設定をご確認ください。")
-
-        current_app.logger.error(f"記事の作成に失敗: {response.status_code}, {error}")
-        raise HTTPError(f"記事の作成に失敗: {response.status_code}, {error}")
+            response = requests.post(url, json=post_data, headers=headers, timeout=TIMEOUT)
+            if response.status_code == 201:
+                return response.json().get("link") or "success"
+            else:
+                raise HTTPError(f"ステータスコード {response.status_code}")
+        except Exception as e:
+            if attempt < 2:
+                current_app.logger.warning(f"[{attempt+1}回目] 投稿リトライ中: {e}")
+                time.sleep(2)
+            else:
+                try:
+                    error = response.json()
+                except Exception:
+                    error = response.text
+                current_app.logger.error(f"記事の作成に失敗: {response.status_code}, {error}")
+                raise HTTPError(f"記事の作成に失敗: {response.status_code}, {error}")
 
 # デザイン装飾用（style属性を排除しclassに変換）
 def _decorate_html(content: str) -> str:

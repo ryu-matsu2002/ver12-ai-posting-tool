@@ -36,6 +36,13 @@ def create_app() -> Flask:
     )
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
+    # ─── SQLAlchemy 接続プール設定 ──────────────
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+        "pool_size": int(os.getenv("POOL_SIZE", 10)),
+        "max_overflow": int(os.getenv("MAX_OVERFLOW", 20)),
+        "pool_timeout": int(os.getenv("POOL_TIMEOUT", 30)),
+    }
+
     # ─── 拡張をバインド ───────────────────────
     db.init_app(app)
     login_manager.init_app(app)
