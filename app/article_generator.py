@@ -246,10 +246,8 @@ def _generate_slots_per_site(app, site_id: int, n: int) -> List[datetime]:
             .filter(Article.site_id == site_id, Article.scheduled_at.isnot(None))\
             .group_by("d").all()
     booked = {d: c for d, c in rows}
-    slots, day = [], date.today()
+    slots, day = [], date.today() + timedelta(days=1)
     while len(slots) < n:
-        if (day - date.today()).days > MAX_SCHEDULE_DAYS:
-            raise RuntimeError(f"{MAX_SCHEDULE_DAYS}日以内にスケジュールできる枠が足りません")
         remain = MAX_PERDAY - booked.get(day, 0)
         if remain > 0:
             need = min(random.randint(1, AVERAGE_POSTS), remain, n - len(slots))
@@ -258,6 +256,8 @@ def _generate_slots_per_site(app, site_id: int, n: int) -> List[datetime]:
                 local = datetime.combine(day, time(h, minute), tzinfo=JST)
                 slots.append(local.astimezone(timezone.utc))
         day += timedelta(days=1)
+        if (day - date.today()).days > 365:
+            raise RuntimeError("slot generation runaway")
     return slots[:n]
 
 
