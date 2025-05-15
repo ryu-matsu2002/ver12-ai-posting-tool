@@ -43,6 +43,7 @@ JST = pytz.timezone("Asia/Tokyo")
 POST_HOURS = list(range(10, 21))
 MAX_PERDAY = 5
 AVERAGE_POSTS = 4
+MAX_SCHEDULE_DAYS = 30  # ← 本日から30日以内の投稿枠に限定
 
 # ============================================
 # 🔧 安全な出力クリーニング関数
@@ -120,11 +121,16 @@ def _title_once(kw: str, pt: str, retry: bool) -> str:
 # ============================================
 def _unique_title(kw: str, pt: str) -> str:
     history = [t[0] for t in db.session.query(Article.title).filter(Article.keyword == kw)]
+    last_cand = ""
     for i in range(MAX_TITLE_RETRY):
         cand = _title_once(kw, pt, retry=i > 0)
         if not any(_similar(cand, h) for h in history):
             return cand
-    raise ValueError(f"タイトル生成に失敗しました: {kw}")
+        last_cand = cand  # 最後に試した候補を記録
+    # すべて類似 → 最後の候補を強制採用
+    logging.warning(f"[タイトル類似警告] {kw} に対して類似タイトルが多すぎましたが最後の候補を採用します")
+    return last_cand
+
 
 # ============================================
 # ✅ ユーザーの希望文字数をGPTに明示して長さ不足を防止
@@ -240,8 +246,10 @@ def _generate_slots_per_site(app, site_id: int, n: int) -> List[datetime]:
             .filter(Article.site_id == site_id, Article.scheduled_at.isnot(None))\
             .group_by("d").all()
     booked = {d: c for d, c in rows}
-    slots, day = [], date.today() + timedelta(days=1)
+    slots, day = [], date.today()
     while len(slots) < n:
+        if (day - date.today()).days > MAX_SCHEDULE_DAYS:
+            raise RuntimeError(f"{MAX_SCHEDULE_DAYS}日以内にスケジュールできる枠が足りません")
         remain = MAX_PERDAY - booked.get(day, 0)
         if remain > 0:
             need = min(random.randint(1, AVERAGE_POSTS), remain, n - len(slots))
@@ -250,9 +258,8 @@ def _generate_slots_per_site(app, site_id: int, n: int) -> List[datetime]:
                 local = datetime.combine(day, time(h, minute), tzinfo=JST)
                 slots.append(local.astimezone(timezone.utc))
         day += timedelta(days=1)
-        if (day - date.today()).days > 365:
-            raise RuntimeError("slot generation runaway")
     return slots[:n]
+
 
 # ============================================
 # 🔧 単体記事生成処理（タイトル→本文→画像→完了）
