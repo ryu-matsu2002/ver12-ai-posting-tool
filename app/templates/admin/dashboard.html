@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}管理者ダッシュボード{% endblock %}
+
+{% block content %}
+<div class="p-6">
+  <h1 class="text-3xl font-bold mb-6">👑 管理者ダッシュボード</h1>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+    <div class="bg-white rounded-xl shadow p-4">
+      <h2 class="text-lg font-semibold text-gray-600">登録ユーザー数</h2>
+      <p class="text-2xl font-bold text-blue-600">{{ user_count }}</p>
+    </div>
+    <div class="bg-white rounded-xl shadow p-4">
+      <h2 class="text-lg font-semibold text-gray-600">登録サイト数</h2>
+      <p class="text-2xl font-bold text-green-600">{{ site_count }}</p>
+    </div>
+    <div class="bg-white rounded-xl shadow p-4">
+      <h2 class="text-lg font-semibold text-gray-600">保存プロンプト数</h2>
+      <p class="text-2xl font-bold text-yellow-500">{{ prompt_count }}</p>
+    </div>
+    <div class="bg-white rounded-xl shadow p-4">
+      <h2 class="text-lg font-semibold text-gray-600">総記事数</h2>
+      <p class="text-2xl font-bold text-purple-600">{{ article_count }}</p>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-xl shadow p-6">
+    <h2 class="text-xl font-bold mb-4">今後の拡張予定</h2>
+    <ul class="list-disc pl-5 text-gray-700 space-y-2">
+      <li>ユーザーごとの記事一覧・操作リンク</li>
+      <li>API使用量の集計（OpenAIなど）</li>
+      <li>サイトごとの投稿状況確認</li>
+      <li>リンクマネージャーとの連携管理</li>
+    </ul>
+  </div>
+</div>
+{% endblock %}

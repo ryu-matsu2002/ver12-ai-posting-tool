@@ -47,9 +47,20 @@ admin_bp = Blueprint("admin", __name__)
 def admin_dashboard():
     if not current_user.is_admin:
         flash("このページにはアクセスできません。", "error")
-        return redirect(url_for("main.dashboard"))  # または login ページへ
+        return redirect(url_for("main.dashboard"))
 
-    return render_template("admin/dashboard.html")
+    user_count    = User.query.count()
+    site_count    = Site.query.count()
+    prompt_count  = PromptTemplate.query.count()
+    article_count = Article.query.count()
+
+    return render_template(
+        "admin/dashboard.html",
+        user_count=user_count,
+        site_count=site_count,
+        prompt_count=prompt_count,
+        article_count=article_count
+    )
 
 # ─────────── 認証
 @bp.route("/login", methods=["GET", "POST"])
