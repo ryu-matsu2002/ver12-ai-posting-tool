@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>{% block title %}管理画面{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com/3.4.4"></script>
+</head>
+<body class="bg-gray-100 h-screen text-gray-800 flex">
+
+  <!-- ✅ 左サイドメニュー -->
+  <aside class="w-64 bg-gray-900 text-white flex flex-col p-4 space-y-4">
+    <h2 class="text-xl font-bold mb-4">Admin Menu</h2>
+    <a href="{{ url_for('admin_dashboard') }}" class="hover:text-yellow-400">👑 ダッシュボード</a>
+    <a href="{{ url_for('main.dashboard') }}" class="hover:text-yellow-400">📝 通常ダッシュボード</a>
+    <a href="{{ url_for('admin.admin_users') }}" class="...">ユーザー管理</a>
+    <a href="{{ url_for('admin.admin_sites') }}" class="...">📊 サイト投稿状況</a>
+    <a href="{{ url_for('main.prompts') }}" class="hover:text-yellow-400">📋 プロンプト管理</a>
+    <a href="{{ url_for('main.sites') }}" class="hover:text-yellow-400">🌐 サイト一覧</a>
+    <a href="{{ url_for('main.log') }}" class="hover:text-yellow-400">📊 投稿ログ</a>
+    <a href="{{ url_for('main.logout') }}" class="hover:text-yellow-400">🚪 ログアウト</a>
+  </aside>
+
+  <!-- ✅ メインコンテンツ -->
+  <main class="flex-1 p-8 overflow-y-auto">
+    {% block content %}{% endblock %}
+  </main>
+
+</body>
+</html>

@@ -62,6 +62,56 @@ def admin_dashboard():
         article_count=article_count
     )
 
+@admin_bp.route("/admin/users")
+@login_required
+def admin_users():
+    if not current_user.is_admin:
+        abort(403)
+    users = User.query.all()
+    return render_template("admin/users.html", users=users)
+
+
+@admin_bp.route("/admin/user/<int:uid>/articles")
+@login_required
+def user_articles(uid):
+    if not current_user.is_admin:
+        abort(403)
+    user = User.query.get_or_404(uid)
+    articles = Article.query.filter_by(user_id=uid).order_by(Article.created_at.desc()).all()
+    return render_template("admin/user_articles.html", user=user, articles=articles)
+
+@admin_bp.route("/admin/sites")
+@login_required
+def admin_sites():
+    if not current_user.is_admin:
+        flash("このページにはアクセスできません。", "error")
+        return redirect(url_for("main.dashboard"))
+
+    from sqlalchemy import func
+    from app.models import Site, Article, User
+
+    # サイト情報と記事ステータス集計を取得
+    result = (
+        db.session.query(
+            Site.id,
+            Site.name,
+            Site.url,
+            User.email.label("user_email"),
+            func.count(Article.id).label("total"),
+            func.sum(func.case((Article.status == "done", 1), else_=0)).label("done"),
+            func.sum(func.case((Article.status == "posted", 1), else_=0)).label("posted"),
+            func.sum(func.case((Article.status == "error", 1), else_=0)).label("error")
+        )
+        .join(User, Site.user_id == User.id)
+        .outerjoin(Article, Site.id == Article.site_id)
+        .group_by(Site.id, User.email)
+        .all()
+    )
+
+    return render_template("admin/sites.html", sites=result)
+
+
+
 # ─────────── 認証
 @bp.route("/login", methods=["GET", "POST"])
 def login():

@@ -1,0 +1,29 @@
+{% extends "base_admin.html" %}
+{% block title %}ユーザーの記事一覧{% endblock %}
+
+{% block content %}
+<div class="p-6">
+  <h1 class="text-xl font-bold mb-4">📝 {{ user.email }} の記事一覧</h1>
+
+  <table class="w-full table-auto">
+    <thead>
+      <tr class="border-b">
+        <th class="px-2 py-2">ID</th>
+        <th class="px-2 py-2">タイトル</th>
+        <th class="px-2 py-2">状態</th>
+        <th class="px-2 py-2">作成日</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in articles %}
+      <tr class="border-b hover:bg-gray-100">
+        <td class="px-2 py-2">{{ a.id }}</td>
+        <td class="px-2 py-2">{{ a.title[:30] }}...</td>
+        <td class="px-2 py-2">{{ a.status }}</td>
+        <td class="px-2 py-2">{{ a.created_at.strftime('%Y-%m-%d') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
