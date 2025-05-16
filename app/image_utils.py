@@ -47,6 +47,16 @@ def _is_recently_used(url: str, ttl: int = RECENTLY_USED_TTL) -> bool:
 def _mark_used(url: str) -> None:
     _used_image_urls[url] = time.time()
 
+# ✅【追加】URLが画像形式かどうかをHEADで確認
+def _is_image_url(url: str) -> bool:
+    try:
+        r = requests.head(url, timeout=5)
+        content_type = r.headers.get("Content-Type", "")
+        return content_type.startswith("image/")
+    except Exception as e:
+        logging.warning(f"[画像判定失敗] {url} → {e}")
+        return False    
+
 # ══════════════════════════════════════════════
 # Pixabay 検索
 # ══════════════════════════════════════════════
@@ -88,24 +98,29 @@ def _valid_dim(hit: dict) -> bool:
     ratio = w/h
     return 0.5 <= ratio <= 3.0
 
+# ✅【修正】画像形式かどうかのチェックを追加
 def _pick_pixabay(hits: List[dict], keywords: List[str]) -> str:
-    # Optional[str] → str に変更。必ず最後は文字列を返す
     if not hits:
         return DEFAULT_IMAGE_URL
     kw_set = {k.lower() for k in keywords}
     top = sorted(hits, key=lambda h: _score(h, kw_set), reverse=True)[:10]
     random.shuffle(top)
+
+    # 🔍 最優先で画像形式・未使用・サイズ適正なURLを返す
     for h in top:
         url = h.get("largeImageURL") or h.get("webformatURL")
-        if url and not _is_recently_used(url) and _valid_dim(h):
+        if url and not _is_recently_used(url) and _valid_dim(h) and _is_image_url(url):
             _mark_used(url)
             return url
-    # フォールバック順序
+
+    # 🔁 サイズ不問でも画像形式であればOK
     for h in top:
         url = h.get("largeImageURL") or h.get("webformatURL")
-        if url and not _is_recently_used(url):
+        if url and not _is_recently_used(url) and _is_image_url(url):
             _mark_used(url)
             return url
+
+    # 🔚 最後のフォールバック（確認なし）
     url = top[0].get("largeImageURL") or top[0].get("webformatURL") or DEFAULT_IMAGE_URL
     _mark_used(url)
     return url
