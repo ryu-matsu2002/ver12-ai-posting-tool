@@ -89,24 +89,25 @@ def admin_sites():
 
     from sqlalchemy import func
     from app.models import Site, Article, User
+    from sqlalchemy import case
 
     # サイト情報と記事ステータス集計を取得
     result = (
-        db.session.query(
-            Site.id,
-            Site.name,
-            Site.url,
-            User.email.label("user_email"),
-            func.count(Article.id).label("total"),
-            func.sum(func.case((Article.status == "done", 1), else_=0)).label("done"),
-            func.sum(func.case((Article.status == "posted", 1), else_=0)).label("posted"),
-            func.sum(func.case((Article.status == "error", 1), else_=0)).label("error")
-        )
-        .join(User, Site.user_id == User.id)
-        .outerjoin(Article, Site.id == Article.site_id)
-        .group_by(Site.id, User.email)
-        .all()
+    db.session.query(
+        Site.id,
+        Site.name,
+        Site.url,
+        User.email.label("user_email"),
+        func.count(Article.id).label("total"),
+        func.sum(case((Article.status == "done", 1), else_=0)).label("done"),
+        func.sum(case((Article.status == "posted", 1), else_=0)).label("posted"),
+        func.sum(case((Article.status == "error", 1), else_=0)).label("error"),
     )
+    .join(User, Site.user_id == User.id)
+    .outerjoin(Article, Site.id == Article.site_id)
+    .group_by(Site.id, User.email)
+    .all()
+)
 
     return render_template("admin/sites.html", sites=result)
 
