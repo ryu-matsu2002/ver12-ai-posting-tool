@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 from dotenv import load_dotenv
 load_dotenv()
+
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
@@ -51,9 +52,10 @@ def create_app() -> Flask:
 
     # ─── Blueprints 登録とスケジューラ起動 ───────
     with app.app_context():
-        # ルート BluePrint
-        from .routes import bp as main_bp
+        # Blueprint の登録（main用 + admin用）
+        from .routes import bp as main_bp, admin_bp
         app.register_blueprint(main_bp)
+        app.register_blueprint(admin_bp)
 
         # 自動投稿ジョブを APScheduler に登録して起動
         from .tasks import init_scheduler

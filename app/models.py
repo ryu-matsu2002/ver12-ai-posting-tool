@@ -13,6 +13,10 @@ class User(db.Model, UserMixin):
     # パスワード長を300文字に拡張済み
     password = db.Column(db.String(300), nullable=False)
 
+    # 追加するフィールド ↓
+    is_admin = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
     # リレーション
     prompts  = db.relationship("PromptTemplate", backref="user", lazy=True)
     articles = db.relationship("Article", backref="user", lazy='selectin')

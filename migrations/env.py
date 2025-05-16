@@ -31,6 +31,8 @@ def get_engine_url():
     except AttributeError:
         return str(get_engine().url).replace('%', '%%')
 
+from app import models  # ✅ User モデル等を含む app.models を明示的に読み込む
+target_metadata = models.db.metadata  # ✅ これがAlembicの変更検知対象となる
 
 # add your model's MetaData object here
 # for 'autogenerate' support

@@ -33,10 +33,23 @@ from .article_generator import (
     _compose_body,
 )
 
+from flask import Blueprint, render_template, redirect, url_for, flash
+from flask_login import current_user, login_required
 
 JST = timezone("Asia/Tokyo")
 bp = Blueprint("main", __name__)
 
+# 必要なら app/__init__.py で admin_bp を登録
+admin_bp = Blueprint("admin", __name__)
+
+@admin_bp.route("/admin")
+@login_required
+def admin_dashboard():
+    if not current_user.is_admin:
+        flash("このページにはアクセスできません。", "error")
+        return redirect(url_for("main.dashboard"))  # または login ページへ
+
+    return render_template("admin/dashboard.html")
 
 # ─────────── 認証
 @bp.route("/login", methods=["GET", "POST"])
