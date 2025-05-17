@@ -56,6 +56,7 @@ class Article(db.Model):
     image_url   = db.Column(db.String(500))
     status      = db.Column(db.String(20),  default="pending")   # pending/gen/done/error
     progress    = db.Column(db.Integer,     default=0)           # 0-100
+    posted_url = db.Column(db.String(512), nullable=True)  # ✅ ←追加部分
 
     # タイムゾーン対応カラム (UTC保持、表示時にJSTに変換)
     created_at   = db.Column(

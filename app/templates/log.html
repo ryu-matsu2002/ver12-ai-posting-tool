@@ -1,4 +1,4 @@
-{# app/templates/log.html  – schedule, posted status & error retry 対応版 #}
+{# app/templates/log.html  – schedule, posted status & error retry 対応版 + WP投稿リンク追加 #}
 {% extends "base.html" %}
 {% block title %}生成ログ | AI Posting Tool{% endblock %}
 
@@ -55,6 +55,13 @@
         <td class="px-4 py-2 align-top">
           {% if a.status == "posted" %}
             <span class="text-green-600 font-bold">posted</span>
+
+            {# ✅ 追加: 投稿済みなら View ボタンを表示 #}
+            {% if a.posted_url %}
+              <a href="{{ a.posted_url }}" target="_blank"
+                 class="ml-2 text-blue-500 underline hover:text-blue-700"
+                 title="WordPress記事を見る">View</a>
+            {% endif %}
           {% elif a.status == "error" %}
             <span class="text-red-600 font-bold" title="{{ a.body }}">error</span>
           {% else %}
