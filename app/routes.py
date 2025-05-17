@@ -265,10 +265,9 @@ def generate():
 
 
 # ─────────── 生成ログ
-@bp.route("/log")
+@bp.route("/log/site/<int:site_id>")
 @login_required
-def log():
-    site_id = request.args.get("site_id", type=int)
+def log(site_id):
 
     # 未スケジュール記事の slot をサイトごとに自動割当
     from collections import defaultdict
@@ -311,6 +310,12 @@ def log():
         jst=JST,
     )
 
+# ─────────── ログ：サイト選択ページ（新設）
+@bp.route("/log/sites")
+@login_required
+def log_sites():
+    sites = Site.query.filter_by(user_id=current_user.id).all()
+    return render_template("log_sites.html", sites=sites)
 
 
 # ─────────── プレビュー
@@ -333,7 +338,7 @@ def post_article(id):
         abort(403)
     if not art.site:
         flash("投稿先サイトが設定されていません", "danger")
-        return redirect(url_for(".log"))
+        return redirect(url_for(".log", site_id=art.site_id))
 
     try:
         url = post_to_wp(art.site, art)
@@ -346,7 +351,7 @@ def post_article(id):
         db.session.rollback()
         flash(f"投稿失敗: {e}", "danger")
 
-    return redirect(url_for(".log"))
+    return redirect(url_for(".log", site_id=art.site_id))
 
 
 # ─────────── 記事編集・削除・再試行
@@ -362,7 +367,7 @@ def edit_article(id):
         art.body  = form.body.data
         db.session.commit()
         flash("記事を更新しました", "success")
-        return redirect(url_for(".log"))
+        return redirect(url_for(".log", site_id=art.site_id))
     return render_template("edit_article.html", form=form, article=art)
 
 @bp.post("/article/<int:id>/delete")
@@ -374,7 +379,7 @@ def delete_article(id):
     db.session.delete(art)
     db.session.commit()
     flash("記事を削除しました", "success")
-    return redirect(url_for(".log"))
+    return redirect(url_for(".log", site_id=art.site_id))
 
 @bp.post("/article/<int:id>/retry")
 @login_required

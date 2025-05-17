@@ -1,0 +1,31 @@
+{# app/templates/log_sites.html - サイト別ログ選択ページ #}
+{% extends "base.html" %}
+{% block title %}投稿ログ - サイト一覧 | AI Posting Tool{% endblock %}
+
+{% block content %}
+<h2 class="text-2xl font-semibold mb-6">投稿ログ - サイトを選択</h2>
+
+{% if sites %}
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+    {% for site in sites %}
+      <a href="{{ url_for('main.log', site_id=site.id) }}"
+         class="block p-5 rounded-lg shadow hover:shadow-md border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition">
+        <div class="text-lg font-bold text-blue-700 dark:text-blue-300">
+          {{ site.name }}
+        </div>
+        <div class="text-sm text-gray-600 dark:text-gray-400 truncate">
+          {{ site.url }}
+        </div>
+        <div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
+          登録記事数: {{ site.articles|length }}
+        </div>
+      </a>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="text-gray-500 text-center py-12">
+    まだサイトが登録されていません。
+  </div>
+{% endif %}
+
+{% endblock %}
