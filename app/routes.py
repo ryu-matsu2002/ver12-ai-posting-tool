@@ -259,7 +259,7 @@ def generate():
             site_id
         )
         flash(f"{len(kws)} 件をキューに登録しました", "success")
-        return redirect(url_for(".log"))
+        return redirect(url_for(".log_sites"))
 
     return render_template("generate.html", form=form)
 
