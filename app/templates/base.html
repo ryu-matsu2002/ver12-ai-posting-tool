@@ -36,7 +36,7 @@
 
   <!-- ===== SIDEBAR ===== -->
   <aside class="w-60 shrink-0 h-full bg-primaryDark border-r border-gray-700 shadow-md flex flex-col">
-    <h1 class="text-xl font-semibold px-6 py-4 border-b border-gray-700">AI Posting Tool</h1>
+    <h1 class="text-xl font-semibold px-6 py-4 border-b border-gray-700">TCC autowize</h1>
 
     <nav class="flex-1 py-4 space-y-1">
       <a href="{{ url_for('main.dashboard') }}"
@@ -44,26 +44,30 @@
                 {{ 'font-semibold bg-[#0f2fa6]' if request.path=='/' else '' }}">
         <span class="material-icons align-middle mr-2">dashboard</span>Dashboard
       </a>
-      <a href="{{ url_for('main.generate') }}"
+      <a href="{{ url_for('main.sites') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
-                {{ '/generate' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
-        <span class="material-icons align-middle mr-2">edit</span>記事生成
+                {{ request.path == '/sites' and 'font-semibold bg-[#0f2fa6]' }}">
+        <span class="material-icons align-middle mr-2">storage</span>サイト登録
       </a>
+
       <a href="{{ url_for('main.prompts') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
                 {{ '/prompts' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">notes</span>プロンプト
       </a>
-      <a href="{{ url_for('main.sites') }}"
+
+      <a href="{{ url_for('main.generate') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
-                {{ '/sites' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
-        <span class="material-icons align-middle mr-2">storage</span>サイト管理
+                {{ '/generate' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
+        <span class="material-icons align-middle mr-2">edit</span>記事生成
       </a>
+
       <a href="{{ url_for('main.log_sites') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
                 {{ request.path.startswith('/log') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">article</span>ログ
       </a>
+
       <a href="{{ url_for('main.login') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
                 {{ '/login' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
