@@ -62,7 +62,7 @@ class GenerateForm(FlaskForm):
             raise ValueError("キーワードは最大40個までです。")
 
 class PromptForm(FlaskForm):
-    genre    = StringField("ジャンル名", validators=[DataRequired(), Length(max=100)])
+    genre    = StringField("プロンプト名", validators=[DataRequired(), Length(max=100)])
     title_pt = TextAreaField("タイトル用プロンプト", validators=[DataRequired()])
     body_pt  = TextAreaField("本文用プロンプト",      validators=[DataRequired()])
     submit   = SubmitField("保存")
