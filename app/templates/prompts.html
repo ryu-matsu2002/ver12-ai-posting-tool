@@ -4,63 +4,59 @@
 {% block content %}
 <h2 class="text-2xl font-semibold mb-6">プロンプト管理</h2>
 
-<div class="grid md:grid-cols-2 gap-10">
-
-  <!-- ───────── プロンプト登録フォーム ───────── -->
+<form method="post" class="max-w-3xl space-y-4 mb-10 bg-white dark:bg-gray-800 p-6 rounded shadow">
+  {{ form.hidden_tag() }}
   <div>
-    <form method="post" class="space-y-4 p-6 bg-white dark:bg-gray-800 rounded shadow">
-      {{ form.hidden_tag() }}
-
-      <div>
-        {{ form.genre.label(class="block mb-1 font-medium") }}
-        {{ form.genre(class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
-      </div>
-
-      <div>
-        {{ form.title_pt.label(class="block mb-1 font-medium") }}
-        {{ form.title_pt(rows=3, class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
-      </div>
-
-      <div>
-        {{ form.body_pt.label(class="block mb-1 font-medium") }}
-        {{ form.body_pt(rows=5, class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
-      </div>
-
-      {{ form.submit(class="py-2 px-6 bg-blue-600 hover:bg-blue-700 text-white rounded") }}
-    </form>
+    {{ form.genre.label(class="block mb-1 font-medium") }}
+    {{ form.genre(class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
   </div>
-
-  <!-- ───────── 保存済みプロンプト（カード形式） ───────── -->
   <div>
-    <h3 class="text-xl font-semibold mb-4">保存済み</h3>
+    {{ form.title_pt.label(class="block mb-1 font-medium") }}
+    {{ form.title_pt(rows=3,class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
+  </div>
+  <div>
+    {{ form.body_pt.label(class="block mb-1 font-medium") }}
+    {{ form.body_pt(rows=5,class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
+  </div>
+  {{ form.submit(class="py-2 px-6 bg-blue-600 hover:bg-blue-700 text-white rounded") }}
+</form>
 
-    {% if prompts %}
-    <div class="grid grid-cols-1 gap-4">
-      {% for p in prompts %}
-      <div class="p-4 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow hover:shadow-md transition">
+<h3 class="text-xl font-semibold mb-4">保存済み</h3>
+
+<div class="space-y-4" x-data>
+  {% for p in prompts %}
+  <div x-data="{ open: false }" class="border border-gray-300 dark:border-gray-600 rounded shadow p-4 bg-white dark:bg-gray-800">
+    <div class="flex justify-between items-center">
+      <div>
         <div class="text-sm text-gray-500">ジャンル</div>
-        <div class="text-base font-bold text-blue-700 dark:text-blue-300 mb-2">{{ p.genre }}</div>
-
-        <div class="text-sm text-gray-500">タイトル用プロンプト</div>
-        <div class="text-sm text-gray-800 dark:text-gray-200 mb-3 whitespace-pre-wrap">{{ p.title_pt }}</div>
-
-        <div class="text-sm text-gray-500">本文用プロンプト</div>
-        <div class="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{{ p.body_pt }}</div>
-
-        <form method="post" action="{{ url_for('main.delete_prompt', pid=p.id) }}"
-              class="mt-3 text-right"
-              onsubmit="return confirm('削除しますか？');">
-          <button type="submit" class="text-red-600 hover:underline text-sm">Delete</button>
+        <div class="font-semibold text-lg">{{ p.genre }}</div>
+      </div>
+      <div class="space-x-4">
+        <button @click="open = !open" type="button"
+                class="px-4 py-1 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded">
+          確認
+        </button>
+        <form action="{{ url_for('main.delete_prompt', pid=p.id) }}" method="post" class="inline"
+              onsubmit="return confirm('Delete?')">
+          <button class="text-red-500 hover:underline text-sm">Delete</button>
         </form>
       </div>
-      {% endfor %}
     </div>
-    {% else %}
-    <div class="text-gray-500 text-sm text-center mt-4">
-      まだプロンプトが登録されていません。
-    </div>
-    {% endif %}
-  </div>
 
+    <div x-show="open" class="mt-4 space-y-3" x-cloak>
+      <div>
+        <div class="text-sm text-gray-500">タイトル用プロンプト</div>
+        <div class="whitespace-pre-line text-sm text-gray-800 dark:text-gray-200">{{ p.title_pt }}</div>
+      </div>
+      <div>
+        <div class="text-sm text-gray-500">本文用プロンプト</div>
+        <div class="whitespace-pre-line text-sm text-gray-800 dark:text-gray-200">{{ p.body_pt }}</div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
 </div>
+
+<!-- Alpine.js を読み込み -->
+<script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
 {% endblock %}
