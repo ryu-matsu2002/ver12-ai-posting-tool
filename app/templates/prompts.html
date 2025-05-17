@@ -4,67 +4,73 @@
 {% block content %}
 <h2 class="text-2xl font-semibold mb-6">プロンプト管理</h2>
 
-<!-- 登録フォーム -->
-<form method="post" class="max-w-3xl space-y-4 mb-10 bg-white dark:bg-gray-800 p-6 rounded shadow">
-  {{ form.hidden_tag() }}
-  <div>
-    {{ form.genre.label(class="block mb-1 font-medium") }}
-    {{ form.genre(class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
-  </div>
-  <div>
-    {{ form.title_pt.label(class="block mb-1 font-medium") }}
-    {{ form.title_pt(rows=3, class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
-  </div>
-  <div>
-    {{ form.body_pt.label(class="block mb-1 font-medium") }}
-    {{ form.body_pt(rows=5, class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
-  </div>
-  {{ form.submit(class="py-2 px-6 bg-blue-600 hover:bg-blue-700 text-white rounded") }}
-</form>
+<!-- レイアウトを2カラムに -->
+<div class="grid md:grid-cols-3 gap-8">
 
-<!-- 保存済み一覧 -->
-<h3 class="text-xl font-semibold mb-4">保存済み</h3>
-<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-  {% for p in prompts %}
-    <div class="bg-white dark:bg-gray-800 rounded shadow p-4 border dark:border-gray-700">
-      <div class="flex justify-between items-center mb-2">
-        <div class="font-bold text-blue-700 dark:text-blue-300">{{ p.genre }}</div>
-        <form action="{{ url_for('main.delete_prompt', pid=p.id) }}" method="post"
-              onsubmit="return confirm('削除しますか？');">
-          <button type="submit" class="text-sm text-red-500 hover:underline">Delete</button>
-        </form>
-      </div>
+  <!-- ===== 保存済みプロンプト（左） ===== -->
+  <div class="md:col-span-1">
+    <h3 class="text-lg font-semibold mb-4">保存済み</h3>
+    <div class="space-y-4">
+      {% for p in prompts %}
+        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow p-4">
+          <div class="flex justify-between items-center mb-2">
+            <span class="font-bold text-blue-700 dark:text-blue-300 text-sm">{{ p.genre }}</span>
+            <form action="{{ url_for('main.delete_prompt', pid=p.id) }}" method="post"
+                  onsubmit="return confirm('削除しますか？');">
+              <button type="submit" class="text-sm text-red-500 hover:underline">Delete</button>
+            </form>
+          </div>
 
-      <button onclick="togglePrompt('prompt-{{ p.id }}')" class="text-sm text-white bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded">
-        確認
-      </button>
+          <button onclick="togglePrompt('prompt-{{ p.id }}')"
+                  class="text-sm text-white bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded w-full">
+            確認
+          </button>
 
-      <div id="prompt-{{ p.id }}" class="mt-3 hidden">
-        <div class="text-sm text-gray-700 dark:text-gray-300 mt-2">
-          <strong class="block mb-1">タイトル用プロンプト</strong>
-          <pre class="whitespace-pre-wrap break-words">{{ p.title_pt }}</pre>
+          <div id="prompt-{{ p.id }}" class="mt-3 hidden text-sm text-gray-700 dark:text-gray-300">
+            <div class="mt-2">
+              <strong class="block mb-1">タイトル用プロンプト</strong>
+              <pre class="whitespace-pre-wrap break-words">{{ p.title_pt }}</pre>
+            </div>
+            <div class="mt-4">
+              <strong class="block mb-1">本文用プロンプト</strong>
+              <pre class="whitespace-pre-wrap break-words">{{ p.body_pt }}</pre>
+            </div>
+            <button onclick="togglePrompt('prompt-{{ p.id }}')"
+                    class="mt-4 text-sm text-gray-500 hover:text-gray-700 underline">閉じる</button>
+          </div>
         </div>
-        <div class="text-sm text-gray-700 dark:text-gray-300 mt-4">
-          <strong class="block mb-1">本文用プロンプト</strong>
-          <pre class="whitespace-pre-wrap break-words">{{ p.body_pt }}</pre>
-        </div>
-        <button onclick="togglePrompt('prompt-{{ p.id }}')" class="mt-4 text-sm text-gray-500 hover:text-gray-700 underline">閉じる</button>
-      </div>
+      {% else %}
+        <p class="text-gray-500">プロンプトはまだ登録されていません。</p>
+      {% endfor %}
     </div>
-  {% else %}
-    <p class="text-gray-500">プロンプトはまだ登録されていません。</p>
-  {% endfor %}
+  </div>
+
+  <!-- ===== 登録フォーム（右） ===== -->
+  <div class="md:col-span-2">
+    <form method="post" class="space-y-4 bg-white dark:bg-gray-800 p-6 rounded shadow">
+      {{ form.hidden_tag() }}
+      <div>
+        {{ form.genre.label(class="block mb-1 font-medium") }}
+        {{ form.genre(class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
+      </div>
+      <div>
+        {{ form.title_pt.label(class="block mb-1 font-medium") }}
+        {{ form.title_pt(rows=3, class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
+      </div>
+      <div>
+        {{ form.body_pt.label(class="block mb-1 font-medium") }}
+        {{ form.body_pt(rows=5, class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
+      </div>
+      {{ form.submit(class="py-2 px-6 bg-blue-600 hover:bg-blue-700 text-white rounded") }}
+    </form>
+  </div>
 </div>
 
-<!-- JS -->
+<!-- JS for toggle -->
 <script>
   function togglePrompt(id) {
     const el = document.getElementById(id);
-    if (el.classList.contains('hidden')) {
-      el.classList.remove('hidden');
-    } else {
-      el.classList.add('hidden');
-    }
+    el.classList.toggle('hidden');
   }
 </script>
 {% endblock %}
