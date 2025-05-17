@@ -3,6 +3,7 @@ import mimetypes
 import os
 import requests
 import time
+from . import db
 from requests.exceptions import HTTPError
 from flask import current_app
 from .models import Site, Article
@@ -116,6 +117,10 @@ def post_to_wp(site: Site, art: Article) -> str:
         try:
             response = requests.post(url, json=post_data, headers=headers, timeout=TIMEOUT)
             if response.status_code == 201:
+                 # ✅ 投稿成功時：ステータスとURLを保存
+                art.status = "posted"
+                art.posted_url = response.json().get("link")
+                db.session.commit()    
                 return response.json().get("link") or "success"
             else:
                 raise HTTPError(f"ステータスコード {response.status_code}")
