@@ -1,31 +1,46 @@
-{# app/templates/log_sites.html - サイト別ログ選択ページ（縦並び版） #}
 {% extends "base.html" %}
 {% block title %}投稿ログ - サイト一覧 | AI Posting Tool{% endblock %}
 
 {% block content %}
-<h2 class="text-2xl font-semibold mb-6">投稿ログ - サイトを選択</h2>
+<h2 class="text-2xl font-semibold mb-6">投稿ログ - サイト一覧</h2>
 
 {% if sites %}
-  <!-- ✅ grid → flex + flex-col に変更し、縦並び表示にする -->
-  <div class="flex flex-col space-y-4">
-    {% for site in sites %}
-      <a href="{{ url_for('main.log', site_id=site.id) }}"
-         class="block p-5 rounded-lg shadow hover:shadow-md border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition">
-        <div class="text-base font-bold text-blue-700 dark:text-blue-300 mb-1">
-          {{ site.name }}
-        </div>
-        <div class="text-sm text-gray-600 dark:text-gray-400 break-all">
+  <table class="w-full table-auto text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700">
+    <thead>
+      <tr class="bg-gray-100 dark:bg-gray-700 text-left text-red-600 font-bold text-sm whitespace-nowrap">
+        <th class="px-3 py-2">サイト名</th>
+        <th class="px-3 py-2">URL</th>
+        <th class="px-3 py-2 text-center">総記事数</th>
+        <th class="px-3 py-2 text-center">記事生成済み</th>
+        <th class="px-3 py-2 text-center">投稿完了</th>
+        <th class="px-3 py-2 text-center">エラー</th>
+        <th class="px-3 py-2 text-center">詳細</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for site in sites %}
+      <tr class="{% if loop.index0 % 2 == 0 %}bg-white{% else %}bg-blue-50{% endif %} border-b dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-900">
+        <td class="px-3 py-2 align-top font-medium text-blue-700 dark:text-blue-300">
+          [{{ site.name }}]
+        </td>
+        <td class="px-3 py-2 align-top break-all text-gray-700 dark:text-gray-300">
           {{ site.url }}
-        </div>
-        <div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
-          登録記事数: {{ site.articles|length }}
-        </div>
-      </a>
-    {% endfor %}
-  </div>
+        </td>
+        <td class="px-3 py-2 text-center text-black">{{ site.total or 0 }}</td>
+        <td class="px-3 py-2 text-center text-green-600 font-bold">{{ site.done or 0 }}</td>
+        <td class="px-3 py-2 text-center text-blue-600 font-bold">{{ site.posted or 0 }}</td>
+        <td class="px-3 py-2 text-center text-red-600 font-bold">{{ site.error or 0 }}</td>
+        <td class="px-3 py-2 text-center">
+          <a href="{{ url_for('main.log', site_id=site.id) }}"
+             class="inline-block py-1 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm">記事一覧</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 {% else %}
   <div class="text-gray-500 text-center py-12">
-    まだサイトが登録されていません。
+    サイトがまだ登録されていません。
   </div>
 {% endif %}
 

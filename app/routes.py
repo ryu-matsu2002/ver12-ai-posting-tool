@@ -312,12 +312,31 @@ def log(site_id):
     )
 
 
-# ─────────── ログ：サイト選択ページ（新設）
+# ─────────── ログ：サイト選択ページ
 @bp.route("/log/sites")
 @login_required
 def log_sites():
-    sites = Site.query.filter_by(user_id=current_user.id).all()
-    return render_template("log_sites.html", sites=sites)
+    from sqlalchemy import func, case
+
+    # サイトごとの記事集計
+    result = (
+        db.session.query(
+            Site.id,
+            Site.name,
+            Site.url,
+            func.count(Article.id).label("total"),
+            func.sum(case((Article.status == "done", 1), else_=0)).label("done"),
+            func.sum(case((Article.status == "posted", 1), else_=0)).label("posted"),
+            func.sum(case((Article.status == "error", 1), else_=0)).label("error"),
+        )
+        .outerjoin(Article, Site.id == Article.site_id)
+        .filter(Site.user_id == current_user.id)
+        .group_by(Site.id)
+        .all()
+    )
+
+    return render_template("log_sites.html", sites=result)
+
 
 
 # ─────────── プレビュー
