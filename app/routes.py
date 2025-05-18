@@ -78,15 +78,6 @@ def admin_users():
     return render_template("admin/users.html", users=users)
 
 
-@admin_bp.route("/admin/user/<int:uid>/articles")
-@login_required
-def user_articles(uid):
-    if not current_user.is_admin:
-        abort(403)
-    user = User.query.get_or_404(uid)
-    articles = Article.query.filter_by(user_id=uid).order_by(Article.created_at.desc()).all()
-    return render_template("admin/user_articles.html", user=user, articles=articles)
-
 @admin_bp.route("/admin/sites")
 @login_required
 def admin_sites():
