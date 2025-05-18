@@ -1,45 +1,46 @@
-{# app/templates/preview.html #}
 {% extends "base.html" %}
 {% block title %}{{ article.title }} | Preview{% endblock %}
 
 {% block content %}
-<div
-  class="max-w-5xl mx-auto bg-white dark:bg-gray-800 p-8 rounded-2xl shadow-2xl leading-relaxed text-gray-800 dark:text-gray-100"
->
+<div class="max-w-6xl mx-auto px-4 lg:px-0">
 
-  {# ───────── 戻るリンク ───────── #}
-  <a href="{{ url_for('main.log_sites') }}" class="text-red-600 underline font-semibold text-sm hover:text-red-800 block mb-4">
-    ← 記事一覧へ戻る
-  </a>
+  <!-- 🔙 戻るリンク -->
+  <div class="mb-6">
+    <a href="{{ url_for('main.log', site_id=article.site_id) }}"
+       class="text-red-600 font-bold text-sm hover:underline hover:text-red-800 inline-block transition"
+       style="margin-left: -1rem;">
+      ← 記事一覧へ戻る
+    </a>
+  </div>
 
-  {# ───────── Title ───────── #}
-  <h1 class="text-4xl md:text-5xl font-extrabold mb-10 tracking-tight">
-    {{ article.title }}
-  </h1>
+  <!-- 🔤 記事タイトル + 本文 -->
+  <div class="bg-white dark:bg-gray-800 p-8 rounded-2xl shadow-2xl leading-relaxed text-gray-800 dark:text-gray-100">
 
-  {# ───────── Featured Image ───────── #}
-  {% if article.image_url %}
-    <div class="overflow-hidden rounded-xl mb-12 shadow-xl">
-      <img
-        src="{{ article.image_url }}"
-        alt="Featured image"
-        class="w-full max-h-[60vh] object-cover"
-      />
+    <!-- タイトル -->
+    <h1 class="text-4xl md:text-5xl font-extrabold mb-10 tracking-tight">
+      {{ article.title }}
+    </h1>
+
+    <!-- アイキャッチ -->
+    {% if article.image_url %}
+      <div class="overflow-hidden rounded-xl mb-12 shadow-xl">
+        <img
+          src="{{ article.image_url }}"
+          alt="Featured image"
+          class="w-full max-h-[60vh] object-cover"
+        />
+      </div>
+    {% endif %}
+
+    <!-- 本文 -->
+    <div id="article-body" class="space-y-8 text-[1.05rem]">
+      {{ styled_body|safe }}
     </div>
-  {% endif %}
-
-  {# ───────── Body ───────── #}
-  <div id="article-body" class="space-y-8 text-[1.05rem]">
-    {{ styled_body|safe }}
   </div>
 </div>
 
 <style>
-/* ============================================
-   カスタム typograpy
-   ============================================ */
-
-/* ---- H2 ---- */
+/* H2 */
 #article-body h2,
 #article-body .wp-heading.wp-heading-h2 {
   font-size: 1.75rem;
@@ -52,7 +53,7 @@
   border-radius: 0.375rem;
 }
 
-/* ---- H3 ---- */
+/* H3 */
 #article-body h3,
 #article-body .wp-heading.wp-heading-h3 {
   font-size: 1.5rem;
@@ -65,13 +66,13 @@
   border-radius: 0.375rem;
 }
 
-/* ---- Paragraph ---- */
+/* P */
 #article-body p {
   margin-bottom: 1.5rem;
   line-height: 1.8;
 }
 
-/* ---- List ---- */
+/* UL/OL */
 #article-body ul,
 #article-body ol {
   margin-left: 1.25rem;
@@ -82,7 +83,7 @@
   list-style-type: disc;
 }
 
-/* ---- Blockquote ---- */
+/* Blockquote */
 #article-body blockquote {
   margin: 2rem 0;
   padding: 1rem 1.25rem;
@@ -92,7 +93,7 @@
   border-radius: 0.375rem;
 }
 
-/* ---- Code Block ---- */
+/* Code Block */
 #article-body pre {
   background: #f3f4f6;
   padding: 1.25rem 1.5rem;
@@ -102,14 +103,14 @@
   font-size: 0.9rem;
 }
 
-/* ---- Inline Code ---- */
+/* Inline Code */
 #article-body code {
   background: #e5e7eb;
   padding: 0.15rem 0.4rem;
   border-radius: 0.25rem;
 }
 
-/* ---- Table ---- */
+/* Table */
 #article-body table {
   width: 100%;
   border-collapse: collapse;
@@ -127,7 +128,7 @@
   text-align: left;
 }
 
-/* ---- Links ---- */
+/* Links */
 #article-body a {
   color: #2563eb;
   text-decoration: underline;
