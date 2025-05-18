@@ -118,6 +118,62 @@ def admin_sites():
 
     return render_template("admin/sites.html", sites=result)
 
+@admin_bp.post("/admin/delete-stuck-articles")
+@login_required
+def delete_stuck_articles():
+    if not current_user.is_admin:
+        abort(403)
+
+    from app.models import Article
+    stuck = Article.query.filter(Article.status.in_(["pending", "gen"])).all()
+
+    deleted_count = len(stuck)
+    for a in stuck:
+        db.session.delete(a)
+    db.session.commit()
+
+    flash(f"{deleted_count} 件の途中停止記事を削除しました", "success")
+    return redirect(url_for("admin.admin_dashboard"))
+
+@admin_bp.route("/admin/user/<int:uid>/articles")
+@login_required
+def user_articles(uid):
+    if not current_user.is_admin:
+        abort(403)
+    user = User.query.get_or_404(uid)
+    articles = Article.query.filter_by(user_id=uid).order_by(Article.created_at.desc()).all()
+
+    # ✅ pending/gen の件数をカウント
+    stuck_count = Article.query.filter(
+        Article.user_id == uid,
+        Article.status.in_(["pending", "gen"])
+    ).count()
+
+    return render_template("admin/user_articles.html", user=user, articles=articles, stuck_count=stuck_count)
+
+
+@admin_bp.post("/admin/user/<int:uid>/delete-stuck")
+@login_required
+def delete_user_stuck_articles(uid):
+    if not current_user.is_admin:
+        abort(403)
+
+    user = User.query.get_or_404(uid)
+    from app.models import Article
+
+    stuck_articles = Article.query.filter(
+        Article.user_id == uid,
+        Article.status.in_(["pending", "gen"])
+    ).all()
+
+    count = len(stuck_articles)
+    for art in stuck_articles:
+        db.session.delete(art)
+    db.session.commit()
+
+    flash(f"{count} 件の途中停止記事を削除しました", "success")
+    return redirect(url_for("admin.user_articles", uid=uid))
+
 
 @bp.route("/chatgpt")
 @login_required

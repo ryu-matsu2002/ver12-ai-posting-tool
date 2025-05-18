@@ -5,6 +5,24 @@
 <div class="p-6">
   <h1 class="text-xl font-bold mb-4">📝 {{ user.email }} の記事一覧</h1>
 
+  <!-- ✅ 削除対象件数表示 + 削除ボタン -->
+  <div class="mb-4 flex items-center gap-4">
+    <p class="text-sm text-red-600 font-semibold">
+      🚫 途中停止状態の記事: <span class="text-lg">{{ stuck_count }}</span> 件
+    </p>
+
+    {% if stuck_count > 0 %}
+    <form method="post" action="{{ url_for('admin.delete_user_stuck_articles', uid=user.id) }}"
+          onsubmit="return confirm('途中停止中の記事（pending / gen）を削除しますか？');">
+      <button type="submit"
+              class="py-2 px-6 bg-red-600 hover:bg-red-700 text-white rounded">
+        一括削除
+      </button>
+    </form>
+    {% endif %}
+  </div>
+
+  <!-- 記事一覧テーブル -->
   <table class="w-full table-auto">
     <thead>
       <tr class="border-b">
@@ -21,8 +39,6 @@
         <td class="px-2 py-2">{{ a.title[:30] }}...</td>
         <td class="px-2 py-2">
           {{ a.status }}
-
-          {# ✅ 追加: 投稿済みの記事に対して WordPress リンク（View）を表示 #}
           {% if a.status == 'posted' and a.posted_url %}
             <a href="{{ a.posted_url }}" target="_blank"
                class="ml-2 text-blue-600 underline hover:text-blue-800"
