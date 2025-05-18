@@ -30,7 +30,7 @@
 </form>
 
 <!-- ✅ 一括操作フォーム -->
-<form method="post" action="{{ url_for('main.bulk_delete') }}">
+<form method="post" action="{{ url_for('main.bulk_delete_articles') }}">
   <div class="mb-4 flex items-center gap-2">
     <select name="action" class="p-2 rounded border">
       <option value="">一括操作</option>
