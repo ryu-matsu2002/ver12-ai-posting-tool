@@ -37,9 +37,9 @@
   <table class="min-w-full bg-white dark:bg-gray-800 text-sm table-auto">
     <thead>
       <tr class="bg-gray-100 dark:bg-gray-700 whitespace-nowrap">
-        <th class="px-4 py-2 text-left min-w-[200px]">検索キーワード</th>
-        <th class="px-4 py-2 text-left min-w-[180px]">サイト名</th>
-        <th class="px-4 py-2 text-left">現在の状態</th>
+        <th class="px-4 py-2 text-left min-w-[240px]">検索キーワード</th>
+        <th class="px-4 py-2 text-left min-w-[200px]">サイト名</th>
+        <th class="px-4 py-2 text-left min-w-[160px]">現在の状態</th>
         <th class="px-4 py-2 text-left">進行状況</th>
         <th class="px-4 py-2 text-left">投稿予定日</th>
         <th class="px-4 py-2 text-left min-w-[300px]">Q＆A記事タイトル</th>
@@ -50,18 +50,7 @@
     </thead>
     <tbody>
       {% for a in articles %}
-      <tr class="
-        {% if a.status == 'posted' %}
-          bg-green-50
-        {% elif a.status == 'error' %}
-          bg-red-50
-        {% elif a.status == 'pending' %}
-          bg-yellow-50
-        {% else %}
-          {% if loop.index0 % 2 == 0 %}bg-white{% else %}bg-blue-50{% endif %}
-        {% endif %}
-        border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-900">
-        
+      <tr class="{% if loop.index0 % 2 == 0 %}bg-white{% else %}bg-blue-50{% endif %} border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-900">
         <td class="px-4 py-2 align-top break-words">{{ a.keyword }}</td>
         <td class="px-4 py-2 align-top break-words">
           {% if a.site %}[{{ a.site.name }}]{% else %}—{% endif %}
