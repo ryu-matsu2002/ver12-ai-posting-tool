@@ -268,47 +268,49 @@ def generate():
 @bp.route("/log/site/<int:site_id>")
 @login_required
 def log(site_id):
-
-    # 未スケジュール記事の slot をサイトごとに自動割当
     from collections import defaultdict
-    from .article_generator import _generate_slots_per_site  # ← 必須
+    from .article_generator import _generate_slots_per_site
 
+    # ステータスフィルタを取得
+    status = request.args.get("status")
+
+    # 未スケジュール記事の slot を自動割当
     unscheduled = Article.query.filter(
         Article.user_id == current_user.id,
         Article.scheduled_at.is_(None),
     ).all()
 
     if unscheduled:
-        # サイトごとに分類
         site_map = defaultdict(list)
         for art in unscheduled:
-            if art.site_id:  # site_id が None の記事は無視
+            if art.site_id:
                 site_map[art.site_id].append(art)
 
-        # 各サイトごとにスロットを生成して割当
-        for site_id, articles in site_map.items():
-            slots = iter(_generate_slots_per_site(current_app, site_id, len(articles)))
+        for sid, articles in site_map.items():
+            slots = iter(_generate_slots_per_site(current_app, sid, len(articles)))
             for art in articles:
                 art.scheduled_at = next(slots)
-
         db.session.commit()
 
-    # 記事取得
-    q = Article.query.filter_by(user_id=current_user.id)
-    if site_id:
-        q = q.filter_by(site_id=site_id)
+    # 記事取得クエリ
+    q = Article.query.filter_by(user_id=current_user.id, site_id=site_id)
+    if status:
+        q = q.filter_by(status=status)
     q = q.order_by(
         nulls_last(asc(Article.scheduled_at)),
         Article.created_at.desc(),
     )
 
+    site = Site.query.get_or_404(site_id)
+
     return render_template(
         "log.html",
         articles=q.all(),
-        sites=Site.query.filter_by(user_id=current_user.id).all(),
-        site_id=site_id,
-        jst=JST,
+        site=site,         # ← サイトオブジェクトを渡す（表示用）
+        status=status,     # ← ステータスフィルタ（セレクトボックスの維持）
+        jst=JST
     )
+
 
 # ─────────── ログ：サイト選択ページ（新設）
 @bp.route("/log/sites")
