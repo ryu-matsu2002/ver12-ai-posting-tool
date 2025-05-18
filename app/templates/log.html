@@ -23,7 +23,7 @@
 </form>
 
 <div class="overflow-x-auto">
-  <table class="min-w-full bg-white dark:bg-gray-800 text-sm">
+  <table class="min-w-full bg-white dark:bg-gray-800 text-sm table-auto">
     <thead>
       <tr class="bg-gray-100 dark:bg-gray-700 whitespace-nowrap">
         <th class="px-4 py-2 text-left">検索キーワード</th>
@@ -40,8 +40,8 @@
     <tbody>
       {% for a in articles %}
       <tr class="{% if loop.index0 % 2 == 0 %}bg-white{% else %}bg-blue-50{% endif %} border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-900">
-        <td class="px-4 py-2 align-top max-w-[10rem] break-words">{{ a.keyword }}</td>
-        <td class="px-4 py-2 align-top">
+        <td class="px-4 py-2 align-top whitespace-nowrap truncate max-w-[200px]">{{ a.keyword }}</td>
+        <td class="px-4 py-2 align-top whitespace-nowrap truncate max-w-[200px]">
           {% if a.site %}[{{ a.site.name }}]{% else %}—{% endif %}
         </td>
         <td class="px-4 py-2 align-top">
@@ -50,22 +50,22 @@
           {% elif a.status == "done" %}
             <span class="text-red-600 font-bold">記事生成済み</span>
           {% elif a.status == "pending" %}
-            <span class="text-red-600 font-bold">記事生成中</span>
+            <span class="text-black font-bold">記事生成中</span>
           {% elif a.status == "error" %}
             <span class="text-red-600 font-bold" title="{{ a.body }}">error</span>
           {% else %}
             {{ a.status }}
           {% endif %}
         </td>
-        <td class="px-4 py-2 align-top">{{ a.progress }}%</td>
-        <td class="px-4 py-2 align-top">
+        <td class="px-4 py-2 align-top whitespace-nowrap">{{ a.progress }}%</td>
+        <td class="px-4 py-2 align-top whitespace-nowrap">
           {% if a.scheduled_at %}
             {{ a.scheduled_at.astimezone(jst).strftime("%Y-%m-%d %H:%M") }}
           {% else %}
             —  
           {% endif %}
         </td>
-        <td class="px-4 py-2 align-top max-w-sm break-words">{{ a.title }}</td>
+        <td class="px-4 py-2 align-top truncate max-w-[250px]">{{ a.title }}</td>
         <td class="px-4 py-2 align-top">
           {% if a.status in ["done", "posted"] %}
             <a href="{{ url_for('main.preview', article_id=a.id) }}"
