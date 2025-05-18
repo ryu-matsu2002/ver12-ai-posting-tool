@@ -169,49 +169,49 @@ def dashboard():
     return render_template("dashboard.html")
 
 
-# ─────────── プロンプト CRUD
+# ─────────── プロンプト CRUD（新規登録のみ）
 @bp.route("/prompts", methods=["GET", "POST"])
 @login_required
 def prompts():
     form = PromptForm()
 
-    # 編集用IDが送信されていた場合、上書き保存処理へ
+    # 新規登録のみ処理
     if form.validate_on_submit():
-        if form.id.data:
-            pt = PromptTemplate.query.get(int(form.id.data))
-            if not pt or pt.user_id != current_user.id:
-                abort(403)
-            pt.genre    = form.genre.data
-            pt.title_pt = form.title_pt.data
-            pt.body_pt  = form.body_pt.data
-            db.session.commit()
-            flash("プロンプトを更新しました", "success")
-        else:
-            # 新規作成処理
-            db.session.add(PromptTemplate(
-                genre    = form.genre.data,
-                title_pt = form.title_pt.data,
-                body_pt  = form.body_pt.data,
-                user_id  = current_user.id
-            ))
-            db.session.commit()
-            flash("プロンプトを保存しました", "success")
+        db.session.add(PromptTemplate(
+            genre    = form.genre.data,
+            title_pt = form.title_pt.data,
+            body_pt  = form.body_pt.data,
+            user_id  = current_user.id
+        ))
+        db.session.commit()
+        flash("プロンプトを保存しました", "success")
         return redirect(url_for(".prompts"))
-
-    # 編集対象プロンプト（GETパラメータでID指定あり）
-    pid = request.args.get("edit", type=int)
-    if pid:
-        pt = PromptTemplate.query.get(pid)
-        if pt and pt.user_id == current_user.id:
-            form.id.data       = pt.id
-            form.genre.data    = pt.genre
-            form.title_pt.data = pt.title_pt
-            form.body_pt.data  = pt.body_pt
 
     plist = PromptTemplate.query.filter_by(user_id=current_user.id).all()
     return render_template("prompts.html", form=form, prompts=plist)
 
 
+# ─────────── プロンプト編集ページ（専用ページ）
+@bp.route("/prompt/edit/<int:pid>", methods=["GET", "POST"])
+@login_required
+def edit_prompt(pid: int):
+    pt = PromptTemplate.query.get_or_404(pid)
+    if pt.user_id != current_user.id:
+        abort(403)
+
+    form = PromptForm(obj=pt)
+    if form.validate_on_submit():
+        pt.genre    = form.genre.data
+        pt.title_pt = form.title_pt.data
+        pt.body_pt  = form.body_pt.data
+        db.session.commit()
+        flash("プロンプトを更新しました", "success")
+        return redirect(url_for(".prompts"))
+
+    return render_template("prompt_edit.html", form=form, prompt=pt)
+
+
+# ─────────── プロンプト削除
 @bp.post("/prompts/delete/<int:pid>")
 @login_required
 def delete_prompt(pid: int):
@@ -223,13 +223,19 @@ def delete_prompt(pid: int):
     flash("削除しました", "success")
     return redirect(url_for(".prompts"))
 
+
+# ─────────── プロンプト取得API（記事生成用）
 @bp.route("/api/prompt/<int:pid>")
 @login_required
 def api_prompt(pid: int):
     pt = PromptTemplate.query.get_or_404(pid)
     if pt.user_id != current_user.id:
         abort(403)
-    return jsonify({"title_pt": pt.title_pt, "body_pt": pt.body_pt})
+    return jsonify({
+        "title_pt": pt.title_pt,
+        "body_pt": pt.body_pt
+    })
+
 
 
 # ─────────── WP サイト CRUD
