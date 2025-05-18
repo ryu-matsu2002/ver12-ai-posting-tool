@@ -112,6 +112,12 @@ def admin_sites():
     return render_template("admin/sites.html", sites=result)
 
 
+@bp.route("/chatgpt")
+@login_required
+def chatgpt():
+    return render_template("chatgpt.html")
+
+
 
 # ─────────── 認証
 @bp.route("/login", methods=["GET", "POST"])
