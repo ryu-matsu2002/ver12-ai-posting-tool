@@ -39,7 +39,7 @@
     </thead>
     <tbody>
       {% for a in articles %}
-      <tr class="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-900">
+      <tr class="{% if loop.index0 % 2 == 0 %}bg-white{% else %}bg-blue-50{% endif %} border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-900">
         <td class="px-4 py-2 align-top max-w-[10rem] break-words">{{ a.keyword }}</td>
         <td class="px-4 py-2 align-top">
           {% if a.site %}[{{ a.site.name }}]{% else %}—{% endif %}
