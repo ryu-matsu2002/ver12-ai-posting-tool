@@ -502,6 +502,23 @@ def retry_article(id: int):
 
     return redirect(url_for(".log", site_id=art.site_id))
 
+@bp.post("/articles/bulk-delete")
+@login_required
+def bulk_delete_articles():
+    ids = request.form.getlist("selected_ids")
+    if not ids:
+        flash("削除する記事が選択されていません", "warning")
+        return redirect(request.referrer or url_for(".dashboard"))
+
+    for aid in ids:
+        article = Article.query.get(int(aid))
+        if article and article.user_id == current_user.id:
+            db.session.delete(article)
+
+    db.session.commit()
+    flash(f"{len(ids)}件の記事を削除しました", "success")
+    return redirect(request.referrer or url_for(".dashboard"))
+
 
 
 @bp.route("/debug-post/<int:aid>")
