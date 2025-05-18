@@ -42,6 +42,13 @@ bp = Blueprint("main", __name__)
 # 必要なら app/__init__.py で admin_bp を登録
 admin_bp = Blueprint("admin", __name__)
 
+from flask import send_from_directory
+
+@bp.route('/robots.txt')
+def robots_txt():
+    return send_from_directory('static', 'robots.txt')
+
+
 @admin_bp.route("/admin")
 @login_required
 def admin_dashboard():
