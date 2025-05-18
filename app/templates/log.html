@@ -32,9 +32,9 @@
   </noscript>
 </form>
 
-<!-- 記事テーブル -->
-<div class="overflow-x-auto w-full max-w-full">
-  <table class="min-w-full bg-white dark:bg-gray-800 text-sm table-auto">
+<!-- テーブル全体 -->
+<div class="overflow-x-auto max-w-screen">
+  <table class="min-w-[1400px] bg-white dark:bg-gray-800 text-sm table-auto">
     <thead>
       <tr class="bg-gray-100 dark:bg-gray-700 whitespace-nowrap">
         <th class="px-4 py-2 text-left min-w-[240px]">検索キーワード</th>
@@ -45,7 +45,7 @@
         <th class="px-4 py-2 text-left min-w-[300px]">Q＆A記事タイトル</th>
         <th class="px-4 py-2 text-left">プレビュー</th>
         <th class="px-4 py-2 text-left">アイキャッチ画像</th>
-        <th class="px-4 py-2 text-left min-w-[200px]">編集／削除</th>
+        <th class="px-4 py-2 text-left min-w-[220px]">編集／削除</th>
       </tr>
     </thead>
     <tbody>
@@ -93,36 +93,36 @@
             —  
           {% endif %}
         </td>
-        <td class="px-4 py-2 align-top space-x-3 whitespace-nowrap">
+        <td class="px-4 py-2 align-top space-x-2 whitespace-nowrap">
           {% if a.status == "error" %}
             <form action="{{ url_for('main.retry_article', id=a.id) }}"
                   method="post" class="inline">
               <button type="submit"
-                      class="py-1 px-3 bg-yellow-500 hover:bg-yellow-600 text-white rounded">
+                      class="py-1 px-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded text-sm">
                 再生成
               </button>
             </form>
           {% endif %}
           <a href="{{ url_for('main.edit_article', id=a.id) }}"
-             class="text-green-600 hover:underline">編集</a>
+             class="text-green-600 hover:underline text-sm">編集</a>
           <form action="{{ url_for('main.delete_article', id=a.id) }}"
                 method="post" class="inline"
                 onsubmit="return confirm('本当に削除しますか？');">
-            <button type="submit" class="text-red-600 hover:underline">削除</button>
+            <button type="submit" class="text-red-600 hover:underline text-sm">削除</button>
           </form>
           {% if a.status == "done" and a.site_id %}
             <form action="{{ url_for('main.post_article', id=a.id) }}"
                   method="post" class="inline">
               <button type="submit"
-                      class="inline-flex items-center gap-1 py-1 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded"
+                      class="inline-flex items-center gap-1 py-1 px-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-sm"
                       title="WordPress へ投稿">
-                ⬆️ <span class="hidden sm:inline">即時投稿</span>
+                ⬆️<span class="hidden sm:inline">即時投稿</span>
               </button>
             </form>
           {% endif %}
           {% if a.status == "posted" and a.posted_url %}
             <a href="{{ a.posted_url }}" target="_blank"
-               class="inline-block py-1 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded"
+               class="inline-block py-1 px-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm"
                title="公開ページを表示">記事表示</a>
           {% endif %}
         </td>
