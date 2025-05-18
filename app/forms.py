@@ -8,7 +8,8 @@ from wtforms import (
     TextAreaField,
     SubmitField,
     SelectField,
-    IntegerField,         # ← 新規追加
+    IntegerField,   
+    HiddenField,            # ← 新規追加
 )
 from wtforms.validators import DataRequired, Email, Length, EqualTo, URL, Optional, NumberRange
 
@@ -62,6 +63,7 @@ class GenerateForm(FlaskForm):
             raise ValueError("キーワードは最大40個までです。")
 
 class PromptForm(FlaskForm):
+    id       = HiddenField() 
     genre    = StringField("プロンプト名", validators=[DataRequired(), Length(max=100)])
     title_pt = TextAreaField("タイトル用プロンプト", validators=[DataRequired()])
     body_pt  = TextAreaField("本文用プロンプト",      validators=[DataRequired()])

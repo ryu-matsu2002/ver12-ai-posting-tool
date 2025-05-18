@@ -11,8 +11,9 @@
   <div class="md:col-span-2">
     <form method="post" class="space-y-4 bg-white dark:bg-gray-800 p-6 rounded shadow">
       {{ form.hidden_tag() }}
+      {{ form.id }}  {# ← 編集時に使用する hidden フィールド #}
+
       <div>
-        <!-- ✅ 修正済み: ジャンル名 → プロンプト名 -->
         <label for="genre" class="block mb-1 font-medium">プロンプト名</label>
         {{ form.genre(class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
       </div>
@@ -35,7 +36,6 @@
       {% for p in prompts %}
         <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow p-4">
           <div class="flex justify-between items-center mb-2">
-            <!-- ✅ 修正済み: ジャンル → プロンプト名 -->
             <span class="font-bold text-blue-700 dark:text-blue-300 text-sm">{{ p.genre }}</span>
             <form action="{{ url_for('main.delete_prompt', pid=p.id) }}" method="post"
                   onsubmit="return confirm('削除しますか？');">
@@ -43,10 +43,14 @@
             </form>
           </div>
 
-          <button onclick="togglePrompt('prompt-{{ p.id }}')"
-                  class="text-sm text-white bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded w-full">
-            確認
-          </button>
+          <div class="flex gap-2 mt-2">
+            <a href="{{ url_for('main.prompts', edit=p.id) }}"
+               class="text-xs text-blue-600 underline hover:text-blue-800">編集</a>
+            <button onclick="togglePrompt('prompt-{{ p.id }}')"
+                    class="text-xs text-white bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded">
+              確認
+            </button>
+          </div>
 
           <div id="prompt-{{ p.id }}" class="mt-3 hidden text-sm text-gray-700 dark:text-gray-300">
             <div class="mt-2">

@@ -174,19 +174,43 @@ def dashboard():
 @login_required
 def prompts():
     form = PromptForm()
+
+    # 編集用IDが送信されていた場合、上書き保存処理へ
     if form.validate_on_submit():
-        db.session.add(PromptTemplate(
-            genre    = form.genre.data,
-            title_pt = form.title_pt.data,
-            body_pt  = form.body_pt.data,
-            user_id  = current_user.id
-        ))
-        db.session.commit()
-        flash("プロンプトを保存しました", "success")
+        if form.id.data:
+            pt = PromptTemplate.query.get(int(form.id.data))
+            if not pt or pt.user_id != current_user.id:
+                abort(403)
+            pt.genre    = form.genre.data
+            pt.title_pt = form.title_pt.data
+            pt.body_pt  = form.body_pt.data
+            db.session.commit()
+            flash("プロンプトを更新しました", "success")
+        else:
+            # 新規作成処理
+            db.session.add(PromptTemplate(
+                genre    = form.genre.data,
+                title_pt = form.title_pt.data,
+                body_pt  = form.body_pt.data,
+                user_id  = current_user.id
+            ))
+            db.session.commit()
+            flash("プロンプトを保存しました", "success")
         return redirect(url_for(".prompts"))
+
+    # 編集対象プロンプト（GETパラメータでID指定あり）
+    pid = request.args.get("edit", type=int)
+    if pid:
+        pt = PromptTemplate.query.get(pid)
+        if pt and pt.user_id == current_user.id:
+            form.id.data       = pt.id
+            form.genre.data    = pt.genre
+            form.title_pt.data = pt.title_pt
+            form.body_pt.data  = pt.body_pt
 
     plist = PromptTemplate.query.filter_by(user_id=current_user.id).all()
     return render_template("prompts.html", form=form, prompts=plist)
+
 
 @bp.post("/prompts/delete/<int:pid>")
 @login_required
