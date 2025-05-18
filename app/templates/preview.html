@@ -6,6 +6,12 @@
 <div
   class="max-w-5xl mx-auto bg-white dark:bg-gray-800 p-8 rounded-2xl shadow-2xl leading-relaxed text-gray-800 dark:text-gray-100"
 >
+
+  {# ───────── 戻るリンク ───────── #}
+  <a href="{{ url_for('main.log_sites') }}" class="text-red-600 underline font-semibold text-sm hover:text-red-800 block mb-4">
+    ← 記事一覧へ戻る
+  </a>
+
   {# ───────── Title ───────── #}
   <h1 class="text-4xl md:text-5xl font-extrabold mb-10 tracking-tight">
     {{ article.title }}
@@ -30,31 +36,31 @@
 
 <style>
 /* ============================================
-   カスタム typograpy (Tailwind @apply を使わず直接指定)
+   カスタム typograpy
    ============================================ */
 
 /* ---- H2 ---- */
 #article-body h2,
 #article-body .wp-heading.wp-heading-h2 {
-  font-size: 1.75rem;          /* text-3xl */
-  font-weight: 700;            /* font-bold */
-  margin: 2.25rem 0 1.25rem;   /* my-9 mb-5 */
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin: 2.25rem 0 1.25rem;
   padding: 0.75rem 1.25rem;
-  color: #1e3a8a;              /* blue-900 */
-  background: #dbeafe;         /* blue-100 */
+  color: #1e3a8a;
+  background: #dbeafe;
   border-left: 6px solid #3b82f6;
-  border-radius: 0.375rem;     /* rounded-md */
+  border-radius: 0.375rem;
 }
 
 /* ---- H3 ---- */
 #article-body h3,
 #article-body .wp-heading.wp-heading-h3 {
-  font-size: 1.5rem;           /* text-2xl */
-  font-weight: 600;            /* font-semibold */
-  margin: 1.75rem 0 1rem;      /* my-7 mb-4 */
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 1.75rem 0 1rem;
   padding: 0.5rem 1rem;
-  color: #3730a3;              /* indigo-900 */
-  background: #eef2ff;         /* indigo-100 */
+  color: #3730a3;
+  background: #eef2ff;
   border-left: 4px solid #6366f1;
   border-radius: 0.375rem;
 }
@@ -65,7 +71,7 @@
   line-height: 1.8;
 }
 
-/* ---- Unordered / Ordered List ---- */
+/* ---- List ---- */
 #article-body ul,
 #article-body ol {
   margin-left: 1.25rem;
@@ -80,15 +86,15 @@
 #article-body blockquote {
   margin: 2rem 0;
   padding: 1rem 1.25rem;
-  border-left: 5px solid #9ca3af;     /* gray-400 */
-  background: #f9fafb;                /* gray-50 */
+  border-left: 5px solid #9ca3af;
+  background: #f9fafb;
   font-style: italic;
   border-radius: 0.375rem;
 }
 
 /* ---- Code Block ---- */
 #article-body pre {
-  background: #f3f4f6;               /* gray-100 */
+  background: #f3f4f6;
   padding: 1.25rem 1.5rem;
   overflow-x: auto;
   border-radius: 0.5rem;
@@ -98,7 +104,7 @@
 
 /* ---- Inline Code ---- */
 #article-body code {
-  background: #e5e7eb;               /* gray-200 */
+  background: #e5e7eb;
   padding: 0.15rem 0.4rem;
   border-radius: 0.25rem;
 }
@@ -112,22 +118,22 @@
 }
 #article-body th,
 #article-body td {
-  border: 1px solid #d1d5db;         /* gray-300 */
+  border: 1px solid #d1d5db;
   padding: 0.75rem 1rem;
 }
 #article-body th {
-  background: #f3f4f6;               /* gray-100 */
+  background: #f3f4f6;
   font-weight: 600;
   text-align: left;
 }
 
 /* ---- Links ---- */
 #article-body a {
-  color: #2563eb;                    /* blue-600 */
+  color: #2563eb;
   text-decoration: underline;
 }
 #article-body a:hover {
-  color: #1d4ed8;                    /* blue-700 */
+  color: #1d4ed8;
 }
 </style>
 {% endblock %}
