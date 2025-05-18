@@ -5,14 +5,14 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>{% block title %}AI Posting Tool{% endblock %}</title>
 
-  <!-- Tailwind -->
+  <!-- Tailwind (JIT CDN) -->
   <script src="https://cdn.tailwindcss.com/3.4.4"></script>
 
-  <!-- Google Fonts / Material Icons -->
+  <!-- Google Fonts・Material Icons -->
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 
-  <!-- Tailwind 拡張設定 -->
+  <!-- Tailwind 設定 -->
   <script>
     tailwind.config = {
       darkMode: 'class',
@@ -33,58 +33,58 @@
 </head>
 
 <body class="h-full flex bg-primary text-white">
+
   <!-- ===== SIDEBAR ===== -->
   <aside class="w-60 shrink-0 h-full bg-primaryDark border-r border-gray-700 shadow-md flex flex-col">
     <h1 class="text-xl font-semibold px-6 py-4 border-b border-gray-700">TCC autowize</h1>
 
     <nav class="flex-1 py-4 space-y-1">
-      <!-- ダッシュボード -->
       <a href="{{ url_for('main.dashboard') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
                 {{ 'font-semibold bg-[#0f2fa6]' if request.path=='/' else '' }}">
         <span class="material-icons align-middle mr-2">dashboard</span>ダッシュボード
       </a>
 
-      <!-- 記事生成（旧ログ） -->
-      <a href="{{ url_for('main.log_sites') }}"
+      <a href="{{ url_for('main.generate') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
-                {{ request.path.startswith('/log') and 'font-semibold bg-[#0f2fa6]' }}">
-        <span class="material-icons align-middle mr-2">article</span>記事生成
+                {{ '/generate' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
+        <span class="material-icons align-middle mr-2">edit</span>記事生成
       </a>
 
-      <!-- サイト登録 -->
       <a href="{{ url_for('main.sites') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
                 {{ request.path == '/sites' and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">storage</span>サイト登録
       </a>
 
-      <!-- プロンプト -->
       <a href="{{ url_for('main.prompts') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
                 {{ '/prompts' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">notes</span>プロンプト登録
       </a>
 
-      <!-- ChatGPT -->
       <a href="{{ url_for('main.chatgpt') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
                 {{ '/chatgpt' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">smart_toy</span>ChatGPT
       </a>
 
-      <!-- Login -->
       <a href="{{ url_for('main.login') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
                 {{ '/login' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">login</span>Login
       </a>
+
+      <!-- ✅ Logout ボタンを Login の直後に移動 -->
+      <a href="{{ url_for('main.logout') }}"
+         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full text-red-400">
+        <span class="material-icons align-middle mr-2">logout</span>Logout
+      </a>
     </nav>
 
-    <!-- ログアウト -->
-    <div class="px-6 py-4 border-t border-gray-700 flex items-center justify-between">
+    <!-- ✅ テーマ切り替えボタンだけ下に残す -->
+    <div class="px-6 py-4 border-t border-gray-700 flex items-center justify-start">
       <button onclick="toggleTheme()" class="material-icons text-gray-300">dark_mode</button>
-      <a href="{{ url_for('main.logout') }}" class="text-sm text-red-400 hover:underline">Logout</a>
     </div>
   </aside>
 
@@ -109,9 +109,8 @@
 </body>
 </html>
 
-<!-- Optional: Tailwind custom -->
 <style>
-  .side { display:block; padding:.5rem 1.5rem; border-radius:9999px }
-  .side:hover { background:rgba(59,130,246,.07) }
-  .active { font-weight:600; background-color:rgba(191,219,254,.7) }
+  .side { display: block; padding: .5rem 1.5rem; border-radius: 9999px }
+  .side:hover { background: rgba(59,130,246,.07) }
+  .active { font-weight: 600; background-color: rgba(191,219,254,.7) }
 </style>
