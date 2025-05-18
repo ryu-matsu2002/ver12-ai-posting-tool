@@ -235,10 +235,13 @@ def delete_site(sid: int):
 
 
 # ─────────── 記事生成
+# ─────────── 記事生成
 @bp.route("/generate", methods=["GET", "POST"])
 @login_required
 def generate():
     form = GenerateForm()
+
+    # ▼ プロンプトとサイトの選択肢をセット
     form.genre_select.choices = [(0, "― 使わない ―")] + [
         (p.id, p.genre)
         for p in PromptTemplate.query.filter_by(user_id=current_user.id)
@@ -247,6 +250,12 @@ def generate():
         (s.id, s.name)
         for s in Site.query.filter_by(user_id=current_user.id)
     ]
+
+    # ▼ クエリ文字列 ?site_id=◯ を受け取り、デフォルト選択に反映
+    if request.method == "GET":
+        preselected_site_id = request.args.get("site_id", type=int)
+        if preselected_site_id:
+            form.site_select.data = preselected_site_id
 
     if form.validate_on_submit():
         kws     = [k.strip() for k in form.keywords.data.splitlines() if k.strip()]
