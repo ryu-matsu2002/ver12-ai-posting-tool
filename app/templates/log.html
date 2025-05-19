@@ -2,19 +2,25 @@
 {% block title %}記事一覧 | AI Posting Tool{% endblock %}
 
 {% block content %}
-<h2 class="text-2xl font-semibold mb-4">記事一覧</h2>
 
-<!-- 🔙 サイト一覧へ戻る -->
-<div class="mb-2">
-  <a href="{{ url_for('main.generate') }}" class="text-sm text-blue-700 hover:underline font-semibold">← サイト一覧に戻る</a>
+<!-- 🔙 サイト一覧へ戻るリンク（大きめ＆上部） -->
+<div class="mb-4">
+  <a href="{{ url_for('main.generate') }}" class="text-base text-blue-700 hover:underline font-semibold">← サイト一覧に戻る</a>
 </div>
+
+<h2 class="text-2xl font-semibold mb-4">記事一覧</h2>
 
 <!-- ✅ 現在の投稿先サイト名 -->
 <div class="mb-4 text-sm">
   <span class="font-semibold">現在の投稿先サイト：</span>
   {% if site %}
-    <a href="{{ site.url }}" target="_blank" class="text-blue-700 font-bold hover:underline">
-      {{ site.name }} 🔗
+    <a href="{{ site.url }}" target="_blank" class="text-blue-700 font-bold hover:underline inline-flex items-center gap-1">
+      {{ site.name }}
+      <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M14 3h7v7" />
+        <path d="M10 14L21 3" />
+        <path d="M5 12v7a2 2 0 0 0 2 2h7" />
+      </svg>
     </a>
   {% else %}
     <span class="text-gray-500">未選択</span>
@@ -23,18 +29,18 @@
 
 <!-- ✅ ステータス絞り込み -->
 <form method="get" class="mb-6 flex items-center flex-wrap gap-3">
-  <label for="statusFilter" class="font-medium shrink-0">ステータスで絞り込み:</label>
+  <label for="statusFilter" class="font-medium shrink-0">表示するステータス:</label>
   <select
     id="statusFilter"
     name="status"
     onchange="this.form.submit()"
     class="p-2 rounded border dark:bg-gray-700 dark:border-gray-600 min-w-[200px]"
   >
-    <option value="">全ステータス</option>
-    <option value="posted" {% if status == "posted" %}selected{% endif %}>投稿完了</option>
-    <option value="done" {% if status == "done" %}selected{% endif %}>記事生成済み</option>
-    <option value="pending" {% if status == "pending" %}selected{% endif %}>記事生成中</option>
-    <option value="error" {% if status == "error" %}selected{% endif %}>エラー</option>
+    <option value="">すべてのステータス</option>
+    <option value="posted" {% if status == "posted" %}selected{% endif %}>✅ 投稿完了</option>
+    <option value="done" {% if status == "done" %}selected{% endif %}>📝 記事生成済み</option>
+    <option value="pending" {% if status == "pending" %}selected{% endif %}>⏳ 記事生成中</option>
+    <option value="error" {% if status == "error" %}selected{% endif %}>❌ エラー</option>
   </select>
 </form>
 
@@ -100,8 +106,8 @@
         <td class="px-2 py-2 text-left">
           {% if a.status in ["done", "posted"] %}
             <a href="{{ url_for('main.preview', article_id=a.id) }}"
-               class="inline-block py-1.5 px-3 bg-blue-500 hover:bg-blue-600 text-white rounded text-sm">
-              プレビュー
+               class="inline-flex items-center justify-center gap-1 py-1 px-3 bg-blue-500 hover:bg-blue-600 text-white rounded text-sm whitespace-nowrap">
+              👁 プレビュー
             </a>
           {% else %}—{% endif %}
         </td>
@@ -118,22 +124,22 @@
               </form>
             {% endif %}
             <a href="{{ url_for('main.edit_article', id=a.id) }}"
-               class="py-1.5 px-3 bg-green-500 hover:bg-green-600 text-white rounded text-sm">編集</a>
+               class="inline-flex items-center gap-1 py-1.5 px-3 bg-green-500 hover:bg-green-600 text-white rounded text-sm">✏ 編集</a>
             <form action="{{ url_for('main.delete_article', id=a.id) }}" method="post"
                   class="inline" onsubmit="return confirm('削除しますか？');">
-              <button type="submit" class="py-1.5 px-3 bg-red-500 hover:bg-red-600 text-white rounded text-sm">削除</button>
+              <button type="submit" class="inline-flex items-center gap-1 py-1.5 px-3 bg-red-500 hover:bg-red-600 text-white rounded text-sm">🗑 削除</button>
             </form>
             {% if a.status == "done" and a.site_id %}
               <form action="{{ url_for('main.post_article', id=a.id) }}" method="post" class="inline">
                 <button type="submit" class="inline-flex items-center gap-1 py-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-sm">
-                  ⬆️<span class="hidden sm:inline">即時投稿</span>
+                  ⬆️ 投稿
                 </button>
               </form>
             {% endif %}
             {% if a.status == "posted" and a.posted_url %}
               <a href="{{ a.posted_url }}" target="_blank"
-                 class="py-1.5 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm"
-                 title="公開ページを表示">記事表示</a>
+                 class="inline-flex items-center gap-1 py-1.5 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm"
+                 title="公開ページを表示">🔍 表示</a>
             {% endif %}
           </div>
         </td>
