@@ -4,7 +4,7 @@
 {% block content %}
 <h2 class="text-3xl font-bold mb-8">ダッシュボード</h2>
 
-<!-- 上部ステータス表示 -->
+<!-- ✅ ステータス表示 -->
 <div class="grid md:grid-cols-4 gap-6 mb-10">
   <!-- 投稿完了 -->
   <div class="bg-white dark:bg-gray-800 p-6 rounded shadow text-center">
@@ -14,13 +14,13 @@
 
   <!-- 投稿待機中 -->
   <div class="bg-white dark:bg-gray-800 p-6 rounded shadow text-center">
-    <p class="text-xl font-bold text-sky-600 mb-2">投稿待機中</p>
-    <p class="text-4xl font-extrabold text-sky-600">{{ g.done or 0 }}</p>
+    <p class="text-xl font-bold text-blue-600 mb-2">投稿待機中</p>
+    <p class="text-4xl font-extrabold text-blue-600">{{ g.done or 0 }}</p>
   </div>
 
   <!-- 総記事数 -->
   <div class="bg-white dark:bg-gray-800 p-6 rounded shadow text-center">
-    <p class="text-xl font-bold text-black mb-2">総記事数</p>
+    <p class="text-xl font-bold text-gray-800 mb-2">総記事数</p>
     <p class="text-4xl font-extrabold">{{ g.total_articles or 0 }}</p>
   </div>
 
@@ -31,31 +31,41 @@
   </div>
 </div>
 
-<!-- 🚀 メニューカード（WordPress風） -->
-<div class="grid md:grid-cols-5 sm:grid-cols-2 gap-6">
-  <a href="{{ url_for('main.generate') }}" class="block bg-white dark:bg-gray-800 p-6 rounded-lg shadow hover:shadow-lg transition text-center">
-    <div class="text-2xl mb-2">📝</div>
-    <p class="font-semibold text-lg text-gray-800 dark:text-white">記事生成</p>
+<!-- ✅ 各機能カード表示（WordPress風） -->
+<div class="grid lg:grid-cols-5 md:grid-cols-3 sm:grid-cols-2 gap-6">
+  <!-- 記事生成 -->
+  <a href="{{ url_for('main.generate') }}" class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center">
+    <div class="text-3xl mb-2">📝</div>
+    <p class="font-semibold text-lg text-gray-900 dark:text-white">記事生成</p>
+    <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">キーワードを元に記事を生成・投稿できます</p>
   </a>
 
-  <a href="{{ url_for('main.sites') }}" class="block bg-white dark:bg-gray-800 p-6 rounded-lg shadow hover:shadow-lg transition text-center">
-    <div class="text-2xl mb-2">🌐</div>
-    <p class="font-semibold text-lg text-gray-800 dark:text-white">新規サイト登録</p>
+  <!-- 新規サイト登録 -->
+  <a href="{{ url_for('main.sites') }}" class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center">
+    <div class="text-3xl mb-2">🌐</div>
+    <p class="font-semibold text-lg text-gray-900 dark:text-white">新規サイト登録</p>
+    <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">WordPressサイトを登録して自動投稿先に設定</p>
   </a>
 
-  <a href="{{ url_for('main.prompts') }}" class="block bg-white dark:bg-gray-800 p-6 rounded-lg shadow hover:shadow-lg transition text-center">
-    <div class="text-2xl mb-2">📋</div>
-    <p class="font-semibold text-lg text-gray-800 dark:text-white">プロンプト登録</p>
+  <!-- プロンプト登録 -->
+  <a href="{{ url_for('main.prompts') }}" class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center">
+    <div class="text-3xl mb-2">📋</div>
+    <p class="font-semibold text-lg text-gray-900 dark:text-white">プロンプト登録</p>
+    <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">記事生成用プロンプトテンプレートを管理</p>
   </a>
 
-  <a href="{{ url_for('main.log_sites') }}" class="block bg-white dark:bg-gray-800 p-6 rounded-lg shadow hover:shadow-lg transition text-center">
-    <div class="text-2xl mb-2">📊</div>
-    <p class="font-semibold text-lg text-gray-800 dark:text-white">投稿ログ</p>
+  <!-- 投稿ログ -->
+  <a href="{{ url_for('main.log_sites') }}" class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center">
+    <div class="text-3xl mb-2">📊</div>
+    <p class="font-semibold text-lg text-gray-900 dark:text-white">投稿ログ</p>
+    <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">各サイトごとの記事生成状況・履歴を確認</p>
   </a>
 
-  <a href="{{ url_for('main.chatgpt') }}" class="block bg-white dark:bg-gray-800 p-6 rounded-lg shadow hover:shadow-lg transition text-center">
-    <div class="text-2xl mb-2">🤖</div>
-    <p class="font-semibold text-lg text-gray-800 dark:text-white">ChatGPT</p>
+  <!-- ChatGPTアクセス -->
+  <a href="{{ url_for('main.chatgpt') }}" class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center">
+    <div class="text-3xl mb-2">🤖</div>
+    <p class="font-semibold text-lg text-gray-900 dark:text-white">ChatGPT</p>
+    <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">ChatGPTのページを新しいタブで開きます</p>
   </a>
 </div>
 {% endblock %}
