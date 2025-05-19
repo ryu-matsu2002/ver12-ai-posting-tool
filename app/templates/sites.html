@@ -38,30 +38,33 @@
     </form>
   </div>
 
-  <!-- ───────── 登録済みサイト（編集・削除ボタン付き）───────── -->
+  <!-- ───────── 登録済みサイト ───────── -->
   <div>
     <h3 class="text-2xl font-semibold mb-6">登録済みサイト</h3>
 
     {% if sites %}
     <div class="flex flex-col space-y-5">
       {% for s in sites %}
-      <div class="p-5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-md hover:shadow-lg transition">
-        <div class="flex justify-between items-center">
-          <div>
-            <div class="text-lg font-bold text-blue-800 dark:text-blue-300">{{ s.name }}</div>
-            <a href="{{ s.url }}" target="_blank" class="text-base text-blue-600 hover:underline break-all">
+      <div class="p-4 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-md hover:shadow-lg transition">
+        <div class="flex justify-between items-center flex-wrap gap-3">
+          <!-- サイト情報（名前＋URL） -->
+          <div class="flex flex-col text-sm text-left min-w-0 max-w-[60%]">
+            <div class="font-semibold text-blue-800 dark:text-blue-300 truncate">{{ s.name }}</div>
+            <a href="{{ s.url }}" target="_blank" class="text-blue-600 hover:underline truncate">
               {{ s.url }}
             </a>
           </div>
-          <div class="flex gap-3">
+
+          <!-- 操作ボタン -->
+          <div class="flex gap-2 flex-nowrap">
             <a href="{{ url_for('main.edit_site', sid=s.id) }}"
-               class="text-base bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded shadow">
+               class="text-sm bg-green-600 hover:bg-green-700 text-white py-1.5 px-3 rounded shadow whitespace-nowrap">
               編集
             </a>
             <form method="post" action="{{ url_for('main.delete_site', sid=s.id) }}"
                   onsubmit="return confirm('削除しますか？');">
               <button type="submit"
-                      class="text-base bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded shadow">
+                      class="text-sm bg-red-600 hover:bg-red-700 text-white py-1.5 px-3 rounded shadow whitespace-nowrap">
                 削除
               </button>
             </form>
