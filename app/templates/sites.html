@@ -40,24 +40,35 @@
     </form>
   </div>
 
-  <!-- ───────── 登録済みサイト（✅縦表示に修正済み）───────── -->
+  <!-- ───────── 登録済みサイト（編集・削除ボタン付き）───────── -->
   <div>
     <h3 class="text-xl font-medium mb-4">登録済みサイト</h3>
 
     {% if sites %}
-    <div class="flex flex-col space-y-4">  <!-- ✅ 1列表示に修正（縦積み） -->
+    <div class="flex flex-col space-y-4">
       {% for s in sites %}
-      <div class="flex items-center justify-between p-4 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow hover:shadow-md transition">
-        <div>
-          <div class="text-base font-bold text-blue-800 dark:text-blue-300">{{ s.name }}</div>
-          <a href="{{ s.url }}" target="_blank" class="text-sm text-blue-600 hover:underline break-all">
-            {{ s.url }}
-          </a>
+      <div class="p-4 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow hover:shadow-md transition">
+        <div class="flex justify-between items-start">
+          <div>
+            <div class="text-base font-bold text-blue-800 dark:text-blue-300">{{ s.name }}</div>
+            <a href="{{ s.url }}" target="_blank" class="text-sm text-blue-600 hover:underline break-all">
+              {{ s.url }}
+            </a>
+          </div>
+          <div class="flex gap-2">
+            <a href="{{ url_for('main.edit_site', sid=s.id) }}"
+               class="text-sm bg-green-600 hover:bg-green-700 text-white py-1 px-3 rounded shadow">
+              編集
+            </a>
+            <form method="post" action="{{ url_for('main.delete_site', sid=s.id) }}"
+                  onsubmit="return confirm('削除しますか？');">
+              <button type="submit"
+                      class="text-sm bg-red-600 hover:bg-red-700 text-white py-1 px-3 rounded shadow">
+                削除
+              </button>
+            </form>
+          </div>
         </div>
-        <form method="post" action="{{ url_for('main.delete_site', sid=s.id) }}"
-              onsubmit="return confirm('削除しますか？');">
-          <button type="submit" class="text-red-600 hover:underline text-sm ml-4">Delete</button>
-        </form>
       </div>
       {% endfor %}
     </div>

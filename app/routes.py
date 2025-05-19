@@ -324,7 +324,27 @@ def delete_site(sid: int):
     return redirect(url_for(".sites"))
 
 
-# ─────────── 記事生成
+@bp.route("/sites/<int:sid>/edit", methods=["GET", "POST"])
+@login_required
+def edit_site(sid: int):
+    site = Site.query.get_or_404(sid)
+    if site.user_id != current_user.id:
+        abort(403)
+
+    form = SiteForm(obj=site)
+
+    if form.validate_on_submit():
+        site.name     = form.name.data
+        site.url      = form.url.data.rstrip("/")
+        site.username = form.username.data
+        site.app_pass = form.app_pass.data
+        db.session.commit()
+        flash("サイト情報を更新しました", "success")
+        return redirect(url_for(".sites"))
+
+    return render_template("site_edit.html", form=form, site=site)
+
+
 # ─────────── 記事生成
 @bp.route("/generate", methods=["GET", "POST"])
 @login_required
