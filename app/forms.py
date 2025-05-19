@@ -78,5 +78,5 @@ class SiteForm(FlaskForm):
     name     = StringField("サイト名",          validators=[DataRequired()])
     url      = StringField("サイトURL",        validators=[DataRequired(), URL()])
     username = StringField("ユーザー名",        validators=[DataRequired()])
-    app_pass = StringField("アプリパスワード",  validators=[DataRequired()])
+    app_pass = StringField("アプリケーションパスワード",  validators=[DataRequired()])
     submit   = SubmitField("保存")

@@ -1,18 +1,27 @@
 {% extends "base.html" %}
-{% block title %}生成ログ | AI Posting Tool{% endblock %}
+{% block title %}記事一覧 | AI Posting Tool{% endblock %}
 
 {% block content %}
 <h2 class="text-2xl font-semibold mb-4">記事一覧</h2>
 
-<!-- 現在の投稿先サイト名 -->
-<div class="mb-4">
-  <span class="font-semibold">現在の投稿先サイト：</span>
-  <span class="text-blue-700 font-bold">
-    {% if site %}{{ site.name }}{% else %}未選択{% endif %}
-  </span>
+<!-- 🔙 サイト一覧へ戻る -->
+<div class="mb-2">
+  <a href="{{ url_for('main.generate') }}" class="text-sm text-blue-700 hover:underline font-semibold">← サイト一覧に戻る</a>
 </div>
 
-<!-- ステータス絞り込み -->
+<!-- ✅ 現在の投稿先サイト名 -->
+<div class="mb-4 text-sm">
+  <span class="font-semibold">現在の投稿先サイト：</span>
+  {% if site %}
+    <a href="{{ site.url }}" target="_blank" class="text-blue-700 font-bold hover:underline">
+      {{ site.name }} 🔗
+    </a>
+  {% else %}
+    <span class="text-gray-500">未選択</span>
+  {% endif %}
+</div>
+
+<!-- ✅ ステータス絞り込み -->
 <form method="get" class="mb-6 flex items-center flex-wrap gap-3">
   <label for="statusFilter" class="font-medium shrink-0">ステータスで絞り込み:</label>
   <select
@@ -21,7 +30,7 @@
     onchange="this.form.submit()"
     class="p-2 rounded border dark:bg-gray-700 dark:border-gray-600 min-w-[200px]"
   >
-    <option value="">―― 全ステータス ――</option>
+    <option value="">全ステータス</option>
     <option value="posted" {% if status == "posted" %}selected{% endif %}>投稿完了</option>
     <option value="done" {% if status == "done" %}selected{% endif %}>記事生成済み</option>
     <option value="pending" {% if status == "pending" %}selected{% endif %}>記事生成中</option>
@@ -49,15 +58,15 @@
         <th class="px-2 py-2 text-center w-4">
           <input type="checkbox" onclick="toggleAll(this)">
         </th>
-        <th class="px-2 py-2 text-left w-[16%]">検索キーワード</th>
-        <th class="px-2 py-2 text-left w-[10%]">サイト名</th>
-        <th class="px-2 py-2 text-left w-[8%]">現在の状態</th>
-        <th class="px-2 py-2 text-left w-[6%]">進行状況</th>
+        <th class="px-2 py-2 text-left w-[15%]">検索キーワード</th>
+        <th class="px-2 py-2 text-left w-[12%]">サイト名</th>
+        <th class="px-2 py-2 text-left w-[10%]">現在の状態</th>
+        <th class="px-2 py-2 text-center w-[6%]">進行状況</th>
         <th class="px-2 py-2 text-left w-[10%]">投稿予定日</th>
         <th class="px-2 py-2 text-left w-[20%]">Q＆A記事タイトル</th>
-        <th class="px-2 py-2 text-left w-[7%]">プレビュー</th>
-        <th class="px-2 py-2 text-left w-[9%]">アイキャッチ</th>
-        <th class="px-2 py-2 text-left w-[14%]">操作</th>
+        <th class="px-2 py-2 text-center w-[7%]">プレビュー</th>
+        <th class="px-2 py-2 text-center w-[10%]">アイキャッチ</th>
+        <th class="px-2 py-2 text-center w-[15%]">操作</th>
       </tr>
     </thead>
     <tbody>
@@ -67,7 +76,7 @@
           <input type="checkbox" name="selected_ids" value="{{ a.id }}">
         </td>
         <td class="px-2 py-2">{{ a.keyword }}</td>
-        <td class="px-2 py-2">{% if a.site %}{{ a.site.name }}{% else %}—{% endif %}</td>
+        <td class="px-2 py-2 text-sm">{% if a.site %}{{ a.site.name }}{% else %}—{% endif %}</td>
         <td class="px-2 py-2">
           {% if a.status == "posted" %}
             <span class="text-green-600 font-bold">投稿完了</span>
@@ -81,46 +90,46 @@
             {{ a.status }}
           {% endif %}
         </td>
-        <td class="px-2 py-2">{{ a.progress }}%</td>
+        <td class="px-2 py-2 text-center">{{ a.progress }}%</td>
         <td class="px-2 py-2 whitespace-nowrap">
           {% if a.scheduled_at %}
             {{ a.scheduled_at.astimezone(jst).strftime("%Y-%m-%d %H:%M") }}
           {% else %}—{% endif %}
         </td>
         <td class="px-2 py-2 break-words text-sm leading-snug" title="{{ a.title }}">{{ a.title }}</td>
-        <td class="px-2 py-2">
+        <td class="px-2 py-2 text-center">
           {% if a.status in ["done", "posted"] %}
             <a href="{{ url_for('main.preview', article_id=a.id) }}"
                class="text-blue-600 hover:underline">プレビュー</a>
           {% else %}—{% endif %}
         </td>
-        <td class="px-2 py-2">
+        <td class="px-2 py-2 text-center">
           {% if a.image_url %}
-            <img src="{{ a.image_url }}" class="h-12 w-16 object-cover rounded">
+            <img src="{{ a.image_url }}" class="h-12 w-16 object-cover rounded mx-auto">
           {% else %}—{% endif %}
         </td>
-        <td class="px-2 py-2 space-x-2 whitespace-nowrap">
+        <td class="px-2 py-2 space-y-1 text-center">
           {% if a.status == "error" %}
             <form action="{{ url_for('main.retry_article', id=a.id) }}" method="post" class="inline">
-              <button type="submit" class="py-1 px-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded">再生成</button>
+              <button type="submit" class="py-1 px-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded text-xs">再生成</button>
             </form>
           {% endif %}
           <a href="{{ url_for('main.edit_article', id=a.id) }}"
-             class="text-green-600 hover:underline">編集</a>
+             class="text-green-600 hover:underline text-xs mr-1">編集</a>
           <form action="{{ url_for('main.delete_article', id=a.id) }}" method="post"
                 class="inline" onsubmit="return confirm('削除しますか？');">
-            <button type="submit" class="text-red-600 hover:underline">削除</button>
+            <button type="submit" class="text-red-600 hover:underline text-xs">削除</button>
           </form>
           {% if a.status == "done" and a.site_id %}
             <form action="{{ url_for('main.post_article', id=a.id) }}" method="post" class="inline">
-              <button type="submit" class="inline-flex items-center gap-1 py-1 px-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded">
+              <button type="submit" class="inline-flex items-center gap-1 py-1 px-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs">
                 ⬆️<span class="hidden sm:inline">即時投稿</span>
               </button>
             </form>
           {% endif %}
           {% if a.status == "posted" and a.posted_url %}
             <a href="{{ a.posted_url }}" target="_blank"
-               class="inline-block py-1 px-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
+               class="inline-block py-1 px-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs"
                title="公開ページを表示">記事表示</a>
           {% endif %}
         </td>
