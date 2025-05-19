@@ -45,13 +45,9 @@
         <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg p-5">
           <div class="flex justify-between items-center mb-3">
             <span class="font-bold text-blue-700 dark:text-blue-300 text-lg">{{ p.genre }}</span>
-            <form action="{{ url_for('main.delete_prompt', pid=p.id) }}" method="post"
-                  onsubmit="return confirm('削除しますか？');">
-              <button type="submit" class="text-sm text-red-500 hover:underline">Delete</button>
-            </form>
           </div>
 
-          <div class="flex gap-3 mt-2 justify-start">
+          <div class="flex flex-wrap gap-3 justify-start">
             <a href="{{ url_for('main.edit_prompt', pid=p.id) }}"
                class="text-sm bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded shadow">
               ✏️ 編集
@@ -60,15 +56,22 @@
                     class="text-sm bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded shadow">
               🔍 確認
             </button>
+            <form action="{{ url_for('main.delete_prompt', pid=p.id) }}" method="post"
+                  onsubmit="return confirm('削除しますか？');">
+              <button type="submit"
+                      class="text-sm bg-red-500 hover:bg-red-600 text-white py-2 px-4 rounded shadow">
+                🗑️ 削除
+              </button>
+            </form>
           </div>
 
           <div id="prompt-{{ p.id }}" class="mt-4 hidden text-base text-gray-800 dark:text-gray-200">
-            <div class="mt-2">
-              <strong class="block mb-1">タイトル用プロンプト</strong>
+            <div class="mt-4">
+              <h4 class="text-lg font-bold text-gray-700 dark:text-gray-300 border-b pb-1 mb-2">📌 タイトル用プロンプト</h4>
               <pre class="whitespace-pre-wrap break-words">{{ p.title_pt }}</pre>
             </div>
-            <div class="mt-4">
-              <strong class="block mb-1">本文用プロンプト</strong>
+            <div class="mt-6">
+              <h4 class="text-lg font-bold text-gray-700 dark:text-gray-300 border-b pb-1 mb-2">📝 本文用プロンプト</h4>
               <pre class="whitespace-pre-wrap break-words">{{ p.body_pt }}</pre>
             </div>
             <button onclick="togglePrompt('prompt-{{ p.id }}')"
