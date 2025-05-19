@@ -74,8 +74,22 @@ def admin_dashboard():
 def admin_users():
     if not current_user.is_admin:
         abort(403)
+
     users = User.query.all()
-    return render_template("admin/users.html", users=users)
+
+    # 統計情報の取得
+    site_count    = Site.query.count()
+    prompt_count  = PromptTemplate.query.count()
+    article_count = Article.query.count()
+
+    return render_template(
+        "admin/users.html",
+        users=users,
+        site_count=site_count,
+        prompt_count=prompt_count,
+        article_count=article_count
+    )
+
 
 
 @admin_bp.route("/admin/sites")
@@ -164,6 +178,18 @@ def delete_user_stuck_articles(uid):
 
     flash(f"{count} 件の途中停止記事を削除しました", "success")
     return redirect(url_for("admin.user_articles", uid=uid))
+
+@admin_bp.post("/admin/login-as/<int:user_id>")
+@login_required
+def admin_login_as(user_id):
+    if not current_user.is_admin:
+        abort(403)
+
+    user = User.query.get_or_404(user_id)
+    login_user(user)
+    flash(f"{user.email} としてログインしました", "info")
+    return redirect(url_for("main.dashboard"))
+
 
 
 @bp.route("/chatgpt")

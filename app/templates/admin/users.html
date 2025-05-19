@@ -5,8 +5,25 @@
 <div class="p-6">
   <h1 class="text-2xl font-bold mb-6">🧑‍💼 ユーザーごとの記事一覧</h1>
 
-  <table class="w-full text-left table-auto">
-    <thead>
+  <!-- ✅ 統計カード -->
+  <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+    <div class="bg-white shadow rounded p-4 text-center">
+      <div class="text-sm text-gray-500 mb-1">登録サイト数</div>
+      <div class="text-2xl font-bold text-green-600">{{ site_count }}</div>
+    </div>
+    <div class="bg-white shadow rounded p-4 text-center">
+      <div class="text-sm text-gray-500 mb-1">保存プロンプト数</div>
+      <div class="text-2xl font-bold text-yellow-500">{{ prompt_count }}</div>
+    </div>
+    <div class="bg-white shadow rounded p-4 text-center">
+      <div class="text-sm text-gray-500 mb-1">総記事数</div>
+      <div class="text-2xl font-bold text-purple-600">{{ article_count }}</div>
+    </div>
+  </div>
+
+  <!-- ✅ ユーザー一覧テーブル -->
+  <table class="w-full text-left table-auto bg-white shadow rounded">
+    <thead class="bg-gray-100 text-gray-700">
       <tr class="border-b">
         <th class="px-2 py-2">ID</th>
         <th class="px-2 py-2">Email</th>
@@ -16,12 +33,17 @@
     </thead>
     <tbody>
       {% for u in users %}
-      <tr class="border-b hover:bg-gray-100">
+      <tr class="border-b hover:bg-gray-50">
         <td class="px-2 py-2">{{ u.id }}</td>
         <td class="px-2 py-2">{{ u.email }}</td>
         <td class="px-2 py-2">{{ u.articles|length }}</td>
-        <td class="px-2 py-2">
+        <td class="px-2 py-2 space-x-2">
           <a href="{{ url_for('admin.user_articles', uid=u.id) }}" class="text-blue-600 hover:underline">記事一覧</a>
+          <form action="{{ url_for('admin.admin_login_as', user_id=u.id) }}" method="post" class="inline">
+            <button type="submit" class="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white text-sm rounded">
+              ログイン
+            </button>
+          </form>
         </td>
       </tr>
       {% endfor %}
