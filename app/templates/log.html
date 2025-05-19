@@ -55,29 +55,29 @@
   <table class="w-full bg-white dark:bg-gray-800 text-sm table-fixed">
     <thead>
       <tr class="bg-gray-100 dark:bg-gray-700 whitespace-nowrap">
-        <th class="px-2 py-2 text-center w-4">
+        <th class="px-2 py-2 text-left w-[40px]">
           <input type="checkbox" onclick="toggleAll(this)">
         </th>
         <th class="px-2 py-2 text-left w-[15%]">検索キーワード</th>
         <th class="px-2 py-2 text-left w-[12%]">サイト名</th>
         <th class="px-2 py-2 text-left w-[10%]">現在の状態</th>
-        <th class="px-2 py-2 text-center w-[6%]">進行状況</th>
+        <th class="px-2 py-2 text-left w-[6%]">進行状況</th>
         <th class="px-2 py-2 text-left w-[10%]">投稿予定日</th>
         <th class="px-2 py-2 text-left w-[20%]">Q＆A記事タイトル</th>
-        <th class="px-2 py-2 text-center w-[7%]">プレビュー</th>
-        <th class="px-2 py-2 text-center w-[10%]">アイキャッチ</th>
-        <th class="px-2 py-2 text-center w-[15%]">操作</th>
+        <th class="px-2 py-2 text-left w-[7%]">プレビュー</th>
+        <th class="px-2 py-2 text-left w-[10%]">アイキャッチ</th>
+        <th class="px-2 py-2 text-left w-[15%]">操作</th>
       </tr>
     </thead>
     <tbody>
       {% for a in articles %}
       <tr class="{% if loop.index0 % 2 == 0 %}bg-white{% else %}bg-blue-50{% endif %}">
-        <td class="text-center">
+        <td class="px-2 py-2 text-left">
           <input type="checkbox" name="selected_ids" value="{{ a.id }}">
         </td>
-        <td class="px-2 py-2">{{ a.keyword }}</td>
-        <td class="px-2 py-2 text-sm">{% if a.site %}{{ a.site.name }}{% else %}—{% endif %}</td>
-        <td class="px-2 py-2">
+        <td class="px-2 py-2 text-left">{{ a.keyword }}</td>
+        <td class="px-2 py-2 text-left text-sm">{% if a.site %}{{ a.site.name }}{% else %}—{% endif %}</td>
+        <td class="px-2 py-2 text-left">
           {% if a.status == "posted" %}
             <span class="text-green-600 font-bold">投稿完了</span>
           {% elif a.status == "done" %}
@@ -90,25 +90,25 @@
             {{ a.status }}
           {% endif %}
         </td>
-        <td class="px-2 py-2 text-center">{{ a.progress }}%</td>
-        <td class="px-2 py-2 whitespace-nowrap">
+        <td class="px-2 py-2 text-left">{{ a.progress }}%</td>
+        <td class="px-2 py-2 text-left whitespace-nowrap">
           {% if a.scheduled_at %}
             {{ a.scheduled_at.astimezone(jst).strftime("%Y-%m-%d %H:%M") }}
           {% else %}—{% endif %}
         </td>
-        <td class="px-2 py-2 break-words text-sm leading-snug" title="{{ a.title }}">{{ a.title }}</td>
-        <td class="px-2 py-2 text-center">
+        <td class="px-2 py-2 text-left break-words text-sm leading-snug" title="{{ a.title }}">{{ a.title }}</td>
+        <td class="px-2 py-2 text-left">
           {% if a.status in ["done", "posted"] %}
             <a href="{{ url_for('main.preview', article_id=a.id) }}"
                class="text-blue-600 hover:underline">プレビュー</a>
           {% else %}—{% endif %}
         </td>
-        <td class="px-2 py-2 text-center">
+        <td class="px-2 py-2 text-left">
           {% if a.image_url %}
             <img src="{{ a.image_url }}" class="h-12 w-16 object-cover rounded mx-auto">
           {% else %}—{% endif %}
         </td>
-        <td class="px-2 py-2 space-y-1 text-center">
+        <td class="px-2 py-2 text-left space-y-1">
           {% if a.status == "error" %}
             <form action="{{ url_for('main.retry_article', id=a.id) }}" method="post" class="inline">
               <button type="submit" class="py-1 px-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded text-xs">再生成</button>
