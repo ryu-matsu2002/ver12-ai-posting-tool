@@ -67,11 +67,15 @@
 
           <div id="prompt-{{ p.id }}" class="mt-4 hidden text-base text-gray-800 dark:text-gray-200">
             <div class="mt-4">
-              <h4 class="text-lg font-bold text-gray-700 dark:text-gray-300 border-b pb-1 mb-2">📌 タイトル用プロンプト</h4>
+              <h4 class="text-lg font-bold text-gray-800 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 px-3 py-1 rounded mb-2">
+                📌 タイトル用プロンプト
+              </h4>
               <pre class="whitespace-pre-wrap break-words">{{ p.title_pt }}</pre>
             </div>
             <div class="mt-6">
-              <h4 class="text-lg font-bold text-gray-700 dark:text-gray-300 border-b pb-1 mb-2">📝 本文用プロンプト</h4>
+              <h4 class="text-lg font-bold text-gray-800 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 px-3 py-1 rounded mb-2">
+                📝 本文用プロンプト
+              </h4>
               <pre class="whitespace-pre-wrap break-words">{{ p.body_pt }}</pre>
             </div>
             <button onclick="togglePrompt('prompt-{{ p.id }}')"
