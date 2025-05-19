@@ -2,25 +2,20 @@
 {% block title %}記事一覧 | AI Posting Tool{% endblock %}
 
 {% block content %}
-
-<!-- 🔙 サイト一覧へ戻るリンク（大きめ＆上部） -->
+<!-- 🔙 サイト一覧に戻るリンク（大きく＆上部） -->
 <div class="mb-4">
-  <a href="{{ url_for('main.generate') }}" class="text-base text-blue-700 hover:underline font-semibold">← サイト一覧に戻る</a>
+  <a href="{{ url_for('main.log_sites') }}" class="text-lg text-blue-700 hover:underline font-semibold">← サイト一覧に戻る</a>
 </div>
 
 <h2 class="text-2xl font-semibold mb-4">記事一覧</h2>
 
-<!-- ✅ 現在の投稿先サイト名 -->
-<div class="mb-4 text-sm">
-  <span class="font-semibold">現在の投稿先サイト：</span>
+<!-- ✅ 現在の投稿先サイト名（大きく） -->
+<div class="mb-4 text-base font-semibold">
+  現在の投稿先サイト：
   {% if site %}
     <a href="{{ site.url }}" target="_blank" class="text-blue-700 font-bold hover:underline inline-flex items-center gap-1">
       {{ site.name }}
-      <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M14 3h7v7" />
-        <path d="M10 14L21 3" />
-        <path d="M5 12v7a2 2 0 0 0 2 2h7" />
-      </svg>
+      <span class="text-blue-700 text-lg">↗</span>
     </a>
   {% else %}
     <span class="text-gray-500">未選択</span>
@@ -61,9 +56,7 @@
   <table class="w-full bg-white dark:bg-gray-800 text-sm table-fixed">
     <thead>
       <tr class="bg-gray-100 dark:bg-gray-700 whitespace-nowrap">
-        <th class="px-2 py-2 text-left w-[40px]">
-          <input type="checkbox" onclick="toggleAll(this)">
-        </th>
+        <th class="px-2 py-2 text-left w-[40px]"><input type="checkbox" onclick="toggleAll(this)"></th>
         <th class="px-2 py-2 text-left w-[15%]">検索キーワード</th>
         <th class="px-2 py-2 text-left w-[12%]">サイト名</th>
         <th class="px-2 py-2 text-left w-[10%]">現在の状態</th>
@@ -84,17 +77,11 @@
         <td class="px-2 py-2 text-left">{{ a.keyword }}</td>
         <td class="px-2 py-2 text-left text-sm">{% if a.site %}{{ a.site.name }}{% else %}—{% endif %}</td>
         <td class="px-2 py-2 text-left">
-          {% if a.status == "posted" %}
-            <span class="text-green-600 font-bold">投稿完了</span>
-          {% elif a.status == "done" %}
-            <span class="text-red-600 font-bold">記事生成済み</span>
-          {% elif a.status == "pending" %}
-            <span class="text-black font-bold">記事生成中</span>
-          {% elif a.status == "error" %}
-            <span class="text-red-600 font-bold">エラー</span>
-          {% else %}
-            {{ a.status }}
-          {% endif %}
+          {% if a.status == "posted" %}<span class="text-green-600 font-bold">投稿完了</span>
+          {% elif a.status == "done" %}<span class="text-red-600 font-bold">記事生成済み</span>
+          {% elif a.status == "pending" %}<span class="text-black font-bold">記事生成中</span>
+          {% elif a.status == "error" %}<span class="text-red-600 font-bold">エラー</span>
+          {% else %}{{ a.status }}{% endif %}
         </td>
         <td class="px-2 py-2 text-left">{{ a.progress }}%</td>
         <td class="px-2 py-2 text-left whitespace-nowrap">
@@ -124,15 +111,20 @@
               </form>
             {% endif %}
             <a href="{{ url_for('main.edit_article', id=a.id) }}"
-               class="inline-flex items-center gap-1 py-1.5 px-3 bg-green-500 hover:bg-green-600 text-white rounded text-sm">✏ 編集</a>
-            <form action="{{ url_for('main.delete_article', id=a.id) }}" method="post"
-                  class="inline" onsubmit="return confirm('削除しますか？');">
-              <button type="submit" class="inline-flex items-center gap-1 py-1.5 px-3 bg-red-500 hover:bg-red-600 text-white rounded text-sm">🗑 削除</button>
+               class="inline-flex items-center gap-1 py-1.5 px-3 bg-green-500 hover:bg-green-600 text-white rounded text-sm">
+              ✏ 編集
+            </a>
+            <form action="{{ url_for('main.delete_article', id=a.id) }}" method="post" class="inline"
+                  onsubmit="return confirm('削除しますか？');">
+              <button type="submit"
+                      class="inline-flex items-center gap-1 py-1.5 px-3 bg-red-500 hover:bg-red-600 text-white rounded text-sm">
+                🗑 削除
+              </button>
             </form>
             {% if a.status == "done" and a.site_id %}
               <form action="{{ url_for('main.post_article', id=a.id) }}" method="post" class="inline">
                 <button type="submit" class="inline-flex items-center gap-1 py-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-sm">
-                  ⬆️ 投稿
+                  ⬆ 投稿
                 </button>
               </form>
             {% endif %}
@@ -146,9 +138,7 @@
       </tr>
       {% else %}
       <tr>
-        <td colspan="10" class="px-4 py-6 text-center text-gray-500">
-          該当する記事がありません
-        </td>
+        <td colspan="10" class="px-4 py-6 text-center text-gray-500">該当する記事がありません</td>
       </tr>
       {% endfor %}
     </tbody>
