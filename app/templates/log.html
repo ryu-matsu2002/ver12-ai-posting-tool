@@ -100,7 +100,9 @@
         <td class="px-2 py-2 text-left">
           {% if a.status in ["done", "posted"] %}
             <a href="{{ url_for('main.preview', article_id=a.id) }}"
-               class="text-blue-600 hover:underline">プレビュー</a>
+               class="inline-block py-1.5 px-3 bg-blue-500 hover:bg-blue-600 text-white rounded text-sm">
+              プレビュー
+            </a>
           {% else %}—{% endif %}
         </td>
         <td class="px-2 py-2 text-left">
@@ -108,30 +110,32 @@
             <img src="{{ a.image_url }}" class="h-12 w-16 object-cover rounded mx-auto">
           {% else %}—{% endif %}
         </td>
-        <td class="px-2 py-2 text-left space-y-1">
-          {% if a.status == "error" %}
-            <form action="{{ url_for('main.retry_article', id=a.id) }}" method="post" class="inline">
-              <button type="submit" class="py-1 px-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded text-xs">再生成</button>
+        <td class="px-2 py-2 text-left">
+          <div class="flex flex-wrap gap-1">
+            {% if a.status == "error" %}
+              <form action="{{ url_for('main.retry_article', id=a.id) }}" method="post" class="inline">
+                <button type="submit" class="py-1.5 px-3 bg-yellow-500 hover:bg-yellow-600 text-white rounded text-sm">再生成</button>
+              </form>
+            {% endif %}
+            <a href="{{ url_for('main.edit_article', id=a.id) }}"
+               class="py-1.5 px-3 bg-green-500 hover:bg-green-600 text-white rounded text-sm">編集</a>
+            <form action="{{ url_for('main.delete_article', id=a.id) }}" method="post"
+                  class="inline" onsubmit="return confirm('削除しますか？');">
+              <button type="submit" class="py-1.5 px-3 bg-red-500 hover:bg-red-600 text-white rounded text-sm">削除</button>
             </form>
-          {% endif %}
-          <a href="{{ url_for('main.edit_article', id=a.id) }}"
-             class="text-green-600 hover:underline text-xs mr-1">編集</a>
-          <form action="{{ url_for('main.delete_article', id=a.id) }}" method="post"
-                class="inline" onsubmit="return confirm('削除しますか？');">
-            <button type="submit" class="text-red-600 hover:underline text-xs">削除</button>
-          </form>
-          {% if a.status == "done" and a.site_id %}
-            <form action="{{ url_for('main.post_article', id=a.id) }}" method="post" class="inline">
-              <button type="submit" class="inline-flex items-center gap-1 py-1 px-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs">
-                ⬆️<span class="hidden sm:inline">即時投稿</span>
-              </button>
-            </form>
-          {% endif %}
-          {% if a.status == "posted" and a.posted_url %}
-            <a href="{{ a.posted_url }}" target="_blank"
-               class="inline-block py-1 px-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs"
-               title="公開ページを表示">記事表示</a>
-          {% endif %}
+            {% if a.status == "done" and a.site_id %}
+              <form action="{{ url_for('main.post_article', id=a.id) }}" method="post" class="inline">
+                <button type="submit" class="inline-flex items-center gap-1 py-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-sm">
+                  ⬆️<span class="hidden sm:inline">即時投稿</span>
+                </button>
+              </form>
+            {% endif %}
+            {% if a.status == "posted" and a.posted_url %}
+              <a href="{{ a.posted_url }}" target="_blank"
+                 class="py-1.5 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm"
+                 title="公開ページを表示">記事表示</a>
+            {% endif %}
+          </div>
         </td>
       </tr>
       {% else %}
