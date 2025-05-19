@@ -13,7 +13,7 @@ from pytz import timezone
 from sqlalchemy import asc, nulls_last
 
 from . import db
-from .models import User, Article, PromptTemplate, Site
+from .models import User, Article, PromptTemplate, Site, Keyword
 from .forms import (
     LoginForm, RegisterForm,
     GenerateForm, PromptForm, ArticleForm, SiteForm
@@ -35,6 +35,7 @@ from .article_generator import (
 
 from flask import Blueprint, render_template, redirect, url_for, flash
 from flask_login import current_user, login_required
+from .forms import KeywordForm
 
 JST = timezone("Asia/Tokyo")
 bp = Blueprint("main", __name__)
@@ -190,7 +191,26 @@ def admin_login_as(user_id):
     flash(f"{user.email} としてログインしました", "info")
     return redirect(url_for("main.dashboard"))
 
+@bp.route("/keywords", methods=["GET", "POST"])
+@login_required
+def keywords():
+    form = KeywordForm()
 
+    # フォームから新規登録
+    if form.validate_on_submit():
+        lines = [line.strip() for line in form.words.data.splitlines() if line.strip()]
+        genre = form.genre.data
+
+        for word in lines:
+            keyword = Keyword(word=word, genre=genre, user_id=current_user.id)
+            db.session.add(keyword)
+        db.session.commit()
+        flash(f"{len(lines)} 件のキーワードを追加しました", "success")
+        return redirect(url_for(".keywords"))
+
+    # 一覧表示（ユーザーごとの）
+    keywords = Keyword.query.filter_by(user_id=current_user.id).order_by(Keyword.id.desc()).all()
+    return render_template("keywords.html", form=form, keywords=keywords)
 
 @bp.route("/chatgpt")
 @login_required

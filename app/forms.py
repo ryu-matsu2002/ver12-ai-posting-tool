@@ -80,3 +80,8 @@ class SiteForm(FlaskForm):
     username = StringField("ユーザー名",        validators=[DataRequired()])
     app_pass = StringField("アプリケーションパスワード",  validators=[DataRequired()])
     submit   = SubmitField("保存")
+
+class KeywordForm(FlaskForm):
+    words = TextAreaField("キーワード（1行1つ）", validators=[DataRequired()])
+    genre = StringField("ジャンル（任意）")
+    submit = SubmitField("キーワードを追加")
