@@ -32,12 +32,12 @@
 </div>
 
 <!-- ✅ 各機能カード表示（WordPress風） -->
-<div class="grid lg:grid-cols-5 md:grid-cols-3 sm:grid-cols-2 gap-6">
-  <!-- 記事生成 -->
-  <a href="{{ url_for('main.generate') }}" class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center">
+<div class="grid lg:grid-cols-4 md:grid-cols-2 sm:grid-cols-2 gap-6">
+  <!-- 記事生成（サイト別ページ） -->
+  <a href="{{ url_for('main.log_sites') }}" class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center">
     <div class="text-3xl mb-2">📝</div>
     <p class="font-semibold text-lg text-gray-900 dark:text-white">記事生成</p>
-    <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">キーワードを元に記事を生成・投稿できます</p>
+    <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">サイト別に記事作成・状況確認・投稿が可能</p>
   </a>
 
   <!-- 新規サイト登録 -->
@@ -52,13 +52,6 @@
     <div class="text-3xl mb-2">📋</div>
     <p class="font-semibold text-lg text-gray-900 dark:text-white">プロンプト登録</p>
     <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">記事生成用プロンプトテンプレートを管理</p>
-  </a>
-
-  <!-- 投稿ログ -->
-  <a href="{{ url_for('main.log_sites') }}" class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center">
-    <div class="text-3xl mb-2">📊</div>
-    <p class="font-semibold text-lg text-gray-900 dark:text-white">投稿ログ</p>
-    <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">各サイトごとの記事生成状況・履歴を確認</p>
   </a>
 
   <!-- ChatGPTアクセス -->
