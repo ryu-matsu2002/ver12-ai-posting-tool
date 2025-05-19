@@ -2,68 +2,66 @@
 {% block title %}サイト登録 | TCC autowize{% endblock %}
 
 {% block content %}
-<h2 class="text-2xl font-semibold mb-6">WordPress サイト管理</h2>
+<h2 class="text-3xl font-bold mb-8">WordPress サイト管理</h2>
 
 <div class="grid md:grid-cols-2 gap-10">
 
   <!-- ───────── サイト登録フォーム ───────── -->
   <div>
-    <h3 class="text-xl font-medium mb-4">新規サイト登録</h3>
-    <form method="post" class="space-y-4 p-6 bg-white dark:bg-gray-800 rounded shadow">
+    <h3 class="text-2xl font-semibold mb-6">新規サイト登録</h3>
+    <form method="post" class="space-y-5 p-6 bg-white dark:bg-gray-800 rounded shadow-lg">
       {{ form.hidden_tag() }}
 
       <div>
-        {{ form.name.label(class="block mb-1 font-medium") }}
-        {{ form.name(class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
+        {{ form.name.label(class="block mb-1 text-lg font-medium") }}
+        {{ form.name(class="w-full p-3 text-base rounded border dark:bg-gray-700 dark:border-gray-600") }}
       </div>
 
       <div>
-        {{ form.url.label(class="block mb-1 font-medium") }}
-        {{ form.url(class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
+        {{ form.url.label(class="block mb-1 text-lg font-medium") }}
+        {{ form.url(class="w-full p-3 text-base rounded border dark:bg-gray-700 dark:border-gray-600") }}
         <small class="text-gray-500 dark:text-gray-400">例: https://example.com</small>
       </div>
 
       <div>
-        {{ form.username.label(class="block mb-1 font-medium") }}
-        {{ form.username(class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
+        {{ form.username.label(class="block mb-1 text-lg font-medium") }}
+        {{ form.username(class="w-full p-3 text-base rounded border dark:bg-gray-700 dark:border-gray-600") }}
       </div>
 
       <div>
-        {{ form.app_pass.label(class="block mb-1 font-medium") }}
-        {{ form.app_pass(class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
-        <small class="text-gray-500 dark:text-gray-400">
-          WP の「アプリケーションパスワード」を入力
-        </small>
+        {{ form.app_pass.label(class="block mb-1 text-lg font-medium") }}
+        {{ form.app_pass(class="w-full p-3 text-base rounded border dark:bg-gray-700 dark:border-gray-600") }}
+        <small class="text-gray-500 dark:text-gray-400">WP の「アプリケーションパスワード」を入力</small>
       </div>
 
-      {{ form.submit(class="py-2 px-6 bg-blue-600 hover:bg-blue-700 text-white rounded") }}
+      {{ form.submit(class="py-3 px-6 bg-blue-600 hover:bg-blue-700 text-white text-lg rounded shadow") }}
     </form>
   </div>
 
   <!-- ───────── 登録済みサイト（編集・削除ボタン付き）───────── -->
   <div>
-    <h3 class="text-xl font-medium mb-4">登録済みサイト</h3>
+    <h3 class="text-2xl font-semibold mb-6">登録済みサイト</h3>
 
     {% if sites %}
-    <div class="flex flex-col space-y-4">
+    <div class="flex flex-col space-y-5">
       {% for s in sites %}
-      <div class="p-4 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow hover:shadow-md transition">
-        <div class="flex justify-between items-start">
+      <div class="p-5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-md hover:shadow-lg transition">
+        <div class="flex justify-between items-center">
           <div>
-            <div class="text-base font-bold text-blue-800 dark:text-blue-300">{{ s.name }}</div>
-            <a href="{{ s.url }}" target="_blank" class="text-sm text-blue-600 hover:underline break-all">
+            <div class="text-lg font-bold text-blue-800 dark:text-blue-300">{{ s.name }}</div>
+            <a href="{{ s.url }}" target="_blank" class="text-base text-blue-600 hover:underline break-all">
               {{ s.url }}
             </a>
           </div>
-          <div class="flex gap-2">
+          <div class="flex gap-3">
             <a href="{{ url_for('main.edit_site', sid=s.id) }}"
-               class="text-sm bg-green-600 hover:bg-green-700 text-white py-1 px-3 rounded shadow">
+               class="text-base bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded shadow">
               編集
             </a>
             <form method="post" action="{{ url_for('main.delete_site', sid=s.id) }}"
                   onsubmit="return confirm('削除しますか？');">
               <button type="submit"
-                      class="text-sm bg-red-600 hover:bg-red-700 text-white py-1 px-3 rounded shadow">
+                      class="text-base bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded shadow">
                 削除
               </button>
             </form>
@@ -73,7 +71,7 @@
       {% endfor %}
     </div>
     {% else %}
-    <div class="text-gray-500 text-sm text-center mt-4">
+    <div class="text-gray-500 text-base text-center mt-4">
       サイトはまだ登録されていません
     </div>
     {% endif %}
