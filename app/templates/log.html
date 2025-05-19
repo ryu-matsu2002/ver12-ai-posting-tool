@@ -2,7 +2,7 @@
 {% block title %}記事一覧 | AI Posting Tool{% endblock %}
 
 {% block content %}
-<!-- 🔙 サイト一覧に戻る -->
+<!-- 🔙 サイト一覧に戻るリンク -->
 <div class="mb-4">
   <a href="{{ url_for('main.log_sites') }}" class="text-lg text-blue-700 hover:underline font-semibold">← サイト一覧に戻る</a>
 </div>
@@ -13,13 +13,9 @@
 <div class="mb-4 text-base font-semibold">
   現在の投稿先サイト：
   {% if site %}
-    <a href="{{ site.url }}" target="_blank" class="text-blue-700 font-bold hover:underline inline-flex items-center gap-1 text-lg">
+    <a href="{{ site.url }}" target="_blank" class="text-blue-700 font-bold hover:underline inline-flex items-center gap-1">
       {{ site.name }}
-      <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path d="M14 3h7v7" />
-        <path d="M10 14L21 3" />
-        <path d="M5 12v7a2 2 0 0 0 2 2h7" />
-      </svg>
+      <span class="text-blue-700 text-lg">↗</span>
     </a>
   {% else %}
     <span class="text-gray-500">未選択</span>
@@ -60,27 +56,25 @@
   <table class="w-full bg-white dark:bg-gray-800 text-sm table-fixed">
     <thead>
       <tr class="bg-gray-100 dark:bg-gray-700 whitespace-nowrap">
-        <th class="px-2 py-2 text-left w-[40px]"><input type="checkbox" onclick="toggleAll(this)"></th>
-        <th class="px-2 py-2 text-left w-[15%]">検索キーワード</th>
-        <th class="px-2 py-2 text-left w-[12%]">サイト名</th>
-        <th class="px-2 py-2 text-left w-[10%]">現在の状態</th>
-        <th class="px-2 py-2 text-left w-[6%]">進行状況</th>
-        <th class="px-2 py-2 text-left w-[10%]">投稿予定日</th>
-        <th class="px-2 py-2 text-left w-[20%]">Q＆A記事タイトル</th>
-        <th class="px-2 py-2 text-left w-[7%]">プレビュー</th>
-        <th class="px-2 py-2 text-left w-[10%]">アイキャッチ</th>
-        <th class="px-2 py-2 text-left w-[15%]">操作</th>
+        <th class="px-2 py-2 w-[40px] text-left"><input type="checkbox" onclick="toggleAll(this)"></th>
+        <th class="px-2 py-2 w-[15%] text-left">検索キーワード</th>
+        <th class="px-2 py-2 w-[12%] text-left">サイト名</th>
+        <th class="px-2 py-2 w-[10%] text-left">現在の状態</th>
+        <th class="px-2 py-2 w-[6%] text-left">進行状況</th>
+        <th class="px-2 py-2 w-[10%] text-left">投稿予定日</th>
+        <th class="px-2 py-2 w-[20%] text-left">Q＆A記事タイトル</th>
+        <th class="px-2 py-2 w-[7%] text-left">プレビュー</th>
+        <th class="px-2 py-2 w-[10%] text-left">アイキャッチ</th>
+        <th class="px-2 py-2 w-[15%] text-left">操作</th>
       </tr>
     </thead>
     <tbody>
       {% for a in articles %}
       <tr class="{% if loop.index0 % 2 == 0 %}bg-white{% else %}bg-blue-50{% endif %}">
-        <td class="px-2 py-2 text-left">
-          <input type="checkbox" name="selected_ids" value="{{ a.id }}">
-        </td>
-        <td class="px-2 py-2 text-left">{{ a.keyword }}</td>
-        <td class="px-2 py-2 text-left text-sm">{% if a.site %}{{ a.site.name }}{% else %}—{% endif %}</td>
-        <td class="px-2 py-2 text-left">
+        <td class="px-2 py-2"><input type="checkbox" name="selected_ids" value="{{ a.id }}"></td>
+        <td class="px-2 py-2">{{ a.keyword }}</td>
+        <td class="px-2 py-2 text-sm">{% if a.site %}{{ a.site.name }}{% else %}—{% endif %}</td>
+        <td class="px-2 py-2">
           {% if a.status == "posted" %}
             <span class="text-green-600 font-bold">投稿完了</span>
           {% elif a.status == "done" %}
@@ -93,54 +87,42 @@
             {{ a.status }}
           {% endif %}
         </td>
-        <td class="px-2 py-2 text-left">{{ a.progress }}%</td>
-        <td class="px-2 py-2 text-left whitespace-nowrap">
+        <td class="px-2 py-2">{{ a.progress }}%</td>
+        <td class="px-2 py-2 whitespace-nowrap">
           {% if a.scheduled_at %}
             {{ a.scheduled_at.astimezone(jst).strftime("%Y-%m-%d %H:%M") }}
           {% else %}—{% endif %}
         </td>
-        <td class="px-2 py-2 text-left break-words text-sm leading-snug" title="{{ a.title }}">{{ a.title }}</td>
-        <td class="px-2 py-2 text-left">
+        <td class="px-2 py-2 break-words text-sm leading-snug" title="{{ a.title }}">{{ a.title }}</td>
+        <td class="px-2 py-2">
           {% if a.status in ["done", "posted"] %}
             <a href="{{ url_for('main.preview', article_id=a.id) }}"
-               class="inline-flex items-center gap-1 py-1 px-3 bg-blue-500 hover:bg-blue-600 text-white rounded text-sm">
-              👁 プレビュー
-            </a>
+               class="text-blue-600 hover:underline">プレビュー</a>
           {% else %}—{% endif %}
         </td>
-        <td class="px-2 py-2 text-left">
+        <td class="px-2 py-2 text-center">
           {% if a.image_url %}
             <img src="{{ a.image_url }}" class="h-12 w-16 object-cover rounded mx-auto">
           {% else %}—{% endif %}
         </td>
-        <td class="px-2 py-2 text-left">
-          <div class="flex flex-wrap gap-1">
-            {% if a.status == "error" %}
-              <form action="{{ url_for('main.retry_article', id=a.id) }}" method="post" class="inline">
-                <button type="submit" class="py-1.5 px-3 bg-yellow-500 hover:bg-yellow-600 text-white rounded text-sm">再生成</button>
-              </form>
-            {% endif %}
-            <a href="{{ url_for('main.edit_article', id=a.id) }}"
-               class="inline-flex items-center gap-1 py-1.5 px-3 bg-green-500 hover:bg-green-600 text-white rounded text-sm">✏ 編集</a>
-            <form action="{{ url_for('main.delete_article', id=a.id) }}" method="post"
-                  class="inline" onsubmit="return confirm('削除しますか？');">
-              <button type="submit" class="inline-flex items-center gap-1 py-1.5 px-3 bg-red-500 hover:bg-red-600 text-white rounded text-sm">
-                🗑 削除
-              </button>
+        <td class="px-2 py-2 space-x-2">
+          {% if a.status == "error" %}
+            <form action="{{ url_for('main.retry_article', id=a.id) }}" method="post" class="inline">
+              <button type="submit" class="text-yellow-600 hover:underline">再生成</button>
             </form>
-            {% if a.status == "done" and a.site_id %}
-              <form action="{{ url_for('main.post_article', id=a.id) }}" method="post" class="inline">
-                <button type="submit" class="inline-flex items-center gap-1 py-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-sm">
-                  ⬆ 投稿
-                </button>
-              </form>
-            {% endif %}
-            {% if a.status == "posted" and a.posted_url %}
-              <a href="{{ a.posted_url }}" target="_blank"
-                 class="inline-flex items-center gap-1 py-1.5 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm"
-                 title="公開ページを表示">🔍 表示</a>
-            {% endif %}
-          </div>
+          {% endif %}
+          <a href="{{ url_for('main.edit_article', id=a.id) }}" class="text-green-600 hover:underline">編集</a>
+          <form action="{{ url_for('main.delete_article', id=a.id) }}" method="post" class="inline" onsubmit="return confirm('削除しますか？');">
+            <button type="submit" class="text-red-600 hover:underline">削除</button>
+          </form>
+          {% if a.status == "done" and a.site_id %}
+            <form action="{{ url_for('main.post_article', id=a.id) }}" method="post" class="inline">
+              <button type="submit" class="text-emerald-600 hover:underline">即時投稿</button>
+            </form>
+          {% endif %}
+          {% if a.status == "posted" and a.posted_url %}
+            <a href="{{ a.posted_url }}" target="_blank" class="text-blue-600 hover:underline" title="公開ページを表示">記事表示</a>
+          {% endif %}
         </td>
       </tr>
       {% else %}
