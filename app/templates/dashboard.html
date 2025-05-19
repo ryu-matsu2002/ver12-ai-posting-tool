@@ -2,24 +2,33 @@
 {% block title %}Dashboard | AI Posting Tool{% endblock %}
 
 {% block content %}
-<h2 class="text-2xl font-semibold mb-6">ダッシュボード</h2>
+<h2 class="text-3xl font-bold mb-8">ダッシュボード</h2>
 
 <div class="grid md:grid-cols-4 gap-6">
-  <div class="bg-white dark:bg-gray-800 p-6 rounded shadow">
-    <h3 class="text-sm text-gray-500 dark:text-gray-400">総記事数</h3>
-    <p class="text-3xl font-bold mt-2">{{ g.total_articles or 0 }}</p>
+
+  <!-- 総記事数 -->
+  <div class="bg-white dark:bg-gray-800 p-6 rounded shadow text-center">
+    <p class="text-xl font-bold text-black mb-2">総記事数</p>
+    <p class="text-4xl font-extrabold">{{ g.total_articles or 0 }}</p>
   </div>
-  <div class="bg-white dark:bg-gray-800 p-6 rounded shadow">
-    <h3 class="text-sm text-gray-500 dark:text-gray-400">生成中</h3>
-    <p class="text-3xl font-bold mt-2">{{ g.generating or 0 }}</p>
+
+  <!-- 投稿待機中（done） -->
+  <div class="bg-white dark:bg-gray-800 p-6 rounded shadow text-center">
+    <p class="text-xl font-bold text-sky-600 mb-2">投稿待機中</p>
+    <p class="text-4xl font-extrabold text-sky-600">{{ g.done or 0 }}</p>
   </div>
-  <div class="bg-white dark:bg-gray-800 p-6 rounded shadow">
-    <h3 class="text-sm text-gray-500 dark:text-gray-400">完了</h3>
-    <p class="text-3xl font-bold mt-2">{{ g.done or 0 }}</p>
+
+  <!-- 投稿完了（posted） -->
+  <div class="bg-white dark:bg-gray-800 p-6 rounded shadow text-center">
+    <p class="text-xl font-bold text-green-700 mb-2">投稿完了</p>
+    <p class="text-4xl font-extrabold text-green-700">{{ g.posted or 0 }}</p>
   </div>
-  <div class="bg-white dark:bg-red-100 p-6 rounded shadow">
-    <h3 class="text-sm text-red-500 dark:text-red-300">エラー</h3>
-    <p class="text-3xl font-bold text-red-600 mt-2">{{ g.error or 0 }}</p>
+
+  <!-- エラー -->
+  <div class="bg-white dark:bg-red-100 p-6 rounded shadow text-center">
+    <p class="text-xl font-bold text-red-600 mb-2">エラー</p>
+    <p class="text-4xl font-extrabold text-red-600">{{ g.error or 0 }}</p>
   </div>
+
 </div>
 {% endblock %}
