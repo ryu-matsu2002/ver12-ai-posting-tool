@@ -46,7 +46,7 @@
         <span class="material-icons align-middle mr-2">dashboard</span>ダッシュボード
       </a>
 
-      <!-- 記事生成（旧ログ） -->
+      <!-- 記事生成 -->
       <a href="{{ url_for('main.log_sites') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
                 {{ request.path.startswith('/log') and 'font-semibold bg-[#0f2fa6]' }}">
@@ -67,6 +67,13 @@
         <span class="material-icons align-middle mr-2">notes</span>プロンプト登録
       </a>
 
+      <!-- ✅ キーワード管理（追加） -->
+      <a href="{{ url_for('main.keywords') }}"
+         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
+                {{ '/keywords' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
+        <span class="material-icons align-middle mr-2">label</span>キーワード管理
+      </a>
+
       <!-- ChatGPT -->
       <a href="{{ url_for('main.chatgpt') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
@@ -81,14 +88,14 @@
         <span class="material-icons align-middle mr-2">login</span>ログイン
       </a>
 
-      <!-- ✅ Logout（Loginのすぐ下に配置） -->
+      <!-- Logout -->
       <a href="{{ url_for('main.logout') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full text-red-400">
         <span class="material-icons align-middle mr-2">logout</span>ログアウト
       </a>
     </nav>
 
-    <!-- ダークモードボタンはフッターに残す -->
+    <!-- ダークモードボタン -->
     <div class="px-6 py-4 border-t border-gray-700 flex items-center justify-between">
       <button onclick="toggleTheme()" class="material-icons text-gray-300">dark_mode</button>
     </div>

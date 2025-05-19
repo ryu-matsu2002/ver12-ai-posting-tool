@@ -196,21 +196,50 @@ def admin_login_as(user_id):
 def keywords():
     form = KeywordForm()
 
-    # フォームから新規登録
+    # ▼ 新規登録処理
     if form.validate_on_submit():
         lines = [line.strip() for line in form.words.data.splitlines() if line.strip()]
         genre = form.genre.data
-
         for word in lines:
-            keyword = Keyword(word=word, genre=genre, user_id=current_user.id)
+            keyword = Keyword(keyword=word, genre=genre, user_id=current_user.id)
             db.session.add(keyword)
         db.session.commit()
         flash(f"{len(lines)} 件のキーワードを追加しました", "success")
         return redirect(url_for(".keywords"))
 
-    # 一覧表示（ユーザーごとの）
-    keywords = Keyword.query.filter_by(user_id=current_user.id).order_by(Keyword.id.desc()).all()
-    return render_template("keywords.html", form=form, keywords=keywords)
+    # ▼ フィルタ：ジャンルと使用ステータス
+    genre_filter = request.args.get("genre", "")
+    status_filter = request.args.get("status", "")  # "used", "unused", ""
+
+    q = Keyword.query.filter_by(user_id=current_user.id)
+    if genre_filter:
+        q = q.filter(Keyword.genre == genre_filter)
+    if status_filter == "used":
+        q = q.filter(Keyword.used == True)
+    elif status_filter == "unused":
+        q = q.filter(Keyword.used == False)
+
+    keywords = q.order_by(Keyword.id.desc()).all()
+
+    # ▼ ジャンル一覧（重複排除）
+    genre_list = (
+        db.session.query(Keyword.genre)
+        .filter_by(user_id=current_user.id)
+        .distinct()
+        .order_by(Keyword.genre.asc())
+        .all()
+    )
+    genre_choices = [g[0] for g in genre_list if g[0]]  # None除外
+
+    return render_template(
+        "keywords.html",
+        form=form,
+        keywords=keywords,
+        genre_choices=genre_choices,
+        selected_genre=genre_filter,
+        selected_status=status_filter,
+    )
+
 
 @bp.route("/chatgpt")
 @login_required
