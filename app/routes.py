@@ -196,18 +196,22 @@ def admin_login_as(user_id):
 def keywords():
     form = KeywordForm()
 
-    # ✅ ログインユーザーのサイトのみ選択肢に設定
+    # ✅ ログインユーザーのサイト選択肢を設定（初期に選択なしを追加）
     user_sites = Site.query.filter_by(user_id=current_user.id).all()
-    form.site_id.choices = [(s.id, s.name) for s in user_sites]
+    form.site_id.choices = [(0, "―― サイトを選択 ――")] + [(s.id, s.name) for s in user_sites]
 
     # ▼ 新規登録処理
     if form.validate_on_submit():
-        lines = [line.strip() for line in form.keywords.data.splitlines() if line.strip()]
         site_id = form.site_id.data
+        if site_id == 0:
+            flash("サイトを選択してください。", "danger")
+            return redirect(url_for(".keywords"))
+
+        lines = [line.strip() for line in form.keywords.data.splitlines() if line.strip()]
         for word in lines:
             keyword = Keyword(
                 keyword=word,
-                genre=None,  # 新バージョンではジャンルなし
+                genre=None,  # 今回はジャンル不要
                 user_id=current_user.id,
                 site_id=site_id
             )
@@ -216,25 +220,27 @@ def keywords():
         flash(f"{len(lines)} 件のキーワードを追加しました", "success")
         return redirect(url_for(".keywords", site_id=site_id))
 
-    # ▼ クエリ文字列からサイトを取得（一覧表示対象）
+    # ▼ クエリ文字列で選択されたサイトを取得（未選択可）
     selected_site_id = request.args.get("site_id", type=int)
     selected_site = Site.query.get(selected_site_id) if selected_site_id else None
 
-    keywords = []
-    if selected_site:
-        keywords = Keyword.query.filter_by(
-            user_id=current_user.id,
-            site_id=selected_site.id
-        ).order_by(Keyword.id.desc()).all()
+    # ▼ grouped_keywords を作成（サイト別にまとめる）
+    from collections import defaultdict
+    all_keywords = Keyword.query.filter_by(user_id=current_user.id).order_by(Keyword.site_id, Keyword.id.desc()).all()
+    site_map = {s.id: s.name for s in user_sites}
+
+    grouped_keywords = defaultdict(lambda: {"site_name": "", "keywords": []})
+    for kw in all_keywords:
+        grouped_keywords[kw.site_id]["site_name"] = site_map.get(kw.site_id, "（不明なサイト）")
+        grouped_keywords[kw.site_id]["keywords"].append(kw)
 
     return render_template(
         "keywords.html",
         form=form,
-        keywords=keywords,
         selected_site=selected_site,
-        sites=user_sites  # ← HTMLでセレクトボックスに表示用
+        sites=user_sites,
+        grouped_keywords=grouped_keywords
     )
-
 
 
 @bp.route("/keywords/edit/<int:keyword_id>", methods=["GET", "POST"])
@@ -252,9 +258,10 @@ def edit_keyword(keyword_id):
 
         db.session.commit()
         flash("キーワードを更新しました", "success")
-        return redirect(url_for("main.keywords"))  # 修正点！
+        return redirect(url_for("main.keywords"))
 
     return render_template("edit_keyword.html", keyword=keyword)
+
 
 @bp.route("/keywords/view/<int:keyword_id>")
 @login_required
@@ -263,6 +270,7 @@ def view_keyword(keyword_id):
     if keyword.user_id != current_user.id:
         abort(403)
     return render_template("view_keyword.html", keyword=keyword)
+
 
 @bp.route("/keywords/delete/<int:keyword_id>")
 @login_required
@@ -273,7 +281,8 @@ def delete_keyword(keyword_id):
     db.session.delete(keyword)
     db.session.commit()
     flash("キーワードを削除しました。", "success")
-    return redirect(url_for("main.keywords"))  # 修正点！
+    return redirect(url_for("main.keywords"))
+
 
 
 @bp.route("/chatgpt")

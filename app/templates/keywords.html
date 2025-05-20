@@ -14,14 +14,14 @@
       <!-- サイト選択 -->
       <div>
         {{ form.site_id.label(class="block font-semibold mb-1") }}
-        {{ form.site_id(class="w-full p-2 border rounded", required=true) }}
+        {{ form.site_id(class="w-full p-2 border rounded") }}
       </div>
 
       <!-- キーワード入力欄 -->
       <div>
         {{ form.keywords.label(class="block font-semibold mb-1") }}
         {{ form.keywords(class="w-full p-2 border rounded", rows=10) }}
-        <small class="text-sm text-gray-500">1行1キーワード（最大1000件）</small>
+        <small class="text-sm text-gray-500">1行1キーワード（最大1000行）</small>
       </div>
 
       <!-- 追加ボタン -->
@@ -29,31 +29,19 @@
     </form>
   </div>
 
-  <!-- 右：登録済みキーワード一覧 -->
+  <!-- 右：登録済みキーワード一覧（サイトごとのカード） -->
   <div class="w-full lg:w-1/2">
-    <h2 class="text-2xl font-bold mb-6">
-      {% if selected_site %}
-        {{ selected_site.name }} 用 登録済みキーワード
-      {% else %}
-        登録済みキーワード（サイト未選択）
-      {% endif %}
-    </h2>
+    <h2 class="text-2xl font-bold mb-6">登録済みキーワード</h2>
 
-    <div class="space-y-4">
-      {% for kw in keywords %}
+    <div class="space-y-6">
+      {% for site_id, group in grouped_keywords.items() %}
       <div class="p-4 bg-white dark:bg-gray-800 rounded shadow">
-        <div class="text-blue-600 text-lg font-semibold mb-1">{{ kw.keyword }}</div>
-        <div class="text-sm text-gray-600 mb-1">ジャンル：{{ kw.genre or '―' }}</div>
-        <div class="text-sm mb-3">ステータス：{{ '✅ 使用済み' if kw.used else '⏳ 未使用' }}</div>
-        <div class="flex gap-2">
-          <a href="{{ url_for('main.edit_keyword', keyword_id=kw.id) }}"
-             class="bg-green-600 hover:bg-green-700 text-white text-sm px-3 py-1 rounded">編集</a>
-          <a href="{{ url_for('main.view_keyword', keyword_id=kw.id) }}"
-             class="bg-blue-600 hover:bg-blue-700 text-white text-sm px-3 py-1 rounded">確認</a>
-          <a href="{{ url_for('main.delete_keyword', keyword_id=kw.id) }}"
-             class="bg-red-600 hover:bg-red-700 text-white text-sm px-3 py-1 rounded"
-             onclick="return confirm('本当に削除しますか？')">削除</a>
-        </div>
+        <div class="text-lg font-semibold mb-2">{{ group.site_name }}（{{ group.keywords | length }} 件）</div>
+        <ul class="list-disc list-inside text-sm text-gray-800 dark:text-gray-200">
+          {% for kw in group.keywords %}
+            <li>{{ kw.keyword }}</li>
+          {% endfor %}
+        </ul>
       </div>
       {% else %}
       <p class="text-gray-500">登録されたキーワードはまだありません。</p>
