@@ -37,11 +37,11 @@
         <div class="text-sm text-gray-600 mb-1">ジャンル：{{ kw.genre or '―' }}</div>
         <div class="text-sm mb-3">ステータス：{{ '✅ 使用済み' if kw.used else '⏳ 未使用' }}</div>
         <div class="flex gap-2">
-          <a href="{{ url_for('edit_keyword', keyword_id=kw.id) }}"
+          <a href="{{ url_for('main.edit_keyword', keyword_id=kw.id) }}"
              class="bg-green-600 hover:bg-green-700 text-white text-sm px-3 py-1 rounded">編集</a>
-          <a href="{{ url_for('view_keyword', keyword_id=kw.id) }}"
+          <a href="{{ url_for('main.view_keyword', keyword_id=kw.id) }}"
              class="bg-blue-600 hover:bg-blue-700 text-white text-sm px-3 py-1 rounded">確認</a>
-          <a href="{{ url_for('delete_keyword', keyword_id=kw.id) }}"
+          <a href="{{ url_for('main.delete_keyword', keyword_id=kw.id) }}"
              class="bg-red-600 hover:bg-red-700 text-white text-sm px-3 py-1 rounded"
              onclick="return confirm('本当に削除しますか？')">削除</a>
         </div>
