@@ -13,27 +13,14 @@
 
       <!-- サイト選択 -->
       <div>
-        <label class="block font-semibold mb-1">投稿先サイト</label>
-        <select name="site_id" required class="w-full p-2 border rounded">
-          <option value="">―― サイトを選択 ――</option>
-          {% for site in sites %}
-            <option value="{{ site.id }}" {% if selected_site and site.id == selected_site.id %}selected{% endif %}>
-              {{ site.name }}
-            </option>
-          {% endfor %}
-        </select>
-      </div>
-
-      <!-- ジャンル -->
-      <div>
-        {{ form.genre.label(class="block font-semibold mb-1") }}
-        {{ form.genre(class="w-full p-2 border rounded") }}
+        {{ form.site_id.label(class="block font-semibold mb-1") }}
+        {{ form.site_id(class="w-full p-2 border rounded", required=true) }}
       </div>
 
       <!-- キーワード入力欄 -->
       <div>
-        {{ form.words.label(class="block font-semibold mb-1") }}
-        {{ form.words(class="w-full p-2 border rounded", rows=10) }}
+        {{ form.keywords.label(class="block font-semibold mb-1") }}
+        {{ form.keywords(class="w-full p-2 border rounded", rows=10) }}
         <small class="text-sm text-gray-500">1行1キーワード（最大1000件）</small>
       </div>
 
