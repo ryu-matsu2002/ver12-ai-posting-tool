@@ -7,32 +7,40 @@
 <form method="post" class="p-6 bg-white dark:bg-gray-800 rounded shadow space-y-6">
   {{ form.hidden_tag() }}
 
+  <!-- キーワード -->
   <div>
     <label class="block font-semibold mb-1">キーワード</label>
     <input type="text" name="keyword" value="{{ keyword.keyword }}" class="w-full p-2 border rounded" required>
   </div>
 
+  <!-- ジャンル -->
   <div>
     <label class="block font-semibold mb-1">ジャンル</label>
     <input type="text" name="genre" value="{{ keyword.genre }}" class="w-full p-2 border rounded">
   </div>
 
+  <!-- ステータス -->
   <div>
     <label class="block font-semibold mb-1">ステータス</label>
     <select name="used" class="w-full p-2 border rounded">
-      <option value="false" {% if not keyword.used %}selected{% endif %}>⏳ 未使用</option>
-      <option value="true" {% if keyword.used %}selected{% endif %}>✅ 使用済み</option>
+      <option value="false" {% if not keyword.used %}selected{% endif %}>⏳ 未使用（未投稿）</option>
+      <option value="true" {% if keyword.used %}selected{% endif %}>✅ 使用済み（投稿済み）</option>
     </select>
   </div>
 
+  <!-- サイト表示 -->
   <div>
     <label class="block font-semibold mb-1">登録サイト</label>
     <p class="text-sm text-gray-700 dark:text-gray-300">{{ keyword.site.name if keyword.site else '―' }}</p>
   </div>
 
-  <div class="flex items-center gap-4">
+  <!-- 操作ボタン -->
+  <div class="flex items-center gap-4 mt-4">
     <a href="{{ url_for('main.keywords') }}" class="text-blue-600 hover:underline">&larr; キーワード一覧に戻る</a>
     <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded">保存</button>
+    <a href="{{ url_for('main.delete_keyword', keyword_id=keyword.id) }}"
+       class="text-red-600 hover:underline ml-auto"
+       onclick="return confirm('このキーワードを削除しますか？')">🗑️ 削除</a>
   </div>
 </form>
 {% endblock %}

@@ -4,40 +4,51 @@
 {% block content %}
 <h2 class="text-2xl font-bold mb-6">キーワード詳細</h2>
 
-<div class="p-6 bg-white dark:bg-gray-800 rounded shadow space-y-4">
-  <div>
-    <label class="block font-semibold text-gray-600">キーワード</label>
-    <p class="text-lg text-black dark:text-white mt-1">{{ keyword.keyword }}</p>
+<div class="p-6 bg-white dark:bg-gray-800 rounded shadow space-y-6">
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <!-- キーワード -->
+    <div>
+      <label class="block font-semibold text-gray-600">キーワード</label>
+      <p class="text-lg text-black dark:text-white mt-1">{{ keyword.keyword }}</p>
+    </div>
+
+    <!-- ジャンル -->
+    <div>
+      <label class="block font-semibold text-gray-600">ジャンル</label>
+      <p class="mt-1">{{ keyword.genre or '―' }}</p>
+    </div>
+
+    <!-- ステータス -->
+    <div>
+      <label class="block font-semibold text-gray-600">ステータス</label>
+      <p class="mt-1 {% if keyword.used %}text-blue-600{% else %}text-green-600{% endif %}">
+        {% if keyword.used %}
+          ✅ 使用済み
+        {% else %}
+          ⏳ 未使用
+        {% endif %}
+      </p>
+    </div>
+
+    <!-- サイト名 -->
+    <div>
+      <label class="block font-semibold text-gray-600">登録サイト</label>
+      <p class="mt-1">{{ keyword.site.name if keyword.site else '―' }}</p>
+    </div>
+
+    <!-- 登録日時 -->
+    <div>
+      <label class="block font-semibold text-gray-600">登録日時</label>
+      <p class="mt-1">{{ keyword.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+    </div>
   </div>
 
-  <div>
-    <label class="block font-semibold text-gray-600">ジャンル</label>
-    <p class="mt-1">{{ keyword.genre or '―' }}</p>
-  </div>
-
-  <div>
-    <label class="block font-semibold text-gray-600">ステータス</label>
-    <p class="mt-1">
-      {% if keyword.used %}
-        ✅ 使用済み
-      {% else %}
-        ⏳ 未使用
-      {% endif %}
-    </p>
-  </div>
-
-  <div>
-    <label class="block font-semibold text-gray-600">登録サイト</label>
-    <p class="mt-1">{{ keyword.site.name if keyword.site else '―' }}</p>
-  </div>
-
-  <div>
-    <label class="block font-semibold text-gray-600">登録日時</label>
-    <p class="mt-1">{{ keyword.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
-  </div>
-
-  <div class="mt-6">
+  <!-- 戻る・編集 -->
+  <div class="flex items-center justify-between mt-6">
     <a href="{{ url_for('main.keywords') }}" class="text-blue-600 hover:underline">&larr; キーワード一覧に戻る</a>
+    <a href="{{ url_for('main.edit_keyword', keyword_id=keyword.id) }}"
+       class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm">✏️ 編集する</a>
   </div>
 </div>
 {% endblock %}

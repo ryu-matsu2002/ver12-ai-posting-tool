@@ -29,45 +29,49 @@
     </form>
   </div>
 
-  <!-- 右：登録済みキーワード一覧 -->
+  <!-- 右：サイトごとのキーワード一覧 -->
   <div class="w-full lg:w-1/2">
     <h2 class="text-2xl font-bold mb-6">登録済みキーワード</h2>
 
-    {% for site_id, group in grouped_keywords.items() %}
-    <div class="bg-white dark:bg-gray-800 rounded shadow p-4 mb-6">
-      <h3 class="text-xl font-semibold text-blue-700 mb-3">
-        {{ group.site_name }}（{{ group.keywords|length }} 件）
-      </h3>
+    {% if grouped_keywords %}
+      {% for site_id, group in grouped_keywords.items() %}
+      <div class="bg-white dark:bg-gray-800 rounded shadow mb-6">
+        <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 rounded-t">
+          <h3 class="text-xl font-semibold text-blue-700">
+            {{ group.site_name }}（{{ group.keywords|length }} 件）
+          </h3>
+        </div>
 
-      <ul class="space-y-2">
-        {% for kw in group.keywords %}
-        <li class="flex flex-col sm:flex-row sm:items-center sm:justify-between bg-gray-50 dark:bg-gray-700 p-3 rounded border">
-          <div class="text-sm font-medium text-black dark:text-white">
-            {{ kw.keyword }}
-            <span class="ml-2 text-xs {% if kw.used %}text-blue-500{% else %}text-green-500{% endif %}">
-              {% if kw.used %}🔵 使用済み{% else %}🟢 未使用{% endif %}
-            </span>
+        <div class="p-4 space-y-2">
+          {% for kw in group.keywords %}
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between bg-gray-50 dark:bg-gray-700 p-3 rounded border">
+            <div class="text-sm font-medium text-black dark:text-white">
+              {{ kw.keyword }}
+              <span class="ml-2 text-xs {% if kw.used %}text-blue-500{% else %}text-green-500{% endif %}">
+                {% if kw.used %}🔵 使用済み{% else %}🟢 未使用{% endif %}
+              </span>
+            </div>
+            <div class="flex gap-2 mt-2 sm:mt-0">
+              <a href="{{ url_for('main.edit_keyword', keyword_id=kw.id) }}"
+                class="bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1 rounded">編集</a>
+              <button type="button" onclick="togglePreview('preview-{{ kw.id }}')"
+                class="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1 rounded">確認</button>
+              <a href="{{ url_for('main.delete_keyword', keyword_id=kw.id) }}"
+                class="bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-1 rounded"
+                onclick="return confirm('本当に削除しますか？')">削除</a>
+            </div>
+            <div id="preview-{{ kw.id }}" class="hidden mt-2 text-sm text-gray-700 dark:text-gray-300">
+              <div><strong>ジャンル:</strong> {{ kw.genre or '―' }}</div>
+              <div><strong>ステータス:</strong> {{ '使用済み' if kw.used else '未使用' }}</div>
+            </div>
           </div>
-          <div class="flex gap-2 mt-2 sm:mt-0">
-            <a href="{{ url_for('main.edit_keyword', keyword_id=kw.id) }}"
-              class="bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1 rounded">編集</a>
-            <button type="button" onclick="togglePreview('preview-{{ kw.id }}')"
-              class="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1 rounded">確認</button>
-            <a href="{{ url_for('main.delete_keyword', keyword_id=kw.id) }}"
-              class="bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-1 rounded"
-              onclick="return confirm('本当に削除しますか？')">削除</a>
-          </div>
-          <div id="preview-{{ kw.id }}" class="hidden mt-2 text-sm text-gray-700 dark:text-gray-300">
-            <div><strong>ジャンル:</strong> {{ kw.genre or '―' }}</div>
-            <div><strong>ステータス:</strong> {{ '使用済み' if kw.used else '未使用' }}</div>
-          </div>
-        </li>
-        {% endfor %}
-      </ul>
-    </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
     {% else %}
-    <p class="text-gray-500">まだキーワードが登録されていません。</p>
-    {% endfor %}
+      <p class="text-gray-500">まだキーワードが登録されていません。</p>
+    {% endif %}
   </div>
 </div>
 
