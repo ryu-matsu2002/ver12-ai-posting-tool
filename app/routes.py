@@ -196,42 +196,45 @@ def admin_login_as(user_id):
 def keywords():
     form = KeywordForm()
 
-    # ▼ サイト一覧を取得してセレクト用に渡す
-    sites = Site.query.filter_by(user_id=current_user.id).all()
+    # ✅ ログインユーザーのサイトのみ選択肢に設定
+    user_sites = Site.query.filter_by(user_id=current_user.id).all()
+    form.site_id.choices = [(s.id, s.name) for s in user_sites]
 
-    # ▼ サイトIDの取得（GET or POST）
-    selected_site_id = request.args.get("site_id", type=int) or request.form.get("site_id", type=int)
-    selected_site = Site.query.get(selected_site_id) if selected_site_id else None
-
-    # ▼ 登録処理（POST時）
-    if form.validate_on_submit() and selected_site:
-        lines = [line.strip() for line in form.words.data.splitlines() if line.strip()]
-        genre = form.genre.data
+    # ▼ 新規登録処理
+    if form.validate_on_submit():
+        lines = [line.strip() for line in form.keywords.data.splitlines() if line.strip()]
+        site_id = form.site_id.data
         for word in lines:
             keyword = Keyword(
                 keyword=word,
-                genre=genre,
+                genre=None,  # 新バージョンではジャンルなし
                 user_id=current_user.id,
-                site_id=selected_site.id
+                site_id=site_id
             )
             db.session.add(keyword)
         db.session.commit()
         flash(f"{len(lines)} 件のキーワードを追加しました", "success")
-        return redirect(url_for(".keywords", site_id=selected_site.id))
+        return redirect(url_for(".keywords", site_id=site_id))
 
-    # ▼ 表示用：該当サイトに絞ったキーワード取得
-    keyword_query = Keyword.query.filter_by(user_id=current_user.id)
+    # ▼ クエリ文字列からサイトを取得（一覧表示対象）
+    selected_site_id = request.args.get("site_id", type=int)
+    selected_site = Site.query.get(selected_site_id) if selected_site_id else None
+
+    keywords = []
     if selected_site:
-        keyword_query = keyword_query.filter_by(site_id=selected_site.id)
-    keywords = keyword_query.order_by(Keyword.id.desc()).all()
+        keywords = Keyword.query.filter_by(
+            user_id=current_user.id,
+            site_id=selected_site.id
+        ).order_by(Keyword.id.desc()).all()
 
     return render_template(
         "keywords.html",
         form=form,
         keywords=keywords,
-        sites=sites,
         selected_site=selected_site,
+        sites=user_sites  # ← HTMLでセレクトボックスに表示用
     )
+
 
 
 @bp.route("/keywords/edit/<int:keyword_id>", methods=["GET", "POST"])
