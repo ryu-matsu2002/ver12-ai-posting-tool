@@ -14,7 +14,7 @@ from .image_utils import fetch_featured_image_from_body  # ← 追加
 from . import db
 from .models import Article, Keyword
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from .article_generator import _generate, _generate_slots_per_site, _unique_title
+
 
 # OpenAI設定
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
