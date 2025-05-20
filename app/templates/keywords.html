@@ -2,67 +2,51 @@
 {% block title %}キーワード管理{% endblock %}
 
 {% block content %}
-<h2 class="text-2xl font-bold mb-6">キーワード管理</h2>
+<div class="flex flex-col lg:flex-row gap-8 items-start">
 
-<!-- 🔍 フィルタフォーム -->
-<form method="get" class="mb-6 flex flex-wrap gap-4">
-  <div>
-    <label class="block mb-1 font-semibold">ジャンル</label>
-    <select name="genre" class="p-2 border rounded">
-      <option value="">すべて</option>
-      {% for g in genre_choices %}
-        <option value="{{ g }}" {% if g == selected_genre %}selected{% endif %}>{{ g }}</option>
-      {% endfor %}
-    </select>
-  </div>
-  <div>
-    <label class="block mb-1 font-semibold">ステータス</label>
-    <select name="status" class="p-2 border rounded">
-      <option value="">すべて</option>
-      <option value="unused" {% if selected_status == 'unused' %}selected{% endif %}>⏳ 未使用</option>
-      <option value="used" {% if selected_status == 'used' %}selected{% endif %}>✅ 使用済み</option>
-    </select>
-  </div>
-  <div class="self-end">
-    <button type="submit" class="bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700">絞り込み</button>
-  </div>
-</form>
+  <!-- 左：キーワード登録フォーム -->
+  <div class="w-full lg:w-1/2">
+    <h2 class="text-2xl font-bold mb-6">キーワード登録</h2>
+    <form method="post" class="p-6 bg-white dark:bg-gray-800 rounded shadow space-y-4">
+      {{ form.hidden_tag() }}
 
-<!-- 📝 キーワード登録フォーム -->
-<form method="post" class="mb-8 p-6 bg-white dark:bg-gray-800 rounded shadow space-y-4">
-  {{ form.hidden_tag() }}
+      <div>
+        {{ form.words.label(class="block font-semibold mb-1") }}
+        {{ form.words(class="w-full p-2 border rounded", rows=5) }}
+      </div>
 
-  <div>
-    {{ form.words.label(class="block font-semibold mb-1") }}
-    {{ form.words(class="w-full p-2 border rounded", rows=5) }}
+      <div>
+        {{ form.genre.label(class="block font-semibold mb-1") }}
+        {{ form.genre(class="w-full p-2 border rounded") }}
+      </div>
+
+      {{ form.submit(class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-6 rounded") }}
+    </form>
   </div>
 
-  <div>
-    {{ form.genre.label(class="block font-semibold mb-1") }}
-    {{ form.genre(class="w-full p-2 border rounded") }}
+  <!-- 右：登録済みキーワード一覧 -->
+  <div class="w-full lg:w-1/2">
+    <h2 class="text-2xl font-bold mb-6">登録済みキーワード</h2>
+    <div class="bg-white dark:bg-gray-800 rounded shadow p-4">
+      <table class="w-full table-auto text-sm">
+        <thead class="bg-gray-200 dark:bg-gray-700">
+          <tr>
+            <th class="px-3 py-2 text-left">キーワード</th>
+            <th class="px-3 py-2 text-left">ジャンル</th>
+            <th class="px-3 py-2 text-left">ステータス</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for kw in keywords %}
+          <tr class="{% if loop.index0 % 2 == 0 %}bg-white{% else %}bg-gray-50 dark:bg-gray-700{% endif %}">
+            <td class="px-3 py-2">{{ kw.keyword }}</td>
+            <td class="px-3 py-2">{{ kw.genre or '―' }}</td>
+            <td class="px-3 py-2">{{ '✅ 使用済み' if kw.used else '⏳ 未使用' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
-
-  {{ form.submit(class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-6 rounded") }}
-</form>
-
-<!-- 📋 一覧テーブル -->
-<h3 class="text-xl font-semibold mb-4">登録済みキーワード</h3>
-<table class="w-full table-auto text-sm bg-white dark:bg-gray-800">
-  <thead class="bg-gray-200 dark:bg-gray-700">
-    <tr>
-      <th class="px-3 py-2 text-left">キーワード</th>
-      <th class="px-3 py-2 text-left">ジャンル</th>
-      <th class="px-3 py-2 text-left">ステータス</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for kw in keywords %}
-    <tr class="{% if loop.index0 % 2 == 0 %}bg-white{% else %}bg-gray-50 dark:bg-gray-700{% endif %}">
-      <td class="px-3 py-2">{{ kw.keyword }}</td>
-      <td class="px-3 py-2">{{ kw.genre or '―' }}</td>
-      <td class="px-3 py-2">{{ '✅ 使用済み' if kw.used else '⏳ 未使用' }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+</div>
 {% endblock %}
