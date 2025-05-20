@@ -83,5 +83,5 @@ class SiteForm(FlaskForm):
 
 class KeywordForm(FlaskForm):
     words = TextAreaField("キーワード（1行1つ）", validators=[DataRequired()])
-    genre = StringField("ジャンル（任意）")
+    genre = StringField("キーワード名")
     submit = SubmitField("キーワードを追加")

@@ -255,23 +255,29 @@ def edit_keyword(keyword_id):
 
         db.session.commit()
         flash("キーワードを更新しました", "success")
-        return redirect(url_for("keywords"))
+        return redirect(url_for("main.keywords"))  # 修正点！
 
     return render_template("edit_keyword.html", keyword=keyword)
 
 @bp.route("/keywords/view/<int:keyword_id>")
+@login_required
 def view_keyword(keyword_id):
     keyword = Keyword.query.get_or_404(keyword_id)
-    # 詳細確認ページを表示する処理
+    if keyword.user_id != current_user.id:
+        abort(403)
     return render_template("view_keyword.html", keyword=keyword)
 
 @bp.route("/keywords/delete/<int:keyword_id>")
+@login_required
 def delete_keyword(keyword_id):
     keyword = Keyword.query.get_or_404(keyword_id)
+    if keyword.user_id != current_user.id:
+        abort(403)
     db.session.delete(keyword)
     db.session.commit()
     flash("キーワードを削除しました。", "success")
-    return redirect(url_for("keywords"))
+    return redirect(url_for("main.keywords"))  # 修正点！
+
 
 @bp.route("/chatgpt")
 @login_required
