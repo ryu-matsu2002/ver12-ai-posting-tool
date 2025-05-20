@@ -242,6 +242,27 @@ def keywords():
         grouped_keywords=grouped_keywords
     )
 
+@bp.route("/api/keywords/<int:site_id>")
+@login_required
+def api_unused_keywords(site_id):
+    offset = request.args.get("offset", 0, type=int)
+    limit = 40
+
+    keywords = Keyword.query.filter_by(
+        user_id=current_user.id,
+        site_id=site_id,
+        used=False
+    ).order_by(Keyword.id.desc()).offset(offset).limit(limit).all()
+
+    data = [
+        {
+            "id": k.id,
+            "keyword": k.keyword,
+            "used": k.used,
+        } for k in keywords
+    ]
+    return jsonify(data)
+
 
 @bp.route("/keywords/edit/<int:keyword_id>", methods=["GET", "POST"])
 @login_required
