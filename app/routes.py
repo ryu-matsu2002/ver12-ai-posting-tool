@@ -240,6 +240,38 @@ def keywords():
         selected_status=status_filter,
     )
 
+@bp.route("/keywords/edit/<int:keyword_id>", methods=["GET", "POST"])
+@login_required
+def edit_keyword(keyword_id):
+    keyword = Keyword.query.get_or_404(keyword_id)
+    if keyword.user_id != current_user.id:
+        abort(403)
+
+    if request.method == "POST":
+        keyword.keyword = request.form.get("keyword", "").strip()
+        keyword.genre = request.form.get("genre", "").strip()
+        used_val = request.form.get("used", "false")
+        keyword.used = True if used_val.lower() == "true" else False
+
+        db.session.commit()
+        flash("キーワードを更新しました", "success")
+        return redirect(url_for("keywords"))
+
+    return render_template("edit_keyword.html", keyword=keyword)
+
+@bp.route("/keywords/view/<int:keyword_id>")
+def view_keyword(keyword_id):
+    keyword = Keyword.query.get_or_404(keyword_id)
+    # 詳細確認ページを表示する処理
+    return render_template("view_keyword.html", keyword=keyword)
+
+@bp.route("/keywords/delete/<int:keyword_id>")
+def delete_keyword(keyword_id):
+    keyword = Keyword.query.get_or_404(keyword_id)
+    db.session.delete(keyword)
+    db.session.commit()
+    flash("キーワードを削除しました。", "success")
+    return redirect(url_for("keywords"))
 
 @bp.route("/chatgpt")
 @login_required

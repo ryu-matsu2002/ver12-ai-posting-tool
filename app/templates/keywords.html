@@ -10,16 +10,19 @@
     <form method="post" class="p-6 bg-white dark:bg-gray-800 rounded shadow space-y-4">
       {{ form.hidden_tag() }}
 
-      <div>
-        {{ form.words.label(class="block font-semibold mb-1") }}
-        {{ form.words(class="w-full p-2 border rounded", rows=5) }}
-      </div>
-
+      <!-- ジャンル -->
       <div>
         {{ form.genre.label(class="block font-semibold mb-1") }}
         {{ form.genre(class="w-full p-2 border rounded") }}
       </div>
 
+      <!-- キーワード入力欄 -->
+      <div>
+        {{ form.words.label(class="block font-semibold mb-1") }}
+        {{ form.words(class="w-full p-2 border rounded", rows=10) }}
+      </div>
+
+      <!-- 追加ボタン -->
       {{ form.submit(class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-6 rounded") }}
     </form>
   </div>
@@ -27,25 +30,25 @@
   <!-- 右：登録済みキーワード一覧 -->
   <div class="w-full lg:w-1/2">
     <h2 class="text-2xl font-bold mb-6">登録済みキーワード</h2>
-    <div class="bg-white dark:bg-gray-800 rounded shadow p-4">
-      <table class="w-full table-auto text-sm">
-        <thead class="bg-gray-200 dark:bg-gray-700">
-          <tr>
-            <th class="px-3 py-2 text-left">キーワード</th>
-            <th class="px-3 py-2 text-left">ジャンル</th>
-            <th class="px-3 py-2 text-left">ステータス</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for kw in keywords %}
-          <tr class="{% if loop.index0 % 2 == 0 %}bg-white{% else %}bg-gray-50 dark:bg-gray-700{% endif %}">
-            <td class="px-3 py-2">{{ kw.keyword }}</td>
-            <td class="px-3 py-2">{{ kw.genre or '―' }}</td>
-            <td class="px-3 py-2">{{ '✅ 使用済み' if kw.used else '⏳ 未使用' }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+    <div class="space-y-4">
+      {% for kw in keywords %}
+      <div class="p-4 bg-white dark:bg-gray-800 rounded shadow">
+        <div class="text-blue-600 text-lg font-semibold mb-1">{{ kw.keyword }}</div>
+        <div class="text-sm text-gray-600 mb-1">ジャンル：{{ kw.genre or '―' }}</div>
+        <div class="text-sm mb-3">ステータス：{{ '✅ 使用済み' if kw.used else '⏳ 未使用' }}</div>
+        <div class="flex gap-2">
+          <a href="{{ url_for('edit_keyword', keyword_id=kw.id) }}"
+             class="bg-green-600 hover:bg-green-700 text-white text-sm px-3 py-1 rounded">編集</a>
+          <a href="{{ url_for('view_keyword', keyword_id=kw.id) }}"
+             class="bg-blue-600 hover:bg-blue-700 text-white text-sm px-3 py-1 rounded">確認</a>
+          <a href="{{ url_for('delete_keyword', keyword_id=kw.id) }}"
+             class="bg-red-600 hover:bg-red-700 text-white text-sm px-3 py-1 rounded"
+             onclick="return confirm('本当に削除しますか？')">削除</a>
+        </div>
+      </div>
+      {% else %}
+      <p class="text-gray-500">登録されたキーワードはまだありません。</p>
+      {% endfor %}
     </div>
   </div>
 </div>

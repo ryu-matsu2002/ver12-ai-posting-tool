@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}キーワード確認{% endblock %}
+
+{% block content %}
+<h2 class="text-2xl font-bold mb-6">キーワード詳細</h2>
+
+<div class="p-6 bg-white dark:bg-gray-800 rounded shadow space-y-4">
+  <div>
+    <label class="block font-semibold text-gray-600">キーワード</label>
+    <p class="text-lg text-black dark:text-white mt-1">{{ keyword.keyword }}</p>
+  </div>
+
+  <div>
+    <label class="block font-semibold text-gray-600">ジャンル</label>
+    <p class="mt-1">{{ keyword.genre or '―' }}</p>
+  </div>
+
+  <div>
+    <label class="block font-semibold text-gray-600">ステータス</label>
+    <p class="mt-1">
+      {% if keyword.used %}
+        ✅ 使用済み
+      {% else %}
+        ⏳ 未使用
+      {% endif %}
+    </p>
+  </div>
+
+  <div class="mt-6">
+    <a href="{{ url_for('keywords') }}" class="text-blue-600 hover:underline">&larr; 戻る</a>
+  </div>
+</div>
+{% endblock %}

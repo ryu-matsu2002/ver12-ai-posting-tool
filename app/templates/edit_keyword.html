@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}キーワード編集{% endblock %}
+
+{% block content %}
+<h2 class="text-2xl font-bold mb-6">キーワード編集</h2>
+
+<form method="post" class="p-6 bg-white dark:bg-gray-800 rounded shadow space-y-6">
+  {{ form.hidden_tag() }}
+
+  <div>
+    <label class="block font-semibold mb-1">キーワード</label>
+    <input type="text" name="keyword" value="{{ keyword.keyword }}" class="w-full p-2 border rounded" required>
+  </div>
+
+  <div>
+    <label class="block font-semibold mb-1">ジャンル</label>
+    <input type="text" name="genre" value="{{ keyword.genre }}" class="w-full p-2 border rounded">
+  </div>
+
+  <div>
+    <label class="block font-semibold mb-1">ステータス</label>
+    <select name="used" class="w-full p-2 border rounded">
+      <option value="false" {% if not keyword.used %}selected{% endif %}>⏳ 未使用</option>
+      <option value="true" {% if keyword.used %}selected{% endif %}>✅ 使用済み</option>
+    </select>
+  </div>
+
+  <div class="flex items-center gap-4">
+    <a href="{{ url_for('keywords') }}" class="text-blue-600 hover:underline">&larr; 戻る</a>
+    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded">保存</button>
+  </div>
+</form>
+{% endblock %}
