@@ -12,8 +12,9 @@ from sqlalchemy import func
 from threading import Event
 from .image_utils import fetch_featured_image_from_body  # ← 追加
 from . import db
-from .models import Article
+from .models import Article, Keyword
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from .article_generator import _generate, _generate_slots_per_site, _unique_title
 
 # OpenAI設定
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
@@ -332,16 +333,13 @@ def _generate(app, aid: int, tpt: str, bpt: str, format: str = "html", self_revi
 # ============================================
 def enqueue_generation(
     user_id: int,
-    keywords: List[str],
+    keywords: list[str],
     title_prompt: str,
     body_prompt: str,
     site_id: int,
     format: str = "html",
     self_review: bool = False
 ) -> None:
-    """
-    複数記事を並列生成キューに追加。ThreadPoolExecutor により同時並列生成。
-    """
     if site_id is None:
         raise ValueError("site_id is required for scheduling")
 
@@ -354,7 +352,15 @@ def enqueue_generation(
         with app.app_context():
             ids: list[int] = []
 
-            # DBへの記事登録処理（生成前）
+            # ▼ 対象のキーワードレコードを取得（user_id, site_id 両方で）
+            keyword_objs = Keyword.query.filter(
+                Keyword.user_id == user_id,
+                Keyword.site_id == site_id,
+                Keyword.keyword.in_(keywords[:40])
+            ).all()
+            kw_map = {k.keyword: k for k in keyword_objs}
+
+            # ▼ 記事データを DB に登録
             for kw, c in zip(keywords[:40], copies):
                 for _ in range(c):
                     try:
@@ -374,15 +380,20 @@ def enqueue_generation(
                     except Exception as e:
                         db.session.rollback()
                         logging.exception(f"[登録失敗] keyword='{kw}': {e}")
+
+            # ▼ 使用済みにマーク（used = True, used_at = 現在時刻）
+            for kobj in kw_map.values():
+                kobj.used = True
+                kobj.used_at = datetime.utcnow()
+
             db.session.commit()
 
-            # 並列生成処理
+            # ▼ 並列生成処理（本文などを非同期で）
             with ThreadPoolExecutor(max_workers=4) as executor:
-                futures = []
-                for aid in ids:
-                    futures.append(executor.submit(
-                        _generate, app, aid, title_prompt, body_prompt, format, self_review
-                    ))
+                futures = [
+                    executor.submit(_generate, app, aid, title_prompt, body_prompt, format, self_review)
+                    for aid in ids
+                ]
                 for future in as_completed(futures):
                     try:
                         future.result()

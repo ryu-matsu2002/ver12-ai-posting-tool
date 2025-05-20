@@ -196,49 +196,43 @@ def admin_login_as(user_id):
 def keywords():
     form = KeywordForm()
 
-    # ▼ 新規登録処理
-    if form.validate_on_submit():
+    # ▼ サイト一覧を取得してセレクト用に渡す
+    sites = Site.query.filter_by(user_id=current_user.id).all()
+
+    # ▼ サイトIDの取得（GET or POST）
+    selected_site_id = request.args.get("site_id", type=int) or request.form.get("site_id", type=int)
+    selected_site = Site.query.get(selected_site_id) if selected_site_id else None
+
+    # ▼ 登録処理（POST時）
+    if form.validate_on_submit() and selected_site:
         lines = [line.strip() for line in form.words.data.splitlines() if line.strip()]
         genre = form.genre.data
         for word in lines:
-            keyword = Keyword(keyword=word, genre=genre, user_id=current_user.id)
+            keyword = Keyword(
+                keyword=word,
+                genre=genre,
+                user_id=current_user.id,
+                site_id=selected_site.id
+            )
             db.session.add(keyword)
         db.session.commit()
         flash(f"{len(lines)} 件のキーワードを追加しました", "success")
-        return redirect(url_for(".keywords"))
+        return redirect(url_for(".keywords", site_id=selected_site.id))
 
-    # ▼ フィルタ：ジャンルと使用ステータス
-    genre_filter = request.args.get("genre", "")
-    status_filter = request.args.get("status", "")  # "used", "unused", ""
-
-    q = Keyword.query.filter_by(user_id=current_user.id)
-    if genre_filter:
-        q = q.filter(Keyword.genre == genre_filter)
-    if status_filter == "used":
-        q = q.filter(Keyword.used == True)
-    elif status_filter == "unused":
-        q = q.filter(Keyword.used == False)
-
-    keywords = q.order_by(Keyword.id.desc()).all()
-
-    # ▼ ジャンル一覧（重複排除）
-    genre_list = (
-        db.session.query(Keyword.genre)
-        .filter_by(user_id=current_user.id)
-        .distinct()
-        .order_by(Keyword.genre.asc())
-        .all()
-    )
-    genre_choices = [g[0] for g in genre_list if g[0]]  # None除外
+    # ▼ 表示用：該当サイトに絞ったキーワード取得
+    keyword_query = Keyword.query.filter_by(user_id=current_user.id)
+    if selected_site:
+        keyword_query = keyword_query.filter_by(site_id=selected_site.id)
+    keywords = keyword_query.order_by(Keyword.id.desc()).all()
 
     return render_template(
         "keywords.html",
         form=form,
         keywords=keywords,
-        genre_choices=genre_choices,
-        selected_genre=genre_filter,
-        selected_status=status_filter,
+        sites=sites,
+        selected_site=selected_site,
     )
+
 
 @bp.route("/keywords/edit/<int:keyword_id>", methods=["GET", "POST"])
 @login_required
@@ -480,6 +474,7 @@ def generate():
         if preselected_site_id:
             form.site_select.data = preselected_site_id
 
+    # ▼ POST処理（記事生成）
     if form.validate_on_submit():
         kws     = [k.strip() for k in form.keywords.data.splitlines() if k.strip()]
         site_id = form.site_select.data or None
@@ -493,7 +488,19 @@ def generate():
         flash(f"{len(kws)} 件をキューに登録しました", "success")
         return redirect(url_for(".log_sites"))
 
-    return render_template("generate.html", form=form)
+    # ▼ 未使用キーワード（右カラム用）を取得
+    site_id = form.site_select.data or None
+    keyword_choices = []
+    if site_id:
+        keyword_choices = Keyword.query.filter_by(
+            user_id=current_user.id,
+            site_id=site_id,
+            used=False
+        ).order_by(Keyword.id.desc()).limit(1000).all()
+
+    return render_template("generate.html", form=form, keyword_choices=keyword_choices)
+
+
 
 
 # ─────────── 生成ログ

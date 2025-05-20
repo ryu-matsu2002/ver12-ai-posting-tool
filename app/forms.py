@@ -11,7 +11,7 @@ from wtforms import (
     IntegerField,   
     HiddenField,            # ← 新規追加
 )
-from wtforms.validators import DataRequired, Email, Length, EqualTo, URL, Optional, NumberRange
+from wtforms.validators import DataRequired, Email, Length, EqualTo, URL, Optional, NumberRange, ValidationError
 
 class LoginForm(FlaskForm):
     email    = StringField("Email",    validators=[DataRequired(), Email()])
@@ -81,7 +81,20 @@ class SiteForm(FlaskForm):
     app_pass = StringField("アプリケーションパスワード",  validators=[DataRequired()])
     submit   = SubmitField("保存")
 
+# ✅ 新バージョンの KeywordForm（サイト選択＋一括保存対応）
 class KeywordForm(FlaskForm):
-    words = TextAreaField("キーワード（1行1つ）", validators=[DataRequired()])
-    genre = StringField("キーワード名")
-    submit = SubmitField("キーワードを追加")
+    site_id = SelectField(
+        "対象サイト",
+        coerce=int,
+        validators=[DataRequired()]
+    )
+    keywords = TextAreaField(
+        "キーワード（1行につき1つ・最大1000行）",
+        validators=[DataRequired(), Length(max=10000)]
+    )
+    submit = SubmitField("キーワードを保存")
+
+    def validate_keywords(self, field):
+        lines = field.data.splitlines()
+        if len(lines) > 1000:
+            raise ValidationError("キーワードは最大1000行までです。")

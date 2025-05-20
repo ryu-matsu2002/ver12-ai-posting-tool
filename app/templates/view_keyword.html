@@ -26,8 +26,18 @@
     </p>
   </div>
 
+  <div>
+    <label class="block font-semibold text-gray-600">登録サイト</label>
+    <p class="mt-1">{{ keyword.site.name if keyword.site else '―' }}</p>
+  </div>
+
+  <div>
+    <label class="block font-semibold text-gray-600">登録日時</label>
+    <p class="mt-1">{{ keyword.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+  </div>
+
   <div class="mt-6">
-    <a href="{{ url_for('keywords') }}" class="text-blue-600 hover:underline">&larr; 戻る</a>
+    <a href="{{ url_for('main.keywords') }}" class="text-blue-600 hover:underline">&larr; キーワード一覧に戻る</a>
   </div>
 </div>
 {% endblock %}

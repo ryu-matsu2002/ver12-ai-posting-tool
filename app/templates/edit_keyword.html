@@ -25,8 +25,13 @@
     </select>
   </div>
 
+  <div>
+    <label class="block font-semibold mb-1">登録サイト</label>
+    <p class="text-sm text-gray-700 dark:text-gray-300">{{ keyword.site.name if keyword.site else '―' }}</p>
+  </div>
+
   <div class="flex items-center gap-4">
-    <a href="{{ url_for('keywords') }}" class="text-blue-600 hover:underline">&larr; 戻る</a>
+    <a href="{{ url_for('main.keywords') }}" class="text-blue-600 hover:underline">&larr; キーワード一覧に戻る</a>
     <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded">保存</button>
   </div>
 </form>

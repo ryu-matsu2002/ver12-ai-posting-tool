@@ -78,12 +78,22 @@ class Article(db.Model):
 
 class Keyword(db.Model):
     __tablename__ = "keywords"
+
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    # ↓ まず site_id を "nullable=True" にしておく（仮対応）
+    site_id = db.Column(db.Integer, db.ForeignKey("site.id"), nullable=True)
+
+
     keyword = db.Column(db.String(255), nullable=False)
-    genre = db.Column(db.String(100), nullable=True)  # ジャンルでフィルタ可
     used = db.Column(db.Boolean, default=False)
     used_at = db.Column(db.DateTime, nullable=True)
     times_used = db.Column(db.Integer, default=0)
 
+    genre = db.Column(db.String(100), nullable=True)  # 任意（将来的な分類にも使える）
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)  # 任意だが有用
+
+    # リレーション
     user = db.relationship("User", backref="keywords")
+    site = db.relationship("Site", backref="keywords")
+
