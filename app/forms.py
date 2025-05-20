@@ -88,6 +88,10 @@ class KeywordForm(FlaskForm):
         coerce=int,
         validators=[DataRequired()]
     )
+    genre = StringField(
+        "ジャンル",  # ← 🔧 追加
+        validators=[Optional(), Length(max=100)]
+    )
     keywords = TextAreaField(
         "キーワード（1行につき1つ・最大1000行）",
         validators=[DataRequired(), Length(max=10000)]
