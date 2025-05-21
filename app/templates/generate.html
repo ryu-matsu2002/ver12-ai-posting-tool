@@ -95,10 +95,10 @@
     updateSelectedList();
 
     try {
-      console.log("選択されたサイトID:", siteId);  // ← 追加
+      console.log("選択されたサイトID:", siteId);
       const res = await fetch(`/api/keywords/all/${siteId}`);
       const data = await res.json();
-      console.log("取得したキーワード：", data);  // ← 追加
+      console.log("取得したキーワード：", data);
       data.forEach(k => {
         const btn = document.createElement("button");
         btn.type = "button";
@@ -179,5 +179,13 @@
   }
 
   document.getElementById('selectPrompt').addEventListener('change', onPromptChange);
+
+  // ✅ 初回表示時にもキーワードを自動取得
+  document.addEventListener("DOMContentLoaded", () => {
+    const current = document.querySelector('[name="site_select"]').value;
+    if (current && parseInt(current) > 0) {
+      onSiteChange();
+    }
+  });
 </script>
 {% endblock %}
