@@ -225,9 +225,10 @@ def keywords():
     status_filter = request.args.get("status")  # "used", "unused", or None
     selected_site = Site.query.get(selected_site_id) if selected_site_id else None
 
-    # ▼ サイトごとにキーワードをグループ化
+    # ▼ サイトごとにキーワードをグループ化（対象サイトがあれば絞る）
     base_query = Keyword.query.filter_by(user_id=current_user.id)
-
+    if selected_site_id:
+        base_query = base_query.filter_by(site_id=selected_site_id)
     if status_filter == "used":
         base_query = base_query.filter_by(used=True)
     elif status_filter == "unused":
@@ -250,7 +251,6 @@ def keywords():
         grouped_keywords=grouped_keywords,
         site_map=site_map
     )
-
 
 
 @bp.route("/api/keywords/<int:site_id>")
