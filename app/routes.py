@@ -26,6 +26,7 @@ import re
 import logging
 from datetime import datetime
 from .image_utils import fetch_featured_image  # ← ✅ 正しい
+from collections import defaultdict
 
 
 from .article_generator import (
@@ -203,7 +204,6 @@ def keywords():
     # ▼ 登録処理
     if form.validate_on_submit():
         site_id = form.site_id.data
-        genre   = form.genre.data.strip() or None
         if site_id == 0:
             flash("サイトを選択してください。", "danger")
             return redirect(url_for(".keywords"))
@@ -212,7 +212,6 @@ def keywords():
         for word in lines:
             keyword = Keyword(
                 keyword=word,
-                genre=genre,
                 user_id=current_user.id,
                 site_id=site_id
             )
@@ -225,19 +224,17 @@ def keywords():
     selected_site_id = request.args.get("site_id", type=int)
     selected_site = Site.query.get(selected_site_id) if selected_site_id else None
 
-    # ▼ サイトごと＆ジャンルごとにキーワードをグループ化
-    from collections import defaultdict
+    # ▼ サイトごとにキーワードをグループ化（ジャンルなし）
     all_keywords = Keyword.query.filter_by(user_id=current_user.id).order_by(
-        Keyword.site_id, Keyword.genre, Keyword.id.desc()
+        Keyword.site_id, Keyword.id.desc()
     ).all()
 
     site_map = {s.id: s.name for s in user_sites}
-    grouped_keywords = defaultdict(lambda: defaultdict(list))  # site_id -> genre -> [Keyword]
+    grouped_keywords = defaultdict(lambda: {"site_name": "", "keywords": []})  # site_id -> info
 
     for kw in all_keywords:
-        site_id = kw.site_id
-        genre = kw.genre or "未分類"
-        grouped_keywords[site_id][genre].append(kw)
+        grouped_keywords[kw.site_id]["site_name"] = site_map.get(kw.site_id, "未設定")
+        grouped_keywords[kw.site_id]["keywords"].append(kw)
 
     return render_template(
         "keywords.html",
@@ -261,14 +258,9 @@ def api_unused_keywords(site_id):
         used=False
     ).order_by(Keyword.id.desc()).offset(offset).limit(limit).all()
 
-    data = [
-        {
-            "id": k.id,
-            "keyword": k.keyword,
-            "used": k.used,
-        } for k in keywords
-    ]
+    data = [{"id": k.id, "keyword": k.keyword, "used": k.used} for k in keywords]
     return jsonify(data)
+
 
 @bp.route("/api/keywords/all/<int:site_id>")
 @login_required
@@ -279,12 +271,9 @@ def api_all_keywords(site_id):
     ).order_by(Keyword.id.desc()).limit(1000).all()
 
     return jsonify([
-        {
-            "id": k.id,
-            "keyword": k.keyword
-        } for k in keywords
+        {"id": k.id, "keyword": k.keyword}
+        for k in keywords
     ])
-
 
 
 @bp.route("/keywords/edit/<int:keyword_id>", methods=["GET", "POST"])
@@ -296,7 +285,6 @@ def edit_keyword(keyword_id):
 
     if request.method == "POST":
         keyword.keyword = request.form.get("keyword", "").strip()
-        keyword.genre = request.form.get("genre", "").strip()
         used_val = request.form.get("used", "false")
         keyword.used = True if used_val.lower() == "true" else False
 
@@ -327,6 +315,7 @@ def delete_keyword(keyword_id):
     flash("キーワードを削除しました。", "success")
     return redirect(url_for("main.keywords"))
 
+
 @bp.post("/keywords/bulk-action")
 @login_required
 def bulk_action_keywords():
@@ -338,30 +327,14 @@ def bulk_action_keywords():
         return redirect(request.referrer or url_for("main.keywords"))
 
     if action == "delete":
-        Keyword.query.filter(Keyword.id.in_(keyword_ids), Keyword.user_id == current_user.id).delete(synchronize_session=False)
+        Keyword.query.filter(
+            Keyword.id.in_(keyword_ids),
+            Keyword.user_id == current_user.id
+        ).delete(synchronize_session=False)
         db.session.commit()
         flash("選択されたキーワードを削除しました。", "success")
 
     return redirect(request.referrer or url_for("main.keywords"))
-
-@bp.post("/keywords/bulk-genre-update")
-@login_required
-def bulk_genre_update():
-    ids_str = request.form.get("keyword_ids", "")
-    new_genre = request.form.get("new_genre", "").strip()
-
-    if not ids_str or not new_genre:
-        flash("ジャンル変更に必要な情報が不足しています。", "danger")
-        return redirect(url_for("main.keywords"))
-
-    keyword_ids = [int(x) for x in ids_str.split(",") if x.isdigit()]
-    Keyword.query.filter(Keyword.id.in_(keyword_ids), Keyword.user_id == current_user.id).update(
-        {"genre": new_genre}, synchronize_session=False
-    )
-    db.session.commit()
-
-    flash("ジャンルを変更しました。", "success")
-    return redirect(url_for("main.keywords"))
 
 
 @bp.route("/chatgpt")
