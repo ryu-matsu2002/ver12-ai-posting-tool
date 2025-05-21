@@ -99,3 +99,8 @@ class KeywordForm(FlaskForm):
         lines = field.data.splitlines()
         if len(lines) > 1000:
             raise ValidationError("キーワードは最大1000行までです。")
+
+class EditKeywordForm(FlaskForm):
+    site_id = SelectField("対象サイト", coerce=int, validators=[DataRequired()])
+    keyword = StringField("キーワード", validators=[DataRequired(), Length(max=255)])
+    submit = SubmitField("更新")

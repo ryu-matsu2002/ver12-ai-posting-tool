@@ -33,7 +33,7 @@ from .article_generator import (
     _unique_title,
     _compose_body,
 )
-
+from app.forms import EditKeywordForm
 from flask import Blueprint, render_template, redirect, url_for, flash
 from flask_login import current_user, login_required
 from .forms import KeywordForm
@@ -283,16 +283,18 @@ def edit_keyword(keyword_id):
     if keyword.user_id != current_user.id:
         abort(403)
 
-    if request.method == "POST":
-        keyword.keyword = request.form.get("keyword", "").strip()
-        used_val = request.form.get("used", "false")
-        keyword.used = True if used_val.lower() == "true" else False
+    form = EditKeywordForm(obj=keyword)
+    form.site_id.choices = [(s.id, s.name) for s in Site.query.filter_by(user_id=current_user.id).all()]
 
+    if form.validate_on_submit():
+        keyword.keyword = form.keyword.data.strip()
+        keyword.site_id = form.site_id.data
         db.session.commit()
         flash("キーワードを更新しました", "success")
         return redirect(url_for("main.keywords"))
 
-    return render_template("edit_keyword.html", keyword=keyword)
+    return render_template("edit_keyword.html", form=form)
+
 
 
 @bp.route("/keywords/view/<int:keyword_id>")
