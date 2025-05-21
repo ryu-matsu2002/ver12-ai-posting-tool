@@ -9,12 +9,18 @@
     <h2 class="text-2xl font-bold mb-6">キーワード登録</h2>
 
     <form method="post" class="p-6 bg-white dark:bg-gray-800 rounded shadow space-y-4">
-      
+      {{ form.hidden_tag() }}
 
       <!-- サイト選択 -->
       <div>
         <label class="block font-semibold mb-1">対象サイト</label>
         {{ form.site_id(class="w-full p-2 border rounded") }}
+      </div>
+
+      <!-- ジャンル入力 -->
+      <div>
+        {{ form.genre.label(class="block font-semibold mb-1") }}
+        {{ form.genre(class="w-full p-2 border rounded") }}
       </div>
 
       <!-- キーワード入力欄 -->
@@ -34,51 +40,52 @@
     <h2 class="text-2xl font-bold mb-6">登録済みキーワード</h2>
 
     {% if grouped_keywords %}
-      {% for site_id, group in grouped_keywords.items() %}
-      <form method="post" action="{{ url_for('main.bulk_action_keywords') }}">
-        
-        <input type="hidden" name="site_id" value="{{ site_id }}">
+      {% for site_id, genre_map in grouped_keywords.items() %}
+        {% for genre, keywords in genre_map.items() %}
+        <form method="post" action="{{ url_for('main.bulk_action_keywords') }}">
+          <input type="hidden" name="site_id" value="{{ site_id }}">
 
-        <div class="bg-white dark:bg-gray-800 rounded shadow mb-6">
-          <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 rounded-t flex justify-between items-center">
-            <h3 class="text-xl font-semibold text-blue-700">
-              {{ group.site_name }}（{{ group.keywords|length }} 件）
-            </h3>
-            <div class="flex gap-2">
-              <button type="button" onclick="selectAll(this)" class="text-sm text-gray-600 hover:underline">全選択</button>
-              <button type="submit" name="action" value="delete" class="bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-1 rounded">一括削除</button>
-              <button type="button" onclick="openGenreModal('{{ site_id }}')" class="bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1 rounded">ジャンル変更</button>
-            </div>
-          </div>
-
-          <div class="p-4 space-y-2">
-            {% for kw in group.keywords %}
-            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between bg-gray-50 dark:bg-gray-700 p-3 rounded border">
-              <div class="flex items-center gap-2 text-sm font-medium text-black dark:text-white">
-                <input type="checkbox" name="keyword_ids" value="{{ kw.id }}" class="kw-checkbox-{{ site_id }}">
-                {{ kw.keyword }}
-                <span class="ml-2 text-xs {% if kw.used %}text-blue-500{% else %}text-green-500{% endif %}">
-                  {% if kw.used %}🔵 使用済み{% else %}🟢 未使用{% endif %}
-                </span>
-              </div>
-              <div class="flex gap-2 mt-2 sm:mt-0">
-                <a href="{{ url_for('main.edit_keyword', keyword_id=kw.id) }}"
-                  class="bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1 rounded">編集</a>
-                <button type="button" onclick="togglePreview('preview-{{ kw.id }}')"
-                  class="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1 rounded">確認</button>
-                <a href="{{ url_for('main.delete_keyword', keyword_id=kw.id) }}"
-                  class="bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-1 rounded"
-                  onclick="return confirm('本当に削除しますか？')">削除</a>
-              </div>
-              <div id="preview-{{ kw.id }}" class="hidden mt-2 text-sm text-gray-700 dark:text-gray-300">
-                <div><strong>ジャンル:</strong> {{ kw.genre or '―' }}</div>
-                <div><strong>ステータス:</strong> {{ '使用済み' if kw.used else '未使用' }}</div>
+          <div class="bg-white dark:bg-gray-800 rounded shadow mb-6">
+            <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 rounded-t">
+              <div class="flex justify-between items-center">
+                <div>
+                  <h3 class="text-lg font-semibold text-blue-700">{{ site_map[site_id] }}</h3>
+                  <p class="text-sm text-gray-600 dark:text-gray-300">ジャンル: {{ genre }}（{{ keywords|length }} 件）</p>
+                </div>
+                <div class="flex gap-2">
+                  <button type="button" onclick="selectAll(this)" class="text-sm text-gray-600 hover:underline">全選択</button>
+                  <button type="submit" name="action" value="delete" class="bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-1 rounded">一括削除</button>
+                  <button type="button" onclick="openGenreModal('{{ site_id }}')" class="bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1 rounded">ジャンル変更</button>
+                </div>
               </div>
             </div>
-            {% endfor %}
+
+            <div class="p-4 space-y-2">
+              {% for kw in keywords %}
+              <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between bg-gray-50 dark:bg-gray-700 p-3 rounded border">
+                <div class="flex items-center gap-2 text-sm font-medium text-black dark:text-white">
+                  <input type="checkbox" name="keyword_ids" value="{{ kw.id }}" class="kw-checkbox-{{ site_id }}">
+                  {{ kw.keyword }}
+                </div>
+                <div class="flex gap-2 mt-2 sm:mt-0">
+                  <a href="{{ url_for('main.edit_keyword', keyword_id=kw.id) }}"
+                    class="bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1 rounded">編集</a>
+                  <button type="button" onclick="togglePreview('preview-{{ kw.id }}')"
+                    class="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1 rounded">確認</button>
+                  <a href="{{ url_for('main.delete_keyword', keyword_id=kw.id) }}"
+                    class="bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-1 rounded"
+                    onclick="return confirm('本当に削除しますか？')">削除</a>
+                </div>
+                <div id="preview-{{ kw.id }}" class="hidden mt-2 text-sm text-gray-700 dark:text-gray-300">
+                  <div><strong>ジャンル:</strong> {{ kw.genre or '―' }}</div>
+                  <div><strong>登録日:</strong> {{ kw.created_at.strftime('%Y-%m-%d') }}</div>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
           </div>
-        </div>
-      </form>
+        </form>
+        {% endfor %}
       {% endfor %}
     {% else %}
       <p class="text-gray-500">まだキーワードが登録されていません。</p>
@@ -91,8 +98,6 @@
   <div class="bg-white p-6 rounded shadow w-80">
     <h3 class="text-lg font-semibold mb-4">ジャンルを一括変更</h3>
     <form method="post" action="{{ url_for('main.bulk_genre_update') }}">
-
-      
       <input type="hidden" name="site_id" id="genreModalSiteId">
       <input type="hidden" name="keyword_ids" id="genreModalIds">
       <label class="block mb-2 font-medium">新しいジャンル:</label>

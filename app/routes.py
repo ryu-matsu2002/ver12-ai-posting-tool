@@ -196,13 +196,14 @@ def admin_login_as(user_id):
 def keywords():
     form = KeywordForm()
 
-    # ✅ ログインユーザーのサイト選択肢を設定（初期に選択なしを追加）
+    # サイト選択肢を設定
     user_sites = Site.query.filter_by(user_id=current_user.id).all()
     form.site_id.choices = [(0, "―― サイトを選択 ――")] + [(s.id, s.name) for s in user_sites]
 
-    # ▼ 新規登録処理
+    # ▼ 登録処理
     if form.validate_on_submit():
         site_id = form.site_id.data
+        genre   = form.genre.data.strip() or None
         if site_id == 0:
             flash("サイトを選択してください。", "danger")
             return redirect(url_for(".keywords"))
@@ -211,7 +212,7 @@ def keywords():
         for word in lines:
             keyword = Keyword(
                 keyword=word,
-                genre=None,  # 今回はジャンル不要
+                genre=genre,
                 user_id=current_user.id,
                 site_id=site_id
             )
@@ -220,27 +221,33 @@ def keywords():
         flash(f"{len(lines)} 件のキーワードを追加しました", "success")
         return redirect(url_for(".keywords", site_id=site_id))
 
-    # ▼ クエリ文字列で選択されたサイトを取得（未選択可）
+    # ▼ クエリ文字列で選択されたサイトを取得（未選択でもOK）
     selected_site_id = request.args.get("site_id", type=int)
     selected_site = Site.query.get(selected_site_id) if selected_site_id else None
 
-    # ▼ grouped_keywords を作成（サイト別にまとめる）
+    # ▼ サイトごと＆ジャンルごとにキーワードをグループ化
     from collections import defaultdict
-    all_keywords = Keyword.query.filter_by(user_id=current_user.id).order_by(Keyword.site_id, Keyword.id.desc()).all()
-    site_map = {s.id: s.name for s in user_sites}
+    all_keywords = Keyword.query.filter_by(user_id=current_user.id).order_by(
+        Keyword.site_id, Keyword.genre, Keyword.id.desc()
+    ).all()
 
-    grouped_keywords = defaultdict(lambda: {"site_name": "", "keywords": []})
+    site_map = {s.id: s.name for s in user_sites}
+    grouped_keywords = defaultdict(lambda: defaultdict(list))  # site_id -> genre -> [Keyword]
+
     for kw in all_keywords:
-        grouped_keywords[kw.site_id]["site_name"] = site_map.get(kw.site_id, "（不明なサイト）")
-        grouped_keywords[kw.site_id]["keywords"].append(kw)
+        site_id = kw.site_id
+        genre = kw.genre or "未分類"
+        grouped_keywords[site_id][genre].append(kw)
 
     return render_template(
         "keywords.html",
         form=form,
         selected_site=selected_site,
         sites=user_sites,
-        grouped_keywords=grouped_keywords
+        grouped_keywords=grouped_keywords,
+        site_map=site_map
     )
+
 
 @bp.route("/api/keywords/<int:site_id>")
 @login_required
@@ -262,6 +269,22 @@ def api_unused_keywords(site_id):
         } for k in keywords
     ]
     return jsonify(data)
+
+@bp.route("/api/keywords/all/<int:site_id>")
+@login_required
+def api_all_keywords(site_id):
+    keywords = Keyword.query.filter_by(
+        user_id=current_user.id,
+        site_id=site_id
+    ).order_by(Keyword.id.desc()).limit(1000).all()
+
+    return jsonify([
+        {
+            "id": k.id,
+            "keyword": k.keyword
+        } for k in keywords
+    ])
+
 
 
 @bp.route("/keywords/edit/<int:keyword_id>", methods=["GET", "POST"])
