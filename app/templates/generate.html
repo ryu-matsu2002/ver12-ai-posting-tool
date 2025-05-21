@@ -64,7 +64,7 @@
   <!-- 右：未使用キーワード -->
   <div class="w-full lg:w-1/3">
     <h3 class="text-xl font-bold mb-4">未使用キーワード</h3>
-    <div id="keywordList" class="flex flex-wrap gap-2 max-h-[600px] overflow-y-auto p-3 border rounded bg-gray-50"></div>
+    <div id="keywordList" class="flex flex-wrap gap-2 max-h-[600px] overflow-y-auto p-3 border rounded bg-gray-50 dark:bg-gray-800"></div>
 
     <div class="flex flex-wrap gap-2 mt-4">
       <button type="button" onclick="selectAllKeywords()" class="bg-gray-500 hover:bg-gray-600 text-white text-sm px-3 py-1 rounded">全て選択（最大40件）</button>
@@ -95,9 +95,9 @@
     const select = document.querySelector('[name="site_select"]');
     selectedSiteId = parseInt(select.value);
     offset = 0;
-    document.getElementById('keywordList').innerHTML = '';
     selectedKeywords = [];
     updateSelectedList();
+    document.getElementById('keywordList').innerHTML = '';
     if (selectedSiteId > 0) {
       await loadMoreKeywords();
     }
@@ -112,7 +112,7 @@
       data.forEach(k => {
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'keyword-btn px-3 py-1 rounded border text-sm hover:bg-blue-100';
+        btn.className = 'keyword-btn px-3 py-1 rounded border text-sm hover:bg-blue-100 dark:border-gray-600 dark:text-white';
         btn.textContent = k.keyword;
         btn.dataset.keyword = k.keyword;
         btn.onclick = () => toggleKeyword(btn);
