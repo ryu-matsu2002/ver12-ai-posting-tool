@@ -271,9 +271,12 @@ def api_all_keywords(site_id):
     ).order_by(Keyword.id.desc()).limit(1000).all()
 
     return jsonify([
-        {"id": k.id, "keyword": k.keyword}
-        for k in keywords
+        {
+            "id": k.id,
+            "keyword": k.keyword
+        } for k in keywords
     ])
+
 
 
 @bp.route("/keywords/edit/<int:keyword_id>", methods=["GET", "POST"])
