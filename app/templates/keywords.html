@@ -29,39 +29,54 @@
     </form>
   </div>
 
-  <!-- 右：登録済みキーワード一覧（アコーディオン） -->
+  <!-- 右：登録済みキーワード一覧 -->
   <div class="w-full lg:w-1/2">
-    <h2 class="text-2xl font-bold mb-6">登録済みキーワード</h2>
+    <h2 class="text-2xl font-bold mb-2">登録済みキーワード</h2>
+    <p class="text-sm text-gray-600 mb-4">※使用済み／未使用でフィルター可能です。編集・削除は右端のボタンから操作してください。</p>
 
     {% if grouped_keywords %}
       {% for site_id, group in grouped_keywords.items() %}
-        <div class="mb-4 border border-gray-300 dark:border-gray-600 rounded">
-          <button type="button" class="w-full text-left px-4 py-2 bg-gray-100 dark:bg-gray-700 text-lg font-semibold text-blue-800 dark:text-blue-300" onclick="toggleAccordion('kw-site-{{ site_id }}')">
-            {{ group.site_name }}（{{ group.keywords|length }} 件）
-          </button>
-          <div id="kw-site-{{ site_id }}" class="hidden bg-white dark:bg-gray-800">
-            <form method="post" action="{{ url_for('main.bulk_action_keywords') }}">
+        <div class="mb-6 border rounded">
+          <div class="bg-gray-100 dark:bg-gray-700 px-4 py-2 flex justify-between items-center">
+            <h3 class="font-semibold text-lg text-blue-800 dark:text-blue-300">
+              {{ group.site_name }}（{{ group.keywords|length }} 件）
+            </h3>
+            <form method="post" action="{{ url_for('main.bulk_action_keywords') }}" class="flex items-center gap-2">
               <input type="hidden" name="site_id" value="{{ site_id }}">
-              <div class="p-4 space-y-2">
-                <div class="flex justify-end gap-2 mb-3">
-                  <button type="button" onclick="selectAll(this)" class="text-sm text-gray-600 hover:underline">全選択</button>
-                  <button type="submit" name="action" value="delete" class="bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-1 rounded">一括削除</button>
-                </div>
-
-                {% for kw in group.keywords %}
-                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between bg-gray-50 dark:bg-gray-700 p-3 rounded border">
-                  <div class="flex items-center gap-2 text-sm font-medium text-black dark:text-white">
-                    <input type="checkbox" name="keyword_ids" value="{{ kw.id }}" class="kw-checkbox-{{ site_id }}">
-                    {{ kw.keyword }}
-                  </div>
-                  <div class="flex gap-2 mt-2 sm:mt-0">
-                    <a href="{{ url_for('main.edit_keyword', keyword_id=kw.id) }}" class="bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1 rounded">編集</a>
-                    <a href="{{ url_for('main.delete_keyword', keyword_id=kw.id) }}" class="bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-1 rounded" onclick="return confirm('本当に削除しますか？')">削除</a>
-                  </div>
-                </div>
-                {% endfor %}
-              </div>
+              <select name="status_filter" onchange="this.form.submit()" class="p-1 text-sm border rounded">
+                <option value="">すべて</option>
+                <option value="used" {% if group.status_filter == 'used' %}selected{% endif %}>使用済み</option>
+                <option value="unused" {% if group.status_filter == 'unused' %}selected{% endif %}>未使用</option>
+              </select>
+              <button type="submit" name="action" value="delete" class="bg-red-600 text-white text-sm px-2 py-1 rounded">一括削除</button>
             </form>
+          </div>
+
+          <!-- スクロールエリア -->
+          <div class="max-h-[450px] overflow-y-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-gray-200 dark:bg-gray-600 sticky top-0">
+                <tr>
+                  <th class="p-2 w-8"><input type="checkbox" onclick="toggleAll(this, '{{ site_id }}')"></th>
+                  <th class="p-2">検索キーワード</th>
+                  <th class="p-2">ステータス</th>
+                  <th class="p-2">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for kw in group.keywords %}
+                  <tr class="border-b dark:border-gray-700 bg-white dark:bg-gray-800">
+                    <td class="p-2 text-center"><input type="checkbox" class="kw-checkbox-{{ site_id }}" name="keyword_ids" value="{{ kw.id }}"></td>
+                    <td class="p-2">{{ kw.keyword }}</td>
+                    <td class="p-2">{{ "使用済み" if kw.used else "未使用" }}</td>
+                    <td class="p-2 space-x-2">
+                      <a href="{{ url_for('main.edit_keyword', keyword_id=kw.id) }}" class="bg-green-600 hover:bg-green-700 text-white text-xs px-2 py-1 rounded">編集</a>
+                      <a href="{{ url_for('main.delete_keyword', keyword_id=kw.id) }}" class="bg-red-600 hover:bg-red-700 text-white text-xs px-2 py-1 rounded" onclick="return confirm('本当に削除しますか？')">削除</a>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
           </div>
         </div>
       {% endfor %}
@@ -71,17 +86,11 @@
   </div>
 </div>
 
-<!-- JS（アコーディオン + 全選択） -->
+<!-- JS -->
 <script>
-  function toggleAccordion(id) {
-    document.getElementById(id).classList.toggle("hidden");
-  }
-
-  function selectAll(btn) {
-    const siteId = btn.closest('form').querySelector('input[name="site_id"]').value;
+  function toggleAll(checkbox, siteId) {
     const checkboxes = document.querySelectorAll('.kw-checkbox-' + siteId);
-    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
-    checkboxes.forEach(cb => cb.checked = !allChecked);
+    checkboxes.forEach(cb => cb.checked = checkbox.checked);
   }
 </script>
 {% endblock %}

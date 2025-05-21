@@ -220,17 +220,23 @@ def keywords():
         flash(f"{len(lines)} 件のキーワードを追加しました", "success")
         return redirect(url_for(".keywords", site_id=site_id))
 
-    # ▼ クエリ文字列で選択されたサイトを取得（未選択でもOK）
+    # ▼ クエリパラメータ取得
     selected_site_id = request.args.get("site_id", type=int)
+    status_filter = request.args.get("status")  # "used", "unused", or None
     selected_site = Site.query.get(selected_site_id) if selected_site_id else None
 
-    # ▼ サイトごとにキーワードをグループ化（ジャンルなし）
-    all_keywords = Keyword.query.filter_by(user_id=current_user.id).order_by(
-        Keyword.site_id, Keyword.id.desc()
-    ).all()
+    # ▼ サイトごとにキーワードをグループ化
+    base_query = Keyword.query.filter_by(user_id=current_user.id)
+
+    if status_filter == "used":
+        base_query = base_query.filter_by(used=True)
+    elif status_filter == "unused":
+        base_query = base_query.filter_by(used=False)
+
+    all_keywords = base_query.order_by(Keyword.site_id, Keyword.id.desc()).all()
 
     site_map = {s.id: s.name for s in user_sites}
-    grouped_keywords = defaultdict(lambda: {"site_name": "", "keywords": []})  # site_id -> info
+    grouped_keywords = defaultdict(lambda: {"site_name": "", "keywords": [], "status_filter": status_filter})
 
     for kw in all_keywords:
         grouped_keywords[kw.site_id]["site_name"] = site_map.get(kw.site_id, "未設定")
@@ -244,6 +250,7 @@ def keywords():
         grouped_keywords=grouped_keywords,
         site_map=site_map
     )
+
 
 
 @bp.route("/api/keywords/<int:site_id>")

@@ -90,7 +90,7 @@ class KeywordForm(FlaskForm):
     )
 
     keywords = TextAreaField(
-        "キーワード（1行につき1つ・最大1000行）",
+        "キーワード（1行につき1キーワード・最大1000キーワード保存可能）",
         validators=[DataRequired(), Length(max=10000)]
     )
     submit = SubmitField("キーワードを保存")
