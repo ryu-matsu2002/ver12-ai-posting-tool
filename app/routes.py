@@ -304,6 +304,41 @@ def delete_keyword(keyword_id):
     flash("キーワードを削除しました。", "success")
     return redirect(url_for("main.keywords"))
 
+@bp.post("/keywords/bulk-action")
+@login_required
+def bulk_action_keywords():
+    action = request.form.get("action")
+    keyword_ids = request.form.getlist("keyword_ids")
+
+    if not keyword_ids:
+        flash("対象のキーワードが選択されていません。", "warning")
+        return redirect(request.referrer or url_for("main.keywords"))
+
+    if action == "delete":
+        Keyword.query.filter(Keyword.id.in_(keyword_ids), Keyword.user_id == current_user.id).delete(synchronize_session=False)
+        db.session.commit()
+        flash("選択されたキーワードを削除しました。", "success")
+
+    return redirect(request.referrer or url_for("main.keywords"))
+
+@bp.post("/keywords/bulk-genre-update")
+@login_required
+def bulk_genre_update():
+    ids_str = request.form.get("keyword_ids", "")
+    new_genre = request.form.get("new_genre", "").strip()
+
+    if not ids_str or not new_genre:
+        flash("ジャンル変更に必要な情報が不足しています。", "danger")
+        return redirect(url_for("main.keywords"))
+
+    keyword_ids = [int(x) for x in ids_str.split(",") if x.isdigit()]
+    Keyword.query.filter(Keyword.id.in_(keyword_ids), Keyword.user_id == current_user.id).update(
+        {"genre": new_genre}, synchronize_session=False
+    )
+    db.session.commit()
+
+    flash("ジャンルを変更しました。", "success")
+    return redirect(url_for("main.keywords"))
 
 
 @bp.route("/chatgpt")
