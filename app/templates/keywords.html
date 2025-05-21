@@ -9,7 +9,8 @@
     <h2 class="text-2xl font-bold mb-6">キーワード登録</h2>
 
     <form method="post" class="p-6 bg-white dark:bg-gray-800 rounded shadow space-y-4">
-      {{ form.hidden_tag() }}
+      <!-- ✅ CSRF削除 -->
+      <!-- {{ form.hidden_tag() }} -->
 
       <!-- サイト選択 -->
       <div>
@@ -36,7 +37,8 @@
     {% if grouped_keywords %}
       {% for site_id, group in grouped_keywords.items() %}
       <form method="post" action="{{ url_for('main.bulk_action_keywords') }}">
-        {{ csrf_token() }}
+        <!-- ✅ CSRF削除 -->
+        <!-- {{ csrf_token() }} -->
         <input type="hidden" name="site_id" value="{{ site_id }}">
 
         <div class="bg-white dark:bg-gray-800 rounded shadow mb-6">
@@ -91,7 +93,8 @@
   <div class="bg-white p-6 rounded shadow w-80">
     <h3 class="text-lg font-semibold mb-4">ジャンルを一括変更</h3>
     <form method="post" action="{{ url_for('main.bulk_genre_update') }}">
-      {{ csrf_token() }}
+      <!-- ✅ CSRF削除 -->
+      <!-- {{ csrf_token() }} -->
       <input type="hidden" name="site_id" id="genreModalSiteId">
       <input type="hidden" name="keyword_ids" id="genreModalIds">
       <label class="block mb-2 font-medium">新しいジャンル:</label>
