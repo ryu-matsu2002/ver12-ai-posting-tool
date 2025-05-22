@@ -4,9 +4,10 @@
 {% block content %}
 <div class="flex flex-col lg:flex-row gap-10">
 
-  <!-- 左：記事生成フォーム -->
+  <!-- 左：フォーム -->
   <div class="w-full lg:w-2/3">
     <h2 class="text-2xl font-semibold mb-6">記事生成</h2>
+
     <form method="post" id="genForm" class="space-y-6" onsubmit="return validateKeywordCount()">
       {{ form.hidden_tag() }}
 
@@ -22,14 +23,14 @@
         {{ form.genre_select(id="selectPrompt", class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
       </div>
 
-      <!-- トグル：詳細プロンプト -->
+      <!-- トグル -->
       <div>
         <button type="button" onclick="togglePromptFields()" class="text-blue-600 border border-blue-600 rounded px-3 py-1 text-sm hover:bg-blue-50" id="toggleBtn">
           <span id="toggleIcon">＋</span> <span id="toggleText">詳細プロンプトを表示</span>
         </button>
       </div>
 
-      <!-- 詳細プロンプト欄 -->
+      <!-- 詳細プロンプト -->
       <div id="promptFields" class="space-y-4 mt-2 transition-all duration-300 overflow-hidden max-h-0">
         <div>
           {{ form.title_prompt.label(class="block mb-1 font-medium") }}
@@ -41,13 +42,7 @@
         </div>
       </div>
 
-      <!-- 選択中キーワード -->
-      <div>
-        <label class="block mb-1 font-medium">選択中のキーワード（最大40件）</label>
-        <div id="selectedList" class="flex flex-wrap gap-2 mb-2"></div>
-      </div>
-
-      <!-- POST用 textarea -->
+      <!-- 選択キーワードPOST欄 -->
       <div>
         {{ form.keywords.label(class="block mb-1 font-medium") }}
         {{ form.keywords(rows=8, id="keywordsField", class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
@@ -58,21 +53,30 @@
     </form>
   </div>
 
-  <!-- 右：登録キーワード一覧 -->
+  <!-- 右：キーワード一覧 -->
   <div class="w-full lg:w-1/3">
     <h3 class="text-xl font-bold mb-4">登録キーワード</h3>
 
-    <div class="border rounded bg-white dark:bg-gray-800 p-4 max-h-[600px] overflow-y-auto">
-      <div class="flex justify-between items-center mb-3">
-        <span class="text-sm text-gray-600">クリックで選択／解除（最大40件）</span>
-        <button type="button" onclick="selectAllKeywords()" class="bg-gray-500 hover:bg-gray-600 text-white text-sm px-3 py-1 rounded">全て選択</button>
-      </div>
+    <!-- ステータス絞り込み + 全選択 -->
+    <div class="flex justify-between items-center mb-2">
+      <label class="text-sm">表示ステータス:
+        <select id="statusFilter" class="p-1 border rounded text-sm" onchange="filterByStatus()">
+          <option value="">すべて</option>
+          <option value="used">生成済み</option>
+          <option value="unused">未生成</option>
+        </select>
+      </label>
+      <button type="button" onclick="selectAllKeywords()" class="bg-gray-500 hover:bg-gray-600 text-white text-sm px-3 py-1 rounded">全て選択</button>
+    </div>
 
-      <table class="w-full text-sm">
+    <!-- キーワードテーブル -->
+    <div class="border rounded bg-white dark:bg-gray-800 p-2 max-h-[600px] overflow-y-auto">
+      <table class="w-full text-sm" id="keywordTable">
         <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
           <tr>
             <th class="p-2 text-left">キーワード</th>
-            <th class="p-2 text-center">選択</th>
+            <th class="p-2 text-center">ステータス</th>
+            <th class="p-2 text-center">操作</th>
           </tr>
         </thead>
         <tbody id="keywordList"></tbody>
@@ -84,13 +88,12 @@
 <!-- JavaScript -->
 <script>
 let selectedKeywords = [];
-let isOpen = false;
 
 function togglePromptFields() {
   const field = document.getElementById('promptFields');
   const icon = document.getElementById('toggleIcon');
   const text = document.getElementById('toggleText');
-  isOpen = !isOpen;
+  const isOpen = field.classList.contains("max-h-0");
   field.classList.toggle("max-h-0", !isOpen);
   field.classList.toggle("max-h-[1000px]", isOpen);
   icon.textContent = isOpen ? "－" : "＋";
@@ -101,7 +104,7 @@ async function onSiteChange() {
   const siteId = parseInt(document.querySelector('[name="site_select"]').value);
   if (!siteId) return;
   selectedKeywords = [];
-  updateSelectedList();
+  updateKeywordsTextarea();
 
   const list = document.getElementById("keywordList");
   list.innerHTML = "";
@@ -109,27 +112,32 @@ async function onSiteChange() {
   try {
     const res = await fetch(`/api/keywords/all/${siteId}`);
     const data = await res.json();
+
     data.forEach(k => {
       const row = document.createElement("tr");
+      row.dataset.status = k.used ? "used" : "unused";
 
-      const keywordCell = document.createElement("td");
-      keywordCell.className = "p-2";
-      keywordCell.textContent = k.keyword;
+      const td1 = document.createElement("td");
+      td1.className = "p-2";
+      td1.textContent = k.keyword;
 
-      const actionCell = document.createElement("td");
-      actionCell.className = "p-2 text-center";
+      const td2 = document.createElement("td");
+      td2.className = "p-2 text-center";
+      td2.textContent = k.used ? "生成済み" : "未生成";
 
+      const td3 = document.createElement("td");
+      td3.className = "p-2 text-center";
       const btn = document.createElement("button");
       btn.type = "button";
+      btn.dataset.keyword = k.keyword;
       btn.textContent = "追加";
       btn.className = "px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600";
-      btn.dataset.keyword = k.keyword;
-      btn.onclick = () => toggleKeyword(btn, row);
+      btn.onclick = () => toggleKeyword(btn);
+      td3.appendChild(btn);
 
-      actionCell.appendChild(btn);
-      row.appendChild(keywordCell);
-      row.appendChild(actionCell);
-
+      row.appendChild(td1);
+      row.appendChild(td2);
+      row.appendChild(td3);
       list.appendChild(row);
     });
   } catch (err) {
@@ -137,25 +145,30 @@ async function onSiteChange() {
   }
 }
 
-function toggleKeyword(button, row) {
-  const kw = button.dataset.keyword;
-  const i = selectedKeywords.indexOf(kw);
-  if (i !== -1) {
-    selectedKeywords.splice(i, 1);
-    button.textContent = "追加";
-    button.classList.remove("bg-red-600");
-    button.classList.add("bg-blue-500");
+function toggleKeyword(btn) {
+  const kw = btn.dataset.keyword;
+  const idx = selectedKeywords.indexOf(kw);
+  if (idx !== -1) {
+    selectedKeywords.splice(idx, 1);
+    btn.textContent = "追加";
+    btn.classList.remove("bg-red-600");
+    btn.classList.add("bg-blue-500");
   } else {
     if (selectedKeywords.length >= 40) {
-      alert("最大40キーワードまで選択可能です");
+      alert("最大40キーワードまでです");
       return;
     }
     selectedKeywords.push(kw);
-    button.textContent = "解除";
-    button.classList.remove("bg-blue-500");
-    button.classList.add("bg-red-600");
+    btn.textContent = "解除";
+    btn.classList.remove("bg-blue-500");
+    btn.classList.add("bg-red-600");
   }
-  updateSelectedList();
+  updateKeywordsTextarea();
+}
+
+function updateKeywordsTextarea() {
+  const textarea = document.getElementById("keywordsField");
+  textarea.value = selectedKeywords.join("\n");
 }
 
 function selectAllKeywords() {
@@ -170,20 +183,7 @@ function selectAllKeywords() {
       btn.classList.add("bg-red-600");
     }
   }
-  updateSelectedList();
-}
-
-function updateSelectedList() {
-  const display = document.getElementById("selectedList");
-  const textarea = document.getElementById("keywordsField");
-  display.innerHTML = "";
-  selectedKeywords.forEach(kw => {
-    const tag = document.createElement("span");
-    tag.textContent = kw;
-    tag.className = "bg-gray-300 text-sm px-2 py-1 rounded";
-    display.appendChild(tag);
-  });
-  textarea.value = selectedKeywords.join("\n");
+  updateKeywordsTextarea();
 }
 
 function validateKeywordCount() {
@@ -193,6 +193,14 @@ function validateKeywordCount() {
     return false;
   }
   return true;
+}
+
+function filterByStatus() {
+  const value = document.getElementById("statusFilter").value;
+  const rows = document.querySelectorAll("#keywordList tr");
+  rows.forEach(row => {
+    row.style.display = (value === "" || row.dataset.status === value) ? "" : "none";
+  });
 }
 
 async function onPromptChange() {
@@ -207,7 +215,6 @@ async function onPromptChange() {
     console.error('プロンプト取得エラー', err);
   }
 }
-
 document.getElementById('selectPrompt').addEventListener('change', onPromptChange);
 
 document.addEventListener("DOMContentLoaded", () => {
