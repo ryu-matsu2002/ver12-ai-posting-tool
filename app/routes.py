@@ -61,12 +61,17 @@ def admin_dashboard():
     article_count = Article.query.count()
 
     users = User.query.all()
-    user_articles_map = {
-        user.id: Article.query.filter(
+
+    # ✅ 各ユーザーごとの未設定アイキャッチ画像件数を集計
+    missing_count_map = {}
+    for user in users:
+        count = Article.query.filter(
             Article.user_id == user.id,
             Article.status.in_(["done", "posted"]),
-        ).all() for user in users
-    }
+            ((Article.image_url == None) | (Article.image_url == ""))
+        ).count()
+        if count > 0:
+            missing_count_map[user.id] = count
 
     return render_template(
         "admin/dashboard.html",
@@ -75,8 +80,9 @@ def admin_dashboard():
         prompt_count=prompt_count,
         article_count=article_count,
         users=users,
-        user_articles_map=user_articles_map
+        missing_count_map=missing_count_map
     )
+
 
 
 @admin_bp.route("/admin/users")

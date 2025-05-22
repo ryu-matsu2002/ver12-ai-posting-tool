@@ -38,11 +38,10 @@
       </thead>
       <tbody>
         {% for user in users %}
-          {% set missing_count = user_articles_map[user.id] | selectattr('image_url', 'equalto', None) | list | length %}
-          {% if missing_count > 0 %}
+          {% if missing_count_map.get(user.id) %}
           <tr class="border-b">
             <td class="p-2">{{ user.email }}</td>
-            <td class="p-2 text-red-600 font-bold">未設定の件数：{{ missing_count }} 件</td>
+            <td class="p-2 text-red-600 font-bold">未設定の件数：{{ missing_count_map[user.id] }} 件</td>
             <td class="p-2">
               <a href="{{ url_for('admin.refresh_images', user_id=user.id) }}"
                  class="inline-block bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 transition">
