@@ -3,10 +3,10 @@
 
 {% block content %}
 <div class="flex flex-col lg:flex-row gap-10">
-  <!-- 左：フォーム -->
+
+  <!-- 左：記事生成フォーム -->
   <div class="w-full lg:w-2/3">
     <h2 class="text-2xl font-semibold mb-6">記事生成</h2>
-
     <form method="post" id="genForm" class="space-y-6" onsubmit="return validateKeywordCount()">
       {{ form.hidden_tag() }}
 
@@ -22,9 +22,9 @@
         {{ form.genre_select(id="selectPrompt", class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
       </div>
 
-      <!-- トグルボタン -->
+      <!-- トグル：詳細プロンプト -->
       <div>
-        <button type="button" onclick="togglePromptFields()" class="text-blue-600 border border-blue-600 rounded px-3 py-1 text-sm hover:bg-blue-50 transition" id="toggleBtn">
+        <button type="button" onclick="togglePromptFields()" class="text-blue-600 border border-blue-600 rounded px-3 py-1 text-sm hover:bg-blue-50" id="toggleBtn">
           <span id="toggleIcon">＋</span> <span id="toggleText">詳細プロンプトを表示</span>
         </button>
       </div>
@@ -41,13 +41,13 @@
         </div>
       </div>
 
-      <!-- 選択キーワード -->
+      <!-- 選択中キーワード -->
       <div>
         <label class="block mb-1 font-medium">選択中のキーワード（最大40件）</label>
         <div id="selectedList" class="flex flex-wrap gap-2 mb-2"></div>
       </div>
 
-      <!-- POST対象欄（非表示） -->
+      <!-- POST用 textarea -->
       <div>
         {{ form.keywords.label(class="block mb-1 font-medium") }}
         {{ form.keywords(rows=8, id="keywordsField", class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
@@ -58,134 +58,163 @@
     </form>
   </div>
 
-  <!-- 右：キーワード一覧 -->
+  <!-- 右：登録キーワード一覧 -->
   <div class="w-full lg:w-1/3">
     <h3 class="text-xl font-bold mb-4">登録キーワード</h3>
-    <div id="keywordList" class="flex flex-wrap gap-2 max-h-[600px] overflow-y-auto p-3 border rounded bg-gray-50 dark:bg-gray-800"></div>
 
-    <div class="flex flex-wrap gap-2 mt-4">
-      <button type="button" onclick="selectAllKeywords()" class="bg-gray-500 hover:bg-gray-600 text-white text-sm px-3 py-1 rounded">全て選択（最大40件）</button>
+    <div class="border rounded bg-white dark:bg-gray-800 p-4 max-h-[600px] overflow-y-auto">
+      <div class="flex justify-between items-center mb-3">
+        <span class="text-sm text-gray-600">クリックで選択／解除（最大40件）</span>
+        <button type="button" onclick="selectAllKeywords()" class="bg-gray-500 hover:bg-gray-600 text-white text-sm px-3 py-1 rounded">全て選択</button>
+      </div>
+
+      <table class="w-full text-sm">
+        <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
+          <tr>
+            <th class="p-2 text-left">キーワード</th>
+            <th class="p-2 text-center">選択</th>
+          </tr>
+        </thead>
+        <tbody id="keywordList"></tbody>
+      </table>
     </div>
   </div>
 </div>
 
 <!-- JavaScript -->
 <script>
-  let selectedKeywords = [];
-  let isOpen = false;
+let selectedKeywords = [];
+let isOpen = false;
 
-  function togglePromptFields() {
-    const field = document.getElementById('promptFields');
-    const icon = document.getElementById('toggleIcon');
-    const text = document.getElementById('toggleText');
-    isOpen = !isOpen;
-    field.classList.toggle("max-h-0", !isOpen);
-    field.classList.toggle("max-h-[1000px]", isOpen);
-    icon.textContent = isOpen ? "－" : "＋";
-    text.textContent = isOpen ? "詳細プロンプトを非表示" : "詳細プロンプトを表示";
-  }
+function togglePromptFields() {
+  const field = document.getElementById('promptFields');
+  const icon = document.getElementById('toggleIcon');
+  const text = document.getElementById('toggleText');
+  isOpen = !isOpen;
+  field.classList.toggle("max-h-0", !isOpen);
+  field.classList.toggle("max-h-[1000px]", isOpen);
+  icon.textContent = isOpen ? "－" : "＋";
+  text.textContent = isOpen ? "詳細プロンプトを非表示" : "詳細プロンプトを表示";
+}
 
-  async function onSiteChange() {
-    const siteId = parseInt(document.querySelector('[name="site_select"]').value);
-    if (!siteId) return;
+async function onSiteChange() {
+  const siteId = parseInt(document.querySelector('[name="site_select"]').value);
+  if (!siteId) return;
+  selectedKeywords = [];
+  updateSelectedList();
 
-    const list = document.getElementById("keywordList");
-    list.innerHTML = "";
-    selectedKeywords = [];
-    updateSelectedList();
+  const list = document.getElementById("keywordList");
+  list.innerHTML = "";
 
-    try {
-      console.log("選択されたサイトID:", siteId);
-      const res = await fetch(`/api/keywords/all/${siteId}`);
-      const data = await res.json();
-      console.log("取得したキーワード：", data);
-      data.forEach(k => {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "keyword-btn px-3 py-1 rounded border text-sm hover:bg-blue-100 dark:border-gray-600 dark:text-white";
-        btn.textContent = k.keyword;
-        btn.dataset.keyword = k.keyword;
-        btn.onclick = () => toggleKeyword(btn);
-        list.appendChild(btn);
-      });
-    } catch (err) {
-      console.error("キーワード取得失敗", err);
-    }
-  }
+  try {
+    const res = await fetch(`/api/keywords/all/${siteId}`);
+    const data = await res.json();
+    data.forEach(k => {
+      const row = document.createElement("tr");
 
-  function toggleKeyword(button) {
-    const kw = button.dataset.keyword;
-    const i = selectedKeywords.indexOf(kw);
-    if (i !== -1) {
-      selectedKeywords.splice(i, 1);
-      button.classList.remove('bg-blue-600', 'text-white');
-    } else {
-      if (selectedKeywords.length >= 40) {
-        alert("最大40キーワードまで選択可能です");
-        return;
-      }
-      selectedKeywords.push(kw);
-      button.classList.add('bg-blue-600', 'text-white');
-    }
-    updateSelectedList();
-  }
+      const keywordCell = document.createElement("td");
+      keywordCell.className = "p-2";
+      keywordCell.textContent = k.keyword;
 
-  function selectAllKeywords() {
-    const buttons = document.querySelectorAll(".keyword-btn");
-    for (const btn of buttons) {
-      const kw = btn.dataset.keyword;
-      if (!selectedKeywords.includes(kw)) {
-        if (selectedKeywords.length >= 40) break;
-        selectedKeywords.push(kw);
-        btn.classList.add('bg-blue-600', 'text-white');
-      }
-    }
-    updateSelectedList();
-  }
+      const actionCell = document.createElement("td");
+      actionCell.className = "p-2 text-center";
 
-  function updateSelectedList() {
-    const display = document.getElementById("selectedList");
-    const textarea = document.getElementById("keywordsField");
-    display.innerHTML = "";
-    selectedKeywords.forEach(kw => {
-      const tag = document.createElement("span");
-      tag.textContent = kw;
-      tag.className = "bg-gray-300 text-sm px-2 py-1 rounded";
-      display.appendChild(tag);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = "追加";
+      btn.className = "px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600";
+      btn.dataset.keyword = k.keyword;
+      btn.onclick = () => toggleKeyword(btn, row);
+
+      actionCell.appendChild(btn);
+      row.appendChild(keywordCell);
+      row.appendChild(actionCell);
+
+      list.appendChild(row);
     });
-    textarea.value = selectedKeywords.join("\n");
+  } catch (err) {
+    console.error("キーワード取得失敗", err);
   }
+}
 
-  function validateKeywordCount() {
-    const lines = document.getElementById("keywordsField").value.trim().split(/\r?\n/).filter(l => l);
-    if (lines.length > 40) {
-      alert("キーワードは最大40件までです。現在: " + lines.length);
-      return false;
+function toggleKeyword(button, row) {
+  const kw = button.dataset.keyword;
+  const i = selectedKeywords.indexOf(kw);
+  if (i !== -1) {
+    selectedKeywords.splice(i, 1);
+    button.textContent = "追加";
+    button.classList.remove("bg-red-600");
+    button.classList.add("bg-blue-500");
+  } else {
+    if (selectedKeywords.length >= 40) {
+      alert("最大40キーワードまで選択可能です");
+      return;
     }
-    return true;
+    selectedKeywords.push(kw);
+    button.textContent = "解除";
+    button.classList.remove("bg-blue-500");
+    button.classList.add("bg-red-600");
   }
+  updateSelectedList();
+}
 
-  async function onPromptChange() {
-    const pid = document.getElementById('selectPrompt').value;
-    if (!pid || pid === "0") return;
-    try {
-      const res = await fetch(`/api/prompt/${pid}`);
-      const j = await res.json();
-      document.getElementById('titlePT').value = j.title_pt;
-      document.getElementById('bodyPT').value = j.body_pt;
-    } catch (err) {
-      console.error('プロンプト取得エラー', err);
+function selectAllKeywords() {
+  const buttons = document.querySelectorAll("#keywordList button");
+  for (const btn of buttons) {
+    const kw = btn.dataset.keyword;
+    if (!selectedKeywords.includes(kw)) {
+      if (selectedKeywords.length >= 40) break;
+      selectedKeywords.push(kw);
+      btn.textContent = "解除";
+      btn.classList.remove("bg-blue-500");
+      btn.classList.add("bg-red-600");
     }
   }
+  updateSelectedList();
+}
 
-  document.getElementById('selectPrompt').addEventListener('change', onPromptChange);
-
-  // ✅ 初回表示時にもキーワードを自動取得
-  document.addEventListener("DOMContentLoaded", () => {
-    const current = document.querySelector('[name="site_select"]').value;
-    if (current && parseInt(current) > 0) {
-      onSiteChange();
-    }
+function updateSelectedList() {
+  const display = document.getElementById("selectedList");
+  const textarea = document.getElementById("keywordsField");
+  display.innerHTML = "";
+  selectedKeywords.forEach(kw => {
+    const tag = document.createElement("span");
+    tag.textContent = kw;
+    tag.className = "bg-gray-300 text-sm px-2 py-1 rounded";
+    display.appendChild(tag);
   });
+  textarea.value = selectedKeywords.join("\n");
+}
+
+function validateKeywordCount() {
+  const lines = document.getElementById("keywordsField").value.trim().split(/\r?\n/).filter(l => l);
+  if (lines.length > 40) {
+    alert("キーワードは最大40件までです。現在: " + lines.length);
+    return false;
+  }
+  return true;
+}
+
+async function onPromptChange() {
+  const pid = document.getElementById('selectPrompt').value;
+  if (!pid || pid === "0") return;
+  try {
+    const res = await fetch(`/api/prompt/${pid}`);
+    const j = await res.json();
+    document.getElementById('titlePT').value = j.title_pt;
+    document.getElementById('bodyPT').value = j.body_pt;
+  } catch (err) {
+    console.error('プロンプト取得エラー', err);
+  }
+}
+
+document.getElementById('selectPrompt').addEventListener('change', onPromptChange);
+
+document.addEventListener("DOMContentLoaded", () => {
+  const current = document.querySelector('[name="site_select"]').value;
+  if (current && parseInt(current) > 0) {
+    onSiteChange();
+  }
+});
 </script>
 {% endblock %}
