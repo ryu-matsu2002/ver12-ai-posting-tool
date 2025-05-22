@@ -62,22 +62,22 @@ def admin_dashboard():
 
     users = User.query.all()
 
-    # ✅ 各ユーザーごとの未設定アイキャッチ画像件数を集計
+    # ✅ 各ユーザーごとの未設定アイキャッチ画像件数を集計（"None"文字列も対象に）
     missing_count_map = {}
     for user in users:
         articles = Article.query.filter(
             Article.user_id == user.id,
-            Article.status.in_(["done", "posted", "error"]),  # ← errorも対象に
-            (Article.image_url == None) | (Article.image_url == "")
+            Article.status.in_(["done", "posted", "error"]),
+            (Article.image_url.is_(None)) | (Article.image_url == "") | (Article.image_url == "None")
         ).all()
 
         for a in articles:
-            print(f"[DEBUG] {a.id=} {a.title=} {a.image_url=}")  # ← ここで確認
+            print(f"[DEBUG] {a.id=} {a.title=} {a.image_url=}")
 
         count = len(articles)
         if count > 0:
             missing_count_map[user.id] = count
-            
+
     return render_template(
         "admin/dashboard.html",
         user_count=user_count,
@@ -87,6 +87,7 @@ def admin_dashboard():
         users=users,
         missing_count_map=missing_count_map
     )
+
 
 
 
@@ -222,7 +223,7 @@ def fix_missing_images():
     updated = 0
     articles = Article.query.filter(
         Article.status.in_(["done", "posted"]),
-        Article.image_url.is_(None)
+        (Article.image_url.is_(None)) | (Article.image_url == "") | (Article.image_url == "None")
     ).all()
 
     for art in articles:
@@ -239,6 +240,7 @@ def fix_missing_images():
     db.session.commit()
     flash(f"{updated} 件のアイキャッチ画像を復元しました。", "success")
     return redirect(url_for("admin.admin_dashboard"))
+
 
 
 
@@ -259,7 +261,7 @@ def refresh_images(user_id):
     articles = Article.query.filter(
         Article.user_id == user_id,
         Article.status.in_(["done", "posted"]),
-        (Article.image_url == None) | (Article.image_url == "")
+        (Article.image_url.is_(None)) | (Article.image_url == "") | (Article.image_url == "None")
     ).all()
 
     for art in articles:
@@ -279,6 +281,7 @@ def refresh_images(user_id):
 
     flash(f"✅ 復元完了: {restored} 件 / ❌ 失敗: {failed} 件", "info")
     return redirect(url_for("admin.admin_dashboard"))
+
 
 
 
