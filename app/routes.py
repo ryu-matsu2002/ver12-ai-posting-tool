@@ -67,16 +67,17 @@ def admin_dashboard():
     for user in users:
         articles = Article.query.filter(
             Article.user_id == user.id,
-            Article.status.in_(["done", "posted"]),
+            Article.status.in_(["done", "posted", "error"]),  # ← errorも対象に
+            (Article.image_url == None) | (Article.image_url == "")
         ).all()
 
         for a in articles:
             print(f"[DEBUG] {a.id=} {a.title=} {a.image_url=}")  # ← ここで確認
 
-        count = sum(1 for a in articles if not a.image_url)
+        count = len(articles)
         if count > 0:
             missing_count_map[user.id] = count
-
+            
     return render_template(
         "admin/dashboard.html",
         user_count=user_count,
