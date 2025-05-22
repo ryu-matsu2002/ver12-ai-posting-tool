@@ -3,7 +3,7 @@ from datetime import datetime
 
 from flask import (
     Blueprint, render_template, redirect, url_for,
-    flash, request, abort, g, jsonify, current_app
+    flash, request, abort, g, jsonify, current_app, send_from_directory
 )
 from flask_login import (
     login_user, logout_user, login_required, current_user
@@ -34,8 +34,6 @@ from .article_generator import (
     _compose_body,
 )
 from app.forms import EditKeywordForm
-from flask import Blueprint, render_template, redirect, url_for, flash
-from flask_login import current_user, login_required
 from .forms import KeywordForm
 
 JST = timezone("Asia/Tokyo")
@@ -44,7 +42,6 @@ bp = Blueprint("main", __name__)
 # 必要なら app/__init__.py で admin_bp を登録
 admin_bp = Blueprint("admin", __name__)
 
-from flask import send_from_directory
 
 @bp.route('/robots.txt')
 def robots_txt():
@@ -63,13 +60,24 @@ def admin_dashboard():
     prompt_count  = PromptTemplate.query.count()
     article_count = Article.query.count()
 
+    users = User.query.all()
+    user_articles_map = {
+        user.id: Article.query.filter(
+            Article.user_id == user.id,
+            Article.status.in_(["done", "posted"]),
+        ).all() for user in users
+    }
+
     return render_template(
         "admin/dashboard.html",
         user_count=user_count,
         site_count=site_count,
         prompt_count=prompt_count,
-        article_count=article_count
+        article_count=article_count,
+        users=users,
+        user_articles_map=user_articles_map
     )
+
 
 @admin_bp.route("/admin/users")
 @login_required
@@ -131,7 +139,6 @@ def delete_stuck_articles():
     if not current_user.is_admin:
         abort(403)
 
-    from app.models import Article
     stuck = Article.query.filter(Article.status.in_(["pending", "gen"])).all()
 
     deleted_count = len(stuck)
@@ -166,7 +173,6 @@ def delete_user_stuck_articles(uid):
         abort(403)
 
     user = User.query.get_or_404(uid)
-    from app.models import Article
 
     stuck_articles = Article.query.filter(
         Article.user_id == uid,
@@ -191,6 +197,79 @@ def admin_login_as(user_id):
     login_user(user)
     flash(f"{user.email} としてログインしました", "info")
     return redirect(url_for("main.dashboard"))
+
+
+@admin_bp.post("/admin/fix-missing-images")
+@login_required
+def fix_missing_images():
+    if not current_user.is_admin:
+        abort(403)
+
+    from app.image_utils import fetch_featured_image
+    import re
+
+    updated = 0
+    articles = Article.query.filter(
+        Article.status.in_(["done", "posted"]),
+        Article.image_url.is_(None)
+    ).all()
+
+    for art in articles:
+        match = re.search(r"<h2\b[^>]*>(.*?)</h2>", art.body or "", re.IGNORECASE)
+        first_h2 = match.group(1) if match else ""
+        query = f"{art.keyword} {first_h2}".strip()
+        if not query:
+            query = art.title or art.keyword or "記事 アイキャッチ"
+
+        try:
+            art.image_url = fetch_featured_image(query)
+            updated += 1
+        except Exception as e:
+            current_app.logger.warning(f"[画像復元失敗] Article ID: {art.id}, Error: {e}")
+
+    db.session.commit()
+    flash(f"{updated} 件のアイキャッチ画像を復元しました。", "success")
+    return redirect(url_for("admin.admin_dashboard"))
+
+
+# ─────────── 管理者専用：アイキャッチ一括復元（ユーザー単位）
+@admin_bp.route("/admin/refresh-images/<int:user_id>")
+@login_required
+def refresh_images(user_id):
+    if not current_user.is_admin:
+        flash("管理者権限が必要です。", "danger")
+        return redirect(url_for("main.dashboard"))
+
+    from app.image_utils import fetch_featured_image
+    import re
+
+    restored = 0
+    failed = 0
+
+    # 対象：画像が未設定かつ status が done / posted の記事
+    articles = Article.query.filter(
+        Article.user_id == user_id,
+        Article.status.in_(["done", "posted"]),
+        (Article.image_url == None) | (Article.image_url == "")
+    ).all()
+
+    for art in articles:
+        try:
+            match = re.search(r"<h2[^>]*>(.*?)</h2>", art.body or "", re.IGNORECASE)
+            first_h2 = match.group(1) if match else ""
+            query = f"{art.keyword} {first_h2}".strip() or art.title or art.keyword or "記事 アイキャッチ"
+            art.image_url = fetch_featured_image(query)
+            restored += 1 if art.image_url else 0
+        except Exception as e:
+            failed += 1
+            continue
+
+    from app import db
+    db.session.commit()
+
+    flash(f"✅ 復元完了: {restored} 件 / ❌ 失敗: {failed} 件", "info")
+    return redirect(url_for("admin.admin_dashboard"))
+
 
 @bp.route("/keywords", methods=["GET", "POST"])
 @login_required

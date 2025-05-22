@@ -5,6 +5,7 @@
 <div class="p-6">
   <h1 class="text-3xl font-bold mb-6">👑 管理者ダッシュボード</h1>
 
+  <!-- 統計カード -->
   <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
     <div class="bg-white rounded-xl shadow p-4">
       <h2 class="text-lg font-semibold text-gray-600">登録ユーザー数</h2>
@@ -24,6 +25,42 @@
     </div>
   </div>
 
+  <!-- 🔧 ユーザー別アイキャッチ未設定管理 -->
+  <div class="bg-white rounded-xl shadow p-6 mb-8">
+    <h2 class="text-xl font-bold mb-4">🖼️ アイキャッチ画像 未設定記事の復元</h2>
+    <table class="min-w-full text-sm border">
+      <thead class="bg-gray-100 text-left">
+        <tr>
+          <th class="p-2 border-b font-semibold">ユーザー</th>
+          <th class="p-2 border-b font-semibold">未設定の件数</th>
+          <th class="p-2 border-b font-semibold">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for user in users %}
+          {% set missing_count = user_articles_map[user.id] | selectattr('image_url', 'equalto', None) | list | length %}
+          {% if missing_count > 0 %}
+          <tr class="border-b">
+            <td class="p-2">{{ user.email }}</td>
+            <td class="p-2 text-red-600 font-bold">未設定の件数：{{ missing_count }} 件</td>
+            <td class="p-2">
+              <a href="{{ url_for('admin.refresh_images', user_id=user.id) }}"
+                 class="inline-block bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 transition">
+                一括復元
+              </a>
+            </td>
+          </tr>
+          {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <p class="mt-4 text-sm text-gray-500">
+      ※ 過去記事には再生成せず画像のみ復元します。本文・タイトルには一切影響しません。
+    </p>
+  </div>
+
+  <!-- 拡張予定 -->
   <div class="bg-white rounded-xl shadow p-6">
     <h2 class="text-xl font-bold mb-4">今後の拡張予定</h2>
     <ul class="list-disc pl-5 text-gray-700 space-y-2">
