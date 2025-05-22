@@ -169,3 +169,13 @@ def fetch_featured_image(query: str, title: str = "") -> str:
     except Exception as e:
         logging.error("fetch_featured_image fatal: %s", e)
         return DEFAULT_IMAGE_URL
+
+# タイトル・本文からアイキャッチ画像を推定して取得（復元機能用）
+def fetch_featured_image_from_body(body: str) -> str:
+    import re
+    from .image_utils import fetch_featured_image
+
+    match = re.search(r"<h2\b[^>]*>(.*?)</h2>", body or "", re.IGNORECASE)
+    first_h2 = match.group(1) if match else ""
+    query = first_h2 or "記事 アイキャッチ"
+    return fetch_featured_image(query)
