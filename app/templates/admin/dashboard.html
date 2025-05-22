@@ -25,11 +25,11 @@
     </div>
   </div>
 
-  <!-- 🔧 ユーザー別アイキャッチ未設定管理 -->
+  <!-- 🔧 アイキャッチ復元 -->
   <div class="bg-white rounded-xl shadow p-6 mb-8">
     <h2 class="text-xl font-bold mb-4">🖼️ アイキャッチ画像 未設定記事の復元</h2>
 
-    <!-- 🔄 全記事一括復元ボタン -->
+    <!-- 全体一括復元 -->
     <form method="post" action="{{ url_for('admin.fix_missing_images') }}" class="mb-4">
       <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition">
         全記事のアイキャッチ画像を一括復元
@@ -46,14 +46,15 @@
       </thead>
       <tbody>
         {% for user in users %}
-          {% if missing_count_map.get(user.id) %}
+          {% set count = missing_count_map.get(user.id, 0) %}
+          {% if count > 0 %}
           <tr class="border-b">
             <td class="p-2">{{ user.email }}</td>
-            <td class="p-2 text-red-600 font-bold">未設定の件数：{{ missing_count_map[user.id] }} 件</td>
+            <td class="p-2 text-red-600 font-bold">{{ count }} 件</td>
             <td class="p-2">
               <a href="{{ url_for('admin.refresh_images', user_id=user.id) }}"
-                 class="inline-block bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 transition">
-                一括復元
+                 class="inline-block bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 transition">
+                このユーザーの記事を復元
               </a>
             </td>
           </tr>
