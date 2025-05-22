@@ -28,6 +28,14 @@
   <!-- 🔧 ユーザー別アイキャッチ未設定管理 -->
   <div class="bg-white rounded-xl shadow p-6 mb-8">
     <h2 class="text-xl font-bold mb-4">🖼️ アイキャッチ画像 未設定記事の復元</h2>
+
+    <!-- 🔄 全記事一括復元ボタン -->
+    <form method="post" action="{{ url_for('admin.fix_missing_images') }}" class="mb-4">
+      <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition">
+        全記事のアイキャッチ画像を一括復元
+      </button>
+    </form>
+
     <table class="min-w-full text-sm border">
       <thead class="bg-gray-100 text-left">
         <tr>

@@ -229,11 +229,9 @@ def fix_missing_images():
         match = re.search(r"<h2\b[^>]*>(.*?)</h2>", art.body or "", re.IGNORECASE)
         first_h2 = match.group(1) if match else ""
         query = f"{art.keyword} {first_h2}".strip()
-        if not query:
-            query = art.title or art.keyword or "記事 アイキャッチ"
-
+        title = art.title or art.keyword or "記事"
         try:
-            art.image_url = fetch_featured_image(query)
+            art.image_url = fetch_featured_image(query, title=title)
             updated += 1
         except Exception as e:
             current_app.logger.warning(f"[画像復元失敗] Article ID: {art.id}, Error: {e}")
@@ -241,6 +239,7 @@ def fix_missing_images():
     db.session.commit()
     flash(f"{updated} 件のアイキャッチ画像を復元しました。", "success")
     return redirect(url_for("admin.admin_dashboard"))
+
 
 
 # ─────────── 管理者専用：アイキャッチ一括復元（ユーザー単位）
@@ -257,7 +256,6 @@ def refresh_images(user_id):
     restored = 0
     failed = 0
 
-    # 対象：画像が未設定かつ status が done / posted の記事
     articles = Article.query.filter(
         Article.user_id == user_id,
         Article.status.in_(["done", "posted"]),
@@ -269,7 +267,8 @@ def refresh_images(user_id):
             match = re.search(r"<h2[^>]*>(.*?)</h2>", art.body or "", re.IGNORECASE)
             first_h2 = match.group(1) if match else ""
             query = f"{art.keyword} {first_h2}".strip() or art.title or art.keyword or "記事 アイキャッチ"
-            art.image_url = fetch_featured_image(query)
+            title = art.title or art.keyword or "記事"
+            art.image_url = fetch_featured_image(query, title=title)
             restored += 1 if art.image_url else 0
         except Exception as e:
             failed += 1
@@ -280,6 +279,7 @@ def refresh_images(user_id):
 
     flash(f"✅ 復元完了: {restored} 件 / ❌ 失敗: {failed} 件", "info")
     return redirect(url_for("admin.admin_dashboard"))
+
 
 
 @bp.route("/keywords", methods=["GET", "POST"])
