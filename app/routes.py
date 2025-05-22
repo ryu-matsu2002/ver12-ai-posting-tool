@@ -65,11 +65,15 @@ def admin_dashboard():
     # ✅ 各ユーザーごとの未設定アイキャッチ画像件数を集計
     missing_count_map = {}
     for user in users:
-        count = Article.query.filter(
+        articles = Article.query.filter(
             Article.user_id == user.id,
             Article.status.in_(["done", "posted"]),
-            ((Article.image_url == None) | (Article.image_url == ""))
-        ).count()
+        ).all()
+
+        for a in articles:
+            print(f"[DEBUG] {a.id=} {a.title=} {a.image_url=}")  # ← ここで確認
+
+        count = sum(1 for a in articles if not a.image_url)
         if count > 0:
             missing_count_map[user.id] = count
 

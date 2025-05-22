@@ -314,7 +314,7 @@ def _generate(app, aid: int, tpt: str, bpt: str, format: str = "html", self_revi
             if not query:
                 query = art.title or art.keyword or "記事 アイキャッチ"
 
-            art.image_url = fetch_featured_image(query)
+            art.image_url = fetch_featured_image(query, title=art.title)
 
 
 

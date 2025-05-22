@@ -21,26 +21,23 @@ def _post_headers(username: str, app_pass: str, site_url: str) -> dict:
     return {
         'Authorization': f'Basic {token}',
         'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0',
+        'User-Agent': 'Mozilla/5.0',
         'Referer': f'{site_url}/wp-admin',
         'Origin': site_url,
         'Accept': '*/*, application/json',
     }
 
-
-
-# 画像アップロード用のヘッダー作成（Content-Typeなし）
+# 画像アップロード用のヘッダー作成
 def _upload_headers(username: str, app_pass: str, site_url: str) -> dict:
     token = base64.b64encode(f'{username}:{app_pass}'.encode('utf-8')).decode('utf-8')
     return {
         'Authorization': f'Basic {token}',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0',
+        'User-Agent': 'Mozilla/5.0',
         'Referer': f'{site_url}/wp-admin',
         'Accept': '*/*',
     }
 
-
-# 画像をWordPressにアップロードする関数
+# 画像をWordPressにアップロード
 def upload_image_to_wp(site_url: str, image_path: str, username: str, app_pass: str):
     site_url = normalize_url(site_url)
     url = f"{site_url}/wp-json/wp/v2/media"
@@ -67,7 +64,7 @@ def upload_image_to_wp(site_url: str, image_path: str, username: str, app_pass: 
         current_app.logger.warning(f"画像のアップロードに失敗: {response.status_code}, {error}")
         raise HTTPError(f"画像のアップロードに失敗しました: {response.status_code}, {error}")
 
-# 投稿を行うメイン関数
+# WordPress投稿処理（画像アップロード処理を拡張）
 def post_to_wp(site: Site, art: Article) -> str:
     site_url = normalize_url(site.url)
     url = f"{site_url}/wp-json/wp/v2/posts"
@@ -75,36 +72,40 @@ def post_to_wp(site: Site, art: Article) -> str:
 
     featured_media_id = None
 
-    if art.image_url and art.image_url.startswith("http"):
-       try:
-           response = requests.get(art.image_url, timeout=10)
+    # ✅【修正箇所】画像URLがローカル or 外部の両方に対応
+    if art.image_url:
+        try:
+            if art.image_url.startswith("/static/images/"):
+                # ローカル画像ファイルをそのままアップロード
+                image_path = os.path.join("app", art.image_url.lstrip("/"))
+                featured_media_id, uploaded_url = upload_image_to_wp(
+                    site_url, image_path, site.username, site.app_pass
+                )
+                art.featured_image = uploaded_url
 
-        # ★ Content-Type チェック（画像でなければ中止）
-           content_type = response.headers.get("Content-Type", "")
-           if not content_type.startswith("image/"):
-               raise ValueError(f"取得先が画像ではありません: {content_type}")
+            elif art.image_url.startswith("http"):
+                # 外部画像URLを一時保存してアップロード
+                response = requests.get(art.image_url, timeout=10)
+                content_type = response.headers.get("Content-Type", "")
+                if not content_type.startswith("image/"):
+                    raise ValueError(f"取得先が画像ではありません: {content_type}")
+                ext = os.path.splitext(art.image_url)[-1].split("?")[0]
+                if ext.lower() not in ['.jpg', '.jpeg', '.png']:
+                    ext = '.jpg'
+                temp_path = f"temp_featured_image{ext}"
+                with open(temp_path, "wb") as f:
+                    f.write(response.content)
 
-        # ★ 拡張子が不明な場合は .jpg をデフォルトに
-           ext = os.path.splitext(art.image_url)[-1].split("?")[0]
-           if not ext.lower() in ['.jpg', '.jpeg', '.png']:
-                ext = '.jpg'
+                featured_media_id, uploaded_url = upload_image_to_wp(
+                    site_url, temp_path, site.username, site.app_pass
+                )
+                art.featured_image = uploaded_url
+                os.remove(temp_path)
 
-           temp_path = f"temp_featured_image{ext}"
-           with open(temp_path, "wb") as f:
-               f.write(response.content)
+        except Exception as e:
+            current_app.logger.warning(f"アイキャッチ画像のアップロード失敗: {e}")
 
-           featured_media_id, uploaded_url = upload_image_to_wp(
-               site_url, temp_path, site.username, site.app_pass
-           )
-
-           art.featured_image = uploaded_url
-           os.remove(temp_path)
-
-       except Exception as e:  
-           current_app.logger.warning(f"アイキャッチ画像のアップロード失敗: {e}")
-
-
-
+    # 投稿本体データ
     post_data = {
         "title": art.title,
         "content": f'<div class="ai-content">{_decorate_html(art.body)}</div>',
@@ -113,14 +114,14 @@ def post_to_wp(site: Site, art: Article) -> str:
     if featured_media_id:
         post_data["featured_media"] = featured_media_id
 
+    # 投稿リトライ処理
     for attempt in range(3):
         try:
             response = requests.post(url, json=post_data, headers=headers, timeout=TIMEOUT)
             if response.status_code == 201:
-                 # ✅ 投稿成功時：ステータスとURLを保存
                 art.status = "posted"
                 art.posted_url = response.json().get("link")
-                db.session.commit()    
+                db.session.commit()
                 return response.json().get("link") or "success"
             else:
                 raise HTTPError(f"ステータスコード {response.status_code}")
@@ -136,10 +137,9 @@ def post_to_wp(site: Site, art: Article) -> str:
                 current_app.logger.error(f"記事の作成に失敗: {response.status_code}, {error}")
                 raise HTTPError(f"記事の作成に失敗: {response.status_code}, {error}")
 
-# デザイン装飾用（style属性を排除しclassに変換）
+# デザイン調整
 def _decorate_html(content: str) -> str:
     content = content.replace('<h2>', '<h2 class="ai-h2">')
     content = content.replace('<h3>', '<h3 class="ai-h3">')
-    content = content.replace('<p>',  '<p class="ai-p">')
+    content = content.replace('<p>', '<p class="ai-p">')
     return content
-

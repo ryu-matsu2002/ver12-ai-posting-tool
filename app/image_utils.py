@@ -1,20 +1,9 @@
-# ───────────────────────────────────────────────────────────────
-# app/image_utils.py   – v8-fixed2 (2025-05-XX)  *always-thumb*
-# ───────────────────────────────────────────────────────────────
-
-"""
-Pixabay → Unsplash → デフォルト画像の順でアイキャッチを取得するユーティリティ
-
-この改訂版では fetch_featured_image が絶対に文字列を返し、
-None を返さないことでプレビュー／WP投稿時に “thumb” のまま
-表示されなくなる問題を解消します。
-"""
-
 from __future__ import annotations
 import os, random, time, logging, requests
 import re
 from typing import List
 from flask import current_app
+from werkzeug.utils import secure_filename
 
 # ───── 設定 ─────
 ROOT_URL            = os.getenv("APP_ROOT_URL", "https://your-domain.com")
@@ -23,21 +12,23 @@ PIXABAY_TIMEOUT     = 5
 MAX_PER_PAGE        = 30
 RECENTLY_USED_TTL   = int(os.getenv("IMAGE_CACHE_TTL", "86400"))  # 24h
 DEFAULT_IMAGE_PATH  = os.getenv("DEFAULT_IMAGE_URL", "/static/default-thumb.jpg")
-# プレビュー表示／WP 投稿時に使う絶対 URL
 DEFAULT_IMAGE_URL   = (
     DEFAULT_IMAGE_PATH.startswith("http")
     and DEFAULT_IMAGE_PATH
     or f"{ROOT_URL}{DEFAULT_IMAGE_PATH}"
 )
 
-# ビジネス系タグ（関連性向上）
+# ✅ 保存ディレクトリとURLパスの定義
+IMAGE_SAVE_DIR = os.path.join("app", "static", "images")
+IMAGE_URL_PREFIX = "/static/images"
+
+# ビジネス系タグ
 _BUSINESS_TAGS = {
     "money","business","office","finance","analysis",
     "marketing","startup","strategy","computer",
     "statistics","success"
 }
 
-# 画像利用履歴 (url→timestamp)
 _used_image_urls: dict[str, float] = {}
 
 def _is_recently_used(url: str, ttl: int = RECENTLY_USED_TTL) -> bool:
@@ -47,7 +38,6 @@ def _is_recently_used(url: str, ttl: int = RECENTLY_USED_TTL) -> bool:
 def _mark_used(url: str) -> None:
     _used_image_urls[url] = time.time()
 
-# ✅【追加】URLが画像形式かどうかをHEADで確認
 def _is_image_url(url: str) -> bool:
     try:
         r = requests.head(url, timeout=5)
@@ -55,11 +45,8 @@ def _is_image_url(url: str) -> bool:
         return content_type.startswith("image/")
     except Exception as e:
         logging.warning(f"[画像判定失敗] {url} → {e}")
-        return False    
+        return False
 
-# ══════════════════════════════════════════════
-# Pixabay 検索
-# ══════════════════════════════════════════════
 def _search_pixabay(query: str, per_page: int = MAX_PER_PAGE) -> List[dict]:
     if not PIXABAY_API_KEY or not query:
         return []
@@ -82,9 +69,6 @@ def _search_pixabay(query: str, per_page: int = MAX_PER_PAGE) -> List[dict]:
         logging.debug("Pixabay error (%s): %s", query, e)
         return []
 
-# ══════════════════════════════════════════════
-# スコアリング & 選択
-# ══════════════════════════════════════════════
 def _score(hit: dict, kw_set: set[str]) -> int:
     tags  = {t.strip().lower() for t in hit.get("tags","").split(",")}
     base  = sum(1 for kw in kw_set if kw in tags)
@@ -98,7 +82,6 @@ def _valid_dim(hit: dict) -> bool:
     ratio = w/h
     return 0.5 <= ratio <= 3.0
 
-# ✅【修正】画像形式かどうかのチェックを追加
 def _pick_pixabay(hits: List[dict], keywords: List[str]) -> str:
     if not hits:
         return DEFAULT_IMAGE_URL
@@ -106,42 +89,51 @@ def _pick_pixabay(hits: List[dict], keywords: List[str]) -> str:
     top = sorted(hits, key=lambda h: _score(h, kw_set), reverse=True)[:10]
     random.shuffle(top)
 
-    # 🔍 最優先で画像形式・未使用・サイズ適正なURLを返す
     for h in top:
         url = h.get("largeImageURL") or h.get("webformatURL")
         if url and not _is_recently_used(url) and _valid_dim(h) and _is_image_url(url):
             _mark_used(url)
             return url
 
-    # 🔁 サイズ不問でも画像形式であればOK
     for h in top:
         url = h.get("largeImageURL") or h.get("webformatURL")
         if url and not _is_recently_used(url) and _is_image_url(url):
             _mark_used(url)
             return url
 
-    # 🔚 最後のフォールバック（確認なし）
     url = top[0].get("largeImageURL") or top[0].get("webformatURL") or DEFAULT_IMAGE_URL
     _mark_used(url)
     return url
 
-# ══════════════════════════════════════════════
-# Unsplash Source
-# ══════════════════════════════════════════════
 def _unsplash_src(query: str) -> str:
     words = query.split()[:6]
     short = " ".join(words)[:120]
     q = requests.utils.quote(short)
     return f"https://source.unsplash.com/featured/1200x630/?{q}"
 
-# ══════════════════════════════════════════════
-# Public API
-# ══════════════════════════════════════════════
-def fetch_featured_image(query: str) -> str:
-    """
-    高精度なアイキャッチ画像を取得する。
-    クエリから不要語除去・英語化・補強語追加・Pixabay→Unsplash→デフォルトの順で対応。
-    """
+# ✅ 新機能：画像をダウンロードしてローカル保存（ファイル名 = 記事タイトル）
+def _download_and_save_image(image_url: str, title: str) -> str:
+    try:
+        filename = secure_filename(title.strip()) + ".jpg"
+        local_path = os.path.join(IMAGE_SAVE_DIR, filename)
+        if not os.path.exists(IMAGE_SAVE_DIR):
+            os.makedirs(IMAGE_SAVE_DIR, exist_ok=True)
+
+        # 既に保存済なら再DLしない
+        if not os.path.exists(local_path):
+            r = requests.get(image_url, timeout=10)
+            r.raise_for_status()
+            with open(local_path, "wb") as f:
+                f.write(r.content)
+        return f"{IMAGE_URL_PREFIX}/{filename}"
+    except Exception as e:
+        logging.error(f"[画像保存失敗] {image_url}: {e}")
+        return DEFAULT_IMAGE_URL
+
+# ─────────────────────────────────────────────
+# 🔧 Public API
+# ─────────────────────────────────────────────
+def fetch_featured_image(query: str, title: str = "") -> str:
     def is_safe_image(url: str) -> bool:
         return url.lower().endswith(('.jpg', '.jpeg', '.png'))
 
@@ -160,53 +152,20 @@ def fetch_featured_image(query: str) -> str:
         base_query = clean_and_translate(query)
         keywords = base_query.split()
 
-        # 1. 素のクエリ
         hits = _search_pixabay(base_query)
         url  = _pick_pixabay(hits, keywords)
         if url and is_safe_image(url):
-            return url
+            return _download_and_save_image(url, title or query)
 
-        # 2. 補強検索（補助語追加）
         enhanced_query = f"{base_query} woman person lifestyle"
         hits = _search_pixabay(enhanced_query)
         url = _pick_pixabay(hits, keywords + ["woman", "person", "lifestyle"])
         if url and is_safe_image(url):
-            return url
+            return _download_and_save_image(url, title or query)
 
-        # 3. Unsplash fallback
-        unsplash_url = _unsplash_src(base_query)
-        if is_safe_image(unsplash_url):
-            return unsplash_url
-
-        return DEFAULT_IMAGE_URL
+        fallback_url = _unsplash_src(base_query)
+        return fallback_url
 
     except Exception as e:
         logging.error("fetch_featured_image fatal: %s", e)
-        return DEFAULT_IMAGE_URL
-
-
-def fetch_featured_image_from_body(body_html: str, keyword: str) -> str:
-    from bs4 import BeautifulSoup
-
-    def extract_top_topics(html: str) -> List[str]:
-        soup = BeautifulSoup(html, "html.parser")
-        # h2とh3をすべて取得し、見出し語句の上位3件を選定
-        headings = soup.find_all(["h2", "h3"])
-        phrases = [h.get_text().strip() for h in headings]
-        return phrases[:3] if phrases else [keyword]
-
-    try:
-        topics = extract_top_topics(body_html)
-        queries = [f"{keyword} {t}" for t in topics]
-
-        for query in queries:
-            hits = _search_pixabay(query)
-            url = _pick_pixabay(hits, query.split())
-            if url and url.lower().endswith((".jpg", ".jpeg", ".png")):
-                return url
-
-        # 最後に Unsplash fallback
-        return _unsplash_src(f"{keyword} {topics[0]}")
-    except Exception as e:
-        logging.error(f"画像選定失敗: {e}")
         return DEFAULT_IMAGE_URL
