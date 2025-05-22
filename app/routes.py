@@ -544,15 +544,16 @@ def generate():
         for s in Site.query.filter_by(user_id=current_user.id)
     ]
 
-    # ▼ クエリ文字列 ?site_id=◯ を受け取り、デフォルト選択に反映
-    if request.method == "GET":
-        preselected_site_id = request.args.get("site_id", type=int)
-        if preselected_site_id:
-            form.site_select.data = preselected_site_id
+    # ▼ クエリパラメータから事前選択されたsite_idとstatusを取得
+    selected_site_id = request.args.get("site_id", type=int)
+    status_filter = request.args.get("status")  # "used" / "unused" / None
+
+    if request.method == "GET" and selected_site_id:
+        form.site_select.data = selected_site_id
 
     # ▼ POST処理（記事生成）
     if form.validate_on_submit():
-        kws     = [k.strip() for k in form.keywords.data.splitlines() if k.strip()]
+        kws = [k.strip() for k in form.keywords.data.splitlines() if k.strip()]
         site_id = form.site_select.data or None
         enqueue_generation(
             current_user.id,
@@ -564,17 +565,37 @@ def generate():
         flash(f"{len(kws)} 件をキューに登録しました", "success")
         return redirect(url_for(".log_sites"))
 
-    # ▼ 未使用キーワード（右カラム用）を取得
-    site_id = form.site_select.data or None
+    # ▼ 表示するキーワード一覧を取得（statusフィルタも考慮）
     keyword_choices = []
-    if site_id:
-        keyword_choices = Keyword.query.filter_by(
-            user_id=current_user.id,
-            site_id=site_id,
-            used=False
-        ).order_by(Keyword.id.desc()).limit(1000).all()
+    selected_site = None
+    site_name = None
 
-    return render_template("generate.html", form=form, keyword_choices=keyword_choices)
+    if form.site_select.data:
+        selected_site_id = form.site_select.data
+        selected_site = Site.query.get(selected_site_id)
+        site_name = selected_site.name if selected_site else ""
+
+        keyword_query = Keyword.query.filter_by(
+            user_id=current_user.id,
+            site_id=selected_site_id
+        )
+
+        if status_filter == "used":
+            keyword_query = keyword_query.filter_by(used=True)
+        elif status_filter == "unused":
+            keyword_query = keyword_query.filter_by(used=False)
+
+        keyword_choices = keyword_query.order_by(Keyword.id.desc()).limit(1000).all()
+
+    return render_template(
+        "generate.html",
+        form=form,
+        keyword_choices=keyword_choices,
+        selected_site=selected_site,
+        site_name=site_name,
+        status_filter=status_filter
+    )
+
 
 
 
