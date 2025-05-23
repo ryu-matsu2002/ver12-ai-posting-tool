@@ -49,14 +49,15 @@ def robots_txt():
     return send_from_directory('static', 'robots.txt')
 
 
+from app.models import Article, User, PromptTemplate, Site
+import os
+
 @admin_bp.route("/admin")
 @login_required
 def admin_dashboard():
     if not current_user.is_admin:
         flash("このページにはアクセスできません。", "error")
         return redirect(url_for("main.dashboard"))
-
-    # from app.image_utils import _is_image_url ← 一時的にコメントアウト
 
     user_count    = User.query.count()
     site_count    = Site.query.count()
@@ -69,24 +70,21 @@ def admin_dashboard():
     for user in users:
         articles = Article.query.filter(
             Article.user_id == user.id,
-            Article.status.in_(["done", "posted", "error"]),
+            Article.status.in_(["done", "posted", "error"])
         ).all()
 
         missing = []
         for a in articles:
-            url = (a.image_url or "").strip()
-            if url in ["", "None"]:
+            img_url = (a.image_url or "").strip()
+            if img_url in ["", "None"]:
                 missing.append(a)
-            elif url.startswith("/static/images/"):
-                local_path = os.path.join("app", url.lstrip("/"))
+            elif img_url.startswith("/static/images/"):
+                local_path = os.path.join("app", img_url.lstrip("/"))
                 if not os.path.exists(local_path):
                     missing.append(a)
-            # elif not _is_image_url(url):  # ← 一時的に無効化
-            #     missing.append(a)
 
         if missing:
             missing_count_map[user.id] = len(missing)
-            print(f"[DEBUG] {user.email} → {len(missing)} 件")  # ← ログ出力で確認
 
     return render_template(
         "admin/dashboard.html",
@@ -97,7 +95,6 @@ def admin_dashboard():
         users=users,
         missing_count_map=missing_count_map
     )
-
 
 
 @admin_bp.route("/admin/users")

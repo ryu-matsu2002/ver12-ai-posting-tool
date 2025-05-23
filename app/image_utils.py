@@ -39,15 +39,16 @@ def _mark_used(url: str) -> None:
     _used_image_urls[url] = time.time()
 
 def _is_image_url(url: str) -> bool:
-    if not url:
-        return False
-    if url.strip() in ["", "None"]:
+    if not url or url.strip() in ["", "None"]:
         return False
     if url.startswith("/static/images/"):
-        return True
+        # ファイルが実在するか確認
+        local_path = os.path.join("app", url.lstrip("/"))
+        return os.path.exists(local_path)
     if url.startswith("http") and any(ext in url.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"]):
         return True
     return False
+
 
 
 
