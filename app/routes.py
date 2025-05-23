@@ -56,7 +56,7 @@ def admin_dashboard():
         flash("このページにはアクセスできません。", "error")
         return redirect(url_for("main.dashboard"))
 
-    from app.image_utils import _is_image_url  # ← 追加
+    from app.image_utils import _is_image_url  # 🔹 忘れずに
 
     user_count    = User.query.count()
     site_count    = Site.query.count()
@@ -64,8 +64,8 @@ def admin_dashboard():
     article_count = Article.query.count()
 
     users = User.query.all()
-
     missing_count_map = {}
+
     for user in users:
         articles = Article.query.filter(
             Article.user_id == user.id,
@@ -74,17 +74,18 @@ def admin_dashboard():
 
         missing = []
         for a in articles:
-            if not a.image_url or a.image_url.strip() in ["", "None"]:
+            url = a.image_url or ""
+            if url.strip() in ["", "None"]:
                 missing.append(a)
-            elif a.image_url.startswith("/static/images/"):
-                local_path = os.path.join("app", a.image_url.lstrip("/"))
+            elif url.startswith("/static/images/"):
+                local_path = os.path.join("app", url.lstrip("/"))
                 if not os.path.exists(local_path):
                     missing.append(a)
-            elif not _is_image_url(a.image_url):  # ← ここも高速判定
+            elif not _is_image_url(url):
                 missing.append(a)
 
         if missing:
-            missing_count_map[user.id] = len(missing)
+            missing_count_map[user.id] = len(missing)  # 🔹 ここをforループ内で設定！
 
     return render_template(
         "admin/dashboard.html",
@@ -95,6 +96,7 @@ def admin_dashboard():
         users=users,
         missing_count_map=missing_count_map
     )
+
 
 
 @admin_bp.route("/admin/users")
