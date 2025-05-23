@@ -57,6 +57,8 @@ import os
 from flask import current_app
 from app.image_utils import _is_image_url
 
+from os.path import exists
+
 @admin_bp.route("/admin")
 @login_required
 def admin_dashboard():
@@ -80,22 +82,15 @@ def admin_dashboard():
 
         missing = []
         for a in articles:
-            url = a.image_url or ""
-
-            # アイキャッチが未設定の条件を厳密化
-            is_missing = False
-
-            if url.strip() in ["", "None"]:
-                is_missing = True
+            url = a.image_url
+            if not url or url.strip() in ["", "None"]:
+                missing.append(a)
             elif url.startswith("/static/images/"):
-                filename = url.replace("/static/images/", "")
-                local_path = os.path.join("app", "static", "images", filename)
-                if not os.path.exists(local_path) or filename == ".jpg":
-                    is_missing = True
-            elif not _is_image_url(url):
-                is_missing = True
-
-            if is_missing:
+                fname = url.replace("/static/images/", "")
+                path = os.path.join("app", "static", "images", fname)
+                if not fname or not exists(path):  # ローカルに画像が存在しない場合
+                    missing.append(a)
+            elif not _is_image_url(url):  # 外部URLだが破損してる可能性あり
                 missing.append(a)
 
         if missing:
@@ -110,6 +105,7 @@ def admin_dashboard():
         users=users,
         missing_count_map=missing_count_map
     )
+
 
 
 
