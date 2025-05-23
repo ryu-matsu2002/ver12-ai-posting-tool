@@ -50,11 +50,15 @@
             {{ missing_count_map.get(user.id, 0) }} 件
           </td>
           <td class="p-2">
-            {% if missing_count_map.get(user.id, 0) > 0 %}
+            {% set missing_count = missing_count_map.get(user.id, 0) %}
+            {% if missing_count > 0 %}
               <a href="{{ url_for('admin.refresh_images', user_id=user.id) }}"
                  class="inline-block bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 transition">
                 このユーザーを復元
               </a>
+              <div class="text-xs text-gray-400 mt-1 break-all">
+                🔗 {{ url_for('admin.refresh_images', user_id=user.id) }}
+              </div>
             {% else %}
               <span class="text-gray-400">復元不要</span>
             {% endif %}

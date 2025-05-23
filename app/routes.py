@@ -261,7 +261,7 @@ def fix_missing_images():
 
 
 # ─────────── 管理者専用：アイキャッチ一括復元（ユーザー単位）
-@admin_bp.route("/admin/refresh-images/<int:user_id>")
+@admin_bp.route("/refresh-images/<int:user_id>")
 @login_required
 def refresh_images(user_id):
     if not current_user.is_admin:
