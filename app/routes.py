@@ -56,7 +56,7 @@ def admin_dashboard():
         flash("このページにはアクセスできません。", "error")
         return redirect(url_for("main.dashboard"))
 
-    from app.image_utils import _is_image_url  # 🔹 忘れずに
+    # from app.image_utils import _is_image_url ← 一時的にコメントアウト
 
     user_count    = User.query.count()
     site_count    = Site.query.count()
@@ -74,18 +74,19 @@ def admin_dashboard():
 
         missing = []
         for a in articles:
-            url = a.image_url or ""
-            if url.strip() in ["", "None"]:
+            url = (a.image_url or "").strip()
+            if url in ["", "None"]:
                 missing.append(a)
             elif url.startswith("/static/images/"):
                 local_path = os.path.join("app", url.lstrip("/"))
                 if not os.path.exists(local_path):
                     missing.append(a)
-            elif not _is_image_url(url):
-                missing.append(a)
+            # elif not _is_image_url(url):  # ← 一時的に無効化
+            #     missing.append(a)
 
         if missing:
-            missing_count_map[user.id] = len(missing)  # 🔹 ここをforループ内で設定！
+            missing_count_map[user.id] = len(missing)
+            print(f"[DEBUG] {user.email} → {len(missing)} 件")  # ← ログ出力で確認
 
     return render_template(
         "admin/dashboard.html",
