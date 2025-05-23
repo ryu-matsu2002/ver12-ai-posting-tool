@@ -40,20 +40,27 @@ def _mark_used(url: str) -> None:
 
 # 外部URLでも有効かを HEAD リクエストで検査（text/html を除外）
 def _is_image_url(url: str) -> bool:
+    import requests
     if not url or url.strip() in ["", "None"]:
         return False
+
     if url.startswith("/static/images/"):
         filename = os.path.basename(url)
         path = os.path.join("app", "static", "images", filename)
-        return os.path.exists(path) and os.path.getsize(path) > 0
-    if url.startswith("http"):
+        return filename.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')) and os.path.exists(path) and os.path.getsize(path) > 0
+
+    if url.startswith("http") and any(ext in url.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"]):
         try:
-            head = requests.head(url, timeout=5)
-            content_type = head.headers.get("Content-Type", "")
-            return "image" in content_type
-        except Exception:
+            r = requests.head(url, timeout=5, allow_redirects=True)
+            content_type = r.headers.get("Content-Type", "")
+            return "image" in content_type.lower()
+        except Exception as e:
+            # Flask が落ちないようにログだけ残す
+            current_app.logger.warning(f"[画像HEAD失敗] {url} - {e}")
             return False
+
     return False
+
 
 
 
