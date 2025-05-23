@@ -83,16 +83,14 @@ def admin_dashboard():
                 missing.append(a)
 
             elif url.startswith("/static/images/"):
-                # ローカルファイルとして存在するか確認
                 fname = url.replace("/static/images/", "")
                 path = os.path.abspath(os.path.join("app", "static", "images", fname))
                 if not fname or not exists(path) or getsize(path) == 0:
                     missing.append(a)
 
             elif url.startswith("http"):
-                # 外部画像URLの期限切れ・破損をチェック（_is_image_urlはHEADリクエストで確認）
-                if not _is_image_url(url):
-                    missing.append(a)
+                # 外部URLは期限切れの可能性があるため復元対象とする（HEADリクエストは行わない）
+                missing.append(a)
 
         # 全ユーザーを記録（missing=0でも）
         missing_count_map[user.id] = len(missing)
