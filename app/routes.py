@@ -54,6 +54,9 @@ def robots_txt():
 from app.models import Article, User, PromptTemplate, Site
 import os
 
+from flask import current_app
+from app.image_utils import _is_image_url
+
 @admin_bp.route("/admin")
 @login_required
 def admin_dashboard():
@@ -67,7 +70,6 @@ def admin_dashboard():
     article_count = Article.query.count()
     users = User.query.all()
 
-    # 各ユーザーごとの未設定画像数を正確にカウント
     missing_count_map = {}
 
     for user in users:
@@ -78,12 +80,22 @@ def admin_dashboard():
 
         missing = []
         for a in articles:
-            url = a.image_url
-            if not url or url.strip() in ["", "None"]:
-                missing.append(a)
-            elif url.startswith("/static/images/") and url.endswith("/.jpg"):
-                missing.append(a)
-            elif not _is_image_url(url):  # 外部URLも無効と判定される場合あり
+            url = a.image_url or ""
+
+            # アイキャッチが未設定の条件を厳密化
+            is_missing = False
+
+            if url.strip() in ["", "None"]:
+                is_missing = True
+            elif url.startswith("/static/images/"):
+                filename = url.replace("/static/images/", "")
+                local_path = os.path.join("app", "static", "images", filename)
+                if not os.path.exists(local_path) or filename == ".jpg":
+                    is_missing = True
+            elif not _is_image_url(url):
+                is_missing = True
+
+            if is_missing:
                 missing.append(a)
 
         if missing:
@@ -98,6 +110,7 @@ def admin_dashboard():
         users=users,
         missing_count_map=missing_count_map
     )
+
 
 
 
