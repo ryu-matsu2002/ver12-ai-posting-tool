@@ -281,32 +281,36 @@ def refresh_images(user_id):
         (Article.image_url.is_(None)) | (Article.image_url == "") | (Article.image_url == "None")
     ).all()
 
+    print(f"=== 対象記事数: {len(articles)}")
+
     for art in articles:
         try:
-            # 本文から最初のh2を取得して画像キーワードを組み立て
             match = re.search(r"<h2[^>]*>(.*?)</h2>", art.body or "", re.IGNORECASE)
             first_h2 = match.group(1) if match else ""
             query = f"{art.keyword} {first_h2}".strip() or art.title or art.keyword or "記事 アイキャッチ"
             title = art.title or art.keyword or "記事"
 
-            # 画像URLを取得して保存
+            print(f"🟡 記事ID={art.id}, クエリ='{query}'")
+
             new_url = fetch_featured_image(query, title=title)
 
             if new_url and new_url != DEFAULT_IMAGE_URL:
                 art.image_url = new_url
                 restored += 1
+                print(f"✅ 復元成功 → {new_url}")
             else:
                 failed += 1
+                print(f"❌ 復元失敗（DEFAULT_IMAGE_URL）")
 
         except Exception as e:
             failed += 1
-            current_app.logger.warning(f"[復元失敗] Article ID: {art.id}, Error: {e}")
+            print(f"🔥 Exception: {e}")
             continue
 
     db.session.commit()
-
     flash(f"✅ 復元完了: {restored} 件 / ❌ 失敗: {failed} 件", "info")
     return redirect(url_for("admin.admin_dashboard"))
+
 
 
 @bp.route("/keywords", methods=["GET", "POST"])
