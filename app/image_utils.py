@@ -38,22 +38,23 @@ def _is_recently_used(url: str, ttl: int = RECENTLY_USED_TTL) -> bool:
 def _mark_used(url: str) -> None:
     _used_image_urls[url] = time.time()
 
+# 外部URLでも有効かを HEAD リクエストで検査（text/html を除外）
 def _is_image_url(url: str) -> bool:
     if not url or url.strip() in ["", "None"]:
         return False
-
     if url.startswith("/static/images/"):
         filename = os.path.basename(url)
-        if not filename.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
+        path = os.path.join("app", "static", "images", filename)
+        return os.path.exists(path) and os.path.getsize(path) > 0
+    if url.startswith("http"):
+        try:
+            head = requests.head(url, timeout=5)
+            content_type = head.headers.get("Content-Type", "")
+            return "image" in content_type
+        except Exception:
             return False
-        # ✅ 絶対パスで存在確認
-        local_path = os.path.abspath(os.path.join("app", "static", "images", filename))
-        return os.path.exists(local_path)
-
-    if url.startswith("http") and any(ext in url.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"]):
-        return True
-
     return False
+
 
 
 

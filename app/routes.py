@@ -52,7 +52,7 @@ def robots_txt():
 
 
 from app.models import Article, User, PromptTemplate, Site
-from os.path import exists
+from os.path import exists, getsize
 
 @admin_bp.route("/admin")
 @login_required
@@ -83,15 +83,18 @@ def admin_dashboard():
                 missing.append(a)
 
             elif url.startswith("/static/images/"):
+                # ローカルファイルとして存在するか確認
                 fname = url.replace("/static/images/", "")
                 path = os.path.abspath(os.path.join("app", "static", "images", fname))
-                if not fname or not exists(path):  # ✅ ローカルに画像が存在しない
+                if not fname or not exists(path) or getsize(path) == 0:
                     missing.append(a)
 
-            elif not _is_image_url(url):  # ✅ 外部URLが壊れてる可能性
-                missing.append(a)
+            elif url.startswith("http"):
+                # 外部画像URLの期限切れ・破損をチェック（_is_image_urlはHEADリクエストで確認）
+                if not _is_image_url(url):
+                    missing.append(a)
 
-        # ✅ 全ユーザーを記録（件数0でも）
+        # 全ユーザーを記録（missing=0でも）
         missing_count_map[user.id] = len(missing)
 
     return render_template(
@@ -103,6 +106,7 @@ def admin_dashboard():
         users=users,
         missing_count_map=missing_count_map
     )
+
 
 
 @admin_bp.route("/admin/users")
