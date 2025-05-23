@@ -268,8 +268,9 @@ def refresh_images(user_id):
         flash("管理者権限が必要です。", "danger")
         return redirect(url_for("main.dashboard"))
 
-    from app.image_utils import fetch_featured_image
     import re
+    from app.image_utils import fetch_featured_image, DEFAULT_IMAGE_URL
+    from app import db
 
     restored = 0
     failed = 0
@@ -282,23 +283,30 @@ def refresh_images(user_id):
 
     for art in articles:
         try:
+            # 本文から最初のh2を取得して画像キーワードを組み立て
             match = re.search(r"<h2[^>]*>(.*?)</h2>", art.body or "", re.IGNORECASE)
             first_h2 = match.group(1) if match else ""
             query = f"{art.keyword} {first_h2}".strip() or art.title or art.keyword or "記事 アイキャッチ"
             title = art.title or art.keyword or "記事"
-            art.image_url = fetch_featured_image(query, title=title)
-            restored += 1 if art.image_url else 0
+
+            # 画像URLを取得して保存
+            new_url = fetch_featured_image(query, title=title)
+
+            if new_url and new_url != DEFAULT_IMAGE_URL:
+                art.image_url = new_url
+                restored += 1
+            else:
+                failed += 1
+
         except Exception as e:
             failed += 1
+            current_app.logger.warning(f"[復元失敗] Article ID: {art.id}, Error: {e}")
             continue
 
-    from app import db
     db.session.commit()
 
     flash(f"✅ 復元完了: {restored} 件 / ❌ 失敗: {failed} 件", "info")
     return redirect(url_for("admin.admin_dashboard"))
-
-
 
 
 @bp.route("/keywords", methods=["GET", "POST"])
