@@ -61,9 +61,9 @@ def admin_dashboard():
         flash("このページにはアクセスできません。", "error")
         return redirect(url_for("main.dashboard"))
 
-    user_count = User.query.count()
-    site_count = Site.query.count()
-    prompt_count = PromptTemplate.query.count()
+    user_count    = User.query.count()
+    site_count    = Site.query.count()
+    prompt_count  = PromptTemplate.query.count()
     article_count = Article.query.count()
     users = User.query.all()
 
@@ -78,17 +78,20 @@ def admin_dashboard():
         missing = []
         for a in articles:
             url = a.image_url
+
             if not url or url.strip() in ["", "None"]:
                 missing.append(a)
+
             elif url.startswith("/static/images/"):
                 fname = url.replace("/static/images/", "")
-                path = os.path.join("app", "static", "images", fname)
-                if not fname or not exists(path):  # ←ここでローカルファイルが存在しないものを missing に追加
+                path = os.path.abspath(os.path.join("app", "static", "images", fname))
+                if not fname or not exists(path):  # ✅ ローカルに画像が存在しない
                     missing.append(a)
-            elif not _is_image_url(url):  # 外部URLで画像拡張子が無い/壊れてる
+
+            elif not _is_image_url(url):  # ✅ 外部URLが壊れてる可能性
                 missing.append(a)
 
-        # ✅ 必ず全ユーザー記録（0件も含む）
+        # ✅ 全ユーザーを記録（件数0でも）
         missing_count_map[user.id] = len(missing)
 
     return render_template(
@@ -100,7 +103,6 @@ def admin_dashboard():
         users=users,
         missing_count_map=missing_count_map
     )
-
 
 
 @admin_bp.route("/admin/users")
