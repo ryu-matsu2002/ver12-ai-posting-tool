@@ -36,6 +36,8 @@ from .article_generator import (
 )
 from app.forms import EditKeywordForm
 from .forms import KeywordForm
+from app.image_utils import _is_image_url
+
 
 JST = timezone("Asia/Tokyo")
 bp = Blueprint("main", __name__)
@@ -63,25 +65,26 @@ def admin_dashboard():
     site_count    = Site.query.count()
     prompt_count  = PromptTemplate.query.count()
     article_count = Article.query.count()
-
     users = User.query.all()
+
+    # 各ユーザーごとの未設定画像数を正確にカウント
     missing_count_map = {}
 
     for user in users:
         articles = Article.query.filter(
             Article.user_id == user.id,
-            Article.status.in_(["done", "posted", "error"])
+            Article.status.in_(["done", "posted", "error"]),
         ).all()
 
         missing = []
         for a in articles:
-            img_url = (a.image_url or "").strip()
-            if img_url in ["", "None"]:
+            url = a.image_url
+            if not url or url.strip() in ["", "None"]:
                 missing.append(a)
-            elif img_url.startswith("/static/images/"):
-                local_path = os.path.join("app", img_url.lstrip("/"))
-                if not os.path.exists(local_path):
-                    missing.append(a)
+            elif url.startswith("/static/images/") and url.endswith("/.jpg"):
+                missing.append(a)
+            elif not _is_image_url(url):  # 外部URLも無効と判定される場合あり
+                missing.append(a)
 
         if missing:
             missing_count_map[user.id] = len(missing)
@@ -95,6 +98,7 @@ def admin_dashboard():
         users=users,
         missing_count_map=missing_count_map
     )
+
 
 
 @admin_bp.route("/admin/users")
