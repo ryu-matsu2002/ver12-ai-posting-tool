@@ -52,11 +52,6 @@ def robots_txt():
 
 
 from app.models import Article, User, PromptTemplate, Site
-import os
-
-from flask import current_app
-from app.image_utils import _is_image_url
-
 from os.path import exists
 
 @admin_bp.route("/admin")
@@ -66,9 +61,9 @@ def admin_dashboard():
         flash("このページにはアクセスできません。", "error")
         return redirect(url_for("main.dashboard"))
 
-    user_count    = User.query.count()
-    site_count    = Site.query.count()
-    prompt_count  = PromptTemplate.query.count()
+    user_count = User.query.count()
+    site_count = Site.query.count()
+    prompt_count = PromptTemplate.query.count()
     article_count = Article.query.count()
     users = User.query.all()
 
@@ -88,12 +83,12 @@ def admin_dashboard():
             elif url.startswith("/static/images/"):
                 fname = url.replace("/static/images/", "")
                 path = os.path.join("app", "static", "images", fname)
-                if not fname or not exists(path):  # ローカルに画像が存在しない場合
+                if not fname or not exists(path):  # ←ここでローカルファイルが存在しないものを missing に追加
                     missing.append(a)
-            elif not _is_image_url(url):  # 外部URLだが破損してる可能性あり
+            elif not _is_image_url(url):  # 外部URLで画像拡張子が無い/壊れてる
                 missing.append(a)
 
-        # ✅ 全ユーザーを必ず記録
+        # ✅ 必ず全ユーザー記録（0件も含む）
         missing_count_map[user.id] = len(missing)
 
     return render_template(
@@ -105,6 +100,7 @@ def admin_dashboard():
         users=users,
         missing_count_map=missing_count_map
     )
+
 
 
 @admin_bp.route("/admin/users")
