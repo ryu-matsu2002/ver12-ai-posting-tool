@@ -39,13 +39,16 @@ def _mark_used(url: str) -> None:
     _used_image_urls[url] = time.time()
 
 def _is_image_url(url: str) -> bool:
-    try:
-        r = requests.head(url, timeout=1, allow_redirects=True)
-        content_type = r.headers.get("Content-Type", "")
-        return content_type.startswith("image/")
-    except requests.exceptions.RequestException as e:
-        logging.warning(f"[画像判定失敗] {url} → {e}")
+    if not url:
         return False
+    if url.strip() in ["", "None"]:
+        return False
+    if url.startswith("/static/images/"):
+        return True
+    if url.startswith("http") and any(ext in url.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"]):
+        return True
+    return False
+
 
 
 def _search_pixabay(query: str, per_page: int = MAX_PER_PAGE) -> List[dict]:

@@ -23,6 +23,7 @@ from .wp_client import post_to_wp, _decorate_html
 
 # --- 既存の import の下に追加 ---
 import re
+import os
 import logging
 from datetime import datetime
 from .image_utils import fetch_featured_image  # ← ✅ 正しい
@@ -55,17 +56,16 @@ def admin_dashboard():
         flash("このページにはアクセスできません。", "error")
         return redirect(url_for("main.dashboard"))
 
-    from app.image_utils import _is_image_url
-    import os
+    from app.image_utils import _is_image_url  # ← 追加
 
-    user_count = User.query.count()
-    site_count = Site.query.count()
-    prompt_count = PromptTemplate.query.count()
+    user_count    = User.query.count()
+    site_count    = Site.query.count()
+    prompt_count  = PromptTemplate.query.count()
     article_count = Article.query.count()
 
     users = User.query.all()
-    missing_count_map = {}
 
+    missing_count_map = {}
     for user in users:
         articles = Article.query.filter(
             Article.user_id == user.id,
@@ -80,7 +80,7 @@ def admin_dashboard():
                 local_path = os.path.join("app", a.image_url.lstrip("/"))
                 if not os.path.exists(local_path):
                     missing.append(a)
-            elif not _is_image_url(a.image_url):
+            elif not _is_image_url(a.image_url):  # ← ここも高速判定
                 missing.append(a)
 
         if missing:
@@ -95,10 +95,6 @@ def admin_dashboard():
         users=users,
         missing_count_map=missing_count_map
     )
-
-
-
-
 
 
 @admin_bp.route("/admin/users")
