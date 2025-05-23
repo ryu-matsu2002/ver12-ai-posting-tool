@@ -24,6 +24,7 @@ from .wp_client import post_to_wp, _decorate_html
 # --- 既存の import の下に追加 ---
 import re
 import logging
+import os
 from datetime import datetime
 from .image_utils import fetch_featured_image  # ← ✅ 正しい
 from collections import defaultdict
@@ -35,6 +36,7 @@ from .article_generator import (
 )
 from app.forms import EditKeywordForm
 from .forms import KeywordForm
+from app.image_utils import _is_image_url
 
 JST = timezone("Asia/Tokyo")
 bp = Blueprint("main", __name__)
@@ -68,16 +70,21 @@ def admin_dashboard():
         articles = Article.query.filter(
             Article.user_id == user.id,
             Article.status.in_(["done", "posted", "error"]),
-            Article.image_url.in_([None, "", "None"])
         ).all()
 
-        for a in articles:
-            print(f"[DEBUG] {a.id=} {a.title=} {a.image_url=}")  # ← ログ確認用
+    missing = []
+    for a in articles:
+        if not a.image_url or a.image_url.strip() in ["", "None"]:
+            missing.append(a)
+        elif a.image_url.startswith("/static/images/"):
+            local_path = os.path.join("app", a.image_url.lstrip("/"))
+            if not os.path.exists(local_path):
+                missing.append(a)
+        elif not _is_image_url(a.image_url):  # 外部URLなら実際に画像かチェック
+            missing.append(a)
 
-        count = len(articles)
-        if count > 0:
-            missing_count_map[user.id] = count
-
+    if missing:
+        missing_count_map[user.id] = len(missing)
     return render_template(
         "admin/dashboard.html",
         user_count=user_count,
