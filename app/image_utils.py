@@ -40,12 +40,13 @@ def _mark_used(url: str) -> None:
 
 def _is_image_url(url: str) -> bool:
     try:
-        r = requests.head(url, timeout=5)
+        r = requests.head(url, timeout=1)  # ← タイムアウトを1秒に短縮
         content_type = r.headers.get("Content-Type", "")
         return content_type.startswith("image/")
     except Exception as e:
         logging.warning(f"[画像判定失敗] {url} → {e}")
-        return False
+        return False  # タイムアウトや例外時は False を返す
+
 
 def _search_pixabay(query: str, per_page: int = MAX_PER_PAGE) -> List[dict]:
     if not PIXABAY_API_KEY or not query:
