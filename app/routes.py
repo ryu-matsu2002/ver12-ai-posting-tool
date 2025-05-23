@@ -93,8 +93,8 @@ def admin_dashboard():
             elif not _is_image_url(url):  # 外部URLだが破損してる可能性あり
                 missing.append(a)
 
-        if missing:
-            missing_count_map[user.id] = len(missing)
+        # ✅ 全ユーザーを必ず記録
+        missing_count_map[user.id] = len(missing)
 
     return render_template(
         "admin/dashboard.html",
@@ -105,9 +105,6 @@ def admin_dashboard():
         users=users,
         missing_count_map=missing_count_map
     )
-
-
-
 
 
 @admin_bp.route("/admin/users")
