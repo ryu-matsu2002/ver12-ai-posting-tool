@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}プロフィール編集{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto bg-white dark:bg-gray-800 p-8 rounded shadow">
+  <h2 class="text-2xl font-bold mb-6 text-center">プロフィール編集</h2>
+
+  <form method="post" action="{{ url_for('main.profile', username=current_user.username) }}">
+    {{ form.hidden_tag() }}
+
+    <!-- ユーザー名（初回のみ編集可） -->
+    <div class="mb-4">
+      {{ form.username.label(class="block mb-1") }}
+      {% if current_user.username.startswith("user") %}
+        {{ form.username(class="w-full p-2 rounded border") }}
+        <p class="text-sm text-gray-500 mt-1">※ 一度だけ変更できます</p>
+      {% else %}
+        {{ form.username(class="w-full p-2 rounded border", readonly=true) }}
+        <p class="text-sm text-gray-500 mt-1">※ ユーザー名は変更できません</p>
+      {% endif %}
+    </div>
+
+    <div class="flex gap-4 mb-4">
+      <div class="w-1/2">
+        {{ form.last_name.label(class="block mb-1") }}
+        {{ form.last_name(class="w-full p-2 rounded border") }}
+      </div>
+      <div class="w-1/2">
+        {{ form.first_name.label(class="block mb-1") }}
+        {{ form.first_name(class="w-full p-2 rounded border") }}
+      </div>
+    </div>
+
+    <div class="flex gap-4 mb-4">
+      <div class="w-1/2">
+        {{ form.last_kana.label(class="block mb-1") }}
+        {{ form.last_kana(class="w-full p-2 rounded border") }}
+      </div>
+      <div class="w-1/2">
+        {{ form.first_kana.label(class="block mb-1") }}
+        {{ form.first_kana(class="w-full p-2 rounded border") }}
+      </div>
+    </div>
+
+    <div class="mb-4">
+      {{ form.phone.label(class="block mb-1") }}
+      {{ form.phone(class="w-full p-2 rounded border") }}
+    </div>
+
+    <div class="mb-4">
+      {{ form.postal_code.label(class="block mb-1") }}
+      {{ form.postal_code(class="w-full p-2 rounded border") }}
+    </div>
+
+    <div class="flex gap-4 mb-4">
+      <div class="w-1/2">
+        {{ form.prefecture.label(class="block mb-1") }}
+        {{ form.prefecture(class="w-full p-2 rounded border") }}
+      </div>
+      <div class="w-1/2">
+        {{ form.city.label(class="block mb-1") }}
+        {{ form.city(class="w-full p-2 rounded border") }}
+      </div>
+    </div>
+
+    <div class="mb-4">
+      {{ form.address1.label(class="block mb-1") }}
+      {{ form.address1(class="w-full p-2 rounded border") }}
+    </div>
+
+    <div class="mb-4">
+      {{ form.address2.label(class="block mb-1") }}
+      {{ form.address2(class="w-full p-2 rounded border") }}
+    </div>
+
+    <div class="text-center">
+      {{ form.submit(class="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700") }}
+    </div>
+  </form>
+</div>
+{% endblock %}

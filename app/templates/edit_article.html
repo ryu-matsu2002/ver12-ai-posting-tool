@@ -5,7 +5,8 @@
 
 <!-- 🔙 記事一覧に戻るリンク -->
 <div class="mb-4">
-  <a href="{{ url_for('main.log', site_id=article.site_id) }}" class="text-base text-blue-700 hover:underline font-semibold">
+  <a href="{{ url_for('main.log', username=current_user.username, site_id=article.site_id) }}"
+     class="text-base text-blue-700 hover:underline font-semibold">
     ← 記事一覧に戻る
   </a>
 </div>
@@ -14,17 +15,17 @@
 
 <form method="post" class="max-w-3xl space-y-4">
   {{ form.hidden_tag() }}
-  
+
   <div>
     {{ form.title.label(class="block mb-1") }}
     {{ form.title(class="w-full p-2 border rounded") }}
   </div>
-  
+
   <div>
     {{ form.body.label(class="block mb-1") }}
     {{ form.body(rows=15, class="w-full p-2 border rounded font-mono") }}
   </div>
-  
+
   {{ form.submit(class="px-6 py-2 bg-blue-600 text-white rounded") }}
 </form>
 

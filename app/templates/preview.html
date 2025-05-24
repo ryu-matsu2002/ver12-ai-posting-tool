@@ -4,9 +4,9 @@
 {% block content %}
 <div class="max-w-6xl mx-auto px-4 lg:px-0">
 
-  <!-- 🔙 戻るリンク：大きめ・赤・太字 -->
+  <!-- 🔙 戻るリンク -->
   <div class="mb-6">
-    <a href="{{ url_for('main.log', site_id=article.site_id) }}"
+    <a href="{{ url_for('main.log', username=current_user.username, site_id=article.site_id) }}"
        class="text-blue-600 hover:underline block mb-4 font-semibold">
       ← 記事一覧へ戻る
     </a>
@@ -14,7 +14,6 @@
 
   <!-- 🔤 記事タイトル + 本文 -->
   <div class="bg-white dark:bg-gray-800 p-8 rounded-2xl shadow-2xl leading-relaxed text-gray-800 dark:text-gray-100">
-
     <!-- タイトル -->
     <h1 class="text-4xl md:text-5xl font-extrabold mb-10 tracking-tight">
       {{ article.title }}

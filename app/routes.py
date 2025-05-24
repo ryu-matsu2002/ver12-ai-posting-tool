@@ -16,7 +16,8 @@ from . import db
 from .models import User, Article, PromptTemplate, Site, Keyword
 from .forms import (
     LoginForm, RegisterForm,
-    GenerateForm, PromptForm, ArticleForm, SiteForm
+    GenerateForm, PromptForm, ArticleForm, SiteForm, 
+    ProfileForm
 )
 from .article_generator import enqueue_generation
 from .wp_client import post_to_wp, _decorate_html
@@ -313,21 +314,22 @@ def refresh_images(user_id):
 
 
 
-@bp.route("/keywords", methods=["GET", "POST"])
+@bp.route("/<username>/keywords", methods=["GET", "POST"])
 @login_required
-def keywords():
+def keywords(username):
+    if current_user.username != username:
+        abort(403)
+
     form = KeywordForm()
 
-    # サイト選択肢を設定
     user_sites = Site.query.filter_by(user_id=current_user.id).all()
     form.site_id.choices = [(0, "―― サイトを選択 ――")] + [(s.id, s.name) for s in user_sites]
 
-    # ▼ 登録処理
     if form.validate_on_submit():
         site_id = form.site_id.data
         if site_id == 0:
             flash("サイトを選択してください。", "danger")
-            return redirect(url_for(".keywords"))
+            return redirect(url_for("main.keywords", username=username))
 
         lines = [line.strip() for line in form.keywords.data.splitlines() if line.strip()]
         for word in lines:
@@ -339,14 +341,12 @@ def keywords():
             db.session.add(keyword)
         db.session.commit()
         flash(f"{len(lines)} 件のキーワードを追加しました", "success")
-        return redirect(url_for(".keywords", site_id=site_id))
+        return redirect(url_for("main.keywords", username=username, site_id=site_id))
 
-    # ▼ クエリパラメータ取得
     selected_site_id = request.args.get("site_id", type=int)
-    status_filter = request.args.get("status")  # "used", "unused", or None
+    status_filter = request.args.get("status")
     selected_site = Site.query.get(selected_site_id) if selected_site_id else None
 
-    # ▼ サイトごとにキーワードをグループ化（対象サイトがあれば絞る）
     base_query = Keyword.query.filter_by(user_id=current_user.id)
     if selected_site_id:
         base_query = base_query.filter_by(site_id=selected_site_id)
@@ -356,7 +356,6 @@ def keywords():
         base_query = base_query.filter_by(used=False)
 
     all_keywords = base_query.order_by(Keyword.site_id, Keyword.id.desc()).all()
-
     site_map = {s.id: s.name for s in user_sites}
     grouped_keywords = defaultdict(lambda: {"site_name": "", "keywords": [], "status_filter": status_filter})
 
@@ -379,37 +378,24 @@ def keywords():
 def api_unused_keywords(site_id):
     offset = request.args.get("offset", 0, type=int)
     limit = 40
-
-    keywords = Keyword.query.filter_by(
-        user_id=current_user.id,
-        site_id=site_id,
-        used=False
-    ).order_by(Keyword.id.desc()).offset(offset).limit(limit).all()
-
-    data = [{"id": k.id, "keyword": k.keyword, "used": k.used} for k in keywords]
-    return jsonify(data)
+    keywords = Keyword.query.filter_by(user_id=current_user.id, site_id=site_id, used=False)\
+        .order_by(Keyword.id.desc()).offset(offset).limit(limit).all()
+    return jsonify([{"id": k.id, "keyword": k.keyword, "used": k.used} for k in keywords])
 
 
 @bp.route("/api/keywords/all/<int:site_id>")
 @login_required
 def api_all_keywords(site_id):
-    keywords = Keyword.query.filter_by(
-        user_id=current_user.id,
-        site_id=site_id
-    ).order_by(Keyword.id.desc()).limit(1000).all()
-
-    return jsonify([
-        {
-            "id": k.id,
-            "keyword": k.keyword
-        } for k in keywords
-    ])
+    keywords = Keyword.query.filter_by(user_id=current_user.id, site_id=site_id)\
+        .order_by(Keyword.id.desc()).limit(1000).all()
+    return jsonify([{"id": k.id, "keyword": k.keyword} for k in keywords])
 
 
-
-@bp.route("/keywords/edit/<int:keyword_id>", methods=["GET", "POST"])
+@bp.route("/<username>/keywords/edit/<int:keyword_id>", methods=["GET", "POST"])
 @login_required
-def edit_keyword(keyword_id):
+def edit_keyword(username, keyword_id):
+    if current_user.username != username:
+        abort(403)
     keyword = Keyword.query.get_or_404(keyword_id)
     if keyword.user_id != current_user.id:
         abort(403)
@@ -422,42 +408,47 @@ def edit_keyword(keyword_id):
         keyword.site_id = form.site_id.data
         db.session.commit()
         flash("キーワードを更新しました", "success")
-        return redirect(url_for("main.keywords"))
+        return redirect(url_for("main.keywords", username=username))
 
     return render_template("edit_keyword.html", form=form)
 
 
-
-@bp.route("/keywords/view/<int:keyword_id>")
+@bp.route("/<username>/keywords/view/<int:keyword_id>")
 @login_required
-def view_keyword(keyword_id):
+def view_keyword(username, keyword_id):
+    if current_user.username != username:
+        abort(403)
     keyword = Keyword.query.get_or_404(keyword_id)
     if keyword.user_id != current_user.id:
         abort(403)
     return render_template("view_keyword.html", keyword=keyword)
 
 
-@bp.route("/keywords/delete/<int:keyword_id>")
+@bp.route("/<username>/keywords/delete/<int:keyword_id>")
 @login_required
-def delete_keyword(keyword_id):
+def delete_keyword(username, keyword_id):
+    if current_user.username != username:
+        abort(403)
     keyword = Keyword.query.get_or_404(keyword_id)
     if keyword.user_id != current_user.id:
         abort(403)
     db.session.delete(keyword)
     db.session.commit()
     flash("キーワードを削除しました。", "success")
-    return redirect(url_for("main.keywords"))
+    return redirect(url_for("main.keywords", username=username))
 
 
-@bp.post("/keywords/bulk-action")
+@bp.post("/<username>/keywords/bulk-action")
 @login_required
-def bulk_action_keywords():
+def bulk_action_keywords(username):
+    if current_user.username != username:
+        abort(403)
     action = request.form.get("action")
     keyword_ids = request.form.getlist("keyword_ids")
 
     if not keyword_ids:
         flash("対象のキーワードが選択されていません。", "warning")
-        return redirect(request.referrer or url_for("main.keywords"))
+        return redirect(request.referrer or url_for("main.keywords", username=username))
 
     if action == "delete":
         Keyword.query.filter(
@@ -467,13 +458,17 @@ def bulk_action_keywords():
         db.session.commit()
         flash("選択されたキーワードを削除しました。", "success")
 
-    return redirect(request.referrer or url_for("main.keywords"))
+    return redirect(request.referrer or url_for("main.keywords", username=username))
 
 
-@bp.route("/chatgpt")
+
+@bp.route("/<username>/chatgpt")
 @login_required
-def chatgpt():
+def chatgpt(username):
+    if current_user.username != username:
+        abort(403)
     return render_template("chatgpt.html")
+
 
 
 
@@ -482,28 +477,71 @@ def chatgpt():
 def login():
     form = LoginForm()
     if form.validate_on_submit():
-        user = User.query.filter_by(email=form.email.data).first()
-        if user and check_password_hash(user.password, form.password.data):
+        identifier = form.identifier.data
+        password = form.password.data
+
+        # メールアドレスまたはユーザー名のいずれかで検索
+        user = User.query.filter(
+            (User.email == identifier) | (User.email.ilike(identifier)) |
+            (User.last_name == identifier)  # ユーザー名とする場合
+        ).first()
+
+        if user and check_password_hash(user.password, password):
             login_user(user)
-            return redirect(request.args.get("next") or url_for(".dashboard"))
-        flash("ログイン失敗", "danger")
+            flash("ログイン成功！", "success")
+            return redirect(url_for("main.dashboard", username=user.username))
+        else:
+            flash("ログイン情報が正しくありません。", "danger")
+
     return render_template("login.html", form=form)
+
 
 @bp.route("/register", methods=["GET", "POST"])
 def register():
     form = RegisterForm()
     if form.validate_on_submit():
+        # 登録用パスワードが正しいか
+        if form.register_key.data != "tcctool":
+            flash("登録専用パスワードが間違っています。", "danger")
+            return render_template("register.html", form=form)
+
+        # メールアドレスの重複チェック
         if User.query.filter_by(email=form.email.data).first():
-            flash("既に登録されています", "danger")
-        else:
-            db.session.add(User(
-                email=form.email.data,
-                password=generate_password_hash(form.password.data)
-            ))
-            db.session.commit()
-            flash("登録完了！ログインしてください", "success")
-            return redirect(url_for(".login"))
+            flash("このメールアドレスは既に登録されています。", "danger")
+            return render_template("register.html", form=form)
+
+        # ユーザー名（username）の重複チェック
+        if User.query.filter_by(username=form.username.data).first():
+            flash("このユーザー名はすでに使われています。", "danger")
+            return render_template("register.html", form=form)
+
+        # ユーザー作成・保存
+        new_user = User(
+            email=form.email.data,
+            password=generate_password_hash(form.password.data),
+            username=form.username.data,  # ← 追加済み！
+            user_type=form.user_type.data,
+            company_name=form.company_name.data,
+            company_kana=form.company_kana.data,
+            last_name=form.last_name.data,
+            first_name=form.first_name.data,
+            last_kana=form.last_kana.data,
+            first_kana=form.first_kana.data,
+            postal_code=form.postal_code.data,
+            prefecture=form.prefecture.data,
+            city=form.city.data,
+            address1=form.address1.data,
+            address2=form.address2.data,
+            phone=form.phone.data
+        )
+        db.session.add(new_user)
+        db.session.commit()
+
+        flash("登録が完了しました。ログインしてください。", "success")
+        return redirect(url_for(".login"))
+
     return render_template("register.html", form=form)
+
 
 @bp.route("/logout")
 @login_required
@@ -512,10 +550,58 @@ def logout():
     return redirect(url_for(".login"))
 
 
-# ─────────── Dashboard
+
+@bp.route("/<username>/profile", methods=["GET", "POST"])
+@login_required
+def profile(username):
+    if current_user.username != username:
+        abort(403)
+
+    form = ProfileForm(obj=current_user)
+
+    if form.validate_on_submit():
+        # ユーザー名が仮名（user123）のままで、変更された場合のみ許可
+        if current_user.username.startswith("user") and form.username.data != current_user.username:
+            # 重複チェック
+            if User.query.filter_by(username=form.username.data).first():
+                flash("このユーザー名はすでに使われています。", "danger")
+                return render_template("profile.html", form=form)
+            else:
+                current_user.username = form.username.data
+
+        # 基本情報の更新
+        current_user.last_name = form.last_name.data
+        current_user.first_name = form.first_name.data
+        current_user.last_kana = form.last_kana.data
+        current_user.first_kana = form.first_kana.data
+        current_user.phone = form.phone.data
+        current_user.postal_code = form.postal_code.data
+        current_user.prefecture = form.prefecture.data
+        current_user.city = form.city.data
+        current_user.address1 = form.address1.data
+        current_user.address2 = form.address2.data
+
+        db.session.commit()
+        flash("プロフィールを更新しました。", "success")
+
+        return redirect(url_for("main.profile", username=current_user.username))
+
+    return render_template("profile.html", form=form)
+
+
+
 @bp.route("/")
 @login_required
-def dashboard():
+def root_redirect():
+    return redirect(url_for("main.dashboard", username=current_user.username))
+
+# ─────────── Dashboard
+@bp.route("/<username>/dashboard")
+@login_required
+def dashboard(username):
+    # セキュリティ：ログイン中のユーザーのusernameと一致するか確認
+    if current_user.username != username:
+        abort(403)
     g.total_articles = Article.query.filter_by(user_id=current_user.id).count()
     g.generating     = Article.query.filter(
         Article.user_id == current_user.id,
@@ -528,12 +614,14 @@ def dashboard():
 
 
 # ─────────── プロンプト CRUD（新規登録のみ）
-@bp.route("/prompts", methods=["GET", "POST"])
+@bp.route("/<username>/prompts", methods=["GET", "POST"])
 @login_required
-def prompts():
+def prompts(username):
+    if current_user.username != username:
+        abort(403)
+
     form = PromptForm()
 
-    # 新規登録のみ処理
     if form.validate_on_submit():
         db.session.add(PromptTemplate(
             genre    = form.genre.data,
@@ -543,10 +631,11 @@ def prompts():
         ))
         db.session.commit()
         flash("プロンプトを保存しました", "success")
-        return redirect(url_for(".prompts"))
+        return redirect(url_for(".prompts", username=username))
 
     plist = PromptTemplate.query.filter_by(user_id=current_user.id).all()
     return render_template("prompts.html", form=form, prompts=plist)
+
 
 
 # ─────────── プロンプト編集ページ（専用ページ）
@@ -597,9 +686,13 @@ def api_prompt(pid: int):
 
 
 # ─────────── WP サイト CRUD
-@bp.route("/sites", methods=["GET", "POST"])
+# ─────────── WP サイト CRUD（ユーザー別）
+@bp.route("/<username>/sites", methods=["GET", "POST"])
 @login_required
-def sites():
+def sites(username):
+    if current_user.username != username:
+        abort(403)
+
     form = SiteForm()
     if form.validate_on_submit():
         db.session.add(Site(
@@ -611,26 +704,34 @@ def sites():
         ))
         db.session.commit()
         flash("サイトを登録しました", "success")
-        return redirect(url_for(".sites"))
+        return redirect(url_for("main.sites", username=username))
 
     site_list = Site.query.filter_by(user_id=current_user.id).all()
     return render_template("sites.html", form=form, sites=site_list)
 
-@bp.post("/sites/<int:sid>/delete")
+
+@bp.post("/<username>/sites/<int:sid>/delete")
 @login_required
-def delete_site(sid: int):
+def delete_site(username, sid: int):
+    if current_user.username != username:
+        abort(403)
+
     site = Site.query.get_or_404(sid)
     if site.user_id != current_user.id:
         abort(403)
+
     db.session.delete(site)
     db.session.commit()
     flash("サイトを削除しました", "success")
-    return redirect(url_for(".sites"))
+    return redirect(url_for("main.sites", username=username))
 
 
-@bp.route("/sites/<int:sid>/edit", methods=["GET", "POST"])
+@bp.route("/<username>/sites/<int:sid>/edit", methods=["GET", "POST"])
 @login_required
-def edit_site(sid: int):
+def edit_site(username, sid: int):
+    if current_user.username != username:
+        abort(403)
+
     site = Site.query.get_or_404(sid)
     if site.user_id != current_user.id:
         abort(403)
@@ -644,15 +745,20 @@ def edit_site(sid: int):
         site.app_pass = form.app_pass.data
         db.session.commit()
         flash("サイト情報を更新しました", "success")
-        return redirect(url_for(".sites"))
+        return redirect(url_for("main.sites", username=username))
 
     return render_template("site_edit.html", form=form, site=site)
 
 
+
 # ─────────── 記事生成
-@bp.route("/generate", methods=["GET", "POST"])
+# ─────────── 記事生成（ユーザー別）
+@bp.route("/<username>/generate", methods=["GET", "POST"])
 @login_required
-def generate():
+def generate(username):
+    if current_user.username != username:
+        abort(403)
+
     form = GenerateForm()
 
     # ▼ プロンプトとサイトの選択肢をセット
@@ -684,7 +790,7 @@ def generate():
             site_id
         )
         flash(f"{len(kws)} 件をキューに登録しました", "success")
-        return redirect(url_for(".log_sites"))
+        return redirect(url_for("main.log_sites", username=username))
 
     # ▼ 表示するキーワード一覧を取得（statusフィルタも考慮）
     keyword_choices = []
@@ -719,12 +825,13 @@ def generate():
 
 
 
-
-
 # ─────────── 生成ログ
-@bp.route("/log/site/<int:site_id>")
+@bp.route("/<username>/log/site/<int:site_id>")
 @login_required
-def log(site_id):
+def log(username, site_id):
+    if current_user.username != username:
+        abort(403)
+
     from collections import defaultdict
     from .article_generator import _generate_slots_per_site
 
@@ -763,16 +870,19 @@ def log(site_id):
     return render_template(
         "log.html",
         articles=q.all(),
-        site=site,         # ← サイトオブジェクトを渡す（表示用）
-        status=status,     # ← ステータスフィルタ（セレクトボックスの維持）
+        site=site,
+        status=status,
         jst=JST
     )
 
 
-# ─────────── ログ：サイト選択ページ
-@bp.route("/log/sites")
+# ─────────── ログ：サイト選択ページ（ユーザー別）
+@bp.route("/<username>/log/sites")
 @login_required
-def log_sites():
+def log_sites(username):
+    if current_user.username != username:
+        abort(403)
+
     from sqlalchemy import func, case
 
     # サイトごとの記事集計

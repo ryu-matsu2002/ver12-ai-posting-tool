@@ -8,7 +8,7 @@
   <div class="w-full lg:w-1/2">
     <h2 class="text-2xl font-bold mb-6">キーワード登録</h2>
 
-    <form method="post" class="p-6 bg-white dark:bg-gray-800 rounded shadow space-y-4">
+    <form method="post" action="{{ url_for('main.keywords', username=current_user.username) }}" class="p-6 bg-white dark:bg-gray-800 rounded shadow space-y-4">
       {{ form.hidden_tag() }}
 
       <div>
@@ -45,7 +45,7 @@
 
           <!-- アコーディオン本体 -->
           <div id="kw-site-{{ site_id }}" class="bg-white dark:bg-gray-800 block">
-            <form method="post" action="{{ url_for('main.bulk_action_keywords') }}">
+            <form method="post" action="{{ url_for('main.bulk_action_keywords', username=current_user.username) }}">
               <input type="hidden" name="site_id" value="{{ site_id }}">
 
               <!-- ステータスフィルタと削除ボタン -->
@@ -84,8 +84,8 @@
                         <td class="p-2">{{ kw.keyword }}</td>
                         <td class="p-2 text-center">{{ "生成済み" if kw.used else "未生成" }}</td>
                         <td class="p-2 text-center space-x-2">
-                          <a href="{{ url_for('main.edit_keyword', keyword_id=kw.id) }}" class="bg-green-600 hover:bg-green-700 text-white text-xs px-2 py-1 rounded">編集</a>
-                          <a href="{{ url_for('main.delete_keyword', keyword_id=kw.id) }}" class="bg-red-600 hover:bg-red-700 text-white text-xs px-2 py-1 rounded" onclick="return confirm('本当に削除しますか？')">削除</a>
+                          <a href="{{ url_for('main.edit_keyword', username=current_user.username, keyword_id=kw.id) }}" class="bg-green-600 hover:bg-green-700 text-white text-xs px-2 py-1 rounded">編集</a>
+                          <a href="{{ url_for('main.delete_keyword', username=current_user.username, keyword_id=kw.id) }}" class="bg-red-600 hover:bg-red-700 text-white text-xs px-2 py-1 rounded" onclick="return confirm('本当に削除しますか？')">削除</a>
                         </td>
                       </tr>
                     {% endfor %}

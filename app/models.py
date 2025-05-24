@@ -9,18 +9,46 @@ from app import db
 # ──── ユーザ ────
 class User(db.Model, UserMixin):
     id       = db.Column(db.Integer, primary_key=True)
-    email    = db.Column(db.String(120), unique=True, nullable=False)
-    # パスワード長を300文字に拡張済み
-    password = db.Column(db.String(300), nullable=False)
 
-    # 追加するフィールド ↓
-    is_admin = db.Column(db.Boolean, default=False)
+    # 基本情報
+    email    = db.Column(db.String(120), unique=True, nullable=False)
+    password = db.Column(db.String(300), nullable=False)
+    username = db.Column(db.String(50), unique=True, nullable=False)
+    
+    # 区分（個人 or 法人）
+    user_type = db.Column(db.String(20), nullable=False, default="personal")  # "personal" or "corporate"
+
+    # 法人用
+    company_name = db.Column(db.String(100), nullable=True)
+    company_kana = db.Column(db.String(100), nullable=True)
+
+    # 氏名
+    last_name  = db.Column(db.String(50), nullable=False)
+    first_name = db.Column(db.String(50), nullable=False)
+
+    # フリガナ
+    last_kana  = db.Column(db.String(50), nullable=False)
+    first_kana = db.Column(db.String(50), nullable=False)
+
+    # 住所
+    postal_code = db.Column(db.String(10), nullable=False)
+    prefecture  = db.Column(db.String(20), nullable=False)
+    city        = db.Column(db.String(50), nullable=False)
+    address1    = db.Column(db.String(100), nullable=False)
+    address2    = db.Column(db.String(100), nullable=True)
+
+    # 電話番号
+    phone = db.Column(db.String(20), nullable=False)
+
+    # 管理用
+    is_admin   = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     # リレーション
     prompts  = db.relationship("PromptTemplate", backref="user", lazy=True)
     articles = db.relationship("Article", backref="user", lazy='selectin')
     sites    = db.relationship("Site",           backref="user", lazy=True)
+
 
 
 # ──── WP サイト ────

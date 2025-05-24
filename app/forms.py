@@ -14,15 +14,67 @@ from wtforms import (
 from wtforms.validators import DataRequired, Email, Length, EqualTo, URL, Optional, NumberRange, ValidationError
 
 class LoginForm(FlaskForm):
-    email    = StringField("Email",    validators=[DataRequired(), Email()])
-    password = PasswordField("Password", validators=[DataRequired()])
-    submit   = SubmitField("ログイン")
+    identifier = StringField("メールアドレスまたはユーザー名", validators=[DataRequired()])
+    password   = PasswordField("パスワード", validators=[DataRequired()])
+    submit     = SubmitField("ログイン")
+
 
 class RegisterForm(FlaskForm):
-    email    = StringField("Email",    validators=[DataRequired(), Email()])
-    password = PasswordField("Password", validators=[DataRequired(), Length(min=6)])
-    confirm  = PasswordField("Confirm",  validators=[DataRequired(), EqualTo("password")])
-    submit   = SubmitField("登録")
+
+    # ユーザー名（先頭に追加）
+    username = StringField(
+        "ユーザー名",
+        validators=[
+            DataRequired(),
+            Length(min=3, max=50, message="3～50文字で入力してください。")
+        ]
+    )
+    # メールアドレス・パスワード
+    email    = StringField("メールアドレス", validators=[DataRequired(), Email()])
+    password = PasswordField("パスワード", validators=[DataRequired(), Length(min=6)])
+    confirm  = PasswordField("パスワード確認", validators=[DataRequired(), EqualTo("password")])
+
+    # 区分（個人 or 法人）
+    user_type = SelectField(
+        "区分", choices=[("personal", "個人"), ("corporate", "法人")],
+        validators=[DataRequired()]
+    )
+
+    # 法人用：会社名、会社名（フリガナ）
+    company_name = StringField("会社名", validators=[Optional(), Length(max=100)])
+    company_kana = StringField("会社名（フリガナ）", validators=[Optional(), Length(max=100)])
+
+    # 氏名（姓・名）
+    last_name  = StringField("姓", validators=[DataRequired(), Length(max=50)])
+    first_name = StringField("名", validators=[DataRequired(), Length(max=50)])
+
+    # フリガナ（姓・名）
+    last_kana  = StringField("セイ", validators=[DataRequired(), Length(max=50)])
+    first_kana = StringField("メイ", validators=[DataRequired(), Length(max=50)])
+
+    # 郵便番号
+    postal_code = StringField("郵便番号", validators=[DataRequired(), Length(max=10)])
+
+    # 都道府県
+    prefecture = StringField("都道府県", validators=[DataRequired(), Length(max=20)])
+
+    # 市区郡・町村
+    city = StringField("市区郡", validators=[DataRequired(), Length(max=50)])
+
+    # 町名・番地
+    address1 = StringField("町名・番地", validators=[DataRequired(), Length(max=100)])
+
+    # 建物名・部屋番号
+    address2 = StringField("建物名・部屋番号", validators=[Optional(), Length(max=100)])
+
+    # 電話番号
+    phone = StringField("電話番号", validators=[DataRequired(), Length(max=20)])
+
+    # 専用パスワード
+    register_key = PasswordField("登録用パスワード", validators=[DataRequired()])
+
+    submit = SubmitField("登録")
+
 
 class GenerateForm(FlaskForm):
     keywords      = TextAreaField(
@@ -104,3 +156,21 @@ class EditKeywordForm(FlaskForm):
     site_id = SelectField("対象サイト", coerce=int, validators=[DataRequired()])
     keyword = StringField("キーワード", validators=[DataRequired(), Length(max=255)])
     submit = SubmitField("更新")
+
+class ProfileForm(FlaskForm):
+    # ユーザー名（初回のみ編集可能にする、テンプレート側で制御）
+    username = StringField("ユーザー名", validators=[
+        DataRequired(),
+        Length(min=3, max=50, message="3～50文字で入力してください。")
+    ])
+    last_name = StringField("姓", validators=[DataRequired()])
+    first_name = StringField("名", validators=[DataRequired()])
+    last_kana = StringField("セイ", validators=[DataRequired()])
+    first_kana = StringField("メイ", validators=[DataRequired()])
+    phone = StringField("電話番号", validators=[DataRequired()])
+    postal_code = StringField("郵便番号", validators=[DataRequired()])
+    prefecture = StringField("都道府県", validators=[DataRequired()])
+    city = StringField("市区郡", validators=[DataRequired()])
+    address1 = StringField("町名・番地", validators=[DataRequired()])
+    address2 = StringField("建物名・部屋番号", validators=[Optional()])
+    submit = SubmitField("更新する")

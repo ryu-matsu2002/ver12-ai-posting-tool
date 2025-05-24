@@ -57,11 +57,12 @@
 
           <!-- 操作ボタン -->
           <div class="flex gap-2 flex-nowrap">
-            <a href="{{ url_for('main.edit_site', sid=s.id) }}"
+            <a href="{{ url_for('main.edit_site', username=current_user.username, sid=s.id) }}"
                class="text-sm bg-green-600 hover:bg-green-700 text-white py-1.5 px-3 rounded shadow whitespace-nowrap">
               編集
             </a>
-            <form method="post" action="{{ url_for('main.delete_site', sid=s.id) }}"
+            <form method="post"
+                  action="{{ url_for('main.delete_site', username=current_user.username, sid=s.id) }}"
                   onsubmit="return confirm('削除しますか？');">
               <button type="submit"
                       class="text-sm bg-red-600 hover:bg-red-700 text-white py-1.5 px-3 rounded shadow whitespace-nowrap">

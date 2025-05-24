@@ -1,3 +1,4 @@
+{% set username = current_user.username if current_user.is_authenticated else None %}
 <!doctype html>
 <html lang="ja" class="h-full">
 <head>
@@ -40,48 +41,48 @@
 
     <nav class="flex-1 py-4 space-y-1">
       <!-- ダッシュボード -->
-      <a href="{{ url_for('main.dashboard') }}"
+      <a href="{{ url_for('main.dashboard', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
-                {{ 'font-semibold bg-[#0f2fa6]' if request.path=='/' else '' }}">
+                {{ '/dashboard' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">dashboard</span>ダッシュボード
       </a>
 
       <!-- 記事生成 -->
-      <a href="{{ url_for('main.log_sites') }}"
+      <a href="{{ url_for('main.log_sites', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
-                {{ request.path.startswith('/log') and 'font-semibold bg-[#0f2fa6]' }}">
+                {{ '/log' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">article</span>記事生成
       </a>
 
       <!-- サイト登録 -->
-      <a href="{{ url_for('main.sites') }}"
+      <a href="{{ url_for('main.sites', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
-                {{ request.path == '/sites' and 'font-semibold bg-[#0f2fa6]' }}">
+                {{ '/sites' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">storage</span>新規サイト登録
       </a>
 
       <!-- プロンプト -->
-      <a href="{{ url_for('main.prompts') }}"
+      <a href="{{ url_for('main.prompts', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
                 {{ '/prompts' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">notes</span>プロンプト登録
       </a>
 
-      <!-- ✅ キーワード管理（追加） -->
-      <a href="{{ url_for('main.keywords') }}"
+      <!-- キーワード管理 -->
+      <a href="{{ url_for('main.keywords', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
                 {{ '/keywords' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">label</span>キーワード登録
       </a>
 
-      <!-- ChatGPT -->
+      <!-- ChatGPT（グローバル） -->
       <a href="{{ url_for('main.chatgpt') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
                 {{ '/chatgpt' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">smart_toy</span>ChatGPT
       </a>
 
-      <!-- Login -->
+      <!-- Login（グローバル） -->
       <a href="{{ url_for('main.login') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
                 {{ '/login' in request.path and 'font-semibold bg-[#0f2fa6]' }}">

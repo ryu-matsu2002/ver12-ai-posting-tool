@@ -7,18 +7,22 @@
   {{ form.hidden_tag() }}
   <h2 class="text-2xl font-semibold mb-6 text-center">ログイン</h2>
 
+  <!-- メールアドレスまたはユーザー名 -->
   <div class="mb-4">
-    {{ form.email.label(class="block mb-1") }}
-    {{ form.email(class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
+    {{ form.identifier.label(class="block mb-1") }}
+    {{ form.identifier(class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
   </div>
 
+  <!-- パスワード -->
   <div class="mb-6">
     {{ form.password.label(class="block mb-1") }}
     {{ form.password(class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
   </div>
 
+  <!-- ログインボタン -->
   {{ form.submit(class="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded") }}
 
+  <!-- 新規登録リンク -->
   <p class="text-center text-sm mt-4">
     新規登録は
     <a href="{{ url_for('main.register') }}" class="text-blue-600 hover:underline">こちら</a>

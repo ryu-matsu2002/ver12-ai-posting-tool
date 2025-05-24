@@ -7,7 +7,11 @@
   <div class="w-full lg:w-1/2">
     <h2 class="text-2xl font-semibold mb-6">記事生成</h2>
 
-    <form method="post" id="genForm" class="space-y-6" onsubmit="return validateKeywordCount()">
+    <form method="post"
+          action="{{ url_for('main.generate', username=current_user.username) }}"
+          id="genForm"
+          class="space-y-6"
+          onsubmit="return validateKeywordCount()">
       {{ form.hidden_tag() }}
 
       <!-- サイト選択 -->
