@@ -76,7 +76,7 @@
       </a>
 
       <!-- ChatGPT（グローバル） -->
-      <a href="{{ url_for('main.chatgpt') }}"
+      <a href="{{ url_for('main.chatgpt', username=current_user.username) }}">
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
                 {{ '/chatgpt' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">smart_toy</span>ChatGPT
