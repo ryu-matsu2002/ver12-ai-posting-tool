@@ -2,9 +2,9 @@
 {% block title %}Register | AI Posting Tool{% endblock %}
 
 {% block content %}
-<div class="min-h-screen flex items-start justify-center bg-gray-100 py-10 px-4">
+<div class="flex justify-center px-4 mt-0 mb-10">
   <form method="post"
-        class="w-full max-w-md bg-white dark:bg-gray-800 p-8 rounded-lg shadow-md">
+        class="w-full max-w-md bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
     {{ form.hidden_tag() }}
 
     <h2 class="text-2xl font-semibold mb-6 text-center">新規登録</h2>
@@ -109,7 +109,7 @@
       {{ form.phone(class="w-full p-2 rounded border") }}
     </div>
 
-    <!-- 専用登録パスワード -->
+    <!-- 登録用キー -->
     <div class="mb-6">
       {{ form.register_key.label(class="block mb-1 text-sm font-medium") }}
       {{ form.register_key(class="w-full p-2 rounded border") }}
