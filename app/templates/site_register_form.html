@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}サイト登録 | AI Posting Tool{% endblock %}
+
+{% block content %}
+<h2 class="text-2xl font-bold mb-6">WordPress サイト管理</h2>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-10">
+  <!-- 左：新規サイト登録フォーム -->
+  <div class="bg-white rounded-lg shadow p-6 border border-gray-300">
+    <h3 class="text-lg font-semibold mb-4">新規サイト登録</h3>
+    <form method="post">
+      {{ form.hidden_tag() }}
+
+      <div class="mb-4">
+        {{ form.name.label(class="block mb-1 font-semibold text-sm") }}
+        {{ form.name(class="w-full p-2 border border-gray-300 rounded") }}
+      </div>
+
+      <div class="mb-4">
+        {{ form.url.label(class="block mb-1 font-semibold text-sm") }}
+        {{ form.url(class="w-full p-2 border border-gray-300 rounded") }}
+        <small class="text-sm text-gray-500">例: https://example.com</small>
+      </div>
+
+      <div class="mb-4">
+        {{ form.username.label(class="block mb-1 font-semibold text-sm") }}
+        {{ form.username(class="w-full p-2 border border-gray-300 rounded") }}
+      </div>
+
+      <div class="mb-6">
+        {{ form.app_password.label(class="block mb-1 font-semibold text-sm") }}
+        {{ form.app_password(class="w-full p-2 border border-gray-300 rounded") }}
+        <small class="text-sm text-gray-500">WPの「アプリケーションパスワード」を入力</small>
+      </div>
+
+      <button type="submit"
+              class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 w-full">
+        保存
+      </button>
+    </form>
+  </div>
+
+  <!-- 右：登録済みサイト一覧 -->
+  <div class="bg-white rounded-lg shadow p-6 border border-gray-300">
+    <h3 class="text-lg font-semibold mb-4">登録済みサイト</h3>
+
+    {% for site in sites %}
+      <div class="flex items-center justify-between border rounded px-4 py-3 mb-3 shadow-sm">
+        <div class="text-sm">
+          <div class="font-semibold">【{{ site.name }}】</div>
+          <a href="{{ site.url }}" class="text-blue-600 hover:underline" target="_blank">{{ site.url }}</a>
+        </div>
+        <div class="flex gap-2">
+          <a href="{{ url_for('main.edit_site', site_id=site.id, username=username) }}"
+             class="bg-green-500 hover:bg-green-600 text-white text-sm px-3 py-1 rounded">編集</a>
+          <form method="post" action="{{ url_for('main.delete_site', site_id=site.id, username=username) }}"
+                onsubmit="return confirm('このサイトを削除しますか？')">
+            <button type="submit" class="bg-red-500 hover:bg-red-600 text-white text-sm px-3 py-1 rounded">削除</button>
+          </form>
+        </div>
+      </div>
+    {% else %}
+      <p class="text-gray-600 text-sm">登録済みのサイトはまだありません。</p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

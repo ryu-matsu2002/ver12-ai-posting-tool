@@ -684,7 +684,7 @@ def api_prompt(pid: int):
 
 
 
-# ─────────── WP サイト CRUD
+
 # ─────────── WP サイト CRUD（ユーザー別）
 @bp.route("/<username>/sites", methods=["GET", "POST"])
 @login_required
@@ -748,6 +748,11 @@ def edit_site(username, sid: int):
 
     return render_template("site_edit.html", form=form, site=site)
 
+# routes.py に追加
+@bp.route("/<username>/site-register/intro")
+@login_required
+def site_register_intro(username):
+    return render_template("site_register_intro.html", username=username)
 
 
 # ─────────── 記事生成
