@@ -40,56 +40,35 @@
     <h1 class="text-xl font-semibold px-6 py-4 border-b border-gray-700">TCC autowize</h1>
 
     <nav class="flex-1 py-4 space-y-1">
-      <!-- ダッシュボード -->
+      <!-- メニュー各種 -->
       <a href="{{ url_for('main.dashboard', username=username) }}"
-         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
-                {{ request.path.startswith('/' + username + '/dashboard') and 'font-semibold bg-[#0f2fa6]' }}">
+         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/dashboard') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">dashboard</span>ダッシュボード
       </a>
-
-      <!-- 記事生成 -->
       <a href="{{ url_for('main.log_sites', username=username) }}"
-         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
-                {{ request.path.startswith('/' + username + '/log') and 'font-semibold bg-[#0f2fa6]' }}">
+         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/log') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">article</span>記事生成
       </a>
-
-      <!-- サイト登録 -->
       <a href="{{ url_for('main.sites', username=username) }}"
-         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
-                {{ request.path.startswith('/' + username + '/sites') and 'font-semibold bg-[#0f2fa6]' }}">
+         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/sites') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">storage</span>新規サイト登録
       </a>
-
-      <!-- プロンプト -->
       <a href="{{ url_for('main.prompts', username=username) }}"
-         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
-                {{ request.path.startswith('/' + username + '/prompts') and 'font-semibold bg-[#0f2fa6]' }}">
+         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/prompts') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">notes</span>プロンプト登録
       </a>
-
-      <!-- キーワード管理 -->
       <a href="{{ url_for('main.keywords', username=username) }}"
-         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
-                {{ request.path.startswith('/' + username + '/keywords') and 'font-semibold bg-[#0f2fa6]' }}">
+         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/keywords') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">label</span>キーワード登録
       </a>
-
-      <!-- ChatGPT -->
       <a href="{{ url_for('main.chatgpt', username=username) }}"
-         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
-                {{ request.path.startswith('/' + username + '/chatgpt') and 'font-semibold bg-[#0f2fa6]' }}">
+         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/chatgpt') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">smart_toy</span>ChatGPT
       </a>
-
-      <!-- ログイン -->
       <a href="{{ url_for('main.login') }}"
-         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
-                {{ request.path.startswith('/login') and 'font-semibold bg-[#0f2fa6]' }}">
+         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/login') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">login</span>ログイン
       </a>
-
-      <!-- ログアウト -->
       <a href="{{ url_for('main.logout') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full text-red-400">
         <span class="material-icons align-middle mr-2">logout</span>ログアウト
@@ -104,13 +83,17 @@
 
   <!-- ===== MAIN CONTENT ===== -->
   <main class="flex-1 overflow-y-auto p-8 bg-white text-black">
-    <!-- 🔹 プロフィールドロップダウン -->
+    <!-- ✅ 改善済ユーザーアイコン + ドロップダウン -->
     <div class="flex justify-end mb-6">
-      <div class="relative group">
-        <button class="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:underline">
-          👤 {{ current_user.username }}
+      <div class="relative">
+        <button id="userDropdownBtn"
+                class="flex items-center gap-2 px-4 py-2 text-base font-semibold text-gray-700 dark:text-white bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 rounded-full focus:outline-none"
+                onclick="toggleUserDropdown()">
+          <span class="material-icons text-2xl">account_circle</span>
+          {{ current_user.username }}
         </button>
-        <div class="absolute right-0 mt-2 hidden group-hover:block bg-white dark:bg-gray-800 border rounded shadow-lg z-50">
+        <div id="userDropdown"
+             class="absolute right-0 mt-2 w-48 hidden bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg z-50">
           <a href="{{ url_for('main.profile', username=current_user.username) }}"
              class="block px-4 py-2 text-sm text-gray-800 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700">
             プロフィール
@@ -123,14 +106,13 @@
       </div>
     </div>
 
-    <!-- 🔸 フラッシュメッセージ -->
+    <!-- フラッシュメッセージ -->
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         <div class="space-y-2 mb-6">
           {% for cat, msg in messages %}
             <div class="p-3 rounded text-sm
-                        {{ 'bg-green-100 text-green-800' if cat=='success'
-                           else 'bg-red-100 text-red-800' }}">
+                        {{ 'bg-green-100 text-green-800' if cat=='success' else 'bg-red-100 text-red-800' }}">
               {{ msg }}
             </div>
           {% endfor %}
@@ -140,6 +122,22 @@
 
     {% block content %}{% endblock %}
   </main>
+
+  <!-- ✅ ドロップダウンJS -->
+  <script>
+    function toggleUserDropdown() {
+      const menu = document.getElementById('userDropdown');
+      menu.classList.toggle('hidden');
+    }
+
+    document.addEventListener('click', function (e) {
+      const btn = document.getElementById('userDropdownBtn');
+      const menu = document.getElementById('userDropdown');
+      if (!btn.contains(e.target) && !menu.contains(e.target)) {
+        menu.classList.add('hidden');
+      }
+    });
+  </script>
 </body>
 </html>
 
