@@ -43,49 +43,49 @@
       <!-- ダッシュボード -->
       <a href="{{ url_for('main.dashboard', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
-                {{ '/dashboard' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
+                {{ request.path.startswith('/' + username + '/dashboard') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">dashboard</span>ダッシュボード
       </a>
 
       <!-- 記事生成 -->
       <a href="{{ url_for('main.log_sites', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
-                {{ '/log' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
+                {{ request.path.startswith('/' + username + '/log') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">article</span>記事生成
       </a>
 
       <!-- サイト登録 -->
       <a href="{{ url_for('main.sites', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
-                {{ '/sites' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
+                {{ request.path.startswith('/' + username + '/sites') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">storage</span>新規サイト登録
       </a>
 
       <!-- プロンプト -->
       <a href="{{ url_for('main.prompts', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
-                {{ '/prompts' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
+                {{ request.path.startswith('/' + username + '/prompts') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">notes</span>プロンプト登録
       </a>
 
       <!-- キーワード管理 -->
       <a href="{{ url_for('main.keywords', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
-                {{ '/keywords' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
+                {{ request.path.startswith('/' + username + '/keywords') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">label</span>キーワード登録
       </a>
 
       <!-- ChatGPT -->
       <a href="{{ url_for('main.chatgpt', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
-                {{ '/chatgpt' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
+                {{ request.path.startswith('/' + username + '/chatgpt') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">smart_toy</span>ChatGPT
       </a>
 
       <!-- ログイン -->
       <a href="{{ url_for('main.login') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
-                {{ '/login' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
+                {{ request.path.startswith('/login') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">login</span>ログイン
       </a>
 
