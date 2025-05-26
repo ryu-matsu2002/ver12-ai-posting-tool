@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ja" class="h-full" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow">
+  <title>{% block title %}Register | AI Posting Tool{% endblock %}</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com/3.4.4"></script>
+
+  <!-- Google Fonts & Icons（任意） -->
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500&display=swap" rel="stylesheet">
+
+  <!-- ダークモード設定 -->
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Roboto', 'sans-serif']
+          }
+        }
+      }
+    };
+    (() => {
+      if (localStorage.theme === 'dark') {
+        document.documentElement.classList.add('dark');
+      }
+    })();
+  </script>
+</head>
+
+<!-- ✅ ここが login とは違う本質部分 -->
+<body class="min-h-screen bg-gray-100 dark:bg-gray-900 overflow-y-auto">
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="absolute top-4 w-full max-w-md px-6">
+        {% for cat, msg in messages %}
+          <div class="p-3 rounded text-sm mb-2
+                      {{ 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' }}">
+            {{ msg }}
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  {% block content %}{% endblock %}
+</body>
+</html>
