@@ -40,42 +40,56 @@
     <h1 class="text-xl font-semibold px-6 py-4 border-b border-gray-700">TCC autowize</h1>
 
     <nav class="flex-1 py-4 space-y-1">
-      <!-- メニュー各種 -->
       <a href="{{ url_for('main.dashboard', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/dashboard') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">dashboard</span>ダッシュボード
       </a>
+
       <a href="{{ url_for('main.log_sites', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/log') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">article</span>記事生成
       </a>
-      <a href="{{ url_for('main.sites', username=username) }}"
-         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/sites') and 'font-semibold bg-[#0f2fa6]' }}">
-        <span class="material-icons align-middle mr-2">storage</span>新規サイト登録
-      </a>
-      <a href="{{ url_for('main.prompts', username=username) }}"
-         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/prompts') and 'font-semibold bg-[#0f2fa6]' }}">
-        <span class="material-icons align-middle mr-2">notes</span>プロンプト登録
-      </a>
-      <a href="{{ url_for('main.keywords', username=username) }}"
-         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/keywords') and 'font-semibold bg-[#0f2fa6]' }}">
-        <span class="material-icons align-middle mr-2">label</span>キーワード登録
-      </a>
+
+      <!-- ▼ 登録管理 -->
+      <button onclick="toggleSubmenu()" class="w-full text-left px-6 py-2 hover:bg-primaryHover rounded-r-full flex items-center justify-between">
+        <span>
+          <span class="material-icons align-middle mr-2">folder</span>登録管理
+        </span>
+        <span class="material-icons text-sm" id="submenu-icon">expand_more</span>
+      </button>
+
+      <div id="submenu" class="pl-8 space-y-1 hidden">
+        <a href="{{ url_for('main.keywords', username=username) }}"
+           class="block py-1 text-sm hover:underline {{ request.path.startswith('/' + username + '/keywords') and 'font-semibold underline' }}">
+          ├ キーワード登録
+        </a>
+        <a href="{{ url_for('main.prompts', username=username) }}"
+           class="block py-1 text-sm hover:underline {{ request.path.startswith('/' + username + '/prompts') and 'font-semibold underline' }}">
+          ├ プロンプト登録
+        </a>
+        <a href="{{ url_for('main.sites', username=username) }}"
+           class="block py-1 text-sm hover:underline {{ request.path.startswith('/' + username + '/sites') and 'font-semibold underline' }}">
+          └ サイト登録
+        </a>
+      </div>
+
       <a href="{{ url_for('main.chatgpt', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/chatgpt') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">smart_toy</span>ChatGPT
       </a>
+
       <a href="{{ url_for('main.login') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/login') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">login</span>ログイン
       </a>
+
       <a href="{{ url_for('main.logout') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full text-red-400">
         <span class="material-icons align-middle mr-2">logout</span>ログアウト
       </a>
     </nav>
 
-    <!-- ダークモードボタン -->
+    <!-- ダークモード切替 -->
     <div class="px-6 py-4 border-t border-gray-700 flex items-center justify-between">
       <button onclick="toggleTheme()" class="material-icons text-gray-300">dark_mode</button>
     </div>
@@ -83,7 +97,7 @@
 
   <!-- ===== MAIN CONTENT ===== -->
   <main class="flex-1 overflow-y-auto p-8 bg-white text-black">
-    <!-- ✅ 改善済ユーザーアイコン + ドロップダウン -->
+    <!-- ユーザーアイコン＋ドロップダウン -->
     <div class="flex justify-end mb-6">
       <div class="relative">
         <button id="userDropdownBtn"
@@ -123,7 +137,7 @@
     {% block content %}{% endblock %}
   </main>
 
-  <!-- ✅ ドロップダウンJS -->
+  <!-- JS -->
   <script>
     function toggleUserDropdown() {
       const menu = document.getElementById('userDropdown');
@@ -137,6 +151,13 @@
         menu.classList.add('hidden');
       }
     });
+
+    function toggleSubmenu() {
+      const submenu = document.getElementById('submenu');
+      const icon = document.getElementById('submenu-icon');
+      submenu.classList.toggle('hidden');
+      icon.textContent = submenu.classList.contains('hidden') ? 'expand_more' : 'expand_less';
+    }
   </script>
 </body>
 </html>
