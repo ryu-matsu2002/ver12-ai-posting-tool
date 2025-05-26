@@ -32,22 +32,27 @@
   </script>
 </head>
 
-<!-- ✅ 修正ここ！ -->
-<body class="min-h-screen bg-gray-100 dark:bg-gray-900 overflow-y-auto">
+<!-- ✅ 中央揃えにするためのFlex構成 -->
+<body class="h-screen bg-gray-100 dark:bg-gray-900 overflow-hidden">
 
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-      <div class="absolute top-4 w-full max-w-md px-6">
-        {% for cat, msg in messages %}
-          <div class="p-3 rounded text-sm mb-2
-                      {{ 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' }}">
-            {{ msg }}
-          </div>
-        {% endfor %}
-      </div>
-    {% endif %}
-  {% endwith %}
+  <!-- 中央寄せ用ラッパー -->
+  <div class="flex items-center justify-center h-full">
 
-  {% block content %}{% endblock %}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="absolute top-4 w-full max-w-md px-6">
+          {% for cat, msg in messages %}
+            <div class="p-3 rounded text-sm mb-2
+                        {{ 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' }}">
+              {{ msg }}
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+
+  </div>
 </body>
 </html>
