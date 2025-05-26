@@ -60,7 +60,7 @@ from os.path import exists, getsize
 def admin_dashboard():
     if not current_user.is_admin:
         flash("このページにはアクセスできません。", "error")
-        return redirect(url_for("main.dashboard"))
+        return redirect(url_for("main.dashboard", username=current_user.username))
 
     user_count    = User.query.count()
     site_count    = Site.query.count()
@@ -136,7 +136,7 @@ def admin_users():
 def admin_sites():
     if not current_user.is_admin:
         flash("このページにはアクセスできません。", "error")
-        return redirect(url_for("main.dashboard"))
+        return redirect(url_for("main.dashboard", username=current_user.username))
 
     from sqlalchemy import func
     from app.models import Site, Article, User
@@ -225,7 +225,7 @@ def admin_login_as(user_id):
     user = User.query.get_or_404(user_id)
     login_user(user)
     flash(f"{user.email} としてログインしました", "info")
-    return redirect(url_for("main.dashboard"))
+    return redirect(url_for("main.dashboard", username=current_user.username))
 
 
 @admin_bp.post("/admin/fix-missing-images")
@@ -267,7 +267,7 @@ def fix_missing_images():
 def refresh_images(user_id):
     if not current_user.is_admin:
         flash("管理者権限が必要です。", "danger")
-        return redirect(url_for("main.dashboard"))
+        return redirect(url_for("main.dashboard", username=current_user.username))
 
     import re
     from app.image_utils import fetch_featured_image, DEFAULT_IMAGE_URL
