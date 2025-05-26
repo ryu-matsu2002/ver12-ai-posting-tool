@@ -480,10 +480,8 @@ def login():
         identifier = form.identifier.data
         password = form.password.data
 
-        # メールアドレスまたはユーザー名のいずれかで検索
         user = User.query.filter(
-            (User.email == identifier) | (User.email.ilike(identifier)) |
-            (User.last_name == identifier)  # ユーザー名とする場合
+            (User.email == identifier) | (User.username == identifier)
         ).first()
 
         if user and check_password_hash(user.password, password):
@@ -494,6 +492,7 @@ def login():
             flash("ログイン情報が正しくありません。", "danger")
 
     return render_template("login.html", form=form)
+
 
 
 @bp.route("/register", methods=["GET", "POST"])
