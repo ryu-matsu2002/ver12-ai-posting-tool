@@ -2,7 +2,14 @@
 {% block title %}Register | AI Posting Tool{% endblock %}
 
 {% block content %}
-<div class="min-h-screen flex items-start justify-center pt-10">
+<style>
+  html {
+    scroll-behavior: smooth;
+  }
+</style>
+
+<!-- 上部余白と縦スクロール対策付き -->
+<div class="min-h-screen flex items-start justify-center mt-20">
   <form method="post"
         class="w-full max-w-2xl bg-white dark:bg-gray-800 p-8 rounded shadow">
     {{ form.hidden_tag() }}
@@ -142,11 +149,9 @@
 
     userTypeSelect.addEventListener("change", toggleCorporateFields);
     toggleCorporateFields(); // 初期表示
-  });
 
-  // ページ読み込み時に必ず上までスクロール
-  window.onload = function () {
-    window.scrollTo(0, 0);
-  };
+    // 強制的に上へスクロール
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  });
 </script>
 {% endblock %}
