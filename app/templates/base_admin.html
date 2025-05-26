@@ -13,7 +13,6 @@
   <aside class="w-64 bg-gray-900 text-white flex flex-col p-4 space-y-4">
     <h2 class="text-xl font-bold mb-4">Admin Menu</h2>
     <a href="{{ url_for('admin.admin_dashboard') }}" class="hover:text-yellow-400">管理ダッシュボード</a>
-    <a href="{{ url_for('main.dashboard', username=current_user.username) }}" class="hover:text-yellow-400"> 一般ダッシュボード</a>
     <a href="{{ url_for('admin.admin_users') }}" class="...">ユーザー管理</a>
     <a href="{{ url_for('admin.admin_sites') }}" class="...">📊 サイト投稿状況</a>
   </aside>
