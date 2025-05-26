@@ -653,7 +653,7 @@ def edit_prompt(pid: int):
         pt.body_pt  = form.body_pt.data
         db.session.commit()
         flash("プロンプトを更新しました", "success")
-        return redirect(url_for(".prompts"))
+        return redirect(url_for(".prompts", username=current_user.username))
 
     return render_template("prompt_edit.html", form=form, prompt=pt)
 
@@ -668,7 +668,7 @@ def delete_prompt(pid: int):
     db.session.delete(pt)
     db.session.commit()
     flash("削除しました", "success")
-    return redirect(url_for(".prompts"))
+    return redirect(url_for(".prompts", username=current_user.username))
 
 
 # ─────────── プロンプト取得API（記事生成用）
@@ -939,7 +939,7 @@ def post_article(id):
         db.session.rollback()
         flash(f"投稿失敗: {e}", "danger")
 
-    return redirect(url_for(".log", site_id=art.site_id))
+    return redirect(url_for(".log", username=current_user.username, site_id=art.site_id))
 
 
 # ─────────── 記事編集・削除・再試行
@@ -955,7 +955,7 @@ def edit_article(id):
         art.body  = form.body.data
         db.session.commit()
         flash("記事を更新しました", "success")
-        return redirect(url_for(".log", site_id=art.site_id))
+        return redirect(url_for(".log", username=current_user.username, site_id=art.site_id))
     return render_template("edit_article.html", form=form, article=art)
 
 @bp.post("/article/<int:id>/delete")
@@ -967,7 +967,7 @@ def delete_article(id):
     db.session.delete(art)
     db.session.commit()
     flash("記事を削除しました", "success")
-    return redirect(url_for(".log", site_id=art.site_id))
+    return redirect(url_for(".log", username=current_user.username, site_id=art.site_id))
 
 @bp.post("/article/<int:id>/retry")
 @login_required
