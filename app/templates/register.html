@@ -2,150 +2,134 @@
 {% block title %}Register | AI Posting Tool{% endblock %}
 
 {% block content %}
-<style>
-  html {
-    scroll-behavior: smooth;
-  }
-  .sticky-header {
-    position: sticky;
-    top: 0;
-    z-index: 50;
-    background-color: white;
-    padding-top: 1rem;
-    padding-bottom: 1rem;
-    border-bottom: 1px solid #ddd;
-  }
-</style>
-
-<div class="min-h-screen flex flex-col items-center py-6">
+<!-- scroll-behavior など不要なので削除 -->
+<div class="min-h-screen flex items-start justify-center">
   <form method="post"
-        class="w-full max-w-2xl bg-white dark:bg-gray-800 p-0 rounded shadow overflow-hidden">
-
+        class="w-full max-w-2xl bg-white dark:bg-gray-800 p-8 rounded shadow">
     {{ form.hidden_tag() }}
 
-    <!-- 🔒 固定表示：タイトル＋ログイン情報 -->
-    <div class="sticky-header px-8">
-      <h2 class="text-2xl font-semibold mb-4 text-center">新規登録</h2>
+    <!-- タイトル -->
+    <h2 class="text-2xl font-semibold mb-6 text-center">新規登録</h2>
 
+    <!-- ユーザー名 -->
+    <div class="mb-4">
+      {{ form.username.label(class="block mb-1") }}
+      {{ form.username(class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
+    </div>
+
+    <!-- メールアドレス -->
+    <div class="mb-4">
+      {{ form.email.label(class="block mb-1") }}
+      {{ form.email(class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
+    </div>
+
+    <!-- パスワード -->
+    <div class="mb-4">
+      {{ form.password.label(class="block mb-1") }}
+      {{ form.password(class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
+    </div>
+
+    <!-- パスワード確認 -->
+    <div class="mb-6">
+      {{ form.confirm.label(class="block mb-1") }}
+      {{ form.confirm(class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
+    </div>
+
+    <!-- 区分 -->
+    <div class="mb-6">
+      <label class="block mb-1">区分</label>
+      {{ form.user_type(class="w-full p-2 rounded border", id="user_type") }}
+    </div>
+
+    <!-- 法人用フィールド -->
+    <div id="corporate_fields" class="mb-6 hidden">
       <div class="mb-4">
-        {{ form.username.label(class="block mb-1") }}
-        {{ form.username(class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
+        {{ form.company_name.label(class="block mb-1") }}
+        {{ form.company_name(class="w-full p-2 rounded border") }}
       </div>
-
       <div class="mb-4">
-        {{ form.email.label(class="block mb-1") }}
-        {{ form.email(class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
-      </div>
-
-      <div class="mb-4">
-        {{ form.password.label(class="block mb-1") }}
-        {{ form.password(class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
-      </div>
-
-      <div class="mb-0">
-        {{ form.confirm.label(class="block mb-1") }}
-        {{ form.confirm(class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
+        {{ form.company_kana.label(class="block mb-1") }}
+        {{ form.company_kana(class="w-full p-2 rounded border") }}
       </div>
     </div>
 
-    <!-- ✏️ スクロールする入力フィールド -->
-    <div class="px-8 py-6">
-      <!-- 区分 -->
-      <div class="mb-6">
-        <label class="block mb-1">区分</label>
-        {{ form.user_type(class="w-full p-2 rounded border", id="user_type") }}
+    <!-- 氏名 -->
+    <div class="flex gap-4 mb-4">
+      <div class="w-1/2">
+        {{ form.last_name.label(class="block mb-1") }}
+        {{ form.last_name(class="w-full p-2 rounded border") }}
       </div>
-
-      <!-- 法人用フィールド -->
-      <div id="corporate_fields" class="mb-6 hidden">
-        <div class="mb-4">
-          {{ form.company_name.label(class="block mb-1") }}
-          {{ form.company_name(class="w-full p-2 rounded border") }}
-        </div>
-        <div class="mb-4">
-          {{ form.company_kana.label(class="block mb-1") }}
-          {{ form.company_kana(class="w-full p-2 rounded border") }}
-        </div>
+      <div class="w-1/2">
+        {{ form.first_name.label(class="block mb-1") }}
+        {{ form.first_name(class="w-full p-2 rounded border") }}
       </div>
-
-      <!-- 氏名 -->
-      <div class="flex gap-4 mb-4">
-        <div class="w-1/2">
-          {{ form.last_name.label(class="block mb-1") }}
-          {{ form.last_name(class="w-full p-2 rounded border") }}
-        </div>
-        <div class="w-1/2">
-          {{ form.first_name.label(class="block mb-1") }}
-          {{ form.first_name(class="w-full p-2 rounded border") }}
-        </div>
-      </div>
-
-      <!-- フリガナ -->
-      <div class="flex gap-4 mb-4">
-        <div class="w-1/2">
-          {{ form.last_kana.label(class="block mb-1") }}
-          {{ form.last_kana(class="w-full p-2 rounded border") }}
-        </div>
-        <div class="w-1/2">
-          {{ form.first_kana.label(class="block mb-1") }}
-          {{ form.first_kana(class="w-full p-2 rounded border") }}
-        </div>
-      </div>
-
-      <!-- 郵便番号 -->
-      <div class="mb-4">
-        {{ form.postal_code.label(class="block mb-1") }}
-        {{ form.postal_code(class="w-full p-2 rounded border") }}
-      </div>
-
-      <!-- 都道府県・市区郡 -->
-      <div class="flex gap-4 mb-4">
-        <div class="w-1/2">
-          {{ form.prefecture.label(class="block mb-1") }}
-          {{ form.prefecture(class="w-full p-2 rounded border") }}
-        </div>
-        <div class="w-1/2">
-          {{ form.city.label(class="block mb-1") }}
-          {{ form.city(class="w-full p-2 rounded border") }}
-        </div>
-      </div>
-
-      <!-- 住所 -->
-      <div class="mb-4">
-        {{ form.address1.label(class="block mb-1") }}
-        {{ form.address1(class="w-full p-2 rounded border") }}
-      </div>
-      <div class="mb-4">
-        {{ form.address2.label(class="block mb-1") }}
-        {{ form.address2(class="w-full p-2 rounded border") }}
-      </div>
-
-      <!-- 電話番号 -->
-      <div class="mb-4">
-        {{ form.phone.label(class="block mb-1") }}
-        {{ form.phone(class="w-full p-2 rounded border") }}
-      </div>
-
-      <!-- 専用登録パスワード -->
-      <div class="mb-6">
-        {{ form.register_key.label(class="block mb-1") }}
-        {{ form.register_key(class="w-full p-2 rounded border") }}
-        <p class="text-sm text-gray-500 mt-1">※ 登録には「tcctool」という登録専用パスワードが必要です</p>
-      </div>
-
-      <!-- 登録ボタン -->
-      {{ form.submit(class="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded") }}
-
-      <!-- ログインリンク -->
-      <p class="text-center text-sm mt-4">
-        既にアカウントをお持ちですか？
-        <a href="{{ url_for('main.login') }}" class="text-blue-600 hover:underline">ログイン</a>
-      </p>
     </div>
+
+    <!-- フリガナ -->
+    <div class="flex gap-4 mb-4">
+      <div class="w-1/2">
+        {{ form.last_kana.label(class="block mb-1") }}
+        {{ form.last_kana(class="w-full p-2 rounded border") }}
+      </div>
+      <div class="w-1/2">
+        {{ form.first_kana.label(class="block mb-1") }}
+        {{ form.first_kana(class="w-full p-2 rounded border") }}
+      </div>
+    </div>
+
+    <!-- 郵便番号 -->
+    <div class="mb-4">
+      {{ form.postal_code.label(class="block mb-1") }}
+      {{ form.postal_code(class="w-full p-2 rounded border") }}
+    </div>
+
+    <!-- 都道府県・市区郡 -->
+    <div class="flex gap-4 mb-4">
+      <div class="w-1/2">
+        {{ form.prefecture.label(class="block mb-1") }}
+        {{ form.prefecture(class="w-full p-2 rounded border") }}
+      </div>
+      <div class="w-1/2">
+        {{ form.city.label(class="block mb-1") }}
+        {{ form.city(class="w-full p-2 rounded border") }}
+      </div>
+    </div>
+
+    <!-- 住所 -->
+    <div class="mb-4">
+      {{ form.address1.label(class="block mb-1") }}
+      {{ form.address1(class="w-full p-2 rounded border") }}
+    </div>
+    <div class="mb-4">
+      {{ form.address2.label(class="block mb-1") }}
+      {{ form.address2(class="w-full p-2 rounded border") }}
+    </div>
+
+    <!-- 電話番号 -->
+    <div class="mb-4">
+      {{ form.phone.label(class="block mb-1") }}
+      {{ form.phone(class="w-full p-2 rounded border") }}
+    </div>
+
+    <!-- 専用登録パスワード -->
+    <div class="mb-6">
+      {{ form.register_key.label(class="block mb-1") }}
+      {{ form.register_key(class="w-full p-2 rounded border") }}
+      <p class="text-sm text-gray-500 mt-1">※ 登録には「tcctool」という登録専用パスワードが必要です</p>
+    </div>
+
+    <!-- 登録ボタン -->
+    {{ form.submit(class="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded") }}
+
+    <!-- ログインリンク -->
+    <p class="text-center text-sm mt-4">
+      既にアカウントをお持ちですか？
+      <a href="{{ url_for('main.login') }}" class="text-blue-600 hover:underline">ログイン</a>
+    </p>
   </form>
 </div>
 
-<!-- JS -->
+<!-- フォーム切り替えJS -->
 <script>
   document.addEventListener("DOMContentLoaded", function () {
     const userTypeSelect = document.getElementById("user_type");
@@ -160,9 +144,7 @@
     }
 
     userTypeSelect.addEventListener("change", toggleCorporateFields);
-    toggleCorporateFields();
-
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    toggleCorporateFields(); // 初期表示
   });
 </script>
 {% endblock %}
