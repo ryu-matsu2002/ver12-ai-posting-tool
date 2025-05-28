@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}プラン購入 | AI Posting Tool{% endblock %}
+
+{% block content %}
+<div class="max-w-xl mx-auto bg-white p-6 mt-10 rounded shadow-md">
+  <h2 class="text-2xl font-bold mb-6 text-center">プランを選択してください</h2>
+
+  <form method="POST" action="{{ url_for('main.purchase') }}" class="space-y-6">
+    {{ csrf_token() }}
+
+    <!-- プラン選択 -->
+    <div>
+      <label for="plan_type" class="block font-medium mb-2">プラン種別</label>
+      <select name="plan_type" id="plan_type" required class="w-full border p-2 rounded">
+        <option value="" disabled selected>選択してください</option>
+        <option value="affiliate">アフィリエイト用（3,000円 一括）</option>
+        <option value="business">事業用（20,000円/月額）</option>
+      </select>
+    </div>
+
+    <!-- サイト数入力 -->
+    <div>
+      <label for="site_count" class="block font-medium mb-2">登録サイト数</label>
+      <input type="number" name="site_count" id="site_count" min="1" max="10"
+             class="w-full border p-2 rounded" placeholder="例：1" required>
+    </div>
+
+    <!-- 購入ボタン -->
+    <div class="text-center">
+      <button type="submit"
+              class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700">
+        Stripeで購入
+      </button>
+    </div>
+
+    {% if request.args.get('success') %}
+      <p class="text-green-600 text-center mt-4">✅ 購入が完了しました！</p>
+    {% elif request.args.get('canceled') %}
+      <p class="text-red-600 text-center mt-4">❌ 購入がキャンセルされました。</p>
+    {% endif %}
+  </form>
+</div>
+{% endblock %}

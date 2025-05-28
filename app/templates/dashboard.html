@@ -4,6 +4,13 @@
 {% block content %}
 <h2 class="text-3xl font-bold mb-8">ダッシュボード</h2>
 
+<!-- ✅ プラン情報 -->
+<div class="bg-gray-100 text-gray-800 p-4 rounded-lg shadow mb-8 dark:bg-gray-700 dark:text-white">
+  🧾 プラン: <strong>{{ plan_type|capitalize }}</strong> /
+  使用済み: <strong>{{ used_quota }}</strong> /
+  上限: <strong>{{ total_quota }}</strong>
+</div>
+
 <!-- ✅ ステータス表示 -->
 <div class="grid md:grid-cols-4 gap-6 mb-10">
   <!-- 投稿完了 -->
@@ -61,7 +68,7 @@
     <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">ジャンル別にキーワードを登録・管理</p>
   </a>
 
-  <!-- ChatGPTアクセス（グローバル） -->
+  <!-- ChatGPTアクセス -->
   <a href="{{ url_for('main.chatgpt', username=current_user.username) }}" class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center">
     <div class="text-3xl mb-2">🤖</div>
     <p class="font-semibold text-lg text-gray-900 dark:text-white">ChatGPT</p>

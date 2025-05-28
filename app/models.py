@@ -125,3 +125,11 @@ class Keyword(db.Model):
     user = db.relationship("User", backref="keywords")
     site = db.relationship("Site", backref="keywords")
 
+class UserSiteQuota(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    total_quota = db.Column(db.Integer, default=0)  # 支払いで獲得したサイト数
+    used_quota = db.Column(db.Integer, default=0)   # 登録済みサイト数
+    plan_type = db.Column(db.String(20))            # 例: 'affiliate' or 'business'
+
+    user = db.relationship('User', backref=db.backref('site_quota', uselist=False))

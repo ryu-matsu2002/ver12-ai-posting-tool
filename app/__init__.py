@@ -14,6 +14,9 @@ from flask_login import LoginManager
 from flask_migrate import Migrate
 from celery import Celery
 
+
+
+
 # ── Flask-拡張の“空”インスタンスを先に作成 ───────────
 db            = SQLAlchemy()
 login_manager = LoginManager()
@@ -53,9 +56,12 @@ def create_app() -> Flask:
     # ─── Blueprints 登録とスケジューラ起動 ───────
     with app.app_context():
         # Blueprint の登録（main用 + admin用）
-        from .routes import bp as main_bp, admin_bp
+        from .routes import bp as main_bp, admin_bp, stripe_webhook_bp
         app.register_blueprint(main_bp)
         app.register_blueprint(admin_bp)
+        app.register_blueprint(stripe_webhook_bp)
+
+        from . import models
 
         # 自動投稿ジョブを APScheduler に登録して起動
         from .tasks import init_scheduler

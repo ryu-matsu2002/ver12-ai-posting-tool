@@ -52,6 +52,95 @@ def robots_txt():
     return send_from_directory('static', 'robots.txt')
 
 
+
+# app/routes.py などに追記
+
+import stripe
+from app import db
+from app.models import User, UserSiteQuota
+
+stripe_webhook_bp = Blueprint('stripe_webhook', __name__)
+
+@stripe_webhook_bp.route("/stripe/webhook", methods=["POST"])
+def stripe_webhook():
+    payload = request.data
+    sig_header = request.headers.get("stripe-signature")
+    webhook_secret = current_app.config["STRIPE_WEBHOOK_SECRET"]
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, webhook_secret
+        )
+    except stripe.error.SignatureVerificationError:
+        return "Webhook signature verification failed", 400
+    except Exception as e:
+        return f"Error parsing webhook: {str(e)}", 400
+
+    # 支払い成功イベントを処理
+    if event["type"] == "checkout.session.completed":
+        session = event["data"]["object"]
+        customer_email = session.get("customer_email")
+        metadata = session.get("metadata", {})
+        plan_type = metadata.get("plan_type")  # "affiliate" or "business"
+        site_count = int(metadata.get("site_count", 1))
+
+        user = User.query.filter_by(email=customer_email).first()
+        if user:
+            quota = UserSiteQuota.query.filter_by(user_id=user.id).first()
+            if not quota:
+                quota = UserSiteQuota(user_id=user.id, total_quota=0, used_quota=0, plan_type=plan_type)
+                db.session.add(quota)
+            quota.total_quota += site_count
+            quota.plan_type = plan_type
+            db.session.commit()
+
+    return jsonify(success=True)
+
+
+# Stripe APIキーを読み込み
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+
+@bp.route("/purchase", methods=["GET", "POST"])
+@login_required
+def purchase():
+    if request.method == "POST":
+        plan_type = request.form.get("plan_type")  # 'affiliate' or 'business'
+        site_count = int(request.form.get("site_count", 1))
+
+        # price_id は後で環境変数かDBで切り替える設計にする
+        price_id = None
+        if plan_type == "affiliate":
+            price_id = os.getenv("STRIPE_PRICE_ID_AFFILIATE")
+        elif plan_type == "business":
+           price_id = os.getenv("STRIPE_PRICE_ID_BUSINESS")
+  # Stripeの実IDに置き換えてください
+
+        if not price_id:
+            flash("不正なプランが選択されました。", "error")
+            return redirect(url_for("main.purchase"))
+
+        # Stripe Checkoutセッション作成
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            customer_email=current_user.email,
+            line_items=[{
+                "price": price_id,
+                "quantity": site_count,
+            }],
+            mode="payment" if plan_type == "affiliate" else "subscription",
+            success_url=url_for("main.purchase", _external=True) + "?success=true",
+            cancel_url=url_for("main.purchase", _external=True) + "?canceled=true",
+            metadata={
+                "user_id": current_user.id,
+                "plan_type": plan_type,
+                "site_count": site_count
+            }
+        )
+        return redirect(session.url, code=303)
+
+    return render_template("purchase.html")
+
+
 from app.models import Article, User, PromptTemplate, Site
 from os.path import exists, getsize
 
@@ -595,21 +684,39 @@ def root_redirect():
     return redirect(url_for("main.dashboard", username=current_user.username))
 
 # ─────────── Dashboard
+from app.models import UserSiteQuota  # 追加
+
 @bp.route("/<username>/dashboard")
 @login_required
 def dashboard(username):
-    # セキュリティ：ログイン中のユーザーのusernameと一致するか確認
     if current_user.username != username:
         abort(403)
+
+    # 記事統計
     g.total_articles = Article.query.filter_by(user_id=current_user.id).count()
     g.generating     = Article.query.filter(
         Article.user_id == current_user.id,
         Article.status.in_(["pending", "gen"])
     ).count()
-    g.done           = Article.query.filter_by(user_id=current_user.id, status="done").count()
-    g.posted         = Article.query.filter_by(user_id=current_user.id, status="posted").count()
-    g.error          = Article.query.filter_by(user_id=current_user.id, status="error").count()  # ←追加
-    return render_template("dashboard.html")
+    g.done   = Article.query.filter_by(user_id=current_user.id, status="done").count()
+    g.posted = Article.query.filter_by(user_id=current_user.id, status="posted").count()
+    g.error  = Article.query.filter_by(user_id=current_user.id, status="error").count()
+
+    # ✅ user / quota 情報取得
+    user = current_user
+    quota = UserSiteQuota.query.filter_by(user_id=user.id).first()
+
+    # ✅ 存在しない場合でも安全に表示
+    plan_type   = quota.plan_type if quota else "未契約"
+    total_quota = quota.total_quota if quota else 0
+    used_quota  = quota.used_quota if quota else 0
+
+    return render_template(
+        "dashboard.html",
+        plan_type=plan_type,
+        total_quota=total_quota,
+        used_quota=used_quota,
+    )
 
 
 # ─────────── プロンプト CRUD（新規登録のみ）
@@ -685,7 +792,6 @@ def api_prompt(pid: int):
 
 
 
-# ─────────── WP サイト CRUD（ユーザー別）
 @bp.route("/<username>/sites", methods=["GET", "POST"])
 @login_required
 def sites(username):
@@ -693,7 +799,15 @@ def sites(username):
         abort(403)
 
     form = SiteForm()
+
+    quota = UserSiteQuota.query.filter_by(user_id=current_user.id).first()
+    remaining_quota = quota.total_quota - quota.used_quota if quota else 0
+
     if form.validate_on_submit():
+        if remaining_quota <= 0:
+            flash("サイト登録上限に達しています。追加するには課金が必要です。", "danger")
+            return redirect(url_for("main.sites", username=username))
+
         db.session.add(Site(
             name     = form.name.data,
             url      = form.url.data.rstrip("/"),
@@ -701,12 +815,18 @@ def sites(username):
             app_pass = form.app_pass.data,
             user_id  = current_user.id
         ))
+
+        # 🔸 used_quota を加算
+        if quota:
+            quota.used_quota += 1
+
         db.session.commit()
         flash("サイトを登録しました", "success")
         return redirect(url_for("main.sites", username=username))
 
     site_list = Site.query.filter_by(user_id=current_user.id).all()
-    return render_template("sites.html", form=form, sites=site_list)
+    return render_template("sites.html", form=form, sites=site_list, remaining_quota=remaining_quota)
+
 
 
 @bp.post("/<username>/sites/<int:sid>/delete")
