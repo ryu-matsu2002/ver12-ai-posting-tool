@@ -818,7 +818,7 @@ def api_prompt(pid: int):
 def first_purchase():
     return render_template("first_purchase.html")
 
-
+from os import getenv
 
 @bp.route("/<username>/sites", methods=["GET", "POST"])
 @login_required
@@ -860,7 +860,16 @@ def sites(username):
         flash("サイトを登録しました", "success")
         return redirect(url_for("main.sites", username=username))
 
-    return render_template("sites.html", form=form, sites=site_list, remaining_quota=remaining_quota)
+    return render_template(
+    "sites.html",
+    form=form,
+    sites=site_list,
+    remaining_quota=remaining_quota,
+    plan_type=quota.plan_type if quota else "未契約",
+    total_quota=quota.total_quota if quota else 0,
+    used_quota=quota.used_quota if quota else 0,
+    stripe_public_key=getenv("STRIPE_PUBLIC_KEY")  # ← ★これが重要
+    )
 
 
 
