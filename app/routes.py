@@ -98,7 +98,28 @@ def stripe_webhook():
 # Stripe APIキーを読み込み
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
+@bp.route("/create-payment-intent", methods=["POST"])
+def create_payment_intent():
+    try:
+        data = request.get_json()
+        plan_type = data.get("plan_type", "affiliate")
+        site_count = int(data.get("site_count", 1))
 
+        # プラン別金額設定
+        unit_price = 3000 if plan_type == "affiliate" else 20000
+        total_amount = unit_price * site_count * 100  # 円 → センチに変換（Stripe仕様）
+
+        # PaymentIntent作成
+        intent = stripe.PaymentIntent.create(
+            amount=total_amount,
+            currency="jpy",
+            automatic_payment_methods={"enabled": True},
+        )
+
+        return jsonify({"clientSecret": intent.client_secret})
+
+    except Exception as e:
+        return jsonify(error=str(e)), 400
 
 
 
