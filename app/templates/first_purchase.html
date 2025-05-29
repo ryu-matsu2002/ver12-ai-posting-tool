@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}初回プラン購入 | TCC autowize{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto px-6 py-10 bg-white rounded shadow-md mt-8">
+
+  <h1 class="text-3xl font-bold mb-6 text-blue-800 flex items-center gap-2">
+    <img src="/static/icons/shop-cart.gif" alt="cart" class="w-6 h-6"> 初回プラン購入
+  </h1>
+
+  <p class="mb-4 text-gray-700 leading-relaxed">
+    このツールでWordPressサイトを登録・管理するには、まずプランを購入する必要があります。<br>
+    以下よりご希望のプランと登録サイト数を選択してください。
+  </p>
+
+  <div class="p-4 bg-yellow-100 text-yellow-800 rounded mb-6">
+    🚨 <strong>注意：</strong>最初のサイト登録を行うには、必ずこのページでの決済が必要です。
+  </div>
+
+  <form action="{{ url_for('main.purchase') }}" method="post" id="payment-form" class="space-y-5">
+
+    <!-- プラン選択 -->
+    <div>
+      <label class="block font-semibold text-gray-800 mb-1">プラン種別</label>
+      <select name="plan_type" id="plan_type" class="w-full border rounded p-3 shadow-sm bg-white">
+        <option value="affiliate">🟦 アフィリエイト用（¥3,000）</option>
+        <option value="business">🟨 事業用（月額 ¥20,000）</option>
+      </select>
+    </div>
+
+    <!-- サイト数入力 -->
+    <div>
+      <label class="block font-semibold text-gray-800 mb-1">サイト数</label>
+      <input type="number" name="site_count" id="site_count"
+        class="w-full border rounded p-3 shadow-sm" min="1" placeholder="例: 3" required>
+    </div>
+
+    <!-- 合計金額表示 -->
+    <div class="text-right font-bold text-green-700 text-lg">
+      合計金額: <span id="total_price">¥3,000</span>
+    </div>
+
+    <!-- 決済ボタン -->
+    <button type="submit"
+      class="w-full py-3 bg-gradient-to-r from-green-400 to-green-600 hover:from-green-500 hover:to-green-700 text-white rounded-lg text-lg font-bold shadow-md transform hover:scale-105 transition">
+      💳 プランを購入して開始する
+    </button>
+  </form>
+
+  <!-- 金額表示用スクリプト -->
+  <script>
+    const priceMap = {
+      affiliate: 3000,
+      business: 20000
+    };
+
+    function updateTotal() {
+      const plan = document.getElementById("plan_type").value;
+      const count = parseInt(document.getElementById("site_count").value || 1);
+      const price = priceMap[plan] * count;
+      document.getElementById("total_price").textContent = `¥${price.toLocaleString()}`;
+    }
+
+    document.getElementById("plan_type").addEventListener("change", updateTotal);
+    document.getElementById("site_count").addEventListener("input", updateTotal);
+  </script>
+</div>
+{% endblock %}

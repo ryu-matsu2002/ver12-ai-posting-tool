@@ -53,8 +53,6 @@ def robots_txt():
 
 
 
-# app/routes.py などに追記
-
 import stripe
 from app import db
 from app.models import User, UserSiteQuota
@@ -99,6 +97,27 @@ def stripe_webhook():
 
 # Stripe APIキーを読み込み
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+
+
+@bp.route("/create_payment", methods=["POST"])
+@login_required
+def create_payment():
+    from flask import jsonify
+    data = request.get_json()
+    plan_type = data.get("plan_type")
+    site_count = int(data.get("site_count", 1))
+
+    price = 3000 if plan_type == "affiliate" else 20000
+    amount = price * site_count
+
+    intent = stripe.PaymentIntent.create(
+        amount=amount,
+        currency="jpy",
+        metadata={"user_id": current_user.id, "plan_type": plan_type}
+    )
+
+    return jsonify({"client_secret": intent.client_secret})
+
 
 @bp.route("/purchase", methods=["GET", "POST"])
 @login_required
@@ -790,6 +809,11 @@ def api_prompt(pid: int):
     })
 
 
+@bp.route("/first_purchase")
+@login_required
+def first_purchase():
+    return render_template("first_purchase.html")
+
 
 
 @bp.route("/<username>/sites", methods=["GET", "POST"])
@@ -803,6 +827,14 @@ def sites(username):
     quota = UserSiteQuota.query.filter_by(user_id=current_user.id).first()
     remaining_quota = quota.total_quota - quota.used_quota if quota else 0
 
+    # 🔸 現在のサイト一覧を取得
+    site_list = Site.query.filter_by(user_id=current_user.id).all()
+
+    # 🔸 サイトが1つも登録されていなければ初回購入ページへリダイレクト
+    if not site_list:
+        return redirect(url_for("main.first_purchase"))
+
+    # 🔸 POST時のサイト登録処理
     if form.validate_on_submit():
         if remaining_quota <= 0:
             flash("サイト登録上限に達しています。追加するには課金が必要です。", "danger")
@@ -824,7 +856,6 @@ def sites(username):
         flash("サイトを登録しました", "success")
         return redirect(url_for("main.sites", username=username))
 
-    site_list = Site.query.filter_by(user_id=current_user.id).all()
     return render_template("sites.html", form=form, sites=site_list, remaining_quota=remaining_quota)
 
 
@@ -871,7 +902,6 @@ def edit_site(username, sid: int):
 
 
 
-# ─────────── 記事生成
 # ─────────── 記事生成（ユーザー別）
 @bp.route("/<username>/generate", methods=["GET", "POST"])
 @login_required
