@@ -6,13 +6,13 @@
 
 <div class="grid md:grid-cols-2 gap-10">
 
-  <!-- ───────── サイト登録フォーム ───────── -->
+  <!-- ───── 左カラム：サイト登録 + プラン購入導線 ───── -->
   <div>
     <h3 class="text-2xl font-semibold mb-6">新規サイト登録</h3>
 
     {% if remaining_quota > 0 %}
       <div class="mb-4 text-green-700 font-semibold">
-        ✅ あと {{ remaining_quota }} サイト登録可能です。
+        ✅ あと <strong>{{ remaining_quota }}</strong> サイト登録可能です。
       </div>
 
       <form method="post" class="space-y-5 p-6 bg-white dark:bg-gray-800 rounded shadow-lg">
@@ -42,17 +42,24 @@
 
         {{ form.submit(class="py-3 px-6 bg-blue-600 hover:bg-blue-700 text-white text-lg rounded shadow") }}
       </form>
+
     {% else %}
-      <div class="p-4 bg-yellow-100 text-yellow-800 rounded shadow-md">
-        ⚠️ サイト登録上限に達しました。<br>
-        <a href="{{ url_for('main.purchase') }}" class="underline text-blue-600">プランを購入</a>して、登録枠を追加してください。
+      <div class="p-6 bg-yellow-100 border-l-4 border-yellow-400 text-yellow-800 rounded shadow-md">
+        ⚠️ サイト登録上限に達しています。<br><br>
+        <a href="{{ url_for('main.purchase') }}" class="underline font-bold text-blue-700">プランを購入</a>して、
+        登録枠を追加してください。
       </div>
     {% endif %}
+
+    <div class="mt-6 p-4 bg-blue-50 border-l-4 border-blue-400 rounded">
+      💡「アフィリエイト用（3,000円）」または<br>
+      「事業用（月額 20,000円）」のプラン選択が可能です。
+    </div>
   </div>
 
-  <!-- ───────── 登録済みサイト + プラン情報 + 課金案内 ───────── -->
+  <!-- ───── 右カラム：登録済みサイト一覧 + 契約状況 ───── -->
   <div>
-    <h3 class="text-2xl font-semibold mb-6">登録済みサイト</h3>
+    <h3 class="text-2xl font-semibold mb-6">登録済みサイト一覧</h3>
 
     <!-- プラン情報 -->
     <div class="mb-6 p-4 bg-gray-100 dark:bg-gray-700 rounded-lg shadow">
@@ -90,15 +97,9 @@
     </div>
     {% else %}
     <div class="text-gray-500 text-base text-center mt-4">
-      サイトはまだ登録されていません
+      サイトはまだ登録されていません。
     </div>
     {% endif %}
-
-    <!-- 課金案内 -->
-    <div class="mt-8 p-4 bg-blue-50 border-l-4 border-blue-400 rounded">
-      💳 サイトを追加登録したい場合は、<br>
-      <a href="{{ url_for('main.purchase') }}" class="font-bold text-blue-700 underline">こちらからプランを購入</a>してください。
-    </div>
   </div>
 
 </div>
