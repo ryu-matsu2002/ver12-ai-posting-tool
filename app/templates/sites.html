@@ -6,70 +6,91 @@
 
 <div class="grid md:grid-cols-2 gap-10">
 
-  <!-- ───── 左カラム：サイト登録 + プラン購入導線 ───── -->
+  <!-- 左カラム：サイト登録フォーム -->
   <div>
     <h3 class="text-2xl font-semibold mb-6">新規サイト登録</h3>
 
     {% if remaining_quota > 0 %}
       <div class="mb-4 text-green-700 font-semibold">
-        ✅ あと <strong>{{ remaining_quota }}</strong> サイト登録可能です。
+        ✅ あと {{ remaining_quota }} サイト登録可能です。
       </div>
-
-      <form method="post" class="space-y-5 p-6 bg-white dark:bg-gray-800 rounded shadow-lg">
-        {{ form.hidden_tag() }}
-
-        <div>
-          {{ form.name.label(class="block mb-1 text-lg font-medium") }}
-          {{ form.name(class="w-full p-3 text-base rounded border dark:bg-gray-700 dark:border-gray-600") }}
-        </div>
-
-        <div>
-          {{ form.url.label(class="block mb-1 text-lg font-medium") }}
-          {{ form.url(class="w-full p-3 text-base rounded border dark:bg-gray-700 dark:border-gray-600") }}
-          <small class="text-gray-500 dark:text-gray-400">例: https://example.com</small>
-        </div>
-
-        <div>
-          {{ form.username.label(class="block mb-1 text-lg font-medium") }}
-          {{ form.username(class="w-full p-3 text-base rounded border dark:bg-gray-700 dark:border-gray-600") }}
-        </div>
-
-        <div>
-          {{ form.app_pass.label(class="block mb-1 text-lg font-medium") }}
-          {{ form.app_pass(class="w-full p-3 text-base rounded border dark:bg-gray-700 dark:border-gray-600") }}
-          <small class="text-gray-500 dark:text-gray-400">WP の「アプリケーションパスワード」を入力</small>
-        </div>
-
-        {{ form.submit(class="py-3 px-6 bg-blue-600 hover:bg-blue-700 text-white text-lg rounded shadow") }}
-      </form>
-
     {% else %}
-      <div class="p-6 bg-yellow-100 border-l-4 border-yellow-400 text-yellow-800 rounded shadow-md">
-        ⚠️ サイト登録上限に達しています。<br><br>
-        <a href="{{ url_for('main.purchase') }}" class="underline font-bold text-blue-700">プランを購入</a>して、
-        登録枠を追加してください。
+      <div class="mb-4 p-4 bg-yellow-100 text-yellow-800 rounded shadow-md text-sm">
+        ⚠️ サイト登録上限に達しています。
+        <a href="#purchase-section" class="text-blue-600 underline">プランを購入</a>して登録枠を追加してください。
       </div>
     {% endif %}
 
-    <div class="mt-6 p-4 bg-blue-50 border-l-4 border-blue-400 rounded">
-      💡「アフィリエイト用（3,000円）」または<br>
-      「事業用（月額 20,000円）」のプラン選択が可能です。
-    </div>
+    <form method="post" class="space-y-5 p-6 bg-white dark:bg-gray-800 rounded shadow-lg">
+      {{ form.hidden_tag() }}
+
+      <div>
+        {{ form.name.label(class="block mb-1 text-lg font-medium") }}
+        {{ form.name(class="w-full p-3 text-base rounded border dark:bg-gray-700 dark:border-gray-600", disabled=remaining_quota <= 0) }}
+      </div>
+
+      <div>
+        {{ form.url.label(class="block mb-1 text-lg font-medium") }}
+        {{ form.url(class="w-full p-3 text-base rounded border dark:bg-gray-700 dark:border-gray-600", disabled=remaining_quota <= 0) }}
+        <small class="text-gray-500 dark:text-gray-400">例: https://example.com</small>
+      </div>
+
+      <div>
+        {{ form.username.label(class="block mb-1 text-lg font-medium") }}
+        {{ form.username(class="w-full p-3 text-base rounded border dark:bg-gray-700 dark:border-gray-600", disabled=remaining_quota <= 0) }}
+      </div>
+
+      <div>
+        {{ form.app_pass.label(class="block mb-1 text-lg font-medium") }}
+        {{ form.app_pass(class="w-full p-3 text-base rounded border dark:bg-gray-700 dark:border-gray-600", disabled=remaining_quota <= 0) }}
+        <small class="text-gray-500 dark:text-gray-400">WP の「アプリケーションパスワード」を入力</small>
+      </div>
+
+      <div>
+        {% if remaining_quota > 0 %}
+          {{ form.submit(class="py-3 px-6 bg-blue-600 hover:bg-blue-700 text-white text-lg rounded shadow") }}
+        {% else %}
+          <button class="py-3 px-6 bg-gray-400 text-white text-lg rounded shadow" disabled>登録不可</button>
+        {% endif %}
+      </div>
+    </form>
   </div>
 
-  <!-- ───── 右カラム：登録済みサイト一覧 + 契約状況 ───── -->
+  <!-- 右カラム：プラン表示・支払い・登録済みサイト一覧 -->
   <div>
     <h3 class="text-2xl font-semibold mb-6">登録済みサイト一覧</h3>
 
-    <!-- プラン情報 -->
-    <div class="mb-6 p-4 bg-gray-100 dark:bg-gray-700 rounded-lg shadow">
+    <!-- プラン情報表示 -->
+    <div class="mb-6 p-4 bg-gray-100 dark:bg-gray-700 rounded-lg shadow text-sm" id="purchase-section">
       <p class="text-base text-gray-800 dark:text-gray-200">
         🧾 現在のプラン: <strong>{{ plan_type|capitalize }}</strong><br>
         ✅ 使用済み: <strong>{{ used_quota }}</strong> / 上限: <strong>{{ total_quota }}</strong>
       </p>
     </div>
 
-    <!-- サイト一覧 -->
+    <!-- Stripe埋込課金フォーム -->
+    <div class="mb-8 p-4 bg-blue-50 border-l-4 border-blue-400 rounded shadow text-sm">
+      💡 <strong>プラン選択:</strong><br>
+      ・アフィリエイト用（¥3,000）<br>
+      ・事業用（月額 ¥20,000）
+
+      <form action="/purchase" method="post" class="mt-3 space-y-2">
+        <select name="plan_type" class="w-full p-2 border rounded">
+          <option value="affiliate">アフィリエイト用（¥3,000）</option>
+          <option value="business">事業用（月額 ¥20,000）</option>
+        </select>
+        <select name="site_count" class="w-full p-2 border rounded">
+          {% for i in range(1, 11) %}
+            <option value="{{ i }}">{{ i }} サイト</option>
+          {% endfor %}
+        </select>
+        <button type="submit" class="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded shadow">
+          プランを購入する
+        </button>
+      </form>
+    </div>
+
+    <!-- 登録済みサイト表示 -->
     {% if sites %}
     <div class="flex flex-col space-y-5">
       {% for s in sites %}
@@ -97,10 +118,9 @@
     </div>
     {% else %}
     <div class="text-gray-500 text-base text-center mt-4">
-      サイトはまだ登録されていません。
+      サイトはまだ登録されていません
     </div>
     {% endif %}
   </div>
-
 </div>
 {% endblock %}
