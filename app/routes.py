@@ -99,24 +99,7 @@ def stripe_webhook():
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
 
-@bp.route("/create_payment", methods=["POST"])
-@login_required
-def create_payment():
-    from flask import jsonify
-    data = request.get_json()
-    plan_type = data.get("plan_type")
-    site_count = int(data.get("site_count", 1))
 
-    price = 3000 if plan_type == "affiliate" else 20000
-    amount = price * site_count
-
-    intent = stripe.PaymentIntent.create(
-        amount=amount,
-        currency="jpy",
-        metadata={"user_id": current_user.id, "plan_type": plan_type}
-    )
-
-    return jsonify({"client_secret": intent.client_secret})
 
 
 @bp.route("/purchase", methods=["GET", "POST"])
