@@ -915,10 +915,7 @@ def api_prompt(pid: int):
     })
 
 
-@bp.route("/first_purchase")
-@login_required
-def first_purchase():
-    return render_template("first_purchase.html")
+
 
 from os import getenv
 
@@ -935,10 +932,6 @@ def sites(username):
 
     # 🔸 現在のサイト一覧を取得
     site_list = Site.query.filter_by(user_id=current_user.id).all()
-
-    # 🔸 サイトが1つも登録されていなければ初回購入ページへリダイレクト
-    if not site_list:
-        return redirect(url_for("main.first_purchase"))
 
     # 🔸 POST時のサイト登録処理
     if form.validate_on_submit():
@@ -963,14 +956,14 @@ def sites(username):
         return redirect(url_for("main.sites", username=username))
 
     return render_template(
-    "sites.html",
-    form=form,
-    sites=site_list,
-    remaining_quota=remaining_quota,
-    plan_type=quota.plan_type if quota else "未契約",
-    total_quota=quota.total_quota if quota else 0,
-    used_quota=quota.used_quota if quota else 0,
-    stripe_public_key=getenv("STRIPE_PUBLIC_KEY")  # ← ★これが重要
+        "sites.html",
+        form=form,
+        sites=site_list,
+        remaining_quota=remaining_quota,
+        plan_type=quota.plan_type if quota else "未契約",
+        total_quota=quota.total_quota if quota else 0,
+        used_quota=quota.used_quota if quota else 0,
+        stripe_public_key=getenv("STRIPE_PUBLIC_KEY")
     )
 
 
