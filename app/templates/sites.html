@@ -54,13 +54,11 @@
       <img src="/static/icons/shop-cart.gif" class="w-6 h-6" alt="cart"> 登録枠の追加購入
     </h3>
 
-    <!-- プランステータス -->
     <div class="mb-4 p-4 bg-yellow-100 border-l-4 border-yellow-500 rounded shadow text-sm text-yellow-800">
       <p>🧾 <strong>現在のプラン:</strong> {{ plan_type|capitalize }}</p>
       <p>✅ <strong>使用済み:</strong> {{ used_quota }} / <strong>上限:</strong> {{ total_quota }}</p>
     </div>
 
-    <!-- プラン選択 -->
     <div id="plan-form">
       <div class="p-4 bg-blue-100 border border-blue-300 rounded shadow mb-4 text-sm leading-6">
         💡 <strong>プラン選択:</strong><br>
@@ -100,7 +98,6 @@
       </button>
     </div>
 
-    <!-- Stripeカード入力フォーム（非表示） -->
     <form id="payment-form" class="mt-6 hidden">
       <div id="card-element" class="p-4 bg-white rounded border shadow mb-4"></div>
       <button id="submit-payment" class="w-full py-3 bg-blue-600 text-white font-bold rounded">支払う</button>
@@ -109,7 +106,14 @@
   </div>
 </div>
 
-<!-- Stripe JS + カスタムJS -->
+<style>
+  .site-option.selected {
+    background-color: #3b82f6;
+    border-color: #2563eb;
+    color: white;
+  }
+</style>
+
 <script src="https://js.stripe.com/v3/"></script>
 <script>
   const stripe = Stripe("{{ stripe_public_key }}");
@@ -128,6 +132,8 @@
 
   document.querySelectorAll(".site-option").forEach(btn => {
     btn.addEventListener("click", () => {
+      document.querySelectorAll(".site-option").forEach(b => b.classList.remove("selected"));
+      btn.classList.add("selected");
       const val = btn.getAttribute("data-value");
       document.getElementById("site_count_hidden").value = val;
       document.getElementById("site_count_custom").value = "";
@@ -136,6 +142,7 @@
   });
 
   document.getElementById("site_count_custom").addEventListener("input", (e) => {
+    document.querySelectorAll(".site-option").forEach(b => b.classList.remove("selected"));
     document.getElementById("site_count_hidden").value = e.target.value;
     updateTotal();
   });
