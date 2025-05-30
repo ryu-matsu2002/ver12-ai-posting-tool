@@ -157,10 +157,11 @@ def create_payment_intent():
         data = request.get_json()
         plan_type = data.get("plan_type", "affiliate")
         site_count = int(data.get("site_count", 1))
-        user_id = int(data.get("user_id"))  # ← 受け取り必須
+        user_id = int(data.get("user_id"))  # ← 必須
+        special = data.get("special", "no")  # ← ✅ 追加！
 
         # 🔸 特別プランかどうかで価格を変更
-        if data.get("special") == "yes":
+        if special == "yes":
             unit_price = 1000  # TCC特別価格
         else:
             unit_price = 3000 if plan_type == "affiliate" else 20000
@@ -175,7 +176,8 @@ def create_payment_intent():
             metadata={
                 "user_id": str(user_id),
                 "plan_type": plan_type,
-                "site_count": str(site_count)
+                "site_count": str(site_count),
+                "special": special  # ✅ ← ここが追加された
             }
         )
 
@@ -183,8 +185,6 @@ def create_payment_intent():
 
     except Exception as e:
         return jsonify(error=str(e)), 400
-
-
 
 
 @bp.route("/purchase", methods=["GET", "POST"])
