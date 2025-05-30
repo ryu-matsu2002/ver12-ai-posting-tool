@@ -76,49 +76,49 @@ def stripe_webhook():
         current_app.logger.error(f"❌ Error parsing webhook: {str(e)}")
         return f"Error parsing webhook: {str(e)}", 400
 
-    # ✅ 支払い成功イベント
+    # ✅ checkout.session.completed の既存処理はそのまま残す
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
         metadata = session.get("metadata", {})
+        # ...（既存処理）
 
-        # 優先順：user_id → customer_email
-        user = None
-        if "user_id" in metadata:
-            try:
-                user_id = int(metadata["user_id"])
-                user = User.query.get(user_id)
-            except Exception as e:
-                current_app.logger.warning(f"⚠️ Invalid user_id: {e}")
-        else:
-            customer_email = session.get("customer_email")
-            if customer_email:
-                user = User.query.filter_by(email=customer_email).first()
+    # ✅ special_purchase の支払い成功はこちら
+    elif event["type"] == "payment_intent.succeeded":
+        intent = event["data"]["object"]
+        metadata = intent.get("metadata", {})
 
-        if user:
-            plan_type = metadata.get("plan_type", "affiliate")
-            site_count = int(metadata.get("site_count", 1))
+        user_id = metadata.get("user_id")
+        site_count = int(metadata.get("site_count", 1))
+        plan_type = metadata.get("plan_type", "affiliate")
+        special = metadata.get("special", "no")
 
-            quota = UserSiteQuota.query.filter_by(user_id=user.id).first()
-            if not quota:
-                quota = UserSiteQuota(
-                    user_id=user.id,
-                    total_quota=0,
-                    used_quota=0,
-                    plan_type=plan_type
+        if user_id:
+            user = User.query.get(int(user_id))
+            if user:
+                quota = UserSiteQuota.query.filter_by(user_id=user.id).first()
+                if not quota:
+                    quota = UserSiteQuota(
+                        user_id=user.id,
+                        total_quota=0,
+                        used_quota=0,
+                        plan_type=plan_type
+                    )
+                    db.session.add(quota)
+
+                quota.total_quota += site_count
+                quota.plan_type = plan_type
+                db.session.commit()
+
+                current_app.logger.info(
+                    f"✅ Webhook: user_id={user.id}, plan={plan_type}, special={special}, site_count={site_count}"
                 )
-                db.session.add(quota)
-
-            quota.total_quota += site_count
-            quota.plan_type = plan_type
-            db.session.commit()
-
-            current_app.logger.info(
-                f"✅ Webhook成功: user_id={user.id}, plan={plan_type}, site_count={site_count}"
-            )
+            else:
+                current_app.logger.warning(f"⚠️ Webhook: user_id={user_id} のユーザーが見つかりません")
         else:
-            current_app.logger.warning("⚠️ Webhook: 対象ユーザーが見つかりませんでした。")
+            current_app.logger.warning("⚠️ Webhook: metadata に user_id が含まれていません")
 
     return jsonify(success=True)
+
 
 
 # Stripe APIキーを読み込み
@@ -130,6 +130,7 @@ def create_payment_intent():
         data = request.get_json()
         plan_type = data.get("plan_type", "affiliate")
         site_count = int(data.get("site_count", 1))
+        user_id = int(data.get("user_id"))  # ← 受け取り必須
 
         # 🔸 特別プランかどうかで価格を変更
         if data.get("special") == "yes":
@@ -144,12 +145,18 @@ def create_payment_intent():
             amount=total_amount,
             currency="jpy",
             automatic_payment_methods={"enabled": True},
+            metadata={
+                "user_id": str(user_id),
+                "plan_type": plan_type,
+                "site_count": str(site_count)
+            }
         )
 
         return jsonify({"clientSecret": intent.client_secret})
 
     except Exception as e:
         return jsonify(error=str(e)), 400
+
 
 
 

@@ -5,6 +5,9 @@
 <div class="max-w-3xl mx-auto py-10">
   <h2 class="text-3xl font-bold mb-6">🎯 TCCメンバー限定</h2>
 
+  <!-- ✅ user_id を HTML に埋め込む -->
+  <span id="user-id" data-id="{{ current_user.id }}"></span>
+
   {% if request.args.get("success") %}
     <div class="mb-6 p-4 bg-green-100 text-green-800 rounded">
       ✅ 支払いが完了しました！マイページに戻ってサイトを登録してください。
@@ -73,13 +76,15 @@
 
   const unitPrice = 1000;
 
+  // ✅ user_id を HTML から取得
+  const userId = parseInt(document.getElementById("user-id").dataset.id);
+
   function updateTotal() {
     const count = parseInt(document.getElementById("site_count_hidden").value || 1);
     const price = unitPrice * count;
     document.getElementById("total_price").textContent = `¥${price.toLocaleString()}`;
   }
 
-  // ボタンの選択状態管理
   const siteButtons = document.querySelectorAll(".site-option");
   siteButtons.forEach(btn => {
     btn.addEventListener("click", () => {
@@ -87,19 +92,16 @@
       document.getElementById("site_count_hidden").value = val;
       document.getElementById("site_count_custom").value = "";
 
-      // すべてのボタンから選択状態を解除
       siteButtons.forEach(b => {
         b.classList.remove("border-blue-500", "bg-blue-50", "ring", "ring-offset-1");
       });
 
-      // 現在のボタンに選択スタイルを追加
       btn.classList.add("border-blue-500", "bg-blue-50", "ring", "ring-offset-1");
 
       updateTotal();
     });
   });
 
-  // 任意入力変更時にボタンの選択をリセット
   document.getElementById("site_count_custom").addEventListener("input", (e) => {
     document.getElementById("site_count_hidden").value = e.target.value;
     siteButtons.forEach(b => {
@@ -108,20 +110,20 @@
     updateTotal();
   });
 
-  // 合計金額初期表示
   updateTotal();
 
-  // Stripe支払い
   document.getElementById("payment-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const siteCount = parseInt(document.getElementById("site_count_hidden").value || 1);
+
     const response = await fetch("{{ url_for('main.create_payment_intent') }}", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         plan_type: "affiliate",
         site_count: siteCount,
-        special: "yes"  // ← TCC限定価格の識別フラグ
+        special: "yes",
+        user_id: userId  // ← 正しく送信
       })
     });
 
