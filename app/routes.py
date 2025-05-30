@@ -141,7 +141,6 @@ def stripe_webhook():
 
 
 # Stripe APIキーを読み込み
-# Stripe APIキーを読み込み
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
 # ────────────── create-payment-intent
