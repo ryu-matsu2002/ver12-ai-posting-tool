@@ -70,27 +70,53 @@ def stripe_webhook():
             payload, sig_header, webhook_secret
         )
     except stripe.error.SignatureVerificationError:
+        current_app.logger.error("❌ Webhook signature verification failed")
         return "Webhook signature verification failed", 400
     except Exception as e:
+        current_app.logger.error(f"❌ Error parsing webhook: {str(e)}")
         return f"Error parsing webhook: {str(e)}", 400
 
-    # 支払い成功イベントを処理
+    # ✅ 支払い成功イベント
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
-        customer_email = session.get("customer_email")
         metadata = session.get("metadata", {})
-        plan_type = metadata.get("plan_type")  # "affiliate" or "business"
-        site_count = int(metadata.get("site_count", 1))
 
-        user = User.query.filter_by(email=customer_email).first()
+        # 優先順：user_id → customer_email
+        user = None
+        if "user_id" in metadata:
+            try:
+                user_id = int(metadata["user_id"])
+                user = User.query.get(user_id)
+            except Exception as e:
+                current_app.logger.warning(f"⚠️ Invalid user_id: {e}")
+        else:
+            customer_email = session.get("customer_email")
+            if customer_email:
+                user = User.query.filter_by(email=customer_email).first()
+
         if user:
+            plan_type = metadata.get("plan_type", "affiliate")
+            site_count = int(metadata.get("site_count", 1))
+
             quota = UserSiteQuota.query.filter_by(user_id=user.id).first()
             if not quota:
-                quota = UserSiteQuota(user_id=user.id, total_quota=0, used_quota=0, plan_type=plan_type)
+                quota = UserSiteQuota(
+                    user_id=user.id,
+                    total_quota=0,
+                    used_quota=0,
+                    plan_type=plan_type
+                )
                 db.session.add(quota)
+
             quota.total_quota += site_count
             quota.plan_type = plan_type
             db.session.commit()
+
+            current_app.logger.info(
+                f"✅ Webhook成功: user_id={user.id}, plan={plan_type}, site_count={site_count}"
+            )
+        else:
+            current_app.logger.warning("⚠️ Webhook: 対象ユーザーが見つかりませんでした。")
 
     return jsonify(success=True)
 
@@ -162,6 +188,38 @@ def purchase():
         return redirect(session.url, code=303)
 
     return render_template("purchase.html")
+
+@bp.route("/special-purchase", methods=["GET", "POST"])
+@login_required
+def special_purchase():
+    # 特定ユーザーのみアクセス許可
+    if current_user.email not in ["特別ユーザーのメールアドレス"]:
+        flash("このページにはアクセスできません。", "danger")
+        return redirect(url_for("main.dashboard", username=current_user.username))
+
+    if request.method == "POST":
+        price_id = os.getenv("STRIPE_PRICE_ID_SPECIAL")
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            customer_email=current_user.email,
+            line_items=[{
+                "price": price_id,
+                "quantity": 1,
+            }],
+            mode="payment",
+            success_url=url_for("main.special_purchase", _external=True) + "?success=true",
+            cancel_url=url_for("main.special_purchase", _external=True) + "?canceled=true",
+            metadata={
+                "user_id": current_user.id,
+                "plan_type": "affiliate",
+                "site_count": 1,
+                "special": "yes"
+            }
+        )
+        return redirect(session.url, code=303)
+
+    return render_template("special_purchase.html")
+
 
 
 from app.models import Article, User, PromptTemplate, Site
