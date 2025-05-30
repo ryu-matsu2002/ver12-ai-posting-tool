@@ -28,7 +28,7 @@
         <th class="px-2 py-2">ID</th>
         <th class="px-2 py-2">Email</th>
         <th class="px-2 py-2">記事数</th>
-        <th class="px-2 py-2">特別アクセス</th>
+        <th class="px-2 py-2">TCC決済ページアクセス権</th>
         <th class="px-2 py-2">操作</th>
       </tr>
     </thead>
@@ -39,10 +39,11 @@
         <td class="px-2 py-2">{{ u.email }}</td>
         <td class="px-2 py-2">{{ u.articles|length }}</td>
 
-        <!-- ✅ 特別アクセスステータス + トグルボタン -->
+        <!-- ✅ 特別アクセス + 切替ボタン + リンク -->
         <td class="px-2 py-2">
           {% if u.is_special_access %}
             <span class="text-green-600 font-semibold">✅ 有効</span>
+            <a href="{{ url_for('main.special_purchase') }}" class="text-blue-600 text-sm underline ml-1" target="_blank">決済ページ</a>
           {% else %}
             <span class="text-gray-500">❌ 無効</span>
           {% endif %}
