@@ -32,7 +32,7 @@
     <!-- 🔸 サイト数選択 -->
     <div class="mt-4">
       <label class="block mb-1 font-semibold text-sm text-gray-700">サイト数を選択</label>
-      <div class="grid grid-cols-5 gap-2 mb-2">
+      <div class="grid grid-cols-5 gap-2 mb-2" id="site-button-group">
         {% for value in [1, 3, 5, 10, 20] %}
         <button type="button" class="site-option flex flex-col items-center justify-center py-2 bg-white border-2 border-gray-300 rounded-lg hover:bg-blue-100 hover:border-blue-400 transition shadow text-sm" data-value="{{ value }}">
           <span class="text-lg font-bold text-blue-700">{{ value }}</span>
@@ -63,7 +63,7 @@
   </div>
 </div>
 
-<!-- Stripe JS + 決済JS -->
+<!-- Stripe JS + カスタムJS -->
 <script src="https://js.stripe.com/v3/"></script>
 <script>
   const stripe = Stripe("{{ stripe_public_key }}");
@@ -79,29 +79,50 @@
     document.getElementById("total_price").textContent = `¥${price.toLocaleString()}`;
   }
 
-  document.querySelectorAll(".site-option").forEach(btn => {
+  // ボタンの選択状態管理
+  const siteButtons = document.querySelectorAll(".site-option");
+  siteButtons.forEach(btn => {
     btn.addEventListener("click", () => {
       const val = btn.getAttribute("data-value");
       document.getElementById("site_count_hidden").value = val;
       document.getElementById("site_count_custom").value = "";
+
+      // すべてのボタンから選択状態を解除
+      siteButtons.forEach(b => {
+        b.classList.remove("border-blue-500", "bg-blue-50", "ring", "ring-offset-1");
+      });
+
+      // 現在のボタンに選択スタイルを追加
+      btn.classList.add("border-blue-500", "bg-blue-50", "ring", "ring-offset-1");
+
       updateTotal();
     });
   });
 
+  // 任意入力変更時にボタンの選択をリセット
   document.getElementById("site_count_custom").addEventListener("input", (e) => {
     document.getElementById("site_count_hidden").value = e.target.value;
+    siteButtons.forEach(b => {
+      b.classList.remove("border-blue-500", "bg-blue-50", "ring", "ring-offset-1");
+    });
     updateTotal();
   });
 
+  // 合計金額初期表示
   updateTotal();
 
+  // Stripe支払い
   document.getElementById("payment-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const siteCount = parseInt(document.getElementById("site_count_hidden").value || 1);
     const response = await fetch("{{ url_for('main.create_payment_intent') }}", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ plan_type: "affiliate", site_count: siteCount })
+      body: JSON.stringify({
+        plan_type: "affiliate",
+        site_count: siteCount,
+        special: "yes"  // ← TCC限定価格の識別フラグ
+      })
     });
 
     const data = await response.json();

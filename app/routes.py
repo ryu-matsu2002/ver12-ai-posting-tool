@@ -131,11 +131,15 @@ def create_payment_intent():
         plan_type = data.get("plan_type", "affiliate")
         site_count = int(data.get("site_count", 1))
 
-        # プラン別金額設定
-        unit_price = 3000 if plan_type == "affiliate" else 20000
+        # 🔸 特別プランかどうかで価格を変更
+        if data.get("special") == "yes":
+            unit_price = 1000  # TCC特別価格
+        else:
+            unit_price = 3000 if plan_type == "affiliate" else 20000
+
         total_amount = unit_price * site_count
 
-        # PaymentIntent作成
+        # Stripe PaymentIntent 作成
         intent = stripe.PaymentIntent.create(
             amount=total_amount,
             currency="jpy",
