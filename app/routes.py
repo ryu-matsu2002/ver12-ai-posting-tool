@@ -189,44 +189,44 @@ def purchase():
 
     return render_template("purchase.html")
 
-@bp.route("/<username>/special-purchase", methods=["GET", "POST"])
+@bp.route("/<username>/special-purchase", methods=["GET"])
 @login_required
 def special_purchase(username):
-    # ログインユーザーと一致しないURLへのアクセスを拒否
+    # ログインユーザー本人かどうかをチェック
     if current_user.username != username:
         abort(403)
 
-    # 特別アクセス権がなければ拒否
+    # 特別アクセス権の確認
     if not getattr(current_user, "is_special_access", False):
         flash("このページにはアクセスできません。", "danger")
         return redirect(url_for("main.dashboard", username=username))
 
-    if request.method == "POST":
-        price_id = os.getenv("STRIPE_PRICE_ID_SPECIAL")
-        try:
-            session = stripe.checkout.Session.create(
-                payment_method_types=["card"],
-                customer_email=current_user.email,
-                line_items=[{
-                    "price": price_id,
-                    "quantity": 1,
-                }],
-                mode="payment",
-                success_url=url_for("main.special_purchase", username=username, _external=True) + "?success=true",
-                cancel_url=url_for("main.special_purchase", username=username, _external=True) + "?canceled=true",
-                metadata={
-                    "user_id": current_user.id,
-                    "plan_type": "affiliate",
-                    "site_count": 1,
-                    "special": "yes"
-                }
-            )
-            return redirect(session.url, code=303)
-        except Exception as e:
-            flash("セッション作成に失敗しました: " + str(e), "danger")
-            return redirect(url_for("main.dashboard", username=username))
+    try:
+        # Stripe PaymentIntent を作成（1000円 × 100＝100000センチ）
+        intent = stripe.PaymentIntent.create(
+            amount=1000 * 100,  # 1000円（単位：円 → センチ）
+            currency="jpy",
+            metadata={
+                "user_id": current_user.id,
+                "plan_type": "affiliate",
+                "site_count": 1,
+                "special": "yes"
+            },
+            automatic_payment_methods={"enabled": True}
+        )
 
-    return render_template("special_purchase.html")
+        return render_template(
+            "special_purchase.html",
+            client_secret=intent.client_secret,
+            stripe_public_key=os.getenv("STRIPE_PUBLIC_KEY"),
+            username=username
+        )
+
+    except Exception as e:
+        flash("支払い準備に失敗しました: " + str(e), "danger")
+        return redirect(url_for("main.dashboard", username=username))
+
+
 
 
 from app.models import Article, User, PromptTemplate, Site
