@@ -133,7 +133,7 @@ def create_payment_intent():
 
         # プラン別金額設定
         unit_price = 3000 if plan_type == "affiliate" else 20000
-        total_amount = unit_price * site_count * 100  # 円 → センチに変換（Stripe仕様）
+        total_amount = unit_price * site_count
 
         # PaymentIntent作成
         intent = stripe.PaymentIntent.create(
@@ -201,31 +201,12 @@ def special_purchase(username):
         flash("このページにはアクセスできません。", "danger")
         return redirect(url_for("main.dashboard", username=username))
 
-    try:
-        # Stripe PaymentIntent を作成（1000円 × 100＝100000センチ）
-        intent = stripe.PaymentIntent.create(
-            amount=1000 * 100,  # 1000円（単位：円 → センチ）
-            currency="jpy",
-            metadata={
-                "user_id": current_user.id,
-                "plan_type": "affiliate",
-                "site_count": 1,
-                "special": "yes"
-            },
-            automatic_payment_methods={"enabled": True}
-        )
-
-        return render_template(
-            "special_purchase.html",
-            client_secret=intent.client_secret,
-            stripe_public_key=os.getenv("STRIPE_PUBLIC_KEY"),
-            username=username
-        )
-
-    except Exception as e:
-        flash("支払い準備に失敗しました: " + str(e), "danger")
-        return redirect(url_for("main.dashboard", username=username))
-
+    # Stripe API呼び出しは削除。テンプレート表示のみ。
+    return render_template(
+        "special_purchase.html",
+        stripe_public_key=os.getenv("STRIPE_PUBLIC_KEY"),
+        username=username
+    )
 
 
 
