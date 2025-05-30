@@ -192,31 +192,35 @@ def purchase():
 @bp.route("/special-purchase", methods=["GET", "POST"])
 @login_required
 def special_purchase():
-    # 特定ユーザーのみアクセス許可
-    if current_user.email not in ["特別ユーザーのメールアドレス"]:
+    # 特別アクセス権のないユーザーは拒否
+    if not getattr(current_user, "is_special_access", False):
         flash("このページにはアクセスできません。", "danger")
         return redirect(url_for("main.dashboard", username=current_user.username))
 
     if request.method == "POST":
         price_id = os.getenv("STRIPE_PRICE_ID_SPECIAL")
-        session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            customer_email=current_user.email,
-            line_items=[{
-                "price": price_id,
-                "quantity": 1,
-            }],
-            mode="payment",
-            success_url=url_for("main.special_purchase", _external=True) + "?success=true",
-            cancel_url=url_for("main.special_purchase", _external=True) + "?canceled=true",
-            metadata={
-                "user_id": current_user.id,
-                "plan_type": "affiliate",
-                "site_count": 1,
-                "special": "yes"
-            }
-        )
-        return redirect(session.url, code=303)
+        try:
+            session = stripe.checkout.Session.create(
+                payment_method_types=["card"],
+                customer_email=current_user.email,
+                line_items=[{
+                    "price": price_id,
+                    "quantity": 1,
+                }],
+                mode="payment",
+                success_url=url_for("main.special_purchase", _external=True) + "?success=true",
+                cancel_url=url_for("main.special_purchase", _external=True) + "?canceled=true",
+                metadata={
+                    "user_id": current_user.id,
+                    "plan_type": "affiliate",
+                    "site_count": 1,
+                    "special": "yes"
+                }
+            )
+            return redirect(session.url, code=303)
+        except Exception as e:
+            flash("セッション作成に失敗しました: " + str(e), "danger")
+            return redirect(url_for("main.dashboard", username=current_user.username))
 
     return render_template("special_purchase.html")
 
@@ -299,6 +303,22 @@ def admin_users():
         article_count=article_count
     )
 
+@admin_bp.post("/admin/user/<int:uid>/toggle-special")
+@login_required
+def toggle_special_access(uid):
+    # 管理者のみ許可
+    if not current_user.is_admin:
+        abort(403)
+
+    # 対象ユーザー取得
+    user = User.query.get_or_404(uid)
+
+    # is_special_access をトグル（ON ⇔ OFF）
+    user.is_special_access = not user.is_special_access
+    db.session.commit()
+
+    flash(f"{user.email} の特別アクセスを {'✅ 有効化' if user.is_special_access else '❌ 無効化'} しました。", "success")
+    return redirect(url_for("admin.admin_users"))
 
 
 @admin_bp.route("/admin/sites")
@@ -347,6 +367,8 @@ def delete_stuck_articles():
 
     flash(f"{deleted_count} 件の途中停止記事を削除しました", "success")
     return redirect(url_for("admin.admin_dashboard"))
+
+
 
 @admin_bp.route("/admin/user/<int:uid>/articles")
 @login_required

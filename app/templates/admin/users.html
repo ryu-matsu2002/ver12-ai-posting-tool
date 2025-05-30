@@ -28,6 +28,7 @@
         <th class="px-2 py-2">ID</th>
         <th class="px-2 py-2">Email</th>
         <th class="px-2 py-2">記事数</th>
+        <th class="px-2 py-2">特別アクセス</th>
         <th class="px-2 py-2">操作</th>
       </tr>
     </thead>
@@ -37,6 +38,19 @@
         <td class="px-2 py-2">{{ u.id }}</td>
         <td class="px-2 py-2">{{ u.email }}</td>
         <td class="px-2 py-2">{{ u.articles|length }}</td>
+
+        <!-- ✅ 特別アクセスステータス + トグルボタン -->
+        <td class="px-2 py-2">
+          {% if u.is_special_access %}
+            <span class="text-green-600 font-semibold">✅ 有効</span>
+          {% else %}
+            <span class="text-gray-500">❌ 無効</span>
+          {% endif %}
+          <form method="post" action="{{ url_for('admin.toggle_special_access', uid=u.id) }}" class="inline ml-2">
+            <button class="text-sm text-blue-600 hover:underline">切替</button>
+          </form>
+        </td>
+
         <td class="px-2 py-2 space-x-2">
           <a href="{{ url_for('admin.user_articles', uid=u.id) }}" class="text-blue-600 hover:underline">記事一覧</a>
           <form action="{{ url_for('admin.admin_login_as', user_id=u.id) }}" method="post" class="inline">
