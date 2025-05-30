@@ -70,6 +70,14 @@
         <span class="material-icons align-middle mr-2">smart_toy</span>ChatGPT
       </a>
 
+      {% if current_user.is_authenticated and current_user.is_admin %}
+　　  <a href="{{ url_for('admin.admin_dashboard') }}"
+         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full text-yellow-300 font-semibold">
+         <span class="material-icons align-middle mr-2">admin_panel_settings</span>管理者ページ
+       </a>
+       {% endif %}
+
+
       {% if current_user.is_authenticated and current_user.is_special_access %}
       <a href="{{ url_for('main.special_purchase', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full text-yellow-400 font-semibold">
