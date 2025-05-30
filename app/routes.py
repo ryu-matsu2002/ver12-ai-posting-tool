@@ -76,13 +76,41 @@ def stripe_webhook():
         current_app.logger.error(f"❌ Error parsing webhook: {str(e)}")
         return f"Error parsing webhook: {str(e)}", 400
 
-    # ✅ checkout.session.completed の既存処理はそのまま残す
+    # ✅ Stripe Checkoutからの支払い完了（通常購入）
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
         metadata = session.get("metadata", {})
-        # ...（既存処理）
 
-    # ✅ special_purchase の支払い成功はこちら
+        user_id = metadata.get("user_id")
+        site_count = int(metadata.get("site_count", 1))
+        plan_type = metadata.get("plan_type", "affiliate")
+
+        if user_id:
+            user = User.query.get(int(user_id))
+            if user:
+                quota = UserSiteQuota.query.filter_by(user_id=user.id).first()
+                if not quota:
+                    quota = UserSiteQuota(
+                        user_id=user.id,
+                        total_quota=0,
+                        used_quota=0,
+                        plan_type=plan_type
+                    )
+                    db.session.add(quota)
+
+                quota.total_quota += site_count
+                quota.plan_type = plan_type
+                db.session.commit()
+
+                current_app.logger.info(
+                    f"✅ Checkout Webhook: user_id={user.id}, plan={plan_type}, site_count={site_count}"
+                )
+            else:
+                current_app.logger.warning(f"⚠️ Checkout Webhook: user_id={user_id} のユーザーが見つかりません")
+        else:
+            current_app.logger.warning("⚠️ Checkout Webhook: metadata に user_id が含まれていません")
+
+    # ✅ special_purchase の支払い成功（特別プラン）
     elif event["type"] == "payment_intent.succeeded":
         intent = event["data"]["object"]
         metadata = intent.get("metadata", {})
@@ -118,7 +146,6 @@ def stripe_webhook():
             current_app.logger.warning("⚠️ Webhook: metadata に user_id が含まれていません")
 
     return jsonify(success=True)
-
 
 
 # Stripe APIキーを読み込み
