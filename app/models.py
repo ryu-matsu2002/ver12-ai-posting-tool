@@ -43,6 +43,7 @@ class User(db.Model, UserMixin):
     # 管理用
     is_admin   = db.Column(db.Boolean, default=False)
     is_special_access = db.Column(db.Boolean, default=False)
+    has_purchased = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     # リレーション

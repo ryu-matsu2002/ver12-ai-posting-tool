@@ -155,7 +155,7 @@
     const response = await fetch("/create-payment-intent", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ plan_type: plan, site_count: count })
+      body: JSON.stringify({ plan_type: plan, site_count: count, special: "yes" })
     });
     const data = await response.json();
     if (data.clientSecret) {
