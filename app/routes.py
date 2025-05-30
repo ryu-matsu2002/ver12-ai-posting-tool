@@ -189,13 +189,17 @@ def purchase():
 
     return render_template("purchase.html")
 
-@bp.route("/special-purchase", methods=["GET", "POST"])
+@bp.route("/<username>/special-purchase", methods=["GET", "POST"])
 @login_required
-def special_purchase():
-    # 特別アクセス権のないユーザーは拒否
+def special_purchase(username):
+    # ログインユーザーと一致しないURLへのアクセスを拒否
+    if current_user.username != username:
+        abort(403)
+
+    # 特別アクセス権がなければ拒否
     if not getattr(current_user, "is_special_access", False):
         flash("このページにはアクセスできません。", "danger")
-        return redirect(url_for("main.dashboard", username=current_user.username))
+        return redirect(url_for("main.dashboard", username=username))
 
     if request.method == "POST":
         price_id = os.getenv("STRIPE_PRICE_ID_SPECIAL")
@@ -208,8 +212,8 @@ def special_purchase():
                     "quantity": 1,
                 }],
                 mode="payment",
-                success_url=url_for("main.special_purchase", _external=True) + "?success=true",
-                cancel_url=url_for("main.special_purchase", _external=True) + "?canceled=true",
+                success_url=url_for("main.special_purchase", username=username, _external=True) + "?success=true",
+                cancel_url=url_for("main.special_purchase", username=username, _external=True) + "?canceled=true",
                 metadata={
                     "user_id": current_user.id,
                     "plan_type": "affiliate",
@@ -220,10 +224,9 @@ def special_purchase():
             return redirect(session.url, code=303)
         except Exception as e:
             flash("セッション作成に失敗しました: " + str(e), "danger")
-            return redirect(url_for("main.dashboard", username=current_user.username))
+            return redirect(url_for("main.dashboard", username=username))
 
     return render_template("special_purchase.html")
-
 
 
 from app.models import Article, User, PromptTemplate, Site

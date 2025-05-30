@@ -43,7 +43,8 @@
         <td class="px-2 py-2">
           {% if u.is_special_access %}
             <span class="text-green-600 font-semibold">✅ 有効</span>
-            <a href="{{ url_for('main.special_purchase') }}" class="text-blue-600 text-sm underline ml-1" target="_blank">決済ページ</a>
+            <a href="{{ url_for('main.special_purchase', username=u.username) }}"
+               class="text-blue-600 text-sm underline ml-1" target="_blank">決済ページ</a>
           {% else %}
             <span class="text-gray-500">❌ 無効</span>
           {% endif %}
