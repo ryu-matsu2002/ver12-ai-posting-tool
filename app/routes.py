@@ -59,6 +59,7 @@ from app.models import User, UserSiteQuota
 
 stripe_webhook_bp = Blueprint('stripe_webhook', __name__)
 
+# ────────────── Webhook ハンドラ（通常購入／特別プラン両対応）
 @stripe_webhook_bp.route("/stripe/webhook", methods=["POST"])
 def stripe_webhook():
     payload = request.data
@@ -66,9 +67,7 @@ def stripe_webhook():
     webhook_secret = current_app.config["STRIPE_WEBHOOK_SECRET"]
 
     try:
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, webhook_secret
-        )
+        event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
     except stripe.error.SignatureVerificationError:
         current_app.logger.error("❌ Webhook signature verification failed")
         return "Webhook signature verification failed", 400
@@ -76,11 +75,10 @@ def stripe_webhook():
         current_app.logger.error(f"❌ Error parsing webhook: {str(e)}")
         return f"Error parsing webhook: {str(e)}", 400
 
-    # ✅ Stripe Checkoutからの支払い完了（通常購入）
+    # ✅ Stripe Checkout支払い完了（通常プラン）
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
         metadata = session.get("metadata", {})
-
         user_id = metadata.get("user_id")
         site_count = int(metadata.get("site_count", 1))
         plan_type = metadata.get("plan_type", "affiliate")
@@ -91,10 +89,7 @@ def stripe_webhook():
                 quota = UserSiteQuota.query.filter_by(user_id=user.id).first()
                 if not quota:
                     quota = UserSiteQuota(
-                        user_id=user.id,
-                        total_quota=0,
-                        used_quota=0,
-                        plan_type=plan_type
+                        user_id=user.id, total_quota=0, used_quota=0, plan_type=plan_type
                     )
                     db.session.add(quota)
 
@@ -110,11 +105,10 @@ def stripe_webhook():
         else:
             current_app.logger.warning("⚠️ Checkout Webhook: metadata に user_id が含まれていません")
 
-    # ✅ special_purchase の支払い成功（特別プラン）
+    # ✅ special_purchase 成功時
     elif event["type"] == "payment_intent.succeeded":
         intent = event["data"]["object"]
         metadata = intent.get("metadata", {})
-
         user_id = metadata.get("user_id")
         site_count = int(metadata.get("site_count", 1))
         plan_type = metadata.get("plan_type", "affiliate")
@@ -126,10 +120,7 @@ def stripe_webhook():
                 quota = UserSiteQuota.query.filter_by(user_id=user.id).first()
                 if not quota:
                     quota = UserSiteQuota(
-                        user_id=user.id,
-                        total_quota=0,
-                        used_quota=0,
-                        plan_type=plan_type
+                        user_id=user.id, total_quota=0, used_quota=0, plan_type=plan_type
                     )
                     db.session.add(quota)
 
@@ -148,19 +139,22 @@ def stripe_webhook():
     return jsonify(success=True)
 
 
+
+# Stripe APIキーを読み込み
 # Stripe APIキーを読み込み
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
+# ────────────── create-payment-intent
 @bp.route("/create-payment-intent", methods=["POST"])
 def create_payment_intent():
     try:
         data = request.get_json()
         plan_type = data.get("plan_type", "affiliate")
         site_count = int(data.get("site_count", 1))
-        user_id = int(data.get("user_id"))  # ← 必須
-        special = data.get("special", "no")  # ← ✅ 追加！
+        user_id = int(data.get("user_id"))  # 必須
+        special = data.get("special", "no")  # 特別プラン
 
-        # 🔸 特別プランかどうかで価格を変更
+        # 🔸 特別プランかどうかで価格を設定
         if special == "yes":
             unit_price = 1000  # TCC特別価格
         else:
@@ -177,7 +171,7 @@ def create_payment_intent():
                 "user_id": str(user_id),
                 "plan_type": plan_type,
                 "site_count": str(site_count),
-                "special": special  # ✅ ← ここが追加された
+                "special": special
             }
         )
 
@@ -187,26 +181,26 @@ def create_payment_intent():
         return jsonify(error=str(e)), 400
 
 
+
+# ────────────── 通常購入ページ
 @bp.route("/purchase", methods=["GET", "POST"])
 @login_required
 def purchase():
     if request.method == "POST":
-        plan_type = request.form.get("plan_type")  # 'affiliate' or 'business'
+        plan_type = request.form.get("plan_type")
         site_count = int(request.form.get("site_count", 1))
 
-        # price_id は後で環境変数かDBで切り替える設計にする
-        price_id = None
         if plan_type == "affiliate":
             price_id = os.getenv("STRIPE_PRICE_ID_AFFILIATE")
         elif plan_type == "business":
-           price_id = os.getenv("STRIPE_PRICE_ID_BUSINESS")
-  # Stripeの実IDに置き換えてください
+            price_id = os.getenv("STRIPE_PRICE_ID_BUSINESS")
+        else:
+            price_id = None
 
         if not price_id:
             flash("不正なプランが選択されました。", "error")
             return redirect(url_for("main.purchase"))
 
-        # Stripe Checkoutセッション作成
         session = stripe.checkout.Session.create(
             payment_method_types=["card"],
             customer_email=current_user.email,
@@ -227,19 +221,18 @@ def purchase():
 
     return render_template("purchase.html")
 
+
+# ────────────── 特別プランページ（テンプレート表示）
 @bp.route("/<username>/special-purchase", methods=["GET"])
 @login_required
 def special_purchase(username):
-    # ログインユーザー本人かどうかをチェック
     if current_user.username != username:
         abort(403)
 
-    # 特別アクセス権の確認
     if not getattr(current_user, "is_special_access", False):
         flash("このページにはアクセスできません。", "danger")
         return redirect(url_for("main.dashboard", username=username))
 
-    # Stripe API呼び出しは削除。テンプレート表示のみ。
     return render_template(
         "special_purchase.html",
         stripe_public_key=os.getenv("STRIPE_PUBLIC_KEY"),
