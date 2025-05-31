@@ -38,7 +38,7 @@
       <img src="{{ url_for('static', filename='images/tcc_logo.png') }}"
            alt="ロゴ" class="w-[70px] h-[70px] mr-3">
       <div class="text-left leading-none">
-        <p class="text-white text-[24px] font-extrabold whitespace-nowrap">Site craft</p>
+        <p class="text-white text-[30px] font-extrabold whitespace-nowrap">Site craft</p>
       </div>
     </a>
 
@@ -204,16 +204,37 @@
       animation: robot-dance 1s ease-in-out;
     }
 
+    #speechBubble {
+      background-color: #fff;
+      color: #333;
+      font-size: 14px;
+      font-weight: 500;
+      line-height: 1.4;
+      padding: 10px 14px;
+      border-radius: 20px;
+      max-width: 240px;
+      box-shadow: 2px 4px 10px rgba(0, 0, 0, 0.15);
+      border: 2px solid #333;
+      position: absolute;
+      left: 110%;  /* ロボットの右に表示 */
+      bottom: 0;
+      white-space: normal;
+    }
+
     #speechBubble::after {
       content: "";
       position: absolute;
-      top: 50%;
-      left: -10px;
-      transform: translateY(-50%);
-      border-width: 8px;
-      border-style: solid;
-      border-color: transparent yellow transparent transparent;
+      bottom: 10px;
+      left: -16px;
+      width: 0;
+      height: 0;
+      border: 10px solid transparent;
+      border-right-color: #fff;
+      border-left: 0;
+      margin-top: -5px;
+      transform: rotate(15deg);
     }
+
   </style>
 </body>
 </html>
