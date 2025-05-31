@@ -62,9 +62,9 @@
   </a>
 </div>
 
-<!-- ✅ ChatGPTカード＋ロボットを並列表示 -->
+<!-- ✅ ChatGPTカード＋ロボットを横並びで表示 -->
 <div class="flex flex-wrap items-end gap-6">
-  <!-- ChatGPTカード（完全統一） -->
+  <!-- ChatGPTカード（他と統一） -->
   <a href="{{ url_for('main.chatgpt', username=current_user.username) }}"
      class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center w-[280px]">
     <div class="text-3xl mb-2">🤖</div>
@@ -72,12 +72,12 @@
     <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">ChatGPTのページを新しいタブで開きます</p>
   </a>
 
-  <!-- ロボットアニメーション -->
+  <!-- ロボットアニメーション（右隣に表示） -->
   <div class="relative w-32 h-auto flex items-end">
     <img id="robotImage"
          src="{{ url_for('static', filename='images/robot.png') }}"
          alt="ロボット"
-         class="w-full h-auto animate-zigzag cursor-pointer transition-transform duration-300"
+         class="w-full h-auto animate-walking cursor-pointer transition-transform duration-300"
          onclick="robotTalk()" />
     <div id="speechBubble"
          class="absolute left-28 bottom-20 bg-yellow-100 text-black text-sm px-3 py-2 rounded shadow-lg border border-gray-300 hidden z-50">
