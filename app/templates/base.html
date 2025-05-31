@@ -26,7 +26,8 @@
           colors: {
             primary: '#031f6f',
             primaryDark: '#02194e',
-            primaryHover: '#2546b0'
+            primaryHover: '#2546b0',
+            brandBlue: '#6495ed'
           }
         }
       }
@@ -34,81 +35,65 @@
   </script>
 </head>
 
-<body class="h-full flex bg-primary text-white">
+<body class="h-screen flex overflow-hidden bg-primary text-white">
   <!-- ===== SIDEBAR ===== -->
   <aside class="w-60 shrink-0 h-full bg-primaryDark border-r border-gray-700 shadow-md flex flex-col">
 
-    <!-- ✅ 上部：背景薄く＋画像大きめ -->
-    <div class="flex flex-col items-center py-6 bg-primaryHover border-b border-white/20">
-      <img src="{{ url_for('static', filename='images/SITE CRAFT公式キャラ右向き.png') }}"
-           alt="公式キャラ"
-           class="w-32 h-32 mb-2"> <!-- 👈 サイズUP -->
-      <span class="text-white text-2xl font-bold tracking-wide">Site craft</span>
+    <!-- ✅ 上部：ロゴマーク＋Site craft文字＋背景を #6495ed に -->
+    <div class="flex flex-col items-center py-6 bg-brandBlue border-b border-white/20">
+      <img src="{{ url_for('static', filename='images/tcc_logo.png') }}"
+           alt="Site Craft ロゴ"
+           class="w-20 h-20 mb-2 rounded-full shadow-md">
+      <span class="text-white text-xl font-bold tracking-wide">Site craft</span>
     </div>
 
     <!-- ===== メニューエリア ===== -->
-    <nav class="flex-1 py-4 space-y-1">
+    <nav class="flex-1 py-4 space-y-1 overflow-y-auto">
       <a href="{{ url_for('main.dashboard', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/dashboard') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">dashboard</span>ダッシュボード
       </a>
-
       <a href="{{ url_for('main.log_sites', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/log') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">article</span>記事生成
       </a>
-
       <a href="{{ url_for('main.sites', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/sites') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">language</span>サイト登録
       </a>
-
       <a href="{{ url_for('main.keywords', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/keywords') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">edit</span>キーワード登録
       </a>
-
       <a href="{{ url_for('main.prompts', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/prompts') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">notes</span>プロンプト登録
       </a>
-
       <a href="{{ url_for('main.chatgpt', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/chatgpt') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">smart_toy</span>ChatGPT
       </a>
-
       {% if current_user.is_authenticated and current_user.is_admin %}
       <a href="{{ url_for('admin.admin_dashboard') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full text-yellow-300 font-semibold">
          <span class="material-icons align-middle mr-2">admin_panel_settings</span>管理者ページ
       </a>
       {% endif %}
-
       {% if current_user.is_authenticated and current_user.is_special_access %}
       <a href="{{ url_for('main.special_purchase', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full text-yellow-400 font-semibold">
         <span class="material-icons align-middle mr-2">credit_card</span>TCC専用決済ページ
       </a>
       {% endif %}
-
       <a href="{{ url_for('main.login') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/login') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">login</span>ログイン
       </a>
-
       <a href="{{ url_for('main.logout') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full text-red-400">
         <span class="material-icons align-middle mr-2">logout</span>ログアウト
       </a>
     </nav>
-
-    <!-- ✅ 下部：ロゴ画像サイズUP＋背景も変える -->
-    <div class="flex flex-col items-center py-5 bg-primaryHover border-t border-white/20">
-      <img src="{{ url_for('static', filename='images/tcc_logo.png') }}"
-           alt="Site Craft ロゴ"
-           class="w-24 h-24 mb-2 rounded-full shadow-md"> <!-- 👈 サイズUP -->
-    </div>
 
     <div class="px-6 py-4 flex items-center justify-between">
       <button onclick="toggleTheme()" class="material-icons text-gray-300">dark_mode</button>
@@ -116,7 +101,7 @@
   </aside>
 
   <!-- ===== MAIN CONTENT ===== -->
-  <main class="flex-1 overflow-y-auto p-8 bg-white text-black">
+  <main class="flex-1 overflow-y-auto p-6 bg-white text-black">
     <div class="flex justify-end mb-6">
       <div class="relative">
         <button id="userDropdownBtn"
@@ -151,6 +136,13 @@
         </div>
       {% endif %}
     {% endwith %}
+
+    <!-- ✅ ロボット画像をダッシュボード中央に表示 -->
+    <div class="flex justify-center items-center mt-10">
+      <img src="{{ url_for('static', filename='images/SITE CRAFT公式キャラ右向き.png') }}"
+           alt="ロボット"
+           class="w-52 h-52">
+    </div>
 
     {% block content %}{% endblock %}
   </main>
