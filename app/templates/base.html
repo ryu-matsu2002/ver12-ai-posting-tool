@@ -37,9 +37,9 @@
        class="flex items-center justify-start bg-primaryDark border-b border-white/20 h-[72px] px-4 hover:opacity-90 transition">
       <img src="{{ url_for('static', filename='images/tcc_logo.png') }}"
            alt="ロゴ"
-           class="w-[52px] h-[52px] mr-3">
+           class="w-[70px] h-[70px] mr-3">
       <div class="text-left leading-none">
-        <p class="text-white text-[20px] font-extrabold leading-tight whitespace-nowrap">Site craft</p>
+        <p class="text-white text-[45px] font-extrabold leading-tight whitespace-nowrap">Site craft</p>
       </div>
     </a>
 
@@ -180,46 +180,55 @@
   </script>
 
   <style>
-    @keyframes zigzag {
-      0% { transform: translateX(0) translateY(0) rotateY(0); }
-      20% { transform: translateX(10px) translateY(-2px); }
-      40% { transform: translateX(20px) translateY(2px); }
-      60% { transform: translateX(30px) translateY(-2px) rotateY(180deg); }
-      80% { transform: translateX(20px) translateY(2px); }
-      100% { transform: translateX(0) translateY(0) rotateY(0); }
-    }
+  /* --- ロボット往復アニメーション（左右移動） --- */
+  @keyframes walk-back-and-forth {
+    0%   { transform: translateX(0)     rotateY(0deg); }
+    10%  { transform: translateX(10px)  rotateY(0deg); }
+    20%  { transform: translateX(20px)  rotateY(0deg); }
+    30%  { transform: translateX(30px)  rotateY(0deg); }
+    40%  { transform: translateX(40px)  rotateY(0deg); }
 
-    .animate-zigzag {
-      animation: zigzag 8s infinite ease-in-out;
-    }
+    50%  { transform: translateX(40px)  rotateY(180deg); }
 
-    @keyframes robot-dance {
-      0%   { transform: scale(1) rotate(0deg) translateY(0); }
-      20%  { transform: scale(1.05) rotate(2deg) translateY(-1px); }
-      40%  { transform: scale(0.97) rotate(-2deg) translateY(2px); }
-      60%  { transform: scale(1.03) rotate(1deg) translateY(-1px); }
-      80%  { transform: scale(1.00) rotate(-1deg) translateY(1px); }
-      100% { transform: scale(1) rotate(0deg) translateY(0); }
-    }
+    60%  { transform: translateX(30px)  rotateY(180deg); }
+    70%  { transform: translateX(20px)  rotateY(180deg); }
+    80%  { transform: translateX(10px)  rotateY(180deg); }
+    90%  { transform: translateX(0)     rotateY(180deg); }
+    100% { transform: translateX(0)     rotateY(0deg); }
+  }
 
-    .animate-walking {
-      animation: robot-dance 1.2s ease-in-out infinite;
-    }
+  .animate-zigzag {
+    animation: walk-back-and-forth 6s ease-in-out infinite;
+  }
 
-    .dance-animation {
-      animation: robot-dance 1s ease-in-out;
-    }
+  /* --- 手足が動くようなダンス --- */
+  @keyframes robot-dance {
+    0%   { transform: scale(1) rotate(0deg) translateY(0); }
+    20%  { transform: scale(1.05) rotate(2deg) translateY(-1px); }
+    40%  { transform: scale(0.97) rotate(-2deg) translateY(2px); }
+    60%  { transform: scale(1.03) rotate(1deg) translateY(-1px); }
+    80%  { transform: scale(1.00) rotate(-1deg) translateY(1px); }
+    100% { transform: scale(1) rotate(0deg) translateY(0); }
+  }
 
-    #speechBubble::after {
-      content: "";
-      position: absolute;
-      top: 50%;
-      left: -10px;
-      transform: translateY(-50%);
-      border-width: 8px;
-      border-style: solid;
-      border-color: transparent yellow transparent transparent;
-    }
-  </style>
+  .animate-walking {
+    animation: robot-dance 1.2s ease-in-out infinite;
+  }
+
+  .dance-animation {
+    animation: robot-dance 1s ease-in-out;
+  }
+
+  #speechBubble::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: -10px;
+    transform: translateY(-50%);
+    border-width: 8px;
+    border-style: solid;
+    border-color: transparent yellow transparent transparent;
+  }
+</style>
 </body>
 </html>
