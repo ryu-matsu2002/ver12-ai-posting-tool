@@ -39,18 +39,17 @@
   <!-- ===== SIDEBAR ===== -->
   <aside class="w-60 shrink-0 h-full bg-primaryDark border-r border-gray-700 shadow-md flex flex-col">
 
-    <!-- ✅ ロゴ部分（左右配置、最大化、クリックでダッシュボード遷移） -->
+    <!-- ✅ ロゴ部分（横並び、クリックでダッシュボード） -->
     <a href="{{ url_for('main.dashboard', username=username) }}"
        class="flex items-center justify-start bg-primaryDark border-b border-white/20 h-[96px] px-4 hover:opacity-90 transition">
       <img src="{{ url_for('static', filename='images/tcc_logo.png') }}"
            alt="ロゴ"
-           class="w-[100px] h-[100px] mr-3">  <!-- 👈 大きく修正（40 → 50） -->
-      <div class="text-left leading-none"> <!-- 👈 行間詰めてより大きく -->
-        <p class="text-white text-[30px] font-extrabold leading-snug">Site</p>
-        <p class="text-white text-[30px] font-extrabold leading-snug">craft</p>
+           class="w-[60px] h-[60px] mr-3"> <!-- 最大化調整 -->
+      <div class="text-left leading-none">
+        <p class="text-white text-[22px] font-extrabold leading-snug">Site</p>
+        <p class="text-white text-[22px] font-extrabold leading-snug">craft</p>
       </div>
     </a>
-
 
     <!-- ===== メニューエリア ===== -->
     <nav class="flex-1 py-4 space-y-1 overflow-y-auto">
@@ -81,7 +80,7 @@
       {% if current_user.is_authenticated and current_user.is_admin %}
       <a href="{{ url_for('admin.admin_dashboard') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full text-yellow-300 font-semibold">
-         <span class="material-icons align-middle mr-2">admin_panel_settings</span>管理者ページ
+        <span class="material-icons align-middle mr-2">admin_panel_settings</span>管理者ページ
       </a>
       {% endif %}
       {% if current_user.is_authenticated and current_user.is_special_access %}
@@ -142,14 +141,26 @@
       {% endif %}
     {% endwith %}
 
-    {% block content %}{% endblock %}
+    {% block content %}
 
-    <!-- ✅ ロボットアニメーション（ChatGPTの右余白エリア） -->
-    <div class="relative h-36 w-full mt-4">
-      <img src="{{ url_for('static', filename='images/SITE CRAFT公式キャラ右向き.png') }}"
-           alt="ロボット"
-           class="absolute top-0 left-0 w-28 h-28 animate-zigzag" />
+    <!-- ✅ ChatGPTカード＋ロボット -->
+    <div class="flex items-center mt-6 space-x-8">
+      <!-- ChatGPTカード -->
+      <div class="w-64 bg-white shadow rounded p-4 text-center border">
+        <div class="text-3xl mb-2">🤖</div>
+        <div class="font-bold mb-1">ChatGPT</div>
+        <p class="text-sm text-gray-600">ChatGPTのページを新しいタブで開きます</p>
+      </div>
+
+      <!-- ロボットアニメーション -->
+      <div class="flex items-center justify-center">
+        <img src="{{ url_for('static', filename='images/SITE CRAFT公式キャラ右向き.png') }}"
+             alt="ロボット"
+             class="w-24 h-24 animate-zigzag" />
+      </div>
     </div>
+
+    {% endblock %}
   </main>
 
   <script>
@@ -172,16 +183,16 @@
   </script>
 
   <style>
-    .side { display:block; padding:.5rem 1.5rem; border-radius:9999px }
-    .side:hover { background:rgba(59,130,246,.07) }
-    .active { font-weight:600; background-color:rgba(191,219,254,.7) }
+    .side { display: block; padding: .5rem 1.5rem; border-radius: 9999px }
+    .side:hover { background: rgba(59,130,246,.07) }
+    .active { font-weight: 600; background-color: rgba(191,219,254,.7) }
 
     @keyframes zigzag {
       0%   { transform: translateX(0) translateY(0) rotateY(0); }
-      20%  { transform: translateX(80px) translateY(-5px); }
-      40%  { transform: translateX(160px) translateY(5px); }
-      60%  { transform: translateX(240px) translateY(-5px) rotateY(180deg); }
-      80%  { transform: translateX(160px) translateY(5px); }
+      20%  { transform: translateX(20px) translateY(-4px); }
+      40%  { transform: translateX(40px) translateY(4px); }
+      60%  { transform: translateX(60px) translateY(-4px) rotateY(180deg); }
+      80%  { transform: translateX(40px) translateY(4px); }
       100% { transform: translateX(0) translateY(0) rotateY(0); }
     }
 
