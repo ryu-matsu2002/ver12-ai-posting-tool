@@ -36,10 +36,9 @@
     <a href="{{ url_for('main.dashboard', username=username) }}"
        class="flex items-center justify-start bg-primaryDark border-b border-white/20 h-[72px] px-4 hover:opacity-90 transition">
       <img src="{{ url_for('static', filename='images/tcc_logo.png') }}"
-           alt="ロゴ"
-           class="w-[70px] h-[70px] mr-3">
+           alt="ロゴ" class="w-[70px] h-[70px] mr-3">
       <div class="text-left leading-none">
-        <p class="text-white text-[30px] font-extrabold leading-tight whitespace-nowrap">Site craft</p>
+        <p class="text-white text-[24px] font-extrabold whitespace-nowrap">Site craft</p>
       </div>
     </a>
 
@@ -98,7 +97,7 @@
   <!-- ===== MAINコンテンツ領域 ===== -->
   <main class="flex-1 overflow-y-auto p-6 bg-white text-black relative">
 
-    <!-- ✅ 右上ユーザープロフィール -->
+    <!-- ✅ ユーザープロフィール -->
     <div class="flex justify-end mb-6">
       <div class="relative">
         <button id="userDropdownBtn"
@@ -134,23 +133,10 @@
       {% endif %}
     {% endwith %}
 
-    <!-- ✅ メインのブロック -->
     {% block content %}{% endblock %}
-
-    <!-- ✅ ロボット画像と吹き出し -->
-    <div class="absolute bottom-6 left-6 w-32 z-50">
-      <img id="robotImage"
-           src="{{ url_for('static', filename='images/robot.png') }}"
-           alt="ロボット"
-           class="w-full h-auto animate-zigzag animate-walking cursor-pointer transition-transform duration-300"
-           onclick="robotTalk()" />
-      <div id="speechBubble"
-           class="hidden absolute -top-20 left-0 bg-white text-black text-sm px-4 py-2 rounded shadow-xl w-[200px]">
-        ...
-      </div>
-    </div>
   </main>
 
+  <!-- JS: 吹き出しアニメーション -->
   <script>
     function toggleUserDropdown() {
       const menu = document.getElementById('userDropdown');
@@ -171,19 +157,9 @@
 
     const phrases = [
       "こんにちは。記事、作ろうか？",
-      "キーワードは、完璧に記憶してるよ。",
-      "プロンプト？任せて、GPT-4oは今日も全力だよ。",
       "画像、ぴったりのを探してくるから待っててね。",
-      "...生成中。ちょっとだけ時間ちょうだい。",
-      "できたよ。いいタイトルでしょ？",
-      "スケジュール投稿も忘れてないよ。2時間間隔だよね。",
-      "この記事、WordPressに今すぐ投稿する？",
-      "あ、画像が壊れてるみたい。直してくるね！",
-      "君のビジネス、ぜったい伸ばすよ。",
-      "もう40記事？すごいペースだね。",
-      "Stripeの支払いも確認済み。次のサイト登録いってみよう！",
-      "ところで、今日は少し休んだ？",
-      "僕がいるから、大丈夫。どんどん任せて。",
+      "SEOもバッチリ対応中！", "できたよ。いいタイトルでしょ？",
+      "この記事、WordPressに投稿する？", "Stripeの支払いも確認済み。",
       "未来のトップ10入り、いっしょに目指そう。"
     ];
 
@@ -204,19 +180,15 @@
 
   <style>
     @keyframes walk-back-and-forth {
-      0%   { left: 0; transform: scaleX(1); }
-      50%  { left: 40px; transform: scaleX(1); }
-      51%  { transform: scaleX(-1); }
-      100% { left: 0; transform: scaleX(-1); }
+      0%   { transform: translateX(0) scaleX(1); }
+      45%  { transform: translateX(20px) scaleX(1); }
+      50%  { transform: translateX(20px) scaleX(-1); }
+      95%  { transform: translateX(0) scaleX(-1); }
+      100% { transform: translateX(0) scaleX(1); }
     }
 
     .animate-zigzag {
-      position: relative;
       animation: walk-back-and-forth 6s ease-in-out infinite;
-    }
-
-    .animate-walking {
-      animation: robot-dance 1.2s ease-in-out infinite;
     }
 
     @keyframes robot-dance {
@@ -226,6 +198,21 @@
       60%  { transform: scale(1.03) rotate(1deg) translateY(-1px); }
       80%  { transform: scale(1.00) rotate(-1deg) translateY(1px); }
       100% { transform: scale(1) rotate(0deg) translateY(0); }
+    }
+
+    .dance-animation {
+      animation: robot-dance 1s ease-in-out;
+    }
+
+    #speechBubble::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: -10px;
+      transform: translateY(-50%);
+      border-width: 8px;
+      border-style: solid;
+      border-color: transparent yellow transparent transparent;
     }
   </style>
 </body>
