@@ -144,7 +144,7 @@
     {% block content %}
 
 <!-- ChatGPTカード＋ロボット -->
-<div class="flex items-center mt-6 space-x-8 relative">
+<div class="flex items-center mt-6 space-x-8">
   <!-- ChatGPTカード -->
   <div class="w-64 bg-white shadow rounded p-4 text-center border">
     <div class="text-3xl mb-2">🤖</div>
@@ -152,14 +152,13 @@
     <p class="text-sm text-gray-600">ChatGPTのページを新しいタブで開きます</p>
   </div>
 
-  <!-- ロボットアニメーション（エリアを拡張） -->
-  <div class="relative w-full h-[140px] overflow-visible bg-white">
+  <!-- ロボットアニメーション -->
+  <div class="relative w-[200px] h-[150px] bg-white border border-gray-200 rounded overflow-visible">
     <img src="{{ url_for('static', filename='images/robot.png') }}"
          alt="ロボット"
-         class="w-24 h-24 absolute top-0 left-0 animate-zigzag" />
+         class="w-24 h-24 absolute top-0 left-0 animate-zigzag z-10" />
   </div>
 </div>
-
 
 {% endblock %}
 
