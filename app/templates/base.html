@@ -37,7 +37,14 @@
 <body class="h-full flex bg-primary text-white">
   <!-- ===== SIDEBAR ===== -->
   <aside class="w-60 shrink-0 h-full bg-primaryDark border-r border-gray-700 shadow-md flex flex-col">
-    <h1 class="text-xl font-semibold px-6 py-4 border-b border-gray-700">TCC autowize</h1>
+
+    <!-- ✅ ロゴ＋Site craft表示をここに追加 -->
+    <div class="flex flex-col items-center py-6 border-b border-white/20">
+      <img src="{{ url_for('static', filename='images/tcc_logo.png') }}"
+           alt="Site Craft ロゴ"
+           class="w-16 h-16 rounded-full mb-2 border-2 border-white shadow-md">
+      <span class="text-white text-xl font-bold tracking-wide">Site craft</span>
+    </div>
 
     <nav class="flex-1 py-4 space-y-1">
       <a href="{{ url_for('main.dashboard', username=username) }}"
@@ -71,12 +78,11 @@
       </a>
 
       {% if current_user.is_authenticated and current_user.is_admin %}
-　　  <a href="{{ url_for('admin.admin_dashboard') }}"
+      <a href="{{ url_for('admin.admin_dashboard') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full text-yellow-300 font-semibold">
          <span class="material-icons align-middle mr-2">admin_panel_settings</span>管理者ページ
        </a>
        {% endif %}
-
 
       {% if current_user.is_authenticated and current_user.is_special_access %}
       <a href="{{ url_for('main.special_purchase', username=username) }}"
