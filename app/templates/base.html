@@ -43,7 +43,6 @@
       </div>
     </a>
 
-
     <nav class="flex-1 py-4 space-y-1 overflow-y-auto">
       <a href="{{ url_for('main.dashboard', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/dashboard') and 'font-semibold bg-[#0f2fa6]' }}">
@@ -137,6 +136,19 @@
 
     <!-- ✅ メインのブロック -->
     {% block content %}{% endblock %}
+
+    <!-- ✅ ロボット画像と吹き出し -->
+    <div class="absolute bottom-6 left-6 w-32 z-50">
+      <img id="robotImage"
+           src="{{ url_for('static', filename='images/robot.png') }}"
+           alt="ロボット"
+           class="w-full h-auto animate-zigzag animate-walking cursor-pointer transition-transform duration-300"
+           onclick="robotTalk()" />
+      <div id="speechBubble"
+           class="hidden absolute -top-20 left-0 bg-white text-black text-sm px-4 py-2 rounded shadow-xl w-[200px]">
+        ...
+      </div>
+    </div>
   </main>
 
   <script>
@@ -158,23 +170,22 @@
     }
 
     const phrases = [
-  "こんにちは。記事、作ろうか？",
-  "キーワードは、完璧に記憶してるよ。",
-  "プロンプト？任せて、GPT-4oは今日も全力だよ。",
-  "画像、ぴったりのを探してくるから待っててね。",
-  "...生成中。ちょっとだけ時間ちょうだい。",
-  "できたよ。いいタイトルでしょ？",
-  "スケジュール投稿も忘れてないよ。2時間間隔だよね。",
-  "この記事、WordPressに今すぐ投稿する？",
-  "あ、画像が壊れてるみたい。直してくるね！",
-  "君のビジネス、ぜったい伸ばすよ。",
-  "もう40記事？すごいペースだね。",
-  "Stripeの支払いも確認済み。次のサイト登録いってみよう！",
-  "ところで、今日は少し休んだ？",
-  "僕がいるから、大丈夫。どんどん任せて。",
-  "未来のトップ10入り、いっしょに目指そう。"
-];
-
+      "こんにちは。記事、作ろうか？",
+      "キーワードは、完璧に記憶してるよ。",
+      "プロンプト？任せて、GPT-4oは今日も全力だよ。",
+      "画像、ぴったりのを探してくるから待っててね。",
+      "...生成中。ちょっとだけ時間ちょうだい。",
+      "できたよ。いいタイトルでしょ？",
+      "スケジュール投稿も忘れてないよ。2時間間隔だよね。",
+      "この記事、WordPressに今すぐ投稿する？",
+      "あ、画像が壊れてるみたい。直してくるね！",
+      "君のビジネス、ぜったい伸ばすよ。",
+      "もう40記事？すごいペースだね。",
+      "Stripeの支払いも確認済み。次のサイト登録いってみよう！",
+      "ところで、今日は少し休んだ？",
+      "僕がいるから、大丈夫。どんどん任せて。",
+      "未来のトップ10入り、いっしょに目指そう。"
+    ];
 
     function robotTalk() {
       const robot = document.getElementById('robotImage');
@@ -192,49 +203,30 @@
   </script>
 
   <style>
-  /* ロボット：左右に行き来する往復アニメーション */
-  @keyframes walk-back-and-forth {
-    0%   { transform: translateX(0) rotateY(0); }
-    25%  { transform: translateX(30px) rotateY(0); }
-    50%  { transform: translateX(60px) rotateY(180deg); }
-    75%  { transform: translateX(30px) rotateY(180deg); }
-    100% { transform: translateX(0) rotateY(0); }
-  }
+    @keyframes walk-back-and-forth {
+      0%   { left: 0; transform: scaleX(1); }
+      50%  { left: 40px; transform: scaleX(1); }
+      51%  { transform: scaleX(-1); }
+      100% { left: 0; transform: scaleX(-1); }
+    }
 
-  .animate-zigzag {
-    animation: walk-back-and-forth 6s ease-in-out infinite;
-    transform-style: preserve-3d;
-    backface-visibility: hidden;
-  }
+    .animate-zigzag {
+      position: relative;
+      animation: walk-back-and-forth 6s ease-in-out infinite;
+    }
 
-  /* 手足を動かすアニメーション */
-  @keyframes robot-dance {
-    0%   { transform: scale(1) rotate(0deg) translateY(0); }
-    20%  { transform: scale(1.05) rotate(2deg) translateY(-1px); }
-    40%  { transform: scale(0.97) rotate(-2deg) translateY(2px); }
-    60%  { transform: scale(1.03) rotate(1deg) translateY(-1px); }
-    80%  { transform: scale(1.00) rotate(-1deg) translateY(1px); }
-    100% { transform: scale(1) rotate(0deg) translateY(0); }
-  }
+    .animate-walking {
+      animation: robot-dance 1.2s ease-in-out infinite;
+    }
 
-  .animate-walking {
-    animation: robot-dance 1.2s ease-in-out infinite;
-  }
-
-  .dance-animation {
-    animation: robot-dance 1s ease-in-out;
-  }
-
-  #speechBubble::after {
-    content: "";
-    position: absolute;
-    top: 50%;
-    left: -10px;
-    transform: translateY(-50%);
-    border-width: 8px;
-    border-style: solid;
-    border-color: transparent yellow transparent transparent;
-  }
-</style>
+    @keyframes robot-dance {
+      0%   { transform: scale(1) rotate(0deg) translateY(0); }
+      20%  { transform: scale(1.05) rotate(2deg) translateY(-1px); }
+      40%  { transform: scale(0.97) rotate(-2deg) translateY(2px); }
+      60%  { transform: scale(1.03) rotate(1deg) translateY(-1px); }
+      80%  { transform: scale(1.00) rotate(-1deg) translateY(1px); }
+      100% { transform: scale(1) rotate(0deg) translateY(0); }
+    }
+  </style>
 </body>
 </html>
