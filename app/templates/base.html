@@ -138,27 +138,6 @@
     {% endwith %}
 
     {% block content %}
-    <div class="flex items-center mt-10 gap-6">
-      <!-- ChatGPTカード -->
-      <div class="w-64 bg-white shadow rounded p-4 text-center border z-10">
-        <div class="text-3xl mb-2">🤖</div>
-        <div class="font-bold mb-1">ChatGPT</div>
-        <p class="text-sm text-gray-600">ChatGPTのページを新しいタブで開きます</p>
-      </div>
-
-      <!-- ロボット＋吹き出し -->
-      <div class="relative w-48 h-48 overflow-visible bg-white border border-gray-200">
-        <img id="robotImage"
-             src="{{ url_for('static', filename='images/robot.png') }}"
-             alt="ロボット"
-             class="w-24 h-24 absolute bottom-0 left-0 animate-zigzag cursor-pointer transition-transform duration-300 z-50"
-             onclick="robotTalk()" />
-        <div id="speechBubble"
-             class="absolute left-28 bottom-24 bg-yellow-100 text-black text-sm px-3 py-2 rounded shadow-lg border border-gray-300 hidden z-50">
-          ...
-        </div>
-      </div>
-    </div>
     {% endblock %}
   </main>
 
