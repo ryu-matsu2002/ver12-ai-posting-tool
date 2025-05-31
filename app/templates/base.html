@@ -38,11 +38,11 @@
   <!-- ===== SIDEBAR ===== -->
   <aside class="w-60 shrink-0 h-full bg-primaryDark border-r border-gray-700 shadow-md flex flex-col">
 
-    <!-- ✅ 上部：ロボット画像＋「Site craft」文字 -->
-    <div class="flex flex-col items-center py-6 border-b border-white/20">
+    <!-- ✅ 上部：背景薄く＋画像大きめ -->
+    <div class="flex flex-col items-center py-6 bg-primaryHover border-b border-white/20">
       <img src="{{ url_for('static', filename='images/SITE CRAFT公式キャラ右向き.png') }}"
            alt="公式キャラ"
-           class="w-24 h-24 mb-2">
+           class="w-32 h-32 mb-2"> <!-- 👈 サイズUP -->
       <span class="text-white text-2xl font-bold tracking-wide">Site craft</span>
     </div>
 
@@ -103,11 +103,11 @@
       </a>
     </nav>
 
-    <!-- ✅ 下部：ロゴ画像だけ表示 -->
-    <div class="flex flex-col items-center py-5 border-t border-white/20">
+    <!-- ✅ 下部：ロゴ画像サイズUP＋背景も変える -->
+    <div class="flex flex-col items-center py-5 bg-primaryHover border-t border-white/20">
       <img src="{{ url_for('static', filename='images/tcc_logo.png') }}"
            alt="Site Craft ロゴ"
-           class="w-16 h-16 mb-2 rounded-full shadow-md">
+           class="w-24 h-24 mb-2 rounded-full shadow-md"> <!-- 👈 サイズUP -->
     </div>
 
     <div class="px-6 py-4 flex items-center justify-between">
