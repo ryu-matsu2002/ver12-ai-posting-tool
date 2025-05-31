@@ -39,13 +39,13 @@
   <!-- ===== SIDEBAR ===== -->
   <aside class="w-60 shrink-0 h-full bg-primaryDark border-r border-gray-700 shadow-md flex flex-col">
 
-    <!-- ✅ 上部：ロゴマーク＋Site craft文字＋背景を #6495ed に -->
-    <div class="flex flex-col items-center py-6 bg-brandBlue border-b border-white/20">
-      <img src="{{ url_for('static', filename='images/tcc_logo.png') }}"
-           alt="Site Craft ロゴ"
-           class="w-20 h-20 mb-2 rounded-full shadow-md">
-      <span class="text-white text-xl font-bold tracking-wide">Site craft</span>
-    </div>
+    <!-- ✅ 横長ロゴ＋Site craft（2行）リンク付き -->
+    <a href="{{ url_for('main.dashboard', username=username) }}" class="flex items-center gap-3 px-4 py-4 bg-brandBlue border-b border-white/20 hover:opacity-90">
+      <img src="{{ url_for('static', filename='images/tcc_logo.png') }}" alt="Site Craft ロゴ" class="w-12 h-12 rounded-full">
+      <span class="text-white text-lg font-extrabold leading-tight">
+        Site<br>craft
+      </span>
+    </a>
 
     <!-- ===== メニューエリア ===== -->
     <nav class="flex-1 py-4 space-y-1 overflow-y-auto">
@@ -76,7 +76,7 @@
       {% if current_user.is_authenticated and current_user.is_admin %}
       <a href="{{ url_for('admin.admin_dashboard') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full text-yellow-300 font-semibold">
-         <span class="material-icons align-middle mr-2">admin_panel_settings</span>管理者ページ
+        <span class="material-icons align-middle mr-2">admin_panel_settings</span>管理者ページ
       </a>
       {% endif %}
       {% if current_user.is_authenticated and current_user.is_special_access %}
@@ -128,8 +128,7 @@
       {% if messages %}
         <div class="space-y-2 mb-6">
           {% for cat, msg in messages %}
-            <div class="p-3 rounded text-sm
-                        {{ 'bg-green-100 text-green-800' if cat=='success' else 'bg-red-100 text-red-800' }}">
+            <div class="p-3 rounded text-sm {{ 'bg-green-100 text-green-800' if cat=='success' else 'bg-red-100 text-red-800' }}">
               {{ msg }}
             </div>
           {% endfor %}
@@ -137,11 +136,11 @@
       {% endif %}
     {% endwith %}
 
-    <!-- ✅ ロボット画像をダッシュボード中央に表示 -->
-    <div class="flex justify-center items-center mt-10">
+    <!-- ✅ ロボットアニメーション仮設置 -->
+    <div class="relative h-36 mt-8 overflow-hidden">
       <img src="{{ url_for('static', filename='images/SITE CRAFT公式キャラ右向き.png') }}"
-           alt="ロボット"
-           class="w-52 h-52">
+           alt="ロボットアニメ"
+           class="absolute left-0 animate-walk w-28 h-28">
     </div>
 
     {% block content %}{% endblock %}
@@ -165,11 +164,18 @@
       document.documentElement.classList.toggle("dark");
     }
   </script>
+
+  <style>
+    .animate-walk {
+      animation: walk 4s linear infinite alternate;
+    }
+    @keyframes walk {
+      0% { left: 0; }
+      100% { left: calc(100% - 120px); }
+    }
+    .side { display:block; padding:.5rem 1.5rem; border-radius:9999px }
+    .side:hover { background:rgba(59,130,246,.07) }
+    .active { font-weight:600; background-color:rgba(191,219,254,.7) }
+  </style>
 </body>
 </html>
-
-<style>
-  .side { display:block; padding:.5rem 1.5rem; border-radius:9999px }
-  .side:hover { background:rgba(59,130,246,.07) }
-  .active { font-weight:600; background-color:rgba(191,219,254,.7) }
-</style>
