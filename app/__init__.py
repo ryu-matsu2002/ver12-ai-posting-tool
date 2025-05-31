@@ -39,6 +39,7 @@ def create_app() -> Flask:
         "DATABASE_URL", "sqlite:///instance/local.db"
     )
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    app.config["STRIPE_WEBHOOK_SECRET"] = os.getenv("STRIPE_WEBHOOK_SECRET")
 
     # ─── SQLAlchemy 接続プール設定 ──────────────
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
