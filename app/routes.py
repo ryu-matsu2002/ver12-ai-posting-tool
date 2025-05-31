@@ -832,11 +832,16 @@ def dashboard(username):
     used_quota  = quota.used_quota if quota else 0
 
     return render_template(
-        "dashboard.html",
-        plan_type=plan_type,
-        total_quota=total_quota,
-        used_quota=used_quota,
+    "dashboard.html",
+    plan_type=plan_type,
+    total_quota=total_quota,
+    used_quota=used_quota,
+    total_articles=g.total_articles,
+    done=g.done,
+    posted=g.posted,
+    error=g.error
     )
+
 
 
 # ─────────── プロンプト CRUD（新規登録のみ）
