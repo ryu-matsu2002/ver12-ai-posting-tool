@@ -31,50 +31,61 @@
   </div>
 </div>
 
-<!-- ✅ 各機能カード表示 -->
-<div class="grid lg:grid-cols-4 md:grid-cols-2 sm:grid-cols-2 gap-6">
-  <a href="{{ url_for('main.log_sites', username=current_user.username) }}" class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center">
-    <div class="text-3xl mb-2">📝</div>
-    <p class="font-semibold text-lg text-gray-900 dark:text-white">記事生成</p>
-    <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">サイト別に記事作成・状況確認・投稿が可能</p>
-  </a>
+<!-- ✅ 各機能カード表示 + ロボット -->
+<div class="flex flex-wrap items-start gap-8">
 
-  <a href="{{ url_for('main.sites', username=current_user.username) }}" class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center">
-    <div class="text-3xl mb-2">🌐</div>
-    <p class="font-semibold text-lg text-gray-900 dark:text-white">新規サイト登録</p>
-    <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">WordPressサイトを登録して自動投稿先に設定</p>
-  </a>
+  <!-- カードグリッド -->
+  <div class="grid lg:grid-cols-4 md:grid-cols-2 sm:grid-cols-2 gap-6 flex-1">
 
-  <a href="{{ url_for('main.prompts', username=current_user.username) }}" class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center">
-    <div class="text-3xl mb-2">📋</div>
-    <p class="font-semibold text-lg text-gray-900 dark:text-white">プロンプト登録</p>
-    <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">記事生成用プロンプトテンプレートを管理</p>
-  </a>
+    <a href="{{ url_for('main.log_sites', username=current_user.username) }}"
+       class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center">
+      <div class="text-3xl mb-2">📝</div>
+      <p class="font-semibold text-lg text-gray-900 dark:text-white">記事生成</p>
+      <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">サイト別に記事作成・状況確認・投稿が可能</p>
+    </a>
 
-  <a href="{{ url_for('main.keywords', username=current_user.username) }}" class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center">
-    <div class="text-3xl mb-2">🏷</div>
-    <p class="font-semibold text-lg text-gray-900 dark:text-white">キーワード管理</p>
-    <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">ジャンル別にキーワードを登録・管理</p>
-  </a>
+    <a href="{{ url_for('main.sites', username=current_user.username) }}"
+       class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center">
+      <div class="text-3xl mb-2">🌐</div>
+      <p class="font-semibold text-lg text-gray-900 dark:text-white">新規サイト登録</p>
+      <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">WordPressサイトを登録して自動投稿先に設定</p>
+    </a>
 
-  <a href="{{ url_for('main.chatgpt', username=current_user.username) }}" class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center">
-    <div class="text-3xl mb-2">🤖</div>
-    <p class="font-semibold text-lg text-gray-900 dark:text-white">ChatGPT</p>
-    <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">ChatGPTのページを新しいタブで開きます</p>
-  </a>
-</div>
+    <a href="{{ url_for('main.prompts', username=current_user.username) }}"
+       class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center">
+      <div class="text-3xl mb-2">📋</div>
+      <p class="font-semibold text-lg text-gray-900 dark:text-white">プロンプト登録</p>
+      <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">記事生成用プロンプトテンプレートを管理</p>
+    </a>
 
-<!-- ✅ ロボットアニメーションブロック -->
-<div class="mt-12 flex items-center gap-8">
-  <div class="relative w-48 h-48 overflow-visible bg-white border border-gray-200 rounded-lg shadow">
+    <a href="{{ url_for('main.keywords', username=current_user.username) }}"
+       class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center">
+      <div class="text-3xl mb-2">🏷</div>
+      <p class="font-semibold text-lg text-gray-900 dark:text-white">キーワード管理</p>
+      <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">ジャンル別にキーワードを登録・管理</p>
+    </a>
+
+    <a href="{{ url_for('main.chatgpt', username=current_user.username) }}"
+       class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center">
+      <div class="text-3xl mb-2">🤖</div>
+      <p class="font-semibold text-lg text-gray-900 dark:text-white">ChatGPT</p>
+      <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">ChatGPTのページを新しいタブで開きます</p>
+    </a>
+
+  </div>
+
+  <!-- ロボットアニメーション -->
+  <div class="relative w-48 h-48 flex-shrink-0">
     <img id="robotImage"
          src="{{ url_for('static', filename='images/robot.png') }}"
          alt="ロボット"
-         class="w-24 h-24 absolute bottom-0 left-0 animate-zigzag cursor-pointer transition-transform duration-300 z-50"
+         class="w-24 h-24 animate-zigzag cursor-pointer transition-transform duration-300"
          onclick="robotTalk()" />
     <div id="speechBubble"
          class="absolute left-28 bottom-24 bg-yellow-100 text-black text-sm px-3 py-2 rounded shadow-lg border border-gray-300 hidden z-50">
+      ...
     </div>
   </div>
+
 </div>
 {% endblock %}

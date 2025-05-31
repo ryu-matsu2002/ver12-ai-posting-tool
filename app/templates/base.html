@@ -7,22 +7,16 @@
   <meta name="robots" content="noindex, nofollow">
   <title>{% block title %}AI Posting Tool{% endblock %}</title>
 
-  <!-- Tailwind -->
   <script src="https://cdn.tailwindcss.com/3.4.4"></script>
-
-  <!-- Google Fonts / Material Icons -->
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 
-  <!-- Tailwind 拡張設定 -->
   <script>
     tailwind.config = {
       darkMode: 'class',
       theme: {
         extend: {
-          fontFamily: {
-            sans: ['Roboto', 'sans-serif']
-          },
+          fontFamily: { sans: ['Roboto', 'sans-serif'] },
           colors: {
             primary: '#031f6f',
             primaryDark: '#02194e',
@@ -36,13 +30,13 @@
 </head>
 
 <body class="h-screen flex overflow-hidden bg-primary text-white">
+
   <!-- ===== SIDEBAR ===== -->
   <aside class="w-60 shrink-0 h-full bg-primaryDark border-r border-gray-700 shadow-md flex flex-col">
     <a href="{{ url_for('main.dashboard', username=username) }}"
        class="flex items-center justify-start bg-primaryDark border-b border-white/20 h-[96px] px-4 hover:opacity-90 transition">
       <img src="{{ url_for('static', filename='images/tcc_logo.png') }}"
-           alt="ロゴ"
-           class="w-[100px] h-[100px] mr-3">
+           alt="ロゴ" class="w-[100px] h-[100px] mr-3">
       <div class="text-left leading-none">
         <p class="text-white text-[30px] font-extrabold leading-snug">Site</p>
         <p class="text-white text-[30px] font-extrabold leading-snug">craft</p>
@@ -101,13 +95,38 @@
     </div>
   </aside>
 
-  <main class="flex-1 overflow-y-visible p-6 bg-white text-black relative">
+  <!-- ===== MAINコンテンツ領域 ===== -->
+  <main class="flex-1 overflow-y-auto p-6 bg-white text-black relative">
+
+    <!-- ✅ 右上ユーザープロフィール -->
+    <div class="flex justify-end mb-6">
+      <div class="relative">
+        <button id="userDropdownBtn"
+                class="flex items-center gap-2 px-4 py-2 text-base font-semibold text-gray-700 dark:text-white bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 rounded-full focus:outline-none"
+                onclick="toggleUserDropdown()">
+          <span class="material-icons text-2xl">account_circle</span>
+          {{ current_user.username }}
+        </button>
+        <div id="userDropdown"
+             class="absolute right-0 mt-2 w-48 hidden bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg z-50">
+          <a href="{{ url_for('main.profile', username=current_user.username) }}"
+             class="block px-4 py-2 text-sm text-gray-800 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700">
+            プロフィール
+          </a>
+          <a href="{{ url_for('main.logout') }}"
+             class="block px-4 py-2 text-sm text-red-600 hover:bg-red-100 dark:hover:bg-red-700 dark:hover:text-white">
+            ログアウト
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- ✅ フラッシュメッセージ -->
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         <div class="space-y-2 mb-6">
           {% for cat, msg in messages %}
-            <div class="p-3 rounded text-sm
-                        {{ 'bg-green-100 text-green-800' if cat=='success' else 'bg-red-100 text-red-800' }}">
+            <div class="p-3 rounded text-sm {{ 'bg-green-100 text-green-800' if cat=='success' else 'bg-red-100 text-red-800' }}">
               {{ msg }}
             </div>
           {% endfor %}
@@ -115,10 +134,10 @@
       {% endif %}
     {% endwith %}
 
+    <!-- ✅ メインのブロック -->
     {% block content %}{% endblock %}
   </main>
 
-  <!-- ====== SCRIPT + STYLE（最下部）====== -->
   <script>
     function toggleUserDropdown() {
       const menu = document.getElementById('userDropdown');
@@ -161,11 +180,11 @@
 
   <style>
     @keyframes zigzag {
-      0%   { transform: translateX(0) translateY(0) rotateY(0); }
-      20%  { transform: translateX(10px) translateY(-2px); }
-      40%  { transform: translateX(20px) translateY(2px); }
-      60%  { transform: translateX(30px) translateY(-2px) rotateY(180deg); }
-      80%  { transform: translateX(20px) translateY(2px); }
+      0% { transform: translateX(0) translateY(0) rotateY(0); }
+      20% { transform: translateX(10px) translateY(-2px); }
+      40% { transform: translateX(20px) translateY(2px); }
+      60% { transform: translateX(30px) translateY(-2px) rotateY(180deg); }
+      80% { transform: translateX(20px) translateY(2px); }
       100% { transform: translateX(0) translateY(0) rotateY(0); }
     }
 
