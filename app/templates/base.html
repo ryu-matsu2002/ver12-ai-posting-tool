@@ -46,8 +46,8 @@
            alt="ロゴ"
            class="w-[60px] h-[60px] mr-3"> <!-- 最大化調整 -->
       <div class="text-left leading-none">
-        <p class="text-white text-[22px] font-extrabold leading-snug">Site</p>
-        <p class="text-white text-[22px] font-extrabold leading-snug">craft</p>
+        <p class="text-white text-[30px] font-extrabold leading-snug">Site</p>
+        <p class="text-white text-[30px] font-extrabold leading-snug">craft</p>
       </div>
     </a>
 
@@ -143,24 +143,25 @@
 
     {% block content %}
 
-    <!-- ✅ ChatGPTカード＋ロボット -->
-    <div class="flex items-center mt-6 space-x-8">
-      <!-- ChatGPTカード -->
-      <div class="w-64 bg-white shadow rounded p-4 text-center border">
-        <div class="text-3xl mb-2">🤖</div>
-        <div class="font-bold mb-1">ChatGPT</div>
-        <p class="text-sm text-gray-600">ChatGPTのページを新しいタブで開きます</p>
-      </div>
+<!-- ✅ ChatGPTカード＋ロボット -->
+<div class="flex items-center mt-6 space-x-8 relative">
+  <!-- ChatGPTカード -->
+  <div class="w-64 bg-white shadow rounded p-4 text-center border">
+    <div class="text-3xl mb-2">🤖</div>
+    <div class="font-bold mb-1">ChatGPT</div>
+    <p class="text-sm text-gray-600">ChatGPTのページを新しいタブで開きます</p>
+  </div>
 
-      <!-- ロボットアニメーション -->
-      <div class="flex items-center justify-center">
-        <img src="{{ url_for('static', filename='images/SITE CRAFT公式キャラ右向き.png') }}"
-             alt="ロボット"
-             class="w-24 h-24 animate-zigzag" />
-      </div>
-    </div>
+  <!-- ロボットアニメーション -->
+  <div class="relative w-[120px] h-[100px] overflow-visible">
+    <img src="{{ url_for('static', filename='images/SITE CRAFT公式キャラ右向き.png') }}"
+         alt="ロボット"
+         class="w-24 h-24 absolute top-0 left-0 animate-zigzag" />
+  </div>
+</div>
 
-    {% endblock %}
+{% endblock %}
+
   </main>
 
   <script>
