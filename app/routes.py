@@ -65,6 +65,9 @@ def stripe_webhook():
     payload = request.data
     sig_header = request.headers.get("stripe-signature")
     webhook_secret = current_app.config["STRIPE_WEBHOOK_SECRET"]
+# ✅ 追加: Webhookのペイロードをログ出力
+    current_app.logger.info("📩 Stripe Webhook Received")
+    current_app.logger.info(payload.decode("utf-8"))  # JSON形式で出力
 
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)

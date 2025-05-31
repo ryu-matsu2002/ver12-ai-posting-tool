@@ -10,11 +10,11 @@
 
   {% if request.args.get("success") %}
     <div class="mb-6 p-4 bg-green-100 text-green-800 rounded">
-      ✅ 支払いが完了しました！マイページに戻ってサイトを登録してください。
+      ✅ 支払いが完了しました！左メニューから「サイト登録」をしてください。
     </div>
     <a href="{{ url_for('main.dashboard', username=current_user.username) }}"
        class="inline-block mb-6 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">
-      🏠 マイページに戻る
+      🏠 サイト登録ページに戻る
     </a>
   {% elif request.args.get("canceled") %}
     <div class="mb-6 p-4 bg-red-100 text-red-800 rounded">
