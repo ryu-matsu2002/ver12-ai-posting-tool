@@ -14,7 +14,6 @@
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 
-  <!-- Tailwind 拡張設定 -->
   <script>
     tailwind.config = {
       darkMode: 'class',
@@ -33,21 +32,43 @@
       }
     };
   </script>
+
+  <style>
+    .side { display: block; padding: .5rem 1.5rem; border-radius: 9999px }
+    .side:hover { background: rgba(59, 130, 246, .07) }
+    .active { font-weight: 600; background-color: rgba(191, 219, 254, .7) }
+
+    /* アニメーション用 */
+    @keyframes zigzag {
+      0% { transform: translateX(0) translateY(0) scaleX(1); }
+      25% { transform: translateX(100px) translateY(20px) scaleX(1); }
+      50% { transform: translateX(200px) translateY(0) scaleX(-1); }
+      75% { transform: translateX(100px) translateY(-20px) scaleX(-1); }
+      100% { transform: translateX(0) translateY(0) scaleX(1); }
+    }
+
+    .robot-walk {
+      animation: zigzag 10s infinite linear;
+    }
+  </style>
 </head>
 
 <body class="h-screen flex overflow-hidden bg-primary text-white">
   <!-- ===== SIDEBAR ===== -->
   <aside class="w-60 shrink-0 h-full bg-primaryDark border-r border-gray-700 shadow-md flex flex-col">
 
-    <!-- ✅ 横長ロゴ＋Site craft（2行）リンク付き -->
-    <a href="{{ url_for('main.dashboard', username=username) }}" class="flex items-center gap-3 px-4 py-4 bg-brandBlue border-b border-white/20 hover:opacity-90">
-      <img src="{{ url_for('static', filename='images/tcc_logo.png') }}" alt="Site Craft ロゴ" class="w-12 h-12 rounded-full">
-      <span class="text-white text-lg font-extrabold leading-tight">
+    <!-- 🔵 ロゴエリア -->
+    <a href="{{ url_for('main.dashboard', username=username) }}"
+       class="flex items-center justify-center flex-col py-4 px-3 bg-primaryDark border-b border-white/20 hover:bg-primaryHover transition">
+      <img src="{{ url_for('static', filename='images/tcc_logo.png') }}"
+           alt="Site Craft ロゴ"
+           class="w-14 h-14 mb-1 rounded-full shadow-md">
+      <div class="text-white text-center leading-tight font-bold text-[15px]">
         Site<br>craft
-      </span>
+      </div>
     </a>
 
-    <!-- ===== メニューエリア ===== -->
+    <!-- メニュー -->
     <nav class="flex-1 py-4 space-y-1 overflow-y-auto">
       <a href="{{ url_for('main.dashboard', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/dashboard') and 'font-semibold bg-[#0f2fa6]' }}">
@@ -95,13 +116,16 @@
       </a>
     </nav>
 
+    <!-- テーマ切替 -->
     <div class="px-6 py-4 flex items-center justify-between">
       <button onclick="toggleTheme()" class="material-icons text-gray-300">dark_mode</button>
     </div>
   </aside>
 
   <!-- ===== MAIN CONTENT ===== -->
-  <main class="flex-1 overflow-y-auto p-6 bg-white text-black">
+  <main class="flex-1 overflow-y-auto p-6 bg-white text-black relative">
+
+    <!-- ユーザー情報 -->
     <div class="flex justify-end mb-6">
       <div class="relative">
         <button id="userDropdownBtn"
@@ -128,7 +152,8 @@
       {% if messages %}
         <div class="space-y-2 mb-6">
           {% for cat, msg in messages %}
-            <div class="p-3 rounded text-sm {{ 'bg-green-100 text-green-800' if cat=='success' else 'bg-red-100 text-red-800' }}">
+            <div class="p-3 rounded text-sm
+              {{ 'bg-green-100 text-green-800' if cat=='success' else 'bg-red-100 text-red-800' }}">
               {{ msg }}
             </div>
           {% endfor %}
@@ -136,11 +161,11 @@
       {% endif %}
     {% endwith %}
 
-    <!-- ✅ ロボットアニメーション仮設置 -->
-    <div class="relative h-36 mt-8 overflow-hidden">
+    <!-- 🔁 ロボット歩行アニメーション -->
+    <div class="relative h-40 w-full overflow-hidden mb-6">
       <img src="{{ url_for('static', filename='images/SITE CRAFT公式キャラ右向き.png') }}"
-           alt="ロボットアニメ"
-           class="absolute left-0 animate-walk w-28 h-28">
+           alt="ロボット"
+           class="w-24 h-24 absolute top-0 left-0 robot-walk">
     </div>
 
     {% block content %}{% endblock %}
@@ -164,18 +189,5 @@
       document.documentElement.classList.toggle("dark");
     }
   </script>
-
-  <style>
-    .animate-walk {
-      animation: walk 4s linear infinite alternate;
-    }
-    @keyframes walk {
-      0% { left: 0; }
-      100% { left: calc(100% - 120px); }
-    }
-    .side { display:block; padding:.5rem 1.5rem; border-radius:9999px }
-    .side:hover { background:rgba(59,130,246,.07) }
-    .active { font-weight:600; background-color:rgba(191,219,254,.7) }
-  </style>
 </body>
 </html>
