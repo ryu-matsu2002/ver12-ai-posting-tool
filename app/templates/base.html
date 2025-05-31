@@ -39,17 +39,18 @@
   <!-- ===== SIDEBAR ===== -->
   <aside class="w-60 shrink-0 h-full bg-primaryDark border-r border-gray-700 shadow-md flex flex-col">
 
-    <!-- ✅ ロゴ部分（左右並び・2行・クリックリンク） -->
+    <!-- ✅ ロゴ部分（左右配置、最大化、クリックでダッシュボード遷移） -->
     <a href="{{ url_for('main.dashboard', username=username) }}"
        class="flex items-center justify-start bg-primaryDark border-b border-white/20 h-[96px] px-4 hover:opacity-90 transition">
       <img src="{{ url_for('static', filename='images/tcc_logo.png') }}"
            alt="ロゴ"
-           class="w-12 h-12 mr-3">
-      <div class="text-left leading-tight">
-        <p class="text-white text-lg font-bold">Site</p>
-        <p class="text-white text-lg font-bold">craft</p>
+           class="w-[55px] h-[55px] mr-3">  <!-- 👈 大きく修正（40 → 50） -->
+      <div class="text-left leading-none"> <!-- 👈 行間詰めてより大きく -->
+        <p class="text-white text-[18px] font-extrabold leading-snug">Site</p>
+        <p class="text-white text-[18px] font-extrabold leading-snug">craft</p>
       </div>
     </a>
+
 
     <!-- ===== メニューエリア ===== -->
     <nav class="flex-1 py-4 space-y-1 overflow-y-auto">
