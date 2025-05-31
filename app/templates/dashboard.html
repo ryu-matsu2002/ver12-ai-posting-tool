@@ -75,4 +75,19 @@
     <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">ChatGPTのページを新しいタブで開きます</p>
   </a>
 </div>
+
+<!-- ✅ ロボットアニメーション追加ブロック -->
+<div class="mt-12 flex items-center gap-8">
+  <div class="relative w-48 h-48 overflow-visible bg-white border border-gray-200 rounded-lg shadow">
+    <img id="robotImage"
+         src="{{ url_for('static', filename='images/robot.png') }}"
+         alt="ロボット"
+         class="w-24 h-24 absolute bottom-0 left-0 animate-zigzag cursor-pointer transition-transform duration-300 z-50"
+         onclick="robotTalk()" />
+    <div id="speechBubble"
+         class="absolute left-28 bottom-24 bg-yellow-100 text-black text-sm px-3 py-2 rounded shadow-lg border border-gray-300 hidden z-50">
+      ...
+    </div>
+  </div>
+</div>
 {% endblock %}
