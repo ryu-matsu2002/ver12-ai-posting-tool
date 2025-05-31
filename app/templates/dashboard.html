@@ -73,15 +73,14 @@
   </a>
 
   <!-- ロボットアニメーション（右隣に表示） -->
-  <div class="relative w-32 h-auto flex items-end">
-    <img id="robotImage"
-         src="{{ url_for('static', filename='images/robot.png') }}"
-         alt="ロボット"
-         class="w-full h-auto animate-walking cursor-pointer transition-transform duration-300"
-         onclick="robotTalk()" />
-    <div id="speechBubble"
-         class="absolute left-28 bottom-20 bg-yellow-100 text-black text-sm px-3 py-2 rounded shadow-lg border border-gray-300 hidden z-50">
-    </div>
+<div class="relative w-32 h-auto flex items-end">
+  <img id="robotImage"
+       src="{{ url_for('static', filename='images/robot.png') }}"
+       alt="ロボット"
+       class="w-full h-auto animate-zigzag animate-walking cursor-pointer transition-transform duration-300"
+       onclick="robotTalk()" />
+  <div id="speechBubble"
+       class="absolute left-28 bottom-20 bg-yellow-100 text-black text-sm px-3 py-2 rounded shadow-lg border border-gray-300 hidden z-50">
   </div>
 </div>
 {% endblock %}

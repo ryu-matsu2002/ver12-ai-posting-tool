@@ -192,28 +192,22 @@
   </script>
 
   <style>
-  /* --- ロボット往復アニメーション（左右移動） --- */
+  /* ロボット：左右に行き来する往復アニメーション */
   @keyframes walk-back-and-forth {
-    0%   { transform: translateX(0)     rotateY(0deg); }
-    10%  { transform: translateX(10px)  rotateY(0deg); }
-    20%  { transform: translateX(20px)  rotateY(0deg); }
-    30%  { transform: translateX(30px)  rotateY(0deg); }
-    40%  { transform: translateX(40px)  rotateY(0deg); }
-
-    50%  { transform: translateX(40px)  rotateY(180deg); }
-
-    60%  { transform: translateX(30px)  rotateY(180deg); }
-    70%  { transform: translateX(20px)  rotateY(180deg); }
-    80%  { transform: translateX(10px)  rotateY(180deg); }
-    90%  { transform: translateX(0)     rotateY(180deg); }
-    100% { transform: translateX(0)     rotateY(0deg); }
+    0%   { transform: translateX(0) rotateY(0); }
+    25%  { transform: translateX(30px) rotateY(0); }
+    50%  { transform: translateX(60px) rotateY(180deg); }
+    75%  { transform: translateX(30px) rotateY(180deg); }
+    100% { transform: translateX(0) rotateY(0); }
   }
 
   .animate-zigzag {
     animation: walk-back-and-forth 6s ease-in-out infinite;
+    transform-style: preserve-3d;
+    backface-visibility: hidden;
   }
 
-  /* --- 手足が動くようなダンス --- */
+  /* 手足を動かすアニメーション */
   @keyframes robot-dance {
     0%   { transform: scale(1) rotate(0deg) translateY(0); }
     20%  { transform: scale(1.05) rotate(2deg) translateY(-1px); }
