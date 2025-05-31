@@ -14,6 +14,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 
+  <!-- Tailwind 拡張設定 -->
   <script>
     tailwind.config = {
       darkMode: 'class',
@@ -32,43 +33,25 @@
       }
     };
   </script>
-
-  <style>
-    .side { display: block; padding: .5rem 1.5rem; border-radius: 9999px }
-    .side:hover { background: rgba(59, 130, 246, .07) }
-    .active { font-weight: 600; background-color: rgba(191, 219, 254, .7) }
-
-    /* アニメーション用 */
-    @keyframes zigzag {
-      0% { transform: translateX(0) translateY(0) scaleX(1); }
-      25% { transform: translateX(100px) translateY(20px) scaleX(1); }
-      50% { transform: translateX(200px) translateY(0) scaleX(-1); }
-      75% { transform: translateX(100px) translateY(-20px) scaleX(-1); }
-      100% { transform: translateX(0) translateY(0) scaleX(1); }
-    }
-
-    .robot-walk {
-      animation: zigzag 10s infinite linear;
-    }
-  </style>
 </head>
 
 <body class="h-screen flex overflow-hidden bg-primary text-white">
   <!-- ===== SIDEBAR ===== -->
   <aside class="w-60 shrink-0 h-full bg-primaryDark border-r border-gray-700 shadow-md flex flex-col">
 
-    <!-- 🔵 ロゴエリア -->
+    <!-- ✅ ロゴ部分（左右並び・2行・クリックリンク） -->
     <a href="{{ url_for('main.dashboard', username=username) }}"
-       class="flex items-center justify-center flex-col py-4 px-3 bg-primaryDark border-b border-white/20 hover:bg-primaryHover transition">
+       class="flex items-center justify-start bg-primaryDark border-b border-white/20 h-[96px] px-4 hover:opacity-90 transition">
       <img src="{{ url_for('static', filename='images/tcc_logo.png') }}"
-           alt="Site Craft ロゴ"
-           class="w-14 h-14 mb-1 rounded-full shadow-md">
-      <div class="text-white text-center leading-tight font-bold text-[15px]">
-        Site<br>craft
+           alt="ロゴ"
+           class="w-12 h-12 mr-3">
+      <div class="text-left leading-tight">
+        <p class="text-white text-lg font-bold">Site</p>
+        <p class="text-white text-lg font-bold">craft</p>
       </div>
     </a>
 
-    <!-- メニュー -->
+    <!-- ===== メニューエリア ===== -->
     <nav class="flex-1 py-4 space-y-1 overflow-y-auto">
       <a href="{{ url_for('main.dashboard', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/dashboard') and 'font-semibold bg-[#0f2fa6]' }}">
@@ -97,7 +80,7 @@
       {% if current_user.is_authenticated and current_user.is_admin %}
       <a href="{{ url_for('admin.admin_dashboard') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full text-yellow-300 font-semibold">
-        <span class="material-icons align-middle mr-2">admin_panel_settings</span>管理者ページ
+         <span class="material-icons align-middle mr-2">admin_panel_settings</span>管理者ページ
       </a>
       {% endif %}
       {% if current_user.is_authenticated and current_user.is_special_access %}
@@ -116,7 +99,6 @@
       </a>
     </nav>
 
-    <!-- テーマ切替 -->
     <div class="px-6 py-4 flex items-center justify-between">
       <button onclick="toggleTheme()" class="material-icons text-gray-300">dark_mode</button>
     </div>
@@ -124,8 +106,6 @@
 
   <!-- ===== MAIN CONTENT ===== -->
   <main class="flex-1 overflow-y-auto p-6 bg-white text-black relative">
-
-    <!-- ユーザー情報 -->
     <div class="flex justify-end mb-6">
       <div class="relative">
         <button id="userDropdownBtn"
@@ -153,7 +133,7 @@
         <div class="space-y-2 mb-6">
           {% for cat, msg in messages %}
             <div class="p-3 rounded text-sm
-              {{ 'bg-green-100 text-green-800' if cat=='success' else 'bg-red-100 text-red-800' }}">
+                        {{ 'bg-green-100 text-green-800' if cat=='success' else 'bg-red-100 text-red-800' }}">
               {{ msg }}
             </div>
           {% endfor %}
@@ -161,14 +141,14 @@
       {% endif %}
     {% endwith %}
 
-    <!-- 🔁 ロボット歩行アニメーション -->
-    <div class="relative h-40 w-full overflow-hidden mb-6">
+    {% block content %}{% endblock %}
+
+    <!-- ✅ ロボットアニメーション（ChatGPTの右余白エリア） -->
+    <div class="relative h-36 w-full mt-4">
       <img src="{{ url_for('static', filename='images/SITE CRAFT公式キャラ右向き.png') }}"
            alt="ロボット"
-           class="w-24 h-24 absolute top-0 left-0 robot-walk">
+           class="absolute top-0 left-0 w-28 h-28 animate-zigzag" />
     </div>
-
-    {% block content %}{% endblock %}
   </main>
 
   <script>
@@ -189,5 +169,24 @@
       document.documentElement.classList.toggle("dark");
     }
   </script>
+
+  <style>
+    .side { display:block; padding:.5rem 1.5rem; border-radius:9999px }
+    .side:hover { background:rgba(59,130,246,.07) }
+    .active { font-weight:600; background-color:rgba(191,219,254,.7) }
+
+    @keyframes zigzag {
+      0%   { transform: translateX(0) translateY(0) rotateY(0); }
+      20%  { transform: translateX(80px) translateY(-5px); }
+      40%  { transform: translateX(160px) translateY(5px); }
+      60%  { transform: translateX(240px) translateY(-5px) rotateY(180deg); }
+      80%  { transform: translateX(160px) translateY(5px); }
+      100% { transform: translateX(0) translateY(0) rotateY(0); }
+    }
+
+    .animate-zigzag {
+      animation: zigzag 10s infinite ease-in-out;
+    }
+  </style>
 </body>
 </html>
