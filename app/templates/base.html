@@ -38,13 +38,14 @@
   <!-- ===== SIDEBAR ===== -->
   <aside class="w-60 shrink-0 h-full bg-primaryDark border-r border-gray-700 shadow-md flex flex-col">
 
-    <!-- ✅ ロゴ＋Site craft表示（修正後） -->
-    <div class="flex flex-col items-center py-6 border-b border-white/20">
+    <!-- ✅ ロゴ＋Site craft表示（改良版） -->
+    <div class="flex flex-col items-center py-8 border-b border-white/20">
       <img src="{{ url_for('static', filename='images/tcc_logo.png') }}"
            alt="Site Craft ロゴ"
-           class="w-20 h-20 rounded-full mb-3 shadow-md">
-      <span class="text-white text-2xl font-bold tracking-wide">Site craft</span>
+           class="w-24 h-24 rounded-full mb-3 shadow-md">  <!-- サイズUP -->
+      <span class="text-white text-3xl font-extrabold tracking-wider">Site craft</span>  <!-- サイズ＆太さUP -->
     </div>
+
 
     <nav class="flex-1 py-4 space-y-1">
       <a href="{{ url_for('main.dashboard', username=username) }}"
