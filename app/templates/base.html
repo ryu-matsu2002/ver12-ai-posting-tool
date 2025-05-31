@@ -101,7 +101,7 @@
     </div>
   </aside>
 
-  <main class="flex-1 overflow-y-auto p-6 bg-white text-black relative">
+  <main class="flex-1 overflow-y-visible p-6 bg-white text-black relative">
     <div class="flex justify-end mb-6">
       <div class="relative">
         <button id="userDropdownBtn"
@@ -138,28 +138,27 @@
     {% endwith %}
 
     {% block content %}
-
-    <!-- ✅ ChatGPTカード＋ロボット表示エリア -->
     <div class="flex items-center mt-10 gap-6">
+      <!-- ChatGPTカード -->
       <div class="w-64 bg-white shadow rounded p-4 text-center border z-10">
         <div class="text-3xl mb-2">🤖</div>
         <div class="font-bold mb-1">ChatGPT</div>
         <p class="text-sm text-gray-600">ChatGPTのページを新しいタブで開きます</p>
       </div>
 
-      <div class="relative w-full h-48 overflow-visible bg-white">
+      <!-- ロボット＋吹き出し -->
+      <div class="relative w-48 h-48 overflow-visible bg-white border border-gray-200">
         <img id="robotImage"
              src="{{ url_for('static', filename='images/robot.png') }}"
              alt="ロボット"
-             class="w-24 h-24 absolute bottom-0 left-0 animate-zigzag cursor-pointer transition-transform duration-300"
+             class="w-24 h-24 absolute bottom-0 left-0 animate-zigzag cursor-pointer transition-transform duration-300 z-50"
              onclick="robotTalk()" />
         <div id="speechBubble"
-             class="absolute left-32 bottom-20 bg-yellow-100 text-black text-sm px-3 py-2 rounded shadow-lg border border-gray-300 hidden z-20">
+             class="absolute left-28 bottom-24 bg-yellow-100 text-black text-sm px-3 py-2 rounded shadow-lg border border-gray-300 hidden z-50">
           ...
         </div>
       </div>
     </div>
-
     {% endblock %}
   </main>
 
@@ -182,19 +181,9 @@
     }
 
     const phrases = [
-      "こんにちは。記事、作ろうか？",
-      "キーワードは、完璧に記憶してるよ。",
-      "画像、ぴったりのを探してくるから待っててね。",
-      "...生成中。ちょっとだけ時間ちょうだい。",
-      "できたよ。いいタイトルでしょ？",
-      "スケジュール投稿も忘れてないよ。",
-      "この記事、WordPressに今すぐ投稿する？",
-      "あ、画像が壊れてるみたい。直してくるね！",
-      "君のビジネス、ぜったい伸ばすよ。",
-      "もう40記事？すごいペースだね。",
-      "Stripeの支払いも確認済み。次のサイト登録いってみよう！",
-      "ところで、今日は少し休んだ？",
-      "僕がいるから、大丈夫。どんどん任せて。",
+      "こんにちは。記事、作ろうか？", "画像、ぴったりのを探してくるから待っててね。",
+      "SEOもバッチリ対応中！", "できたよ。いいタイトルでしょ？",
+      "この記事、WordPressに投稿する？", "Stripeの支払いも確認済み。",
       "未来のトップ10入り、いっしょに目指そう。"
     ];
 
@@ -209,31 +198,27 @@
       bubble.textContent = random;
       bubble.classList.remove('hidden');
 
-      setTimeout(() => {
-        bubble.classList.add('hidden');
-      }, 2500);
+      setTimeout(() => bubble.classList.add('hidden'), 2500);
     }
   </script>
 
   <style>
     @keyframes zigzag {
       0%   { transform: translateX(0) translateY(0) rotateY(0); }
-      20%  { transform: translateX(20px) translateY(-4px); }
-      40%  { transform: translateX(40px) translateY(4px); }
-      60%  { transform: translateX(60px) translateY(-4px) rotateY(180deg); }
-      80%  { transform: translateX(40px) translateY(4px); }
+      20%  { transform: translateX(10px) translateY(-2px); }
+      40%  { transform: translateX(20px) translateY(2px); }
+      60%  { transform: translateX(30px) translateY(-2px) rotateY(180deg); }
+      80%  { transform: translateX(20px) translateY(2px); }
       100% { transform: translateX(0) translateY(0) rotateY(0); }
     }
 
     .animate-zigzag {
-      animation: zigzag 10s infinite ease-in-out;
+      animation: zigzag 8s infinite ease-in-out;
     }
 
     @keyframes robot-dance {
-      0%   { transform: scale(1) rotate(0deg); }
-      25%  { transform: scale(1.2) rotate(10deg); }
-      50%  { transform: scale(1.3) rotate(-10deg); }
-      75%  { transform: scale(1.2) rotate(10deg); }
+      0% { transform: scale(1) rotate(0deg); }
+      50% { transform: scale(1.2) rotate(10deg); }
       100% { transform: scale(1) rotate(0deg); }
     }
 
