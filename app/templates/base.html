@@ -102,28 +102,6 @@
   </aside>
 
   <main class="flex-1 overflow-y-visible p-6 bg-white text-black relative">
-    <div class="flex justify-end mb-6">
-      <div class="relative">
-        <button id="userDropdownBtn"
-                class="flex items-center gap-2 px-4 py-2 text-base font-semibold text-gray-700 dark:text-white bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 rounded-full focus:outline-none"
-                onclick="toggleUserDropdown()">
-          <span class="material-icons text-2xl">account_circle</span>
-          {{ current_user.username }}
-        </button>
-        <div id="userDropdown"
-             class="absolute right-0 mt-2 w-48 hidden bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg z-50">
-          <a href="{{ url_for('main.profile', username=current_user.username) }}"
-             class="block px-4 py-2 text-sm text-gray-800 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700">
-            プロフィール
-          </a>
-          <a href="{{ url_for('main.logout') }}"
-             class="block px-4 py-2 text-sm text-red-600 hover:bg-red-100 dark:hover:bg-red-700 dark:hover:text-white">
-            ログアウト
-          </a>
-        </div>
-      </div>
-    </div>
-
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         <div class="space-y-2 mb-6">
@@ -137,20 +115,20 @@
       {% endif %}
     {% endwith %}
 
-    {% block content %}
-    {% endblock %}
+    {% block content %}{% endblock %}
   </main>
 
+  <!-- ====== SCRIPT + STYLE（最下部）====== -->
   <script>
     function toggleUserDropdown() {
       const menu = document.getElementById('userDropdown');
-      menu.classList.toggle('hidden');
+      if (menu) menu.classList.toggle('hidden');
     }
 
     document.addEventListener('click', function (e) {
       const btn = document.getElementById('userDropdownBtn');
       const menu = document.getElementById('userDropdown');
-      if (!btn.contains(e.target) && !menu.contains(e.target)) {
+      if (btn && menu && !btn.contains(e.target) && !menu.contains(e.target)) {
         menu.classList.add('hidden');
       }
     });
@@ -169,6 +147,7 @@
     function robotTalk() {
       const robot = document.getElementById('robotImage');
       const bubble = document.getElementById('speechBubble');
+      if (!robot || !bubble) return;
 
       robot.classList.add('dance-animation');
       setTimeout(() => robot.classList.remove('dance-animation'), 1000);
@@ -176,7 +155,6 @@
       const random = phrases[Math.floor(Math.random() * phrases.length)];
       bubble.textContent = random;
       bubble.classList.remove('hidden');
-
       setTimeout(() => bubble.classList.add('hidden'), 2500);
     }
   </script>
