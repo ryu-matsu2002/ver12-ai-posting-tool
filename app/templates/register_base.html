@@ -4,15 +4,15 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="robots" content="noindex, nofollow">
-  <title>{% block title %}Register | AI Posting Tool{% endblock %}</title>
+  <title>{% block title %}AI Posting Tool{% endblock %}</title>
 
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com/3.4.4"></script>
 
-  <!-- Google Fonts & Icons（任意） -->
+  <!-- Google Fonts -->
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500&display=swap" rel="stylesheet">
 
-  <!-- ダークモード設定 -->
+  <!-- Tailwind Config -->
   <script>
     tailwind.config = {
       darkMode: 'class',
@@ -32,15 +32,14 @@
   </script>
 </head>
 
-<!-- ✅ ここが login とは違う本質部分 -->
 <body class="min-h-screen bg-gray-100 dark:bg-gray-900 overflow-y-auto">
 
+  <!-- Flash Messages -->
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
-      <div class="absolute top-4 w-full max-w-md px-6">
+      <div class="fixed top-6 left-1/2 transform -translate-x-1/2 z-50 w-full max-w-xl px-4">
         {% for cat, msg in messages %}
-          <div class="p-3 rounded text-sm mb-2
-                      {{ 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' }}">
+          <div class="p-3 rounded text-sm mb-2 bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
             {{ msg }}
           </div>
         {% endfor %}

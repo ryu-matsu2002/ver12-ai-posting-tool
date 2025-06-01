@@ -5,111 +5,66 @@
 <div class="min-h-screen bg-gray-100 px-4 py-10">
   <h2 class="text-3xl font-bold mb-10 text-center">新規登録</h2>
 
-  <form method="post" class="w-full max-w-2xl mx-auto space-y-6 bg-white p-8 rounded shadow">
+  <form method="post" class="w-full max-w-4xl mx-auto space-y-6">
     {{ form.hidden_tag() }}
 
-    <!-- ユーザー名 -->
-    <div>
-      <label class="block text-sm font-bold mb-1">ユーザー名 <span class="text-red-600">必須</span></label>
-      {{ form.username(class="w-full border border-gray-300 p-2 rounded") }}
-    </div>
-
-    <!-- メールアドレス -->
-    <div>
-      <label class="block text-sm font-bold mb-1">メールアドレス <span class="text-red-600">必須</span></label>
-      {{ form.email(class="w-full border border-gray-300 p-2 rounded") }}
-    </div>
-
-    <!-- パスワード -->
-    <div>
-      <label class="block text-sm font-bold mb-1">パスワード <span class="text-red-600">必須</span></label>
-      <div class="relative">
-        {{ form.password(class="w-full border border-gray-300 p-2 rounded pr-10", id="password") }}
-        <span class="absolute right-3 top-2 text-xl cursor-pointer text-gray-600" onclick="togglePassword('password')">👁️</span>
+    <!-- 共通スタイル：左ラベル・右入力の2カラム -->
+    {% macro row(label, field, help_text='') %}
+      <div class="flex items-start gap-6">
+        <div class="w-1/4 text-sm font-bold text-right pt-2">{{ label }}</div>
+        <div class="w-3/4">
+          {{ field }}
+          {% if help_text %}
+            <p class="text-xs text-gray-500 mt-1">{{ help_text }}</p>
+          {% endif %}
+        </div>
       </div>
-    </div>
+    {% endmacro %}
 
-    <!-- パスワード確認 -->
-    <div>
-      <label class="block text-sm font-bold mb-1">パスワード確認 <span class="text-red-600">必須</span></label>
+    {{ row('ユーザー名 <span class="text-red-600">必須</span>', form.username(class="w-full border border-gray-300 p-2 rounded")) }}
+    {{ row('メールアドレス <span class="text-red-600">必須</span>', form.email(class="w-full border border-gray-300 p-2 rounded")) }}
+
+    {{ row('パスワード <span class="text-red-600">必須</span>',
+      caller() }}
+      {% call row('パスワード <span class="text-red-600">必須</span>', '') %}
+        <div class="relative">
+          {{ form.password(class="w-full border border-gray-300 p-2 rounded pr-10", id="password") }}
+          <span class="absolute right-3 top-2 text-2xl cursor-pointer text-gray-600" onclick="togglePassword('password')">👁️</span>
+        </div>
+      {% endcall %}
+    {% endcall %}
+
+    {% call row('パスワード確認 <span class="text-red-600">必須</span>', '') %}
       <div class="relative">
         {{ form.confirm(class="w-full border border-gray-300 p-2 rounded pr-10", id="confirm") }}
-        <span class="absolute right-3 top-2 text-xl cursor-pointer text-gray-600" onclick="togglePassword('confirm')">👁️</span>
+        <span class="absolute right-3 top-2 text-2xl cursor-pointer text-gray-600" onclick="togglePassword('confirm')">👁️</span>
       </div>
-    </div>
+    {% endcall %}
 
-    <!-- 区分 -->
-    <div>
-      <label class="block text-sm font-bold mb-1">登録区分 <span class="text-red-600">必須</span></label>
-      {{ form.user_type(class="w-full border border-gray-300 p-2 rounded", id="user_type") }}
-    </div>
+    {{ row('登録区分 <span class="text-red-600">必須</span>', form.user_type(class="w-full border border-gray-300 p-2 rounded", id="user_type")) }}
 
     <!-- 法人専用 -->
-    <div id="corporate_fields" class="space-y-4 hidden">
-      <div>
-        <label class="block text-sm font-bold mb-1">会社名 <span class="text-red-600">必須</span></label>
-        {{ form.company_name(class="w-full border border-gray-300 p-2 rounded") }}
-      </div>
-      <div>
-        <label class="block text-sm font-bold mb-1">会社名フリガナ <span class="text-red-600">必須</span></label>
-        {{ form.company_kana(class="w-full border border-gray-300 p-2 rounded") }}
-      </div>
+    <div id="corporate_fields" class="space-y-6 hidden">
+      {{ row('会社名 <span class="text-red-600">必須</span>', form.company_name(class="w-full border border-gray-300 p-2 rounded")) }}
+      {{ row('会社名フリガナ <span class="text-red-600">必須</span>', form.company_kana(class="w-full border border-gray-300 p-2 rounded")) }}
     </div>
 
-    <!-- 氏名 -->
-    <div class="flex gap-4">
-      <div class="w-1/2">
-        <label class="block text-sm font-bold mb-1">姓 <span class="text-red-600">必須</span></label>
-        {{ form.last_name(class="w-full border border-gray-300 p-2 rounded") }}
-      </div>
-      <div class="w-1/2">
-        <label class="block text-sm font-bold mb-1">名 <span class="text-red-600">必須</span></label>
-        {{ form.first_name(class="w-full border border-gray-300 p-2 rounded") }}
-      </div>
-    </div>
+    {{ row('姓 <span class="text-red-600">必須</span>', form.last_name(class="w-full border border-gray-300 p-2 rounded")) }}
+    {{ row('名 <span class="text-red-600">必須</span>', form.first_name(class="w-full border border-gray-300 p-2 rounded")) }}
 
-    <!-- フリガナ -->
-    <div class="flex gap-4">
-      <div class="w-1/2">
-        <label class="block text-sm font-bold mb-1">セイ <span class="text-red-600">必須</span></label>
-        {{ form.last_kana(class="w-full border border-gray-300 p-2 rounded") }}
-      </div>
-      <div class="w-1/2">
-        <label class="block text-sm font-bold mb-1">メイ <span class="text-red-600">必須</span></label>
-        {{ form.first_kana(class="w-full border border-gray-300 p-2 rounded") }}
-      </div>
-    </div>
+    {{ row('セイ <span class="text-red-600">必須</span>', form.last_kana(class="w-full border border-gray-300 p-2 rounded")) }}
+    {{ row('メイ <span class="text-red-600">必須</span>', form.first_kana(class="w-full border border-gray-300 p-2 rounded")) }}
 
-    <!-- 郵便番号 -->
-    <div>
-      <label class="block text-sm font-bold mb-1">郵便番号 <span class="text-red-600">必須</span></label>
-      {{ form.postal_code(class="w-full border border-gray-300 p-2 rounded") }}
-      <p class="text-xs text-gray-500 mt-1">※ ハイフンありで入力してください</p>
-    </div>
+    {{ row('郵便番号 <span class="text-red-600">必須</span>', form.postal_code(class="w-full border border-gray-300 p-2 rounded"), '※ ハイフンありで入力してください') }}
+    {{ row('住所 <span class="text-red-600">必須</span>', form.address(class="w-full border border-gray-300 p-2 rounded")) }}
 
-    <!-- 住所 -->
-    <div>
-      <label class="block text-sm font-bold mb-1">住所 <span class="text-red-600">必須</span></label>
-      {{ form.address(class="w-full border border-gray-300 p-2 rounded") }}
-    </div>
+    {{ row('携帯電話番号 <span class="text-red-600">必須</span>', form.phone(class="w-full border border-gray-300 p-2 rounded"), '※ ハイフンありで入力してください') }}
 
-    <!-- 携帯電話番号 -->
-    <div>
-      <label class="block text-sm font-bold mb-1">携帯電話番号 <span class="text-red-600">必須</span></label>
-      {{ form.phone(class="w-full border border-gray-300 p-2 rounded") }}
-      <p class="text-xs text-gray-500 mt-1">※ ハイフンありで入力してください</p>
-    </div>
-
-    <!-- 登録コード -->
-    <div>
-      <label class="block text-sm font-bold mb-1">新規登録用コード <span class="text-red-600">必須</span></label>
-      {{ form.register_key(class="w-full border border-gray-300 p-2 rounded") }}
-      <p class="text-xs text-gray-500 mt-1">※ TCCより発行済みのコードをご入力ください</p>
-    </div>
+    {{ row('新規登録用コード <span class="text-red-600">必須</span>', form.register_key(class="w-full border border-gray-300 p-2 rounded"), '※ TCCより発行済みのコードをご入力ください') }}
 
     <!-- 登録ボタン -->
-    <div class="pt-4">
-      {{ form.submit(class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded text-lg font-semibold") }}
+    <div class="text-center pt-6">
+      {{ form.submit(class="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded text-lg font-semibold") }}
     </div>
 
     <!-- ログインリンク -->
