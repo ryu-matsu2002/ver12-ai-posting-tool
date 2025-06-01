@@ -13,10 +13,13 @@
     {{ form.identifier(class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
   </div>
 
-  <!-- パスワード -->
+  <!-- パスワード + 👁 表示切り替え -->
   <div class="mb-6">
     {{ form.password.label(class="block mb-1") }}
-    {{ form.password(class="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600") }}
+    <div class="relative">
+      {{ form.password(class="w-full p-2 rounded border pr-10 dark:bg-gray-700 dark:border-gray-600", id="password") }}
+      <span class="absolute right-3 top-2.5 cursor-pointer text-gray-500" onclick="togglePassword('password')">👁</span>
+    </div>
   </div>
 
   <!-- ログインボタン -->
@@ -28,4 +31,12 @@
     <a href="{{ url_for('main.register') }}" class="text-blue-600 hover:underline">こちら</a>
   </p>
 </form>
+
+<!-- 👁 パスワード表示切替 -->
+<script>
+  function togglePassword(id) {
+    const input = document.getElementById(id);
+    input.type = input.type === "password" ? "text" : "password";
+  }
+</script>
 {% endblock %}
