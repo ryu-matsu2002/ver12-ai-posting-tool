@@ -23,13 +23,19 @@
     <!-- パスワード -->
     <div>
       <label class="block mb-1 font-medium text-sm">パスワード <span class="text-red-600 text-xs font-bold">必須</span></label>
-      {{ form.password(class="w-full border-b border-gray-400 bg-transparent focus:outline-none py-2") }}
+      <div class="relative">
+        {{ form.password(class="w-full border-b border-gray-400 bg-transparent focus:outline-none py-2 pr-10", id="password") }}
+        <span class="absolute right-2 top-2 cursor-pointer text-gray-500" onclick="togglePassword('password')">👁</span>
+      </div>
     </div>
 
     <!-- パスワード確認 -->
     <div>
       <label class="block mb-1 font-medium text-sm">パスワード確認 <span class="text-red-600 text-xs font-bold">必須</span></label>
-      {{ form.confirm(class="w-full border-b border-gray-400 bg-transparent focus:outline-none py-2") }}
+      <div class="relative">
+        {{ form.confirm(class="w-full border-b border-gray-400 bg-transparent focus:outline-none py-2 pr-10", id="confirm") }}
+        <span class="absolute right-2 top-2 cursor-pointer text-gray-500" onclick="togglePassword('confirm')">👁</span>
+      </div>
     </div>
 
     <!-- 区分 -->
@@ -78,40 +84,27 @@
     <div>
       <label class="block mb-1 font-medium text-sm">郵便番号 <span class="text-red-600 text-xs font-bold">必須</span></label>
       {{ form.postal_code(class="w-full border-b border-gray-400 bg-transparent focus:outline-none py-2") }}
+      <p class="text-xs text-gray-500">※ ハイフンありで入力してください</p>
     </div>
 
-    <!-- 都道府県・市区郡 -->
-    <div class="flex gap-6">
-      <div class="w-1/2">
-        <label class="block mb-1 font-medium text-sm">都道府県 <span class="text-red-600 text-xs font-bold">必須</span></label>
-        {{ form.prefecture(class="w-full border-b border-gray-400 bg-transparent focus:outline-none py-2") }}
-      </div>
-      <div class="w-1/2">
-        <label class="block mb-1 font-medium text-sm">市区郡 <span class="text-red-600 text-xs font-bold">必須</span></label>
-        {{ form.city(class="w-full border-b border-gray-400 bg-transparent focus:outline-none py-2") }}
-      </div>
-    </div>
-
-    <!-- 住所 -->
+    <!-- 住所（統合） -->
     <div>
-      <label class="block mb-1 font-medium text-sm">住所（番地以降） <span class="text-red-600 text-xs font-bold">必須</span></label>
-      {{ form.address1(class="w-full border-b border-gray-400 bg-transparent focus:outline-none py-2") }}
-    </div>
-    <div>
-      <label class="block mb-1 font-medium text-sm">建物名・部屋番号</label>
-      {{ form.address2(class="w-full border-b border-gray-400 bg-transparent focus:outline-none py-2") }}
+      <label class="block mb-1 font-medium text-sm">住所 <span class="text-red-600 text-xs font-bold">必須</span></label>
+      {{ form.address(class="w-full border-b border-gray-400 bg-transparent focus:outline-none py-2") }}
     </div>
 
     <!-- 電話番号 -->
     <div>
-      <label class="block mb-1 font-medium text-sm">電話番号 <span class="text-red-600 text-xs font-bold">必須</span></label>
+      <label class="block mb-1 font-medium text-sm">携帯電話番号 <span class="text-red-600 text-xs font-bold">必須</span></label>
       {{ form.phone(class="w-full border-b border-gray-400 bg-transparent focus:outline-none py-2") }}
+      <p class="text-xs text-gray-500">※ ハイフンありで入力してください</p>
     </div>
 
     <!-- 登録キー -->
     <div>
-      <label class="block mb-1 font-medium text-sm">登録用パスワード <span class="text-red-600 text-xs font-bold">必須</span></label>
+      <label class="block mb-1 font-medium text-sm">新規登録用コード <span class="text-red-600 text-xs font-bold">必須</span></label>
       {{ form.register_key(class="w-full border-b border-gray-400 bg-transparent focus:outline-none py-2") }}
+      <p class="text-xs text-gray-500">※ TCCより発行済みです。</p>
     </div>
 
     <!-- 登録ボタン -->
@@ -127,21 +120,23 @@
   </form>
 </div>
 
+<!-- JS：法人フィールド制御・パスワード表示切替 -->
 <script>
   document.addEventListener("DOMContentLoaded", function () {
     const userTypeSelect = document.getElementById("user_type");
     const corporateFields = document.getElementById("corporate_fields");
 
     function toggleCorporateFields() {
-      if (userTypeSelect.value === "corporate") {
-        corporateFields.classList.remove("hidden");
-      } else {
-        corporateFields.classList.add("hidden");
-      }
+      corporateFields.classList.toggle("hidden", userTypeSelect.value !== "corporate");
     }
 
     userTypeSelect.addEventListener("change", toggleCorporateFields);
     toggleCorporateFields();
   });
+
+  function togglePassword(id) {
+    const input = document.getElementById(id);
+    input.type = input.type === "password" ? "text" : "password";
+  }
 </script>
 {% endblock %}

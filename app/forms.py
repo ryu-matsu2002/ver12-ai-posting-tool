@@ -55,23 +55,14 @@ class RegisterForm(FlaskForm):
     # 郵便番号
     postal_code = StringField("郵便番号", validators=[DataRequired(), Length(max=10)])
 
-    # 都道府県
-    prefecture = StringField("都道府県", validators=[DataRequired(), Length(max=20)])
+    # 住所（統合）
+    address = StringField("住所", validators=[DataRequired(), Length(max=200)])
 
-    # 市区郡・町村
-    city = StringField("市区郡", validators=[DataRequired(), Length(max=50)])
+    # 携帯電話番号
+    phone = StringField("携帯電話番号", validators=[DataRequired(), Length(max=20)])
 
-    # 町名・番地
-    address1 = StringField("町名・番地", validators=[DataRequired(), Length(max=100)])
-
-    # 建物名・部屋番号
-    address2 = StringField("建物名・部屋番号", validators=[Optional(), Length(max=100)])
-
-    # 電話番号
-    phone = StringField("電話番号", validators=[DataRequired(), Length(max=20)])
-
-    # 専用パスワード
-    register_key = PasswordField("登録用パスワード", validators=[DataRequired()])
+    # 新規登録用コード
+    register_key = PasswordField("新規登録用コード", validators=[DataRequired()])
 
     submit = SubmitField("登録")
 

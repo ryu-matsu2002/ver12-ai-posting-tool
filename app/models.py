@@ -32,10 +32,7 @@ class User(db.Model, UserMixin):
 
     # 住所
     postal_code = db.Column(db.String(10), nullable=False)
-    prefecture  = db.Column(db.String(20), nullable=False)
-    city        = db.Column(db.String(50), nullable=False)
-    address1    = db.Column(db.String(100), nullable=False)
-    address2    = db.Column(db.String(100), nullable=True)
+    address = db.Column(db.String(200), nullable=True)  # ← 一旦nullable=True
 
     # 電話番号
     phone = db.Column(db.String(20), nullable=False)
