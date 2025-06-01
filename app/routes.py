@@ -477,7 +477,7 @@ def delete_user(user_id):
     db.session.delete(user)
     db.session.commit()
     flash("ユーザーを削除しました。", "success")
-    return redirect(url_for("admin.user_list"))
+    return redirect(url_for("admin.admin_users"))
 
 
 
