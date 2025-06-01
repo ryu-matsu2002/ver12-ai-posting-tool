@@ -30,10 +30,16 @@
         <td class="px-3 py-2 text-center text-green-600 font-bold">{{ site.done or 0 }}</td>
         <td class="px-3 py-2 text-center text-blue-600 font-bold">{{ site.posted or 0 }}</td>
         <td class="px-3 py-2 text-center text-red-600 font-bold">{{ site.error or 0 }}</td>
-        <td class="px-3 py-2 text-center space-x-2">
-          <!-- 編集ボタン -->
+        <td class="px-3 py-2 text-center space-x-1 whitespace-nowrap">
+          <!-- WP管理ボタン -->
+          <a href="{{ site.url.rstrip('/') }}/admin"
+             target="_blank"
+             class="inline-block py-1 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-sm">
+            WP管理
+          </a>
+          <!-- 編集ボタン（グレー） -->
           <a href="{{ url_for('main.edit_site', username=current_user.username, sid=site.id) }}"
-             class="inline-block py-1 px-3 bg-yellow-500 hover:bg-yellow-600 text-white rounded text-sm">
+             class="inline-block py-1 px-3 bg-gray-500 hover:bg-gray-600 text-white rounded text-sm">
             編集
           </a>
           <!-- 記事一覧ボタン -->
