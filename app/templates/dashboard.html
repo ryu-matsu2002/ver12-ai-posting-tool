@@ -35,7 +35,7 @@
 <div class="grid lg:grid-cols-4 md:grid-cols-2 sm:grid-cols-2 gap-6 mb-6">
   <a href="{{ url_for('main.log_sites', username=current_user.username) }}"
      class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center">
-    <div class="text-3xl mb-2">📝</div>
+    <div class="text-3xl mb-2">🗘</div>
     <p class="font-semibold text-lg text-gray-900 dark:text-white">記事生成</p>
     <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">サイト別に記事作成・状況確認・投稿が可能</p>
   </a>
@@ -60,7 +60,7 @@
 </div>
 
 <!-- ✅ ChatGPTカードとロボット -->
-<div class="flex flex-wrap items-end gap-6">
+<div class="relative flex flex-wrap items-end gap-6">
   <a href="{{ url_for('main.chatgpt', username=current_user.username) }}"
      class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center w-[280px]">
     <div class="text-3xl mb-2">🤖</div>
@@ -68,39 +68,50 @@
     <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">ChatGPTのページを新しいタブで開きます</p>
   </a>
 
-  <!-- ✅ ロボット画像 -->
-  <div class="relative w-32 h-auto flex items-end">
+  <!-- ✅ ロボット画像 + チャットのよこに表示 -->
+  <div class="relative">
     <img id="robotImage"
          src="{{ url_for('static', filename='images/robot.png') }}"
          alt="ロボット"
-         class="w-full h-auto cursor-pointer transition-transform duration-300"
-         onclick="toggleChat()" />
+         class="w-32 h-auto cursor-pointer transition-transform duration-300"
+         onclick="toggleChat(); robotTalk();" />
+    <div id="speechBubble"
+         class="absolute left-36 bottom-20 bg-yellow-100 text-black text-sm px-3 py-2 rounded shadow-lg border border-gray-300 hidden z-50">
+    </div>
+
+    <!-- ✅ チャットウィンドウ -->
+    <div id="chatWindow"
+         class="absolute left-36 bottom-0 w-[500px] bg-white border border-gray-300 shadow-lg rounded-md hidden z-50">
+      <div class="bg-blue-700 text-white px-4 py-2 rounded-t-md flex justify-between items-center">
+        🤖 site craft：：チャットルーム
+        <button onclick="toggleChat()" class="text-white">×</button>
+      </div>
+      <div id="chatMessages" class="p-3 h-64 overflow-y-auto text-sm space-y-2 bg-gray-50"></div>
+      <div class="p-2 border-t flex">
+        <input id="chatInput" type="text"
+               class="flex-1 border rounded px-2 py-1 text-sm"
+               placeholder="メッセージを入力..." />
+        <button onclick="sendMessage()"
+                class="ml-2 bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm">
+          送信
+        </button>
+      </div>
+    </div>
   </div>
 </div>
 
-<!-- ✅ チャットウィンドウ -->
-<div id="chatWindow"
-     class="fixed bottom-24 right-6 w-[500px] bg-white border border-gray-300 shadow-lg rounded-md hidden z-50">
-  <div class="bg-blue-700 text-white px-4 py-2 rounded-t-md flex justify-between items-center">
-    🤖 site craft：：チャットルーム
-    <button onclick="toggleChat()" class="text-white">×</button>
-  </div>
-  <div id="chatMessages" class="p-3 h-64 overflow-y-auto text-sm space-y-2 bg-gray-50"></div>
-  <div class="p-2 border-t flex">
-    <input id="chatInput" type="text"
-           class="flex-1 border rounded px-2 py-1 text-sm"
-           placeholder="メッセージを入力..." />
-    <button onclick="sendMessage()"
-            class="ml-2 bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm">
-      送信
-    </button>
-  </div>
-</div>
-
-<!-- ✅ チャット用JS -->
+<!-- ✅ JS ロボットチャット -->
 <script>
   const chatUsername = "{{ current_user.username }}";
   const messageLog = [];
+
+  const phrases = [
+    "今日もいい記事を書こう！",
+    "クリックありがとう！",
+    "SEOもバッチリ対応中！",
+    "自動化は最高だよね！",
+    "ロボも休みたいなぁ..."
+  ];
 
   function toggleChat() {
     const chat = document.getElementById("chatWindow");
@@ -114,6 +125,20 @@
       messages.appendChild(greeting);
       chat.dataset.initialized = true;
     }
+  }
+
+  function robotTalk() {
+    const robot = document.getElementById('robotImage');
+    const bubble = document.getElementById('speechBubble');
+    if (!robot || !bubble) return;
+
+    robot.classList.add('dance-animation');
+    setTimeout(() => robot.classList.remove('dance-animation'), 800);
+
+    const random = phrases[Math.floor(Math.random() * phrases.length)];
+    bubble.textContent = random;
+    bubble.classList.remove('hidden');
+    setTimeout(() => bubble.classList.add('hidden'), 2500);
   }
 
   function sendMessage() {
@@ -156,4 +181,17 @@
     });
   }
 </script>
+
+<style>
+  @keyframes robot-dance {
+    0% { transform: rotate(0deg); }
+    25% { transform: rotate(3deg); }
+    50% { transform: rotate(-3deg); }
+    75% { transform: rotate(3deg); }
+    100% { transform: rotate(0deg); }
+  }
+  .dance-animation {
+    animation: robot-dance 0.8s ease-in-out;
+  }
+</style>
 {% endblock %}
