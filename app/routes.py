@@ -468,17 +468,17 @@ def fix_missing_images():
     return redirect(url_for("admin.admin_dashboard"))
 
 
-@admin_bp.route('/admin/user/<int:user_id>/delete', methods=['POST'])
+@admin_bp.route("/admin/delete_user/<int:user_id>", methods=["POST"])
 @login_required
 def delete_user(user_id):
     if not current_user.is_admin:
         abort(403)
-
     user = User.query.get_or_404(user_id)
     db.session.delete(user)
     db.session.commit()
-    flash("ユーザーを削除しました", "success")
-    return redirect(url_for('admin.user_list'))
+    flash("ユーザーを削除しました。", "success")
+    return redirect(url_for("admin.user_list"))
+
 
 
 # ─────────── 管理者専用：アイキャッチ一括復元（ユーザー単位）
