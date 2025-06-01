@@ -68,7 +68,7 @@
     <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">ChatGPTのページを新しいタブで開きます</p>
   </a>
 
-  <!-- ✅ ロボット画像（チャット起動） -->
+  <!-- ✅ ロボット画像 -->
   <div class="relative w-32 h-auto flex items-end">
     <img id="robotImage"
          src="{{ url_for('static', filename='images/robot.png') }}"
@@ -79,9 +79,10 @@
 </div>
 
 <!-- ✅ チャットウィンドウ -->
-<div id="chatWindow" class="fixed bottom-24 left-6 w-80 bg-white border border-gray-300 shadow-lg rounded-md hidden z-50">
+<div id="chatWindow"
+     class="fixed bottom-24 right-6 w-[500px] bg-white border border-gray-300 shadow-lg rounded-md hidden z-50">
   <div class="bg-blue-700 text-white px-4 py-2 rounded-t-md flex justify-between items-center">
-    🤖 Chat Assistant
+    🤖 site craft：：チャットルーム
     <button onclick="toggleChat()" class="text-white">×</button>
   </div>
   <div id="chatMessages" class="p-3 h-64 overflow-y-auto text-sm space-y-2 bg-gray-50"></div>
@@ -96,11 +97,23 @@
   </div>
 </div>
 
-<!-- ✅ チャットJS -->
+<!-- ✅ チャット用JS -->
 <script>
+  const chatUsername = "{{ current_user.username }}";
+  const messageLog = [];
+
   function toggleChat() {
     const chat = document.getElementById("chatWindow");
+    const messages = document.getElementById("chatMessages");
     chat.classList.toggle("hidden");
+
+    if (!chat.dataset.initialized) {
+      const greeting = document.createElement("div");
+      greeting.textContent = `🤖 こんにちは、${chatUsername}さん！ご質問があればお気軽にどうぞ。`;
+      greeting.className = "text-left text-blue-700";
+      messages.appendChild(greeting);
+      chat.dataset.initialized = true;
+    }
   }
 
   function sendMessage() {
@@ -113,6 +126,7 @@
     userMsg.textContent = "👤 " + userText;
     userMsg.className = "text-right text-gray-800";
     messages.appendChild(userMsg);
+    messageLog.push({ role: "user", content: userText });
 
     const botMsg = document.createElement("div");
     botMsg.textContent = "🤖 考え中...";
@@ -125,11 +139,16 @@
     fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: userText })
+      body: JSON.stringify({
+        message: userText,
+        history: messageLog,
+        username: chatUsername
+      })
     })
     .then(res => res.json())
     .then(data => {
       botMsg.textContent = "🤖 " + data.reply;
+      messageLog.push({ role: "assistant", content: data.reply });
       messages.scrollTop = messages.scrollHeight;
     })
     .catch(err => {
