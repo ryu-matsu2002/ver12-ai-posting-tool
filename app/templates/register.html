@@ -8,7 +8,7 @@
   <form method="post" class="w-full max-w-4xl mx-auto space-y-6">
     {{ form.hidden_tag() }}
 
-    {# 共通レイアウトマクロ：左ラベル・右フォーム #}
+    {# 共通マクロ #}
     {% macro row(label, field, help_text='') %}
       <div class="flex items-start gap-6">
         <div class="w-1/4 text-sm font-bold text-right pt-2">{{ label|safe }}</div>
@@ -24,15 +24,15 @@
     {{ row('ユーザー名 <span class="text-red-600">必須</span>', form.username(class="w-full border border-gray-300 p-2 rounded")) }}
     {{ row('メールアドレス <span class="text-red-600">必須</span>', form.email(class="w-full border border-gray-300 p-2 rounded")) }}
 
-    {# パスワード欄 with 目アイコン #}
-    {% call row('パスワード <span class="text-red-600">必須</span>', '') %}
+    {# 👁 パスワード欄（caller引数を明示しない） #}
+    {% call(row('パスワード <span class="text-red-600">必須</span>', caller())) %}
       <div class="relative">
         {{ form.password(class="w-full border border-gray-300 p-2 rounded pr-10", id="password") }}
         <span class="absolute right-3 top-2 text-2xl cursor-pointer text-gray-600" onclick="togglePassword('password')">👁️</span>
       </div>
     {% endcall %}
 
-    {% call row('パスワード確認 <span class="text-red-600">必須</span>', '') %}
+    {% call(row('パスワード確認 <span class="text-red-600">必須</span>', caller())) %}
       <div class="relative">
         {{ form.confirm(class="w-full border border-gray-300 p-2 rounded pr-10", id="confirm") }}
         <span class="absolute right-3 top-2 text-2xl cursor-pointer text-gray-600" onclick="togglePassword('confirm')">👁️</span>
@@ -48,24 +48,17 @@
 
     {{ row('姓 <span class="text-red-600">必須</span>', form.last_name(class="w-full border border-gray-300 p-2 rounded")) }}
     {{ row('名 <span class="text-red-600">必須</span>', form.first_name(class="w-full border border-gray-300 p-2 rounded")) }}
-
     {{ row('セイ <span class="text-red-600">必須</span>', form.last_kana(class="w-full border border-gray-300 p-2 rounded")) }}
     {{ row('メイ <span class="text-red-600">必須</span>', form.first_kana(class="w-full border border-gray-300 p-2 rounded")) }}
-
     {{ row('郵便番号 <span class="text-red-600">必須</span>', form.postal_code(class="w-full border border-gray-300 p-2 rounded"), '※ ハイフンありで入力してください') }}
-
     {{ row('住所 <span class="text-red-600">必須</span>', form.address(class="w-full border border-gray-300 p-2 rounded")) }}
-
     {{ row('携帯電話番号 <span class="text-red-600">必須</span>', form.phone(class="w-full border border-gray-300 p-2 rounded"), '※ ハイフンありで入力してください') }}
-
     {{ row('新規登録用コード <span class="text-red-600">必須</span>', form.register_key(class="w-full border border-gray-300 p-2 rounded"), '※ TCCより発行済みのコードをご入力ください') }}
 
-    <!-- 登録ボタン -->
     <div class="text-center pt-6">
       {{ form.submit(class="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded text-lg font-semibold") }}
     </div>
 
-    <!-- ログインリンク -->
     <p class="text-center text-sm mt-6">
       すでにアカウントをお持ちの方は
       <a href="{{ url_for('main.login') }}" class="text-blue-600 hover:underline">ログイン</a>
@@ -73,7 +66,6 @@
   </form>
 </div>
 
-<!-- JS -->
 <script>
   document.addEventListener("DOMContentLoaded", function () {
     const userTypeSelect = document.getElementById("user_type");
