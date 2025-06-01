@@ -31,7 +31,7 @@
   </div>
 </div>
 
-<!-- ✅ カード群（1段目） -->
+<!-- ✅ カード群 -->
 <div class="grid lg:grid-cols-4 md:grid-cols-2 sm:grid-cols-2 gap-6 mb-6">
   <a href="{{ url_for('main.log_sites', username=current_user.username) }}"
      class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center">
@@ -59,7 +59,7 @@
   </a>
 </div>
 
-<!-- ✅ ChatGPTカードとロボットを横並び表示 -->
+<!-- ✅ ChatGPTカードとロボット -->
 <div class="flex flex-wrap items-end gap-6">
   <a href="{{ url_for('main.chatgpt', username=current_user.username) }}"
      class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center w-[280px]">
@@ -68,16 +68,73 @@
     <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">ChatGPTのページを新しいタブで開きます</p>
   </a>
 
-  <!-- ロボット -->
+  <!-- ✅ ロボット画像（チャット起動） -->
   <div class="relative w-32 h-auto flex items-end">
     <img id="robotImage"
          src="{{ url_for('static', filename='images/robot.png') }}"
          alt="ロボット"
-         class="w-full h-auto animate-zigzag cursor-pointer transition-transform duration-300"
-         onclick="robotTalk()" />
-    <div id="speechBubble"
-         class="absolute left-28 bottom-20 bg-yellow-100 text-black text-sm px-3 py-2 rounded shadow-lg border border-gray-300 hidden z-50">
-    </div>
+         class="w-full h-auto cursor-pointer transition-transform duration-300"
+         onclick="toggleChat()" />
   </div>
 </div>
+
+<!-- ✅ チャットウィンドウ -->
+<div id="chatWindow" class="fixed bottom-24 left-6 w-80 bg-white border border-gray-300 shadow-lg rounded-md hidden z-50">
+  <div class="bg-blue-700 text-white px-4 py-2 rounded-t-md flex justify-between items-center">
+    🤖 Chat Assistant
+    <button onclick="toggleChat()" class="text-white">×</button>
+  </div>
+  <div id="chatMessages" class="p-3 h-64 overflow-y-auto text-sm space-y-2 bg-gray-50"></div>
+  <div class="p-2 border-t flex">
+    <input id="chatInput" type="text"
+           class="flex-1 border rounded px-2 py-1 text-sm"
+           placeholder="メッセージを入力..." />
+    <button onclick="sendMessage()"
+            class="ml-2 bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm">
+      送信
+    </button>
+  </div>
+</div>
+
+<!-- ✅ チャットJS -->
+<script>
+  function toggleChat() {
+    const chat = document.getElementById("chatWindow");
+    chat.classList.toggle("hidden");
+  }
+
+  function sendMessage() {
+    const input = document.getElementById("chatInput");
+    const messages = document.getElementById("chatMessages");
+    const userText = input.value.trim();
+    if (!userText) return;
+
+    const userMsg = document.createElement("div");
+    userMsg.textContent = "👤 " + userText;
+    userMsg.className = "text-right text-gray-800";
+    messages.appendChild(userMsg);
+
+    const botMsg = document.createElement("div");
+    botMsg.textContent = "🤖 考え中...";
+    botMsg.className = "text-left text-blue-700";
+    messages.appendChild(botMsg);
+
+    messages.scrollTop = messages.scrollHeight;
+    input.value = "";
+
+    fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: userText })
+    })
+    .then(res => res.json())
+    .then(data => {
+      botMsg.textContent = "🤖 " + data.reply;
+      messages.scrollTop = messages.scrollHeight;
+    })
+    .catch(err => {
+      botMsg.textContent = "🤖 エラーが発生しました。";
+    });
+  }
+</script>
 {% endblock %}

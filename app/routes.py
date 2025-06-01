@@ -26,6 +26,7 @@ from .wp_client import post_to_wp, _decorate_html
 import re
 import os
 import logging
+import openai
 from datetime import datetime
 from .image_utils import fetch_featured_image  # ← ✅ 正しい
 from collections import defaultdict
@@ -51,7 +52,29 @@ admin_bp = Blueprint("admin", __name__)
 def robots_txt():
     return send_from_directory('static', 'robots.txt')
 
+@bp.route("/api/chat", methods=["POST"])
+def chat_api():
+    data = request.get_json()
+    user_msg = data.get("message", "")
 
+    if not user_msg:
+        return jsonify({"reply": "メッセージが空です。"})
+
+    try:
+        openai.api_key = os.getenv("OPENAI_API_KEY")
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "あなたは親切なAIアシスタントです。"},
+                {"role": "user", "content": user_msg}
+            ],
+            max_tokens=300
+        )
+        reply = response.choices[0].message.content.strip()
+        return jsonify({"reply": reply})
+
+    except Exception as e:
+        return jsonify({"reply": f"エラー：{str(e)}"})
 
 import stripe
 from app import db
