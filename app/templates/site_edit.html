@@ -31,7 +31,7 @@
 
   <div class="flex items-center gap-4">
     <button type="submit" class="py-2 px-6 bg-blue-600 hover:bg-blue-700 text-white rounded">更新</button>
-    <a href="{{ url_for('main.sites', username=current_user.username) }}" class="text-sm text-gray-500 hover:underline">← 戻る</a>
+    <a href="{{ url_for('main.log_sites', username=current_user.username) }}" class="text-sm text-gray-500 hover:underline">← 戻る</a>
   </div>
 </form>
 {% endblock %}

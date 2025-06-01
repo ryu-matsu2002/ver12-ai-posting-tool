@@ -1003,7 +1003,7 @@ def edit_site(username, sid: int):
         site.app_pass = form.app_pass.data
         db.session.commit()
         flash("サイト情報を更新しました", "success")
-        return redirect(url_for("main.sites", username=username))
+        return redirect(url_for("main.log_sites", username=username))
 
     return render_template("site_edit.html", form=form, site=site)
 
