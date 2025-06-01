@@ -727,7 +727,7 @@ def register():
         new_user = User(
             email=form.email.data,
             password=generate_password_hash(form.password.data),
-            username=form.username.data,  # ← 追加済み！
+            username=form.username.data,
             user_type=form.user_type.data,
             company_name=form.company_name.data,
             company_kana=form.company_kana.data,
@@ -736,10 +736,7 @@ def register():
             last_kana=form.last_kana.data,
             first_kana=form.first_kana.data,
             postal_code=form.postal_code.data,
-            prefecture=form.prefecture.data,
-            city=form.city.data,
-            address1=form.address1.data,
-            address2=form.address2.data,
+            address=form.address.data,
             phone=form.phone.data
         )
         db.session.add(new_user)
@@ -749,6 +746,7 @@ def register():
         return redirect(url_for(".login"))
 
     return render_template("register.html", form=form)
+
 
 
 @bp.route("/logout")
@@ -778,16 +776,13 @@ def profile(username):
                 current_user.username = form.username.data
 
         # 基本情報の更新
-        current_user.last_name = form.last_name.data
+        current_user.last_name  = form.last_name.data
         current_user.first_name = form.first_name.data
-        current_user.last_kana = form.last_kana.data
+        current_user.last_kana  = form.last_kana.data
         current_user.first_kana = form.first_kana.data
-        current_user.phone = form.phone.data
+        current_user.phone      = form.phone.data
         current_user.postal_code = form.postal_code.data
-        current_user.prefecture = form.prefecture.data
-        current_user.city = form.city.data
-        current_user.address1 = form.address1.data
-        current_user.address2 = form.address2.data
+        current_user.address    = form.address.data  # ← 統合された住所フィールドに対応
 
         db.session.commit()
         flash("プロフィールを更新しました。", "success")
@@ -795,7 +790,6 @@ def profile(username):
         return redirect(url_for("main.profile", username=current_user.username))
 
     return render_template("profile.html", form=form)
-
 
 
 @bp.route("/")

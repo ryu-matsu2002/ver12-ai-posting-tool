@@ -20,6 +20,7 @@
       {% endif %}
     </div>
 
+    <!-- 氏名 -->
     <div class="flex gap-4 mb-4">
       <div class="w-1/2">
         {{ form.last_name.label(class="block mb-1") }}
@@ -31,6 +32,7 @@
       </div>
     </div>
 
+    <!-- フリガナ -->
     <div class="flex gap-4 mb-4">
       <div class="w-1/2">
         {{ form.last_kana.label(class="block mb-1") }}
@@ -42,37 +44,28 @@
       </div>
     </div>
 
+    <!-- 電話番号 -->
     <div class="mb-4">
       {{ form.phone.label(class="block mb-1") }}
       {{ form.phone(class="w-full p-2 rounded border") }}
+      <p class="text-xs text-gray-500 mt-1">※ ハイフンありで入力してください</p>
     </div>
 
+    <!-- 郵便番号 -->
     <div class="mb-4">
       {{ form.postal_code.label(class="block mb-1") }}
       {{ form.postal_code(class="w-full p-2 rounded border") }}
+      <p class="text-xs text-gray-500 mt-1">※ ハイフンありで入力してください</p>
     </div>
 
-    <div class="flex gap-4 mb-4">
-      <div class="w-1/2">
-        {{ form.prefecture.label(class="block mb-1") }}
-        {{ form.prefecture(class="w-full p-2 rounded border") }}
-      </div>
-      <div class="w-1/2">
-        {{ form.city.label(class="block mb-1") }}
-        {{ form.city(class="w-full p-2 rounded border") }}
-      </div>
-    </div>
-
+    <!-- 住所 -->
     <div class="mb-4">
-      {{ form.address1.label(class="block mb-1") }}
-      {{ form.address1(class="w-full p-2 rounded border") }}
+      {{ form.address.label(class="block mb-1") }}
+      {{ form.address(class="w-full p-2 rounded border") }}
+      <p class="text-xs text-gray-500 mt-1">※ 都道府県・市区郡・番地・建物名など全てまとめて入力してください</p>
     </div>
 
-    <div class="mb-4">
-      {{ form.address2.label(class="block mb-1") }}
-      {{ form.address2(class="w-full p-2 rounded border") }}
-    </div>
-
+    <!-- 登録ボタン -->
     <div class="text-center">
       {{ form.submit(class="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700") }}
     </div>
