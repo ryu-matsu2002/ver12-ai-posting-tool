@@ -43,12 +43,11 @@
             <span>▼</span>
           </button>
 
-          <!-- アコーディオン本体 -->
-          <div id="kw-site-{{ site_id }}" class="bg-white dark:bg-gray-800 block">
+          <!-- アコーディオン本体（初期状態：非表示） -->
+          <div id="kw-site-{{ site_id }}" class="bg-white dark:bg-gray-800 hidden">
             <form method="post" action="{{ url_for('main.bulk_action_keywords', username=current_user.username) }}">
               <input type="hidden" name="site_id" value="{{ site_id }}">
 
-              <!-- ステータスフィルタと削除ボタン -->
               <div class="flex justify-between items-center px-4 py-3">
                 <label class="text-sm font-medium">
                   表示するステータス:
@@ -64,7 +63,6 @@
                 </button>
               </div>
 
-              <!-- キーワード一覧 -->
               <div class="max-h-[450px] overflow-y-auto border-t border-gray-300">
                 <table class="w-full text-sm">
                   <thead class="bg-gray-200 dark:bg-gray-600 sticky top-0">
