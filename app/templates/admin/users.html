@@ -1,63 +1,70 @@
 {% extends "base_admin.html" %}
-{% block title %}ユーザー一覧{% endblock %}
+{% block title %}ユーザー一覧 | 管理者ページ{% endblock %}
 
 {% block content %}
 <div class="p-6">
-  <h1 class="text-2xl font-bold mb-6">🧑‍💼 ユーザーごとの記事一覧</h1>
+  <h1 class="text-2xl font-bold mb-6">👨‍💼 ユーザーごとの記事一覧</h1>
 
-  <!-- ✅ 統計カード -->
-  <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
     <div class="bg-white shadow rounded p-4 text-center">
-      <div class="text-sm text-gray-500 mb-1">登録サイト数</div>
-      <div class="text-2xl font-bold text-green-600">{{ site_count }}</div>
+      <div class="text-gray-500 text-sm">登録件数</div>
+      <div class="text-3xl font-bold text-green-600">{{ user_count }}</div>
     </div>
     <div class="bg-white shadow rounded p-4 text-center">
-      <div class="text-sm text-gray-500 mb-1">保存プロンプト数</div>
-      <div class="text-2xl font-bold text-yellow-500">{{ prompt_count }}</div>
+      <div class="text-gray-500 text-sm">保存プロンプト数</div>
+      <div class="text-3xl font-bold text-orange-500">{{ prompt_count }}</div>
     </div>
     <div class="bg-white shadow rounded p-4 text-center">
-      <div class="text-sm text-gray-500 mb-1">総記事数</div>
-      <div class="text-2xl font-bold text-purple-600">{{ article_count }}</div>
+      <div class="text-gray-500 text-sm">総記事数</div>
+      <div class="text-3xl font-bold text-purple-600">{{ article_count }}</div>
     </div>
   </div>
 
-  <!-- ✅ ユーザー一覧テーブル -->
-  <table class="w-full text-left table-auto bg-white shadow rounded">
-    <thead class="bg-gray-100 text-gray-700">
-      <tr class="border-b">
-        <th class="px-2 py-2">ID</th>
-        <th class="px-2 py-2">Email</th>
-        <th class="px-2 py-2">記事数</th>
-        <th class="px-2 py-2">TCC決済ページアクセス権</th>
-        <th class="px-2 py-2">操作</th>
+  <table class="w-full table-auto text-sm bg-white border border-gray-300">
+    <thead class="bg-gray-100 text-left text-gray-700 font-semibold">
+      <tr>
+        <th class="px-3 py-2">ID</th>
+        <th class="px-3 py-2">Email</th>
+        <th class="px-3 py-2 text-center">記事数</th>
+        <th class="px-3 py-2 text-center">TCC決済ページアクセス権</th>
+        <th class="px-3 py-2 text-center">操作</th>
       </tr>
     </thead>
     <tbody>
-      {% for u in users %}
-      <tr class="border-b hover:bg-gray-50">
-        <td class="px-2 py-2">{{ u.id }}</td>
-        <td class="px-2 py-2">{{ u.email }}</td>
-        <td class="px-2 py-2">{{ u.articles|length }}</td>
-
-        <!-- ✅ 特別アクセス + 切替ボタン + リンク -->
-        <td class="px-2 py-2">
-          {% if u.is_special_access %}
-            <span class="text-green-600 font-semibold">✅ 有効</span>
-            <a href="{{ url_for('main.special_purchase', username=u.username) }}"
-               class="text-blue-600 text-sm underline ml-1" target="_blank">決済ページ</a>
+      {% for user in users %}
+      <tr class="{% if loop.index0 % 2 == 0 %}bg-white{% else %}bg-blue-50{% endif %} border-b">
+        <td class="px-3 py-2">{{ user.id }}</td>
+        <td class="px-3 py-2">{{ user.email }}</td>
+        <td class="px-3 py-2 text-center">{{ user.article_count or 0 }}</td>
+        <td class="px-3 py-2 text-center">
+          {% if user.has_access %}
+            <span class="text-green-600 font-bold">✅ 有効</span>
+            <a href="{{ url_for('admin.toggle_access', user_id=user.id) }}" class="ml-2 text-blue-600 underline">切替</a>
+            <a href="{{ url_for('admin.payment_page', user_id=user.id) }}" class="ml-2 text-blue-600 underline">決済ページ</a>
           {% else %}
-            <span class="text-gray-500">❌ 無効</span>
+            <span class="text-red-600 font-bold">❌ 無効</span>
+            <a href="{{ url_for('admin.toggle_access', user_id=user.id) }}" class="ml-2 text-blue-600 underline">切替</a>
           {% endif %}
-          <form method="post" action="{{ url_for('admin.toggle_special_access', uid=u.id) }}" class="inline ml-2">
-            <button class="text-sm text-blue-600 hover:underline">切替</button>
-          </form>
         </td>
+        <td class="px-3 py-2 text-center space-x-2 whitespace-nowrap">
+          <!-- 記事一覧 -->
+          <a href="{{ url_for('admin.user_articles', user_id=user.id) }}"
+             class="inline-block px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm">
+            記事一覧
+          </a>
 
-        <td class="px-2 py-2 space-x-2">
-          <a href="{{ url_for('admin.user_articles', uid=u.id) }}" class="text-blue-600 hover:underline">記事一覧</a>
-          <form action="{{ url_for('admin.admin_login_as', user_id=u.id) }}" method="post" class="inline">
-            <button type="submit" class="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white text-sm rounded">
-              ログイン
+          <!-- ログイン（代理） -->
+          <a href="{{ url_for('admin.impersonate_login', user_id=user.id) }}"
+             class="inline-block px-3 py-1 bg-sky-500 hover:bg-sky-600 text-white rounded text-sm">
+            ログイン
+          </a>
+
+          <!-- 削除ボタン -->
+          <form method="POST" action="{{ url_for('admin.delete_user', user_id=user.id) }}" class="inline-block"
+                onsubmit="return confirm('本当にこのユーザーを削除しますか？');">
+            <button type="submit"
+                    class="px-3 py-1 bg-gray-200 hover:bg-red-100 text-red-600 border border-red-400 rounded text-sm">
+              削除
             </button>
           </form>
         </td>
