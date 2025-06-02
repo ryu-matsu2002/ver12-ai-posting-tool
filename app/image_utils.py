@@ -3,8 +3,7 @@ import os, random, time, logging, requests, re
 from datetime import datetime
 from typing import List
 from flask import current_app
-from .models import Article  # ✅ DB参照用
-from werkzeug.utils import secure_filename
+from .models import Article
 
 # ───── 設定 ─────
 ROOT_URL            = os.getenv("APP_ROOT_URL", "https://your-domain.com")
@@ -56,9 +55,8 @@ def _is_image_url(url: str) -> bool:
     return False
 
 def _sanitize_filename(title: str) -> str:
-    clean_title = title.replace("/", "_").replace("\\", "_").strip()
     today = datetime.now().strftime("%Y%m%d")
-    return f"{clean_title}-{today}.jpg"
+    return f"{title}-{today}.jpg"
 
 def _search_pixabay(query: str, per_page: int = MAX_PER_PAGE) -> List[dict]:
     if not PIXABAY_API_KEY or not query:
@@ -133,6 +131,8 @@ def _download_and_save_image(image_url: str, title: str) -> str:
         if not os.path.exists(local_path):
             r = requests.get(image_url, timeout=10)
             r.raise_for_status()
+            if len(r.content) < 1024:
+                raise Exception("画像サイズが小さすぎます")
             with open(local_path, "wb") as f:
                 f.write(r.content)
         return f"{IMAGE_URL_PREFIX}/{filename}"
@@ -140,9 +140,6 @@ def _download_and_save_image(image_url: str, title: str) -> str:
         logging.error(f"[画像保存失敗] {image_url}: {e}")
         return DEFAULT_IMAGE_URL
 
-# ─────────────────────────────────────────────
-# 🔧 Public API
-# ─────────────────────────────────────────────
 def fetch_featured_image(query: str, title: str = "", body: str = "") -> str:
     def extract_keywords_from_body(text: str) -> str:
         text = re.sub(r"<[^>]+>", "", text)[:500]
@@ -156,9 +153,9 @@ def fetch_featured_image(query: str, title: str = "", body: str = "") -> str:
             "英語": "english", "副業": "side job", "ブログ": "blog", "ビジネス": "business",
             "旅行": "travel", "脱毛": "hair removal", "メイク": "makeup", "占い": "fortune telling"
         }
-        keywords = [w for w in re.split(r"[\\s　]+", query) if w]
+        keywords = [w for w in re.split(r"[\s　]+", query) if w]
         translated = [jp_to_en.get(w, w) for w in keywords]
-        return " ".join(translated[:6])  # ✅ 最大6語に制限
+        return " ".join(translated[:6])[:120]
 
     try:
         body_query = extract_keywords_from_body(body or "")
