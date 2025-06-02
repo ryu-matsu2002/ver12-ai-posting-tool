@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, random, time, logging, requests, re
+import os, random, time, logging, requests, re,uuid
 from datetime import datetime
 from typing import List
 from flask import current_app
@@ -44,18 +44,15 @@ def _is_image_url(url: str) -> bool:
             return False
         local_path = os.path.join("app", "static", "images", filename)
         return os.path.exists(local_path) and os.path.getsize(local_path) > 0
+    # 🔽 外部画像URLは一律 True に変更
     if url.startswith("http"):
-        try:
-            r = requests.head(url, timeout=3, allow_redirects=True)
-            content_type = r.headers.get("Content-Type", "").lower()
-            return "image" in content_type
-        except Exception as e:
-            logging.warning(f"[画像URL確認失敗] {url}: {e}")
-            return False
+        return True
     return False
+
 
 def _sanitize_filename(title: str) -> str:
     today = datetime.now().strftime("%Y%m%d")
+    uid = uuid.uuid4().hex[:6]
     return f"{title}-{today}.jpg"
 
 def _search_pixabay(query: str, per_page: int = MAX_PER_PAGE) -> List[dict]:
@@ -142,10 +139,10 @@ def _download_and_save_image(image_url: str, title: str) -> str:
 
 def fetch_featured_image(query: str, title: str = "", body: str = "") -> str:
     def extract_keywords_from_body(text: str) -> str:
-        text = re.sub(r"<[^>]+>", "", text)[:500]
+        text = re.sub(r"<[^>]+>", "", text)[:300]
         words = re.split(r"[　\s]+", text)
         stopwords = {"の", "に", "で", "を", "と", "が", "は", "から", "ため", "こと", "について", "方法", "おすすめ", "完全ガイド"}
-        return " ".join([w for w in words if w and w not in stopwords])[:120]
+        return " ".join([w for w in words if w and w not in stopwords])[:60]
 
     def clean_and_translate(query: str) -> str:
         jp_to_en = {
@@ -155,7 +152,7 @@ def fetch_featured_image(query: str, title: str = "", body: str = "") -> str:
         }
         keywords = [w for w in re.split(r"[\s　]+", query) if w]
         translated = [jp_to_en.get(w, w) for w in keywords]
-        return " ".join(translated[:6])[:120]
+        return " ".join(translated[:6])[:100]
 
     try:
         body_query = extract_keywords_from_body(body or "")
@@ -167,25 +164,29 @@ def fetch_featured_image(query: str, title: str = "", body: str = "") -> str:
                 a.image_url for a in Article.query
                 .filter(Article.image_url != None)
                 .order_by(Article.created_at.desc())
-                .limit(100)
+                .limit(200)
             }
 
+        # First attempt with original query
         hits = _search_pixabay(base_query)
         url = _pick_pixabay(hits, keywords, exclude_urls=recent_urls)
         if url and url.lower().endswith(('.jpg', '.jpeg', '.png')):
             return _download_and_save_image(url, title or query)
 
-        fallback_query = f"{base_query} woman person lifestyle"
+        # Retry with fallback
+        fallback_query = f"{base_query} person technology"
         hits = _search_pixabay(fallback_query)
-        url = _pick_pixabay(hits, keywords + ["woman", "person", "lifestyle"], exclude_urls=recent_urls)
+        url = _pick_pixabay(hits, keywords + ["person", "technology"], exclude_urls=recent_urls)
         if url and url.lower().endswith(('.jpg', '.jpeg', '.png')):
             return _download_and_save_image(url, title or query)
 
+        # Final fallback: Unsplash
         return _unsplash_src(base_query)
 
     except Exception as e:
         logging.error("fetch_featured_image fatal: %s", e)
         return DEFAULT_IMAGE_URL
+
 
 def fetch_featured_image_from_body(body: str) -> str:
     match = re.search(r"<h2\b[^>]*>(.*?)</h2>", body or "", re.IGNORECASE)

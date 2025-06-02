@@ -494,15 +494,25 @@ def fix_missing_images():
         first_h2 = match.group(1) if match else ""
         query = f"{art.keyword} {first_h2}".strip()
         title = art.title or art.keyword or "記事"
+
         try:
-            art.image_url = fetch_featured_image(query, title=title)
-            updated += 1
+            image_url = fetch_featured_image(query, title=title, body=art.body)
+
+            # ✅ 結果がNoneや空でないことを確認
+            if image_url and isinstance(image_url, str) and len(image_url.strip()) > 5:
+                art.image_url = image_url
+                updated += 1
+                current_app.logger.info(f"[画像復元成功] Article ID: {art.id}, image_url: {image_url}")
+            else:
+                current_app.logger.warning(f"[画像なし] Article ID: {art.id}, query: {query}")
+
         except Exception as e:
             current_app.logger.warning(f"[画像復元失敗] Article ID: {art.id}, Error: {e}")
 
     db.session.commit()
     flash(f"{updated} 件のアイキャッチ画像を復元しました。", "success")
     return redirect(url_for("admin.admin_dashboard"))
+
 
 
 @admin_bp.route("/admin/delete_user/<int:user_id>", methods=["POST"])

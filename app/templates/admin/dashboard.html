@@ -29,10 +29,12 @@
   <div class="bg-white rounded-xl shadow p-6 mb-8">
     <h2 class="text-xl font-bold mb-4">🖼️ アイキャッチ画像 未設定記事の復元</h2>
 
-    <a href="{{ url_for('admin.fix_missing_images') }}"
-       class="mb-4 inline-block bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition">
-      全記事のアイキャッチ画像を一括復元
-    </a>
+    <!-- ✅ formでPOSTに変更 -->
+    <form method="post" action="{{ url_for('admin.fix_missing_images') }}" class="mb-4">
+      <button type="submit" class="inline-block bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition">
+        全記事のアイキャッチ画像を一括復元
+      </button>
+    </form>
 
     <table class="min-w-full text-sm border mt-4">
       <thead class="bg-gray-100 text-left">
