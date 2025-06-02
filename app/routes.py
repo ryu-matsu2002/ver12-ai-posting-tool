@@ -591,33 +591,33 @@ def regenerate_user_stuck_articles(uid):
     if not current_user.is_admin:
         abort(403)
 
-    user = User.query.get_or_404(uid)
-
     stuck_articles = Article.query.filter(
         Article.user_id == uid,
         Article.status.in_(["pending", "gen"])
     ).all()
 
     app = current_app._get_current_object()
-    count = 0
 
-    for art in stuck_articles:
-        try:
-            # 任意：最初のプロンプトを使う（適宜変更可）
+    def _background_regeneration():
+        with app.app_context():
             prompt = PromptTemplate.query.filter_by(user_id=uid).first()
             if not prompt:
-                continue
+                logging.warning(f"[再生成中止] user_id={uid} にプロンプトがありません")
+                return
 
-            threading.Thread(
-                target=_generate,
-                args=(app, art.id, prompt.title_pt, prompt.body_pt),
-                daemon=True
-            ).start()
-            count += 1
-        except Exception as e:
-            logging.exception(f"[管理者再生成失敗] article_id={art.id} error={e}")
+            for art in stuck_articles:
+                try:
+                    threading.Thread(
+                        target=_generate,
+                        args=(app, art.id, prompt.title_pt, prompt.body_pt),
+                        daemon=True
+                    ).start()
+                except Exception as e:
+                    logging.exception(f"[管理者再生成失敗] article_id={art.id} error={e}")
 
-    flash(f"{count} 件の途中停止記事を再生成キューに登録しました", "success")
+    threading.Thread(target=_background_regeneration, daemon=True).start()
+
+    flash(f"{len(stuck_articles)} 件の途中停止記事を再生成キューに登録しました（バックグラウンド処理）", "success")
     return redirect(url_for("admin.user_articles", uid=uid))
 
 
