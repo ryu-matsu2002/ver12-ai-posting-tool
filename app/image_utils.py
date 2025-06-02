@@ -3,8 +3,8 @@ import os, random, time, logging, requests, re
 from datetime import datetime
 from typing import List
 from flask import current_app
+from .models import Article  # ✅ DB参照用
 from werkzeug.utils import secure_filename
-from .models import Article  # ✅ DB参照用に追加
 
 # ───── 設定 ─────
 ROOT_URL            = os.getenv("APP_ROOT_URL", "https://your-domain.com")
@@ -12,7 +12,7 @@ PIXABAY_API_KEY     = os.getenv("PIXABAY_API_KEY", "")
 PIXABAY_TIMEOUT     = 5
 MAX_PER_PAGE        = 30
 RECENTLY_USED_TTL   = int(os.getenv("IMAGE_CACHE_TTL", "86400"))  # 24h
-DEFAULT_IMAGE_PATH  = os.getenv("DEFAULT_IMAGE_URL", "/static/default-thumb.jpg")
+DEFAULT_IMAGE_PATH  = os.getenv("DEFAULT_IMAGE_URL", "/static/images/default-thumb.jpg")
 DEFAULT_IMAGE_URL   = (
     DEFAULT_IMAGE_PATH if DEFAULT_IMAGE_PATH.startswith("http")
     else f"{ROOT_URL}{DEFAULT_IMAGE_PATH}"
@@ -39,14 +39,12 @@ def _mark_used(url: str) -> None:
 def _is_image_url(url: str) -> bool:
     if not url or url.strip() in ["", "None"]:
         return False
-
     if url.startswith("/static/images/"):
         filename = os.path.basename(url)
         if not filename.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
             return False
         local_path = os.path.join("app", "static", "images", filename)
         return os.path.exists(local_path) and os.path.getsize(local_path) > 0
-
     if url.startswith("http"):
         try:
             r = requests.head(url, timeout=3, allow_redirects=True)
@@ -55,13 +53,12 @@ def _is_image_url(url: str) -> bool:
         except Exception as e:
             logging.warning(f"[画像URL確認失敗] {url}: {e}")
             return False
-
     return False
 
 def _sanitize_filename(title: str) -> str:
-    title = title.strip().replace("/", "_").replace("\\", "_")
+    clean_title = title.replace("/", "_").replace("\\", "_").strip()
     today = datetime.now().strftime("%Y%m%d")
-    return f"{title}-{today}.jpg"
+    return f"{clean_title}-{today}.jpg"
 
 def _search_pixabay(query: str, per_page: int = MAX_PER_PAGE) -> List[dict]:
     if not PIXABAY_API_KEY or not query:
@@ -148,8 +145,7 @@ def _download_and_save_image(image_url: str, title: str) -> str:
 # ─────────────────────────────────────────────
 def fetch_featured_image(query: str, title: str = "", body: str = "") -> str:
     def extract_keywords_from_body(text: str) -> str:
-        text = re.sub(r"<[^>]+>", "", text)  # HTMLタグ除去
-        text = text[:500]  # 先頭500文字だけ
+        text = re.sub(r"<[^>]+>", "", text)[:500]
         words = re.split(r"[　\s]+", text)
         stopwords = {"の", "に", "で", "を", "と", "が", "は", "から", "ため", "こと", "について", "方法", "おすすめ", "完全ガイド"}
         return " ".join([w for w in words if w and w not in stopwords])[:120]
@@ -162,15 +158,13 @@ def fetch_featured_image(query: str, title: str = "", body: str = "") -> str:
         }
         keywords = [w for w in re.split(r"[\\s　]+", query) if w]
         translated = [jp_to_en.get(w, w) for w in keywords]
-        return " ".join(translated)
+        return " ".join(translated[:6])  # ✅ 最大6語に制限
 
     try:
-        # 🔍 本文から検索語句抽出
         body_query = extract_keywords_from_body(body or "")
         base_query = clean_and_translate(f"{query} {body_query}")
         keywords = base_query.split()
 
-        # 🔄 DBから過去に使用された image_url を取得
         with current_app.app_context():
             recent_urls = {
                 a.image_url for a in Article.query
@@ -180,7 +174,7 @@ def fetch_featured_image(query: str, title: str = "", body: str = "") -> str:
             }
 
         hits = _search_pixabay(base_query)
-        url  = _pick_pixabay(hits, keywords, exclude_urls=recent_urls)
+        url = _pick_pixabay(hits, keywords, exclude_urls=recent_urls)
         if url and url.lower().endswith(('.jpg', '.jpeg', '.png')):
             return _download_and_save_image(url, title or query)
 
@@ -197,8 +191,6 @@ def fetch_featured_image(query: str, title: str = "", body: str = "") -> str:
         return DEFAULT_IMAGE_URL
 
 def fetch_featured_image_from_body(body: str) -> str:
-    import re
-    from .image_utils import fetch_featured_image
     match = re.search(r"<h2\b[^>]*>(.*?)</h2>", body or "", re.IGNORECASE)
     first_h2 = match.group(1) if match else ""
     return fetch_featured_image(first_h2 or "記事 アイキャッチ", body=body)
