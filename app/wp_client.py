@@ -37,8 +37,8 @@ def _upload_headers(username: str, app_pass: str, site_url: str) -> dict:
         'Accept': '*/*',
     }
 
-# 画像をWordPressにアップロード
-def upload_image_to_wp(site_url: str, image_path: str, username: str, app_pass: str):
+# ✅ 画像をWordPressにアップロードし、記事タイトルをtitle/alt_textとして設定
+def upload_image_to_wp(site_url: str, image_path: str, username: str, app_pass: str, image_title: str = ""):
     site_url = normalize_url(site_url)
     url = f"{site_url}/wp-json/wp/v2/media"
     headers = _upload_headers(username, app_pass, site_url)
@@ -55,7 +55,27 @@ def upload_image_to_wp(site_url: str, image_path: str, username: str, app_pass: 
 
     if response.status_code == 201:
         data = response.json()
-        return data["id"], data["source_url"]
+        media_id = data["id"]
+        source_url = data["source_url"]
+
+        # ✅ メタ情報（title, alt_text）を記事タイトルで上書き
+        if image_title:
+            patch_url = f"{site_url}/wp-json/wp/v2/media/{media_id}"
+            patch_data = {
+                "title": image_title,
+                "alt_text": image_title,
+                "caption": "",
+                "description": ""
+            }
+            patch_headers = _post_headers(username, app_pass, site_url)
+            try:
+                patch_res = requests.post(patch_url, headers=patch_headers, json=patch_data, timeout=TIMEOUT)
+                if patch_res.status_code not in [200, 201]:
+                    current_app.logger.warning(f"画像メタ情報の更新に失敗: {patch_res.status_code}")
+            except Exception as e:
+                current_app.logger.warning(f"画像メタ情報のPATCHエラー: {e}")
+
+        return media_id, source_url
     else:
         try:
             error = response.json()
@@ -72,19 +92,16 @@ def post_to_wp(site: Site, art: Article) -> str:
 
     featured_media_id = None
 
-    # ✅【修正箇所】画像URLがローカル or 外部の両方に対応
     if art.image_url:
         try:
             if art.image_url.startswith("/static/images/"):
-                # ローカル画像ファイルをそのままアップロード
                 image_path = os.path.join("app", art.image_url.lstrip("/"))
                 featured_media_id, uploaded_url = upload_image_to_wp(
-                    site_url, image_path, site.username, site.app_pass
+                    site_url, image_path, site.username, site.app_pass, image_title=art.title
                 )
                 art.featured_image = uploaded_url
 
             elif art.image_url.startswith("http"):
-                # 外部画像URLを一時保存してアップロード
                 response = requests.get(art.image_url, timeout=10)
                 content_type = response.headers.get("Content-Type", "")
                 if not content_type.startswith("image/"):
@@ -97,7 +114,7 @@ def post_to_wp(site: Site, art: Article) -> str:
                     f.write(response.content)
 
                 featured_media_id, uploaded_url = upload_image_to_wp(
-                    site_url, temp_path, site.username, site.app_pass
+                    site_url, temp_path, site.username, site.app_pass, image_title=art.title
                 )
                 art.featured_image = uploaded_url
                 os.remove(temp_path)
@@ -105,7 +122,6 @@ def post_to_wp(site: Site, art: Article) -> str:
         except Exception as e:
             current_app.logger.warning(f"アイキャッチ画像のアップロード失敗: {e}")
 
-    # 投稿本体データ
     post_data = {
         "title": art.title,
         "content": f'<div class="ai-content">{_decorate_html(art.body)}</div>',
@@ -114,7 +130,6 @@ def post_to_wp(site: Site, art: Article) -> str:
     if featured_media_id:
         post_data["featured_media"] = featured_media_id
 
-    # 投稿リトライ処理
     for attempt in range(3):
         try:
             response = requests.post(url, json=post_data, headers=headers, timeout=TIMEOUT)
