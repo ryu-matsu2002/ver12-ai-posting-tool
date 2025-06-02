@@ -5,18 +5,28 @@
 <div class="p-6">
   <h1 class="text-xl font-bold mb-4">📝 {{ user.email }} の記事一覧</h1>
 
-  <!-- ✅ 削除対象件数表示 + 削除ボタン -->
+  <!-- ✅ 削除対象件数表示 + 削除ボタン + 再生成ボタン -->
   <div class="mb-4 flex items-center gap-4">
     <p class="text-sm text-red-600 font-semibold">
       🚫 途中停止状態の記事: <span class="text-lg">{{ stuck_count }}</span> 件
     </p>
 
     {% if stuck_count > 0 %}
+    <!-- ✅ 一括削除ボタン -->
     <form method="post" action="{{ url_for('admin.delete_user_stuck_articles', uid=user.id) }}"
           onsubmit="return confirm('途中停止中の記事（pending / gen）を削除しますか？');">
       <button type="submit"
               class="py-2 px-6 bg-red-600 hover:bg-red-700 text-white rounded">
         一括削除
+      </button>
+    </form>
+
+    <!-- ✅ 一括再生成ボタン -->
+    <form method="post" action="{{ url_for('admin.regenerate_user_stuck_articles', uid=user.id) }}"
+          onsubmit="return confirm('途中停止中の記事（pending / gen）を再生成しますか？');">
+      <button type="submit"
+              class="py-2 px-6 bg-blue-600 hover:bg-blue-700 text-white rounded">
+        🔄 一括再生成
       </button>
     </form>
     {% endif %}

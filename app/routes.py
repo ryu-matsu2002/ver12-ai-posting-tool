@@ -27,6 +27,7 @@ import re
 import os
 import logging
 import openai
+import threading
 from datetime import datetime
 from .image_utils import fetch_featured_image  # ← ✅ 正しい
 from collections import defaultdict
@@ -35,6 +36,7 @@ from collections import defaultdict
 from .article_generator import (
     _unique_title,
     _compose_body,
+    _generate,
 )
 from app.forms import EditKeywordForm
 from .forms import KeywordForm
@@ -582,6 +584,41 @@ def refresh_images(user_id):
     flash(f"✅ 復元完了: {restored} 件 / ❌ 失敗: {failed} 件", "info")
     return redirect(url_for("admin.admin_dashboard"))
 
+
+@admin_bp.post("/admin/user/<int:uid>/regenerate-stuck")
+@login_required
+def regenerate_user_stuck_articles(uid):
+    if not current_user.is_admin:
+        abort(403)
+
+    user = User.query.get_or_404(uid)
+
+    stuck_articles = Article.query.filter(
+        Article.user_id == uid,
+        Article.status.in_(["pending", "gen"])
+    ).all()
+
+    app = current_app._get_current_object()
+    count = 0
+
+    for art in stuck_articles:
+        try:
+            # 任意：最初のプロンプトを使う（適宜変更可）
+            prompt = PromptTemplate.query.filter_by(user_id=uid).first()
+            if not prompt:
+                continue
+
+            threading.Thread(
+                target=_generate,
+                args=(app, art.id, prompt.title_pt, prompt.body_pt),
+                daemon=True
+            ).start()
+            count += 1
+        except Exception as e:
+            logging.exception(f"[管理者再生成失敗] article_id={art.id} error={e}")
+
+    flash(f"{count} 件の途中停止記事を再生成キューに登録しました", "success")
+    return redirect(url_for("admin.user_articles", uid=uid))
 
 
 @bp.route("/<username>/keywords", methods=["GET", "POST"])
