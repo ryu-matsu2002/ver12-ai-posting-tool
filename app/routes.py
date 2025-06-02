@@ -481,31 +481,34 @@ def fix_missing_images():
         abort(403)
 
     from app.image_utils import fetch_featured_image
-    import re
+    import re, os
 
     updated = 0
     articles = Article.query.filter(
-        Article.status.in_(["done", "posted"]),
-        (Article.image_url.is_(None)) | (Article.image_url == "") | (Article.image_url == "None")
+        Article.status.in_(["done", "posted"])
     ).all()
 
     for art in articles:
+        url = art.image_url or ""
+        is_missing = (
+            not url
+            or url == "None"
+            or not url.strip()
+            or url.endswith("/")  # 不完全URL
+            or ("/static/images/" in url and not os.path.exists(f"app{url}"))  # ローカルにファイルなし
+            or ("/static/images/" in url and os.path.getsize(f"app{url}") == 0)  # サイズ0の破損画像
+        )
+
+        if not is_missing:
+            continue
+
         match = re.search(r"<h2\b[^>]*>(.*?)</h2>", art.body or "", re.IGNORECASE)
         first_h2 = match.group(1) if match else ""
         query = f"{art.keyword} {first_h2}".strip()
         title = art.title or art.keyword or "記事"
-
         try:
-            image_url = fetch_featured_image(query, title=title, body=art.body)
-
-            # ✅ 結果がNoneや空でないことを確認
-            if image_url and isinstance(image_url, str) and len(image_url.strip()) > 5:
-                art.image_url = image_url
-                updated += 1
-                current_app.logger.info(f"[画像復元成功] Article ID: {art.id}, image_url: {image_url}")
-            else:
-                current_app.logger.warning(f"[画像なし] Article ID: {art.id}, query: {query}")
-
+            art.image_url = fetch_featured_image(query, title=title, body=art.body)
+            updated += 1
         except Exception as e:
             current_app.logger.warning(f"[画像復元失敗] Article ID: {art.id}, Error: {e}")
 

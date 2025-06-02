@@ -123,19 +123,36 @@ def _download_and_save_image(image_url: str, title: str) -> str:
     try:
         filename = _sanitize_filename(title)
         local_path = os.path.join(IMAGE_SAVE_DIR, filename)
+        
+        # フォルダが存在しなければ作成
         if not os.path.exists(IMAGE_SAVE_DIR):
             os.makedirs(IMAGE_SAVE_DIR, exist_ok=True)
+        
+        # すでに保存済みなら再ダウンロード不要
         if not os.path.exists(local_path):
             r = requests.get(image_url, timeout=10)
             r.raise_for_status()
+
+            # ✅ Content-Typeがimageでなければエラーにする
+            content_type = r.headers.get("Content-Type", "")
+            if not content_type.startswith("image/"):
+                raise Exception(f"取得先が画像ではありません: {content_type}")
+
+            # ✅ サイズが小さすぎる画像を除外（破損防止）
             if len(r.content) < 1024:
                 raise Exception("画像サイズが小さすぎます")
+
+            # ファイル保存
             with open(local_path, "wb") as f:
                 f.write(r.content)
+
+        # ローカル画像のURLを返す
         return f"{IMAGE_URL_PREFIX}/{filename}"
+    
     except Exception as e:
         logging.error(f"[画像保存失敗] {image_url}: {e}")
         return DEFAULT_IMAGE_URL
+
 
 def fetch_featured_image(query: str, title: str = "", body: str = "") -> str:
     def extract_keywords_from_body(text: str) -> str:
