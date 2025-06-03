@@ -478,7 +478,7 @@ def delete_stuck_articles():
     flash(f"{deleted_count} 件の途中停止記事を削除しました", "success")
     return redirect(url_for("admin.admin_dashboard"))
 
-@admin_bp.route("/admin/accounting")
+@admin_bp.route("/admin/accounting", methods=["GET", "POST"])
 @login_required
 def accounting():
     if not current_user.is_admin:
@@ -488,11 +488,17 @@ def accounting():
     from datetime import datetime
     now = datetime.utcnow()
 
+    # 📅 クエリパラメータ取得（例：?year=2025&month=5）
+    year = int(request.args.get("year", now.year))
+    month = int(request.args.get("month", now.month))
+
+    # 🎯 選択月のログだけを取得
     logs = PaymentLog.query.filter(
-        extract("year", PaymentLog.created_at) == now.year,
-        extract("month", PaymentLog.created_at) == now.month
+        extract("year", PaymentLog.created_at) == year,
+        extract("month", PaymentLog.created_at) == month
     ).order_by(PaymentLog.created_at.desc()).all()
 
+    # 💰 集計
     total_amount = sum(log.amount for log in logs)
     total_fee = sum(log.fee or 0 for log in logs)
     total_net = sum(log.net_income or 0 for log in logs)
@@ -501,8 +507,11 @@ def accounting():
         logs=logs,
         total_amount=total_amount,
         total_fee=total_fee,
-        total_net=total_net
+        total_net=total_net,
+        selected_year=year,
+        selected_month=month
     )
+
 
 
 @admin_bp.route("/admin/user/<int:uid>/articles")
