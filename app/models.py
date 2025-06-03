@@ -145,6 +145,7 @@ class PaymentLog(db.Model):
     plan_type = db.Column(db.String(50), nullable=True)  # "affiliate" or "business"
     stripe_payment_id = db.Column(db.String(100), nullable=False, unique=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    status = db.Column(db.String(20), default="succeeded")  # ← これを追加
 
     def __repr__(self):
         return f"<PaymentLog {self.email} {self.amount}円 {self.created_at}>"    

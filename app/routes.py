@@ -174,7 +174,8 @@ def stripe_webhook():
                 fee=fee,
                 net_income=net,
                 plan_type=plan_type,
-                stripe_payment_id=stripe_payment_id
+                stripe_payment_id=stripe_payment_id,
+                status="succeeded"  # ✅ 追加
             )
             db.session.add(log)
             db.session.commit()
@@ -243,7 +244,8 @@ def stripe_webhook():
                 fee=fee,
                 net_income=net,
                 plan_type=plan_type,
-                stripe_payment_id=stripe_payment_id
+                stripe_payment_id=stripe_payment_id,
+                status="succeeded"
             )
             db.session.add(log)
             db.session.commit()
