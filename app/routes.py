@@ -1,5 +1,5 @@
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from flask import (
     Blueprint, render_template, redirect, url_for,
@@ -41,7 +41,6 @@ from .article_generator import (
 from app.forms import EditKeywordForm
 from .forms import KeywordForm
 from app.image_utils import _is_image_url
-
 
 JST = timezone("Asia/Tokyo")
 bp = Blueprint("main", __name__)
@@ -351,7 +350,7 @@ def special_purchase(username):
         username=username
     )
 
-
+# ────────────── 管理者ダッシュボード（セクション） ──────────────
 
 from app.models import Article, User, PromptTemplate, Site
 from os.path import exists, getsize
@@ -405,6 +404,163 @@ def admin_dashboard():
         article_count=article_count,
         users=users,
         missing_count_map=missing_count_map
+    )
+
+# --- ダッシュボード強化系ルート ---
+
+# 📊 統計サマリ（既存）
+@admin_bp.route('/admin/dashboard')
+@login_required
+def admin_dashboard():
+    return render_template("admin/dashboard.html")
+
+# 🔄 処理中ジョブ一覧
+@admin_bp.route("/admin/job-status")
+@login_required
+def job_status():
+    processing_articles = Article.query.filter_by(status="gen").order_by(Article.created_at.desc()).all()
+    return render_template("admin/job_status.html", articles=processing_articles)
+
+
+# 🧠 API使用量／トークン分析
+@admin_bp.route("/admin/api-usage")
+@login_required
+def api_usage():
+    from app.models import TokenUsageLog, User
+    from sqlalchemy import func
+
+    # 日別集計（過去30日）
+    today = datetime.utcnow().date()
+    date_30_days_ago = today - timedelta(days=29)
+
+    daily_data = (
+        db.session.query(
+            func.date(TokenUsageLog.created_at).label("date"),
+            func.sum(TokenUsageLog.total_tokens).label("total_tokens")
+        )
+        .filter(TokenUsageLog.created_at >= date_30_days_ago)
+        .group_by("date")
+        .order_by("date")
+        .all()
+    )
+
+    # ユーザー別集計（過去30日）
+    user_data = (
+        db.session.query(
+            User.email,
+            func.sum(TokenUsageLog.total_tokens).label("total_tokens")
+        )
+        .join(TokenUsageLog, TokenUsageLog.user_id == User.id)
+        .filter(TokenUsageLog.created_at >= date_30_days_ago)
+        .group_by(User.email)
+        .order_by(func.sum(TokenUsageLog.total_tokens).desc())
+        .all()
+    )
+
+    return render_template(
+        "admin/api_usage.html",
+        daily_data=daily_data,
+        user_data=user_data
+    )
+
+
+# 💰 今月の売上＆取り分サマリ
+@admin_bp.route("/admin/revenue-summary")
+@login_required
+def revenue_summary():
+    from app.models import PaymentLog, User
+    from sqlalchemy import func
+
+    # 今月の開始日を取得（UTC）
+    today = datetime.utcnow()
+    first_day = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    # 今月の売上（成功した決済のみ）
+    logs = (
+        db.session.query(
+            User.email,
+            func.sum(PaymentLog.amount).label("total_amount"),
+            func.count(PaymentLog.id).label("count")
+        )
+        .join(User, PaymentLog.user_id == User.id)
+        .filter(PaymentLog.status == "succeeded")
+        .filter(PaymentLog.created_at >= first_day)
+        .group_by(User.email)
+        .order_by(func.sum(PaymentLog.amount).desc())
+        .all()
+    )
+
+    # 総売上
+    total = sum(row.total_amount for row in logs)
+
+    return render_template(
+        "admin/revenue_summary.html",
+        logs=logs,
+        total=total
+    )
+
+
+# 📈 売上推移グラフ＋CSVダウンロード
+# 📈 月別売上グラフ + CSVダウンロード
+@admin_bp.route("/admin/revenue-graph")
+@login_required
+def revenue_graph():
+    from app.models import PaymentLog
+    from sqlalchemy import func
+    from datetime import datetime, timedelta
+
+    # 過去12ヶ月分の月次集計
+    today = datetime.utcnow()
+    first_day = today.replace(day=1) - timedelta(days=365)
+
+    monthly_data = (
+        db.session.query(
+            func.to_char(PaymentLog.created_at, 'YYYY-MM').label("month"),
+            func.sum(PaymentLog.amount).label("total")
+        )
+        .filter(PaymentLog.status == "succeeded")
+        .filter(PaymentLog.created_at >= first_day)
+        .group_by("month")
+        .order_by("month")
+        .all()
+    )
+
+    return render_template("admin/revenue_graph.html", monthly_data=monthly_data)
+
+# 📥 CSVダウンロードルート
+@admin_bp.route("/admin/download-revenue-log")
+@login_required
+def download_revenue_log():
+    from app.models import PaymentLog, User
+    import csv
+    from io import StringIO
+    from flask import Response
+
+    logs = (
+        db.session.query(
+            PaymentLog.id,
+            PaymentLog.amount,
+            PaymentLog.status,
+            PaymentLog.created_at,
+            User.email
+        )
+        .join(User, PaymentLog.user_id == User.id)
+        .order_by(PaymentLog.created_at.desc())
+        .all()
+    )
+
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["ID", "Email", "金額（円）", "ステータス", "日時"])
+
+    for log_id, amount, status, created_at, email in logs:
+        writer.writerow([log_id, email, amount // 100, status, created_at.strftime("%Y-%m-%d %H:%M:%S")])
+
+    output.seek(0)
+    return Response(
+        output,
+        mimetype='text/csv',
+        headers={"Content-Disposition": "attachment;filename=revenue_log.csv"}
     )
 
 
@@ -749,6 +905,8 @@ def regenerate_user_stuck_articles(uid):
     return redirect(url_for("admin.user_articles", uid=uid))
 
 
+# ────────────── キーワード ──────────────
+
 @bp.route("/<username>/keywords", methods=["GET", "POST"])
 @login_required
 def keywords(username):
@@ -895,7 +1053,7 @@ def bulk_action_keywords(username):
 
     return redirect(request.referrer or url_for("main.keywords", username=username))
 
-
+# ────────────── chatgpt ──────────────
 
 @bp.route("/<username>/chatgpt")
 @login_required
@@ -981,7 +1139,7 @@ def logout():
     logout_user()
     return redirect(url_for(".login"))
 
-
+# ────────────── プロフィール ──────────────
 
 @bp.route("/<username>/profile", methods=["GET", "POST"])
 @login_required
@@ -1018,10 +1176,13 @@ def profile(username):
     return render_template("profile.html", form=form)
 
 
+# ────────────── ツール本体コード ──────────────
+
 @bp.route("/")
 @login_required
 def root_redirect():
     return redirect(url_for("main.dashboard", username=current_user.username))
+
 
 # ─────────── Dashboard
 from app.models import UserSiteQuota  # 追加
@@ -1135,7 +1296,7 @@ def api_prompt(pid: int):
     })
 
 
-
+# ────────────── 登録サイト管理 ──────────────
 
 from os import getenv
 
@@ -1231,6 +1392,7 @@ def edit_site(username, sid: int):
 
 
 # ─────────── 記事生成（ユーザー別）
+
 @bp.route("/<username>/generate", methods=["GET", "POST"])
 @login_required
 def generate(username):

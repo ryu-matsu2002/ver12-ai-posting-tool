@@ -148,3 +148,17 @@ class PaymentLog(db.Model):
 
     def __repr__(self):
         return f"<PaymentLog {self.email} {self.amount}円 {self.created_at}>"    
+    
+# ──── API使用ログ ────
+class TokenUsageLog(db.Model):
+    __tablename__ = 'token_usage_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    prompt_tokens = db.Column(db.Integer, default=0)
+    completion_tokens = db.Column(db.Integer, default=0)
+    total_tokens = db.Column(db.Integer, default=0)
+
+    created_at = db.Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+    user = db.relationship("User", backref="token_logs")

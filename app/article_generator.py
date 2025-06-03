@@ -82,6 +82,24 @@ def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float) -> str:
             top_p=TOP_P,
             timeout=120,
         )
+
+        # ✅ TokenUsageLog保存処理（あれば）
+        try:
+            from app.models import TokenUsageLog
+            from flask_login import current_user
+            if hasattr(res, "usage") and current_user and current_user.is_authenticated:
+                usage_log = TokenUsageLog(
+                    user_id=current_user.id,
+                    prompt_tokens=res.usage.get("prompt_tokens", 0),
+                    completion_tokens=res.usage.get("completion_tokens", 0),
+                    total_tokens=res.usage.get("total_tokens", 0),
+                )
+                db.session.add(usage_log)
+                db.session.commit()
+        except Exception as log_error:
+            logging.warning(f"[トークン保存失敗] {log_error}")
+
+
         content = res.choices[0].message.content.strip()
         finish = res.choices[0].finish_reason
 

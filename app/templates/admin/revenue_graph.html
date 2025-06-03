@@ -1,0 +1,58 @@
+{% extends "base_admin.html" %}
+{% block title %}売上推移グラフ＆CSVダウンロード{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-bold mb-6">📈 売上推移（過去12ヶ月）</h1>
+
+<!-- ✅ グラフ -->
+<div class="bg-white p-6 rounded shadow mb-8">
+  <canvas id="revenueChart" height="120"></canvas>
+</div>
+
+<!-- ✅ CSVダウンロード -->
+<div class="mb-6">
+  <a href="{{ url_for('admin.download_revenue_log') }}"
+     class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow">
+    📥 CSVダウンロード
+  </a>
+</div>
+<!-- 👇 JSONを属性に出力 -->
+<div id="revenue-data"
+     data-labels='{{ monthly_data | map(attribute="month") | map("string") | list | tojson }}'
+     data-values='{{ monthly_data | map(attribute="total") | map("int") | list | tojson }}'>
+</div>
+
+<!-- Chart.js CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+  const el = document.getElementById('revenue-data');
+  const revenueLabels = JSON.parse(el.dataset.labels);
+  const revenueValues = JSON.parse(el.dataset.values).map(v => v / 100);  // 円換算
+
+  const ctx = document.getElementById('revenueChart').getContext('2d');
+  const chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: revenueLabels,
+      datasets: [{
+        label: '月別売上（円）',
+        data: revenueValues,
+        borderColor: 'rgba(75, 192, 192, 1)',
+        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+        tension: 0.3,
+        fill: true,
+        pointRadius: 5
+      }]
+    },
+    options: {
+      responsive: true,
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: { stepSize: 10000 }
+        }
+      }
+    }
+  });
+</script>
+{% endblock %}

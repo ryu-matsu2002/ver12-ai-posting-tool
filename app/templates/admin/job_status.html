@@ -1,0 +1,35 @@
+{% extends "base_admin.html" %}
+{% block title %}処理中ジョブ一覧{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-bold mb-6">🔄 処理中ジョブ一覧</h1>
+
+{% if articles %}
+  <table class="w-full table-auto bg-white rounded shadow">
+    <thead>
+      <tr class="bg-gray-100 text-gray-700">
+        <th class="p-2 text-left">ID</th>
+        <th class="p-2 text-left">タイトル</th>
+        <th class="p-2 text-left">キーワード</th>
+        <th class="p-2 text-left">進捗</th>
+        <th class="p-2 text-left">ユーザー</th>
+        <th class="p-2 text-left">生成開始</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for art in articles %}
+        <tr class="border-b">
+          <td class="p-2">{{ art.id }}</td>
+          <td class="p-2">{{ art.title[:30] if art.title else "(未設定)" }}</td>
+          <td class="p-2">{{ art.keyword }}</td>
+          <td class="p-2">{{ art.progress }}%</td>
+          <td class="p-2">{{ art.user.email if art.user else "-" }}</td>
+          <td class="p-2">{{ art.created_at.astimezone().strftime('%Y-%m-%d %H:%M') }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p class="text-gray-600">現在、実行中のジョブはありません。</p>
+{% endif %}
+{% endblock %}

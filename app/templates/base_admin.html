@@ -12,13 +12,35 @@
   <!-- ✅ 左サイドメニュー -->
   <aside class="w-64 bg-gray-900 text-white flex flex-col p-4 space-y-4">
     <h2 class="text-xl font-bold mb-4">Admin Menu</h2>
-    <a href="{{ url_for('admin.admin_dashboard') }}" class="hover:text-yellow-400">管理ダッシュボード</a>
-    <a href="{{ url_for('admin.admin_users') }}" class="...">ユーザー管理</a>
-    <a href="{{ url_for('admin.admin_sites') }}" class="...">📊 サイト投稿状況</a>
-    <a href="{{ url_for('admin.accounting') }}" class="block px-4 py-2 hover:bg-gray-200">
-  💰 経理ダッシュボード
-</a>
 
+    <!-- 📊 ダッシュボード -->
+    <div>
+      <div class="font-bold text-gray-200 mb-1">📊 ダッシュボード</div>
+      <ul class="ml-2 space-y-1 text-sm text-gray-300">
+        <li>
+          <a href="{{ url_for('admin.admin_dashboard') }}" class="hover:text-yellow-400">├ 統計サマリ</a>
+        </li>
+        <li>
+          <a href="{{ url_for('admin.job_status') }}" class="hover:text-yellow-400">├ 処理中ジョブ一覧 🔄</a>
+        </li>
+        <li>
+          <a href="{{ url_for('admin.api_usage') }}" class="hover:text-yellow-400">├ API使用量 / トークン分析</a>
+        </li>
+        <li>
+          <a href="{{ url_for('admin.revenue_summary') }}" class="hover:text-yellow-400">├ 今月の売上＆取り分サマリ 💰</a>
+        </li>
+        <li>
+          <a href="{{ url_for('admin.revenue_graph') }}" class="hover:text-yellow-400">└ 売上推移グラフ／経理帳票ダウンロード</a>
+        </li>
+      </ul>
+    </div>
+
+    <!-- 他のメニュー（必要に応じて調整） -->
+    <a href="{{ url_for('admin.admin_users') }}" class="hover:text-yellow-400">ユーザー管理</a>
+    <a href="{{ url_for('admin.admin_sites') }}" class="hover:text-yellow-400">📊 サイト投稿状況</a>
+    <a href="{{ url_for('admin.accounting') }}" class="block px-4 py-2 hover:bg-gray-200 text-white">
+      💰 経理ダッシュボード
+    </a>
   </aside>
 
   <!-- ✅ メインコンテンツ -->

@@ -1,0 +1,35 @@
+{% extends "base_admin.html" %}
+{% block title %}今月の売上＆取り分サマリ{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-bold mb-6">💰 今月の売上＆取り分サマリ</h1>
+
+<!-- ✅ 総売上サマリ -->
+<div class="bg-white p-6 rounded shadow mb-6">
+  <p class="text-lg font-semibold">今月の売上合計：</p>
+  <p class="text-3xl text-blue-600 font-bold mt-2">¥{{ "{:,}".format(total // 100) }}</p>
+</div>
+
+<!-- ✅ ユーザー別売上 -->
+<div class="bg-white p-6 rounded shadow">
+  <h2 class="text-xl font-semibold mb-4">ユーザー別の売上</h2>
+  <table class="w-full table-auto">
+    <thead class="bg-gray-100 text-gray-700">
+      <tr>
+        <th class="p-2 text-left">ユーザー</th>
+        <th class="p-2 text-left">決済回数</th>
+        <th class="p-2 text-left">合計金額</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for email, amount, count in logs %}
+      <tr class="border-b">
+        <td class="p-2">{{ email }}</td>
+        <td class="p-2">{{ count }}</td>
+        <td class="p-2">¥{{ "{:,}".format(amount // 100) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
