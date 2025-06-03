@@ -489,24 +489,41 @@ def accounting():
         abort(403)
 
     from datetime import datetime, timedelta
+    from sqlalchemy import extract
+    from app.models import PaymentLog
 
     now = datetime.utcnow()
-    year = int(request.args.get("year", now.year))
-    month = int(request.args.get("month", now.month))
+    now_year = now.year  # HTMLに渡す現在年
 
-    # ✅ 月初と月末の範囲を明示的に定義（UTCベース）
-    start_date = datetime(year, month, 1)
-    if month == 12:
-        end_date = datetime(year + 1, 1, 1)
+    # ✅ クエリパラメータ取得
+    year_param = request.args.get("year", str(now.year))
+    month_param = request.args.get("month", str(now.month))
+
+    # ✅ 年月に応じてログを抽出
+    if year_param == "all":
+        logs = PaymentLog.query.order_by(PaymentLog.created_at.desc()).all()
+        selected_year = "all"
+        selected_month = None  # 全期間なので月はなし
     else:
-        end_date = datetime(year, month + 1, 1)
+        # 通常の年と月の集計
+        year = int(year_param)
+        month = int(month_param)
 
-    # ✅ 範囲でフィルタ（月の境界を正確にカバー）
-    logs = PaymentLog.query.filter(
-        PaymentLog.created_at >= start_date,
-        PaymentLog.created_at < end_date
-    ).order_by(PaymentLog.created_at.desc()).all()
+        start_date = datetime(year, month, 1)
+        if month == 12:
+            end_date = datetime(year + 1, 1, 1)
+        else:
+            end_date = datetime(year, month + 1, 1)
 
+        logs = PaymentLog.query.filter(
+            PaymentLog.created_at >= start_date,
+            PaymentLog.created_at < end_date
+        ).order_by(PaymentLog.created_at.desc()).all()
+
+        selected_year = year
+        selected_month = month
+
+    # ✅ 集計処理（全期間 or 月単位のどちらでも対応）
     total_amount = sum(log.amount for log in logs)
     total_fee = sum(log.fee or 0 for log in logs)
     total_net = sum(log.net_income or 0 for log in logs)
@@ -516,9 +533,11 @@ def accounting():
         total_amount=total_amount,
         total_fee=total_fee,
         total_net=total_net,
-        selected_year=year,
-        selected_month=month
+        selected_year=selected_year,
+        selected_month=selected_month,
+        now_year=now_year  # HTML側で range に使うため
     )
+
 
 
 

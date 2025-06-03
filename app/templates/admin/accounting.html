@@ -5,17 +5,18 @@
 <div class="p-6">
   <h1 class="text-2xl font-bold mb-6">💼 Stripe経理ダッシュボード</h1>
 
-  <!-- ✅ 月別選択フォーム -->
+  <!-- ✅ 年月選択 + 全期間オプション付き -->
   <form method="get" class="mb-6 flex flex-wrap items-center gap-3">
     <label class="font-semibold">表示年月:</label>
 
-    <select name="year" class="border rounded px-2 py-1">
-      {% for y in range(2024, 2026) %}
-        <option value="{{ y }}" {% if y == selected_year %}selected{% endif %}>{{ y }}年</option>
+    <select name="year" class="border rounded px-2 py-1" onchange="this.form.submit()">
+      <option value="all" {% if selected_year == 'all' %}selected{% endif %}>全期間</option>
+      {% for y in range(2024, now_year + 1) %}
+        <option value="{{ y }}" {% if selected_year == y %}selected{% endif %}>{{ y }}年</option>
       {% endfor %}
     </select>
 
-    <select name="month" class="border rounded px-2 py-1">
+    <select name="month" class="border rounded px-2 py-1" {% if selected_year == 'all' %}disabled{% endif %}>
       {% for m in range(1, 13) %}
         <option value="{{ m }}" {% if m == selected_month %}selected{% endif %}>{{ m }}月</option>
       {% endfor %}
@@ -29,7 +30,13 @@
   <!-- ✅ 集計カード -->
   <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
     <div class="bg-white rounded shadow p-4 text-center">
-      <div class="text-sm text-gray-500 mb-1">売上合計（{{ selected_year }}年{{ selected_month }}月）</div>
+      <div class="text-sm text-gray-500 mb-1">
+        {% if selected_year == 'all' %}
+          売上合計（全期間）
+        {% else %}
+          売上合計（{{ selected_year }}年{{ selected_month }}月）
+        {% endif %}
+      </div>
       <div class="text-2xl font-bold text-green-600">¥{{ total_amount }}</div>
     </div>
     <div class="bg-white rounded shadow p-4 text-center">
