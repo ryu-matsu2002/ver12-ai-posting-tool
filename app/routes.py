@@ -411,7 +411,7 @@ def admin_dashboard():
 # 📊 統計サマリ（既存）
 @admin_bp.route('/admin/dashboard')
 @login_required
-def admin_dashboard():
+def admin_summary():
     return render_template("admin/dashboard.html")
 
 # 🔄 処理中ジョブ一覧
