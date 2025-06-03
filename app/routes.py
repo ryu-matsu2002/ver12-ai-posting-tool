@@ -154,12 +154,19 @@ def stripe_webhook():
         amount = session.get("amount_total")
         stripe_payment_id = session.get("payment_intent")
 
+        intent = stripe.PaymentIntent.retrieve(stripe_payment_id)
+        charge_id = intent.get("latest_charge")
+        charge = stripe.Charge.retrieve(charge_id)
+
+        balance_tx_id = charge.get("balance_transaction")
+        balance_tx = stripe.BalanceTransaction.retrieve(balance_tx_id)
+
         # 重複チェック
         existing = PaymentLog.query.filter_by(stripe_payment_id=stripe_payment_id).first()
         if not existing:
             user = User.query.get(int(user_id)) if user_id else None
-            fee = int(amount * 0.036) + 30
-            net = amount - fee
+            fee = balance_tx.fee
+            net = balance_tx.net 
 
             log = PaymentLog(
                 user_id=user.id if user else None,
@@ -211,6 +218,12 @@ def stripe_webhook():
         email = intent.get("receipt_email") or intent.get("customer_email")
         stripe_payment_id = intent.get("id")
 
+        charge_id = intent.get("latest_charge")
+        charge = stripe.Charge.retrieve(charge_id)
+
+        balance_tx_id = charge.get("balance_transaction")
+        balance_tx = stripe.BalanceTransaction.retrieve(balance_tx_id)
+
         # 重複チェック
         existing = PaymentLog.query.filter_by(stripe_payment_id=stripe_payment_id).first()
         if not existing:
@@ -221,8 +234,8 @@ def stripe_webhook():
                 email = user.email  # ← これを追加！
 
 
-            fee = int(amount * 0.036) + 30
-            net = amount - fee
+            fee = balance_tx.fee
+            net = balance_tx.net  
 
             log = PaymentLog(
                 user_id=user.id if user else None,
