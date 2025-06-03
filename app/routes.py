@@ -155,7 +155,6 @@ def stripe_webhook():
         stripe_payment_id = session.get("payment_intent")
 
         # 重複チェック
-        from app.models import PaymentLog, User
         existing = PaymentLog.query.filter_by(stripe_payment_id=stripe_payment_id).first()
         if not existing:
             user = User.query.get(int(user_id)) if user_id else None
@@ -213,7 +212,6 @@ def stripe_webhook():
         stripe_payment_id = intent.get("id")
 
         # 重複チェック
-        from app.models import PaymentLog, User
         existing = PaymentLog.query.filter_by(stripe_payment_id=stripe_payment_id).first()
         if not existing:
             user = User.query.get(int(user_id)) if user_id else None
