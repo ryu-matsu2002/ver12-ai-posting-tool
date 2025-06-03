@@ -484,21 +484,25 @@ def accounting():
     if not current_user.is_admin:
         abort(403)
 
-    from sqlalchemy import extract
-    from datetime import datetime
-    now = datetime.utcnow()
+    from datetime import datetime, timedelta
 
-    # 📅 クエリパラメータ取得（例：?year=2025&month=5）
+    now = datetime.utcnow()
     year = int(request.args.get("year", now.year))
     month = int(request.args.get("month", now.month))
 
-    # 🎯 選択月のログだけを取得
+    # ✅ 月初と月末の範囲を明示的に定義（UTCベース）
+    start_date = datetime(year, month, 1)
+    if month == 12:
+        end_date = datetime(year + 1, 1, 1)
+    else:
+        end_date = datetime(year, month + 1, 1)
+
+    # ✅ 範囲でフィルタ（月の境界を正確にカバー）
     logs = PaymentLog.query.filter(
-        extract("year", PaymentLog.created_at) == year,
-        extract("month", PaymentLog.created_at) == month
+        PaymentLog.created_at >= start_date,
+        PaymentLog.created_at < end_date
     ).order_by(PaymentLog.created_at.desc()).all()
 
-    # 💰 集計
     total_amount = sum(log.amount for log in logs)
     total_fee = sum(log.fee or 0 for log in logs)
     total_net = sum(log.net_income or 0 for log in logs)
