@@ -215,6 +215,12 @@ def stripe_webhook():
         existing = PaymentLog.query.filter_by(stripe_payment_id=stripe_payment_id).first()
         if not existing:
             user = User.query.get(int(user_id)) if user_id else None
+
+            # ✅ 修正点：emailが取得できなければユーザー情報から補完
+            if not email and user:
+                email = user.email  # ← これを追加！
+
+
             fee = int(amount * 0.036) + 30
             net = amount - fee
 
