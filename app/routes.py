@@ -94,7 +94,7 @@ def chat_api():
 
 import stripe
 from app import db
-from app.models import User, UserSiteQuota
+from app.models import User, UserSiteQuota, PaymentLog
 
 stripe_webhook_bp = Blueprint('stripe_webhook', __name__)
 
@@ -104,7 +104,8 @@ def stripe_webhook():
     payload = request.data
     sig_header = request.headers.get("stripe-signature")
     webhook_secret = current_app.config["STRIPE_WEBHOOK_SECRET"]
-# ✅ 追加: Webhookのペイロードをログ出力
+
+    # ✅ 追加: Webhookのペイロードをログ出力
     current_app.logger.info("📩 Stripe Webhook Received")
     current_app.logger.info(payload.decode("utf-8"))  # JSON形式で出力
 
@@ -125,6 +126,7 @@ def stripe_webhook():
         site_count = int(metadata.get("site_count", 1))
         plan_type = metadata.get("plan_type", "affiliate")
 
+        # ✅ Quota 加算処理（既存）
         if user_id:
             user = User.query.get(int(user_id))
             if user:
@@ -147,6 +149,32 @@ def stripe_webhook():
         else:
             current_app.logger.warning("⚠️ Checkout Webhook: metadata に user_id が含まれていません")
 
+        # ✅ PaymentLog 保存処理
+        email = session.get("customer_email")
+        amount = session.get("amount_total")
+        stripe_payment_id = session.get("payment_intent")
+
+        # 重複チェック
+        from app.models import PaymentLog, User
+        existing = PaymentLog.query.filter_by(stripe_payment_id=stripe_payment_id).first()
+        if not existing:
+            user = User.query.get(int(user_id)) if user_id else None
+            fee = int(amount * 0.036) + 30
+            net = amount - fee
+
+            log = PaymentLog(
+                user_id=user.id if user else None,
+                email=email,
+                amount=amount,
+                fee=fee,
+                net_income=net,
+                plan_type=plan_type,
+                stripe_payment_id=stripe_payment_id
+            )
+            db.session.add(log)
+            db.session.commit()
+            current_app.logger.info(f"💰 PaymentLog 保存（checkout）：{email} ¥{amount}")
+
     # ✅ special_purchase 成功時
     elif event["type"] == "payment_intent.succeeded":
         intent = event["data"]["object"]
@@ -156,6 +184,7 @@ def stripe_webhook():
         plan_type = metadata.get("plan_type", "affiliate")
         special = metadata.get("special", "no")
 
+        # ✅ Quota 加算処理（既存）
         if user_id:
             user = User.query.get(int(user_id))
             if user:
@@ -178,8 +207,33 @@ def stripe_webhook():
         else:
             current_app.logger.warning("⚠️ Webhook: metadata に user_id が含まれていません")
 
-    return jsonify(success=True)
+        # ✅ PaymentLog 保存処理
+        amount = intent.get("amount")
+        email = intent.get("receipt_email") or intent.get("customer_email")
+        stripe_payment_id = intent.get("id")
 
+        # 重複チェック
+        from app.models import PaymentLog, User
+        existing = PaymentLog.query.filter_by(stripe_payment_id=stripe_payment_id).first()
+        if not existing:
+            user = User.query.get(int(user_id)) if user_id else None
+            fee = int(amount * 0.036) + 30
+            net = amount - fee
+
+            log = PaymentLog(
+                user_id=user.id if user else None,
+                email=email,
+                amount=amount,
+                fee=fee,
+                net_income=net,
+                plan_type=plan_type,
+                stripe_payment_id=stripe_payment_id
+            )
+            db.session.add(log)
+            db.session.commit()
+            current_app.logger.info(f"💰 PaymentLog 保存（special）：{email} ¥{amount}")
+
+    return jsonify(success=True)
 
 
 # Stripe APIキーを読み込み

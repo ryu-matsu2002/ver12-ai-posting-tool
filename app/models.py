@@ -132,3 +132,19 @@ class UserSiteQuota(db.Model):
     plan_type = db.Column(db.String(20))            # 例: 'affiliate' or 'business'
 
     user = db.relationship('User', backref=db.backref('site_quota', uselist=False))
+
+class PaymentLog(db.Model):
+    __tablename__ = 'payment_log'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)  # 紐付けが不明な場合はnull
+    email = db.Column(db.String(255), nullable=False)
+    amount = db.Column(db.Integer, nullable=False)  # 単位：円
+    fee = db.Column(db.Integer, nullable=True)      # Stripe手数料（運営計算）
+    net_income = db.Column(db.Integer, nullable=True)  # 運営の取り分
+    plan_type = db.Column(db.String(50), nullable=True)  # "affiliate" or "business"
+    stripe_payment_id = db.Column(db.String(100), nullable=False, unique=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<PaymentLog {self.email} {self.amount}円 {self.created_at}>"    
