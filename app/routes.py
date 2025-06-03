@@ -478,6 +478,31 @@ def delete_stuck_articles():
     flash(f"{deleted_count} 件の途中停止記事を削除しました", "success")
     return redirect(url_for("admin.admin_dashboard"))
 
+@admin_bp.route("/admin/accounting")
+@login_required
+def accounting():
+    if not current_user.is_admin:
+        abort(403)
+
+    from sqlalchemy import extract
+    from datetime import datetime
+    now = datetime.utcnow()
+
+    logs = PaymentLog.query.filter(
+        extract("year", PaymentLog.created_at) == now.year,
+        extract("month", PaymentLog.created_at) == now.month
+    ).order_by(PaymentLog.created_at.desc()).all()
+
+    total_amount = sum(log.amount for log in logs)
+    total_fee = sum(log.fee or 0 for log in logs)
+    total_net = sum(log.net_income or 0 for log in logs)
+
+    return render_template("admin/accounting.html",
+        logs=logs,
+        total_amount=total_amount,
+        total_fee=total_fee,
+        total_net=total_net
+    )
 
 
 @admin_bp.route("/admin/user/<int:uid>/articles")
