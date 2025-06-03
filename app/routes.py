@@ -150,7 +150,7 @@ def stripe_webhook():
 
         # ✅ PaymentLog 保存処理
         email = session.get("customer_email")
-        amount = session.get("amount_total")
+        amount = session.get("amount_total")// 100  # ← ✅ セントから円に変換
         stripe_payment_id = session.get("payment_intent")
 
         intent = stripe.PaymentIntent.retrieve(stripe_payment_id)
@@ -164,8 +164,8 @@ def stripe_webhook():
         existing = PaymentLog.query.filter_by(stripe_payment_id=stripe_payment_id).first()
         if not existing:
             user = User.query.get(int(user_id)) if user_id else None
-            fee = balance_tx.fee
-            net = balance_tx.net 
+            fee = balance_tx.fee // 100  # ← 任意で換算（必要なら
+            net = balance_tx.net // 100  # ← 任意で換算（必要なら）
 
             log = PaymentLog(
                 user_id=user.id if user else None,
@@ -214,7 +214,7 @@ def stripe_webhook():
             current_app.logger.warning("⚠️ Webhook: metadata に user_id が含まれていません")
 
         # ✅ PaymentLog 保存処理
-        amount = intent.get("amount")
+        amount = intent.get("amount")// 100  # ← ✅ セントから円に変換
         email = intent.get("receipt_email") or intent.get("customer_email")
         stripe_payment_id = intent.get("id")
 
@@ -234,8 +234,8 @@ def stripe_webhook():
                 email = user.email  # ← これを追加！
 
 
-            fee = balance_tx.fee
-            net = balance_tx.net  
+            fee = balance_tx.fee // 100  # ← 任意で換算（必要なら）
+            net = balance_tx.net // 100  # ← 任意で換算（必要なら）  
 
             log = PaymentLog(
                 user_id=user.id if user else None,
