@@ -86,6 +86,11 @@ def upload_image_to_wp(site_url: str, image_path: str, username: str, app_pass: 
 
 # WordPress投稿処理（画像アップロード処理を拡張）
 def post_to_wp(site: Site, art: Article) -> str:
+    # ✅ すでに投稿済みかどうかチェック（重要）
+    if art.status == "posted" and art.posted_url:
+        current_app.logger.info(f"[スキップ] すでに投稿済み: Article ID {art.id}")
+        return art.posted_url or "already posted"
+
     site_url = normalize_url(site.url)
     url = f"{site_url}/wp-json/wp/v2/posts"
     headers = _post_headers(site.username, site.app_pass, site_url)
