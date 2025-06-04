@@ -64,16 +64,16 @@ def create_app() -> Flask:
 
         from . import models
 
-    if os.environ.get("RUN_MAIN") == "true":
-        # 自動投稿ジョブを APScheduler に登録して起動
-        from .tasks import init_scheduler
-        init_scheduler(app)
-
         # Flask-Login: user_loader
         from .models import User  # 循環 import 回避
         @login_manager.user_loader
         def load_user(user_id: str) -> User | None:  # type: ignore[name-defined]
             return User.query.get(int(user_id))
+
+    if os.environ.get("RUN_MAIN") == "true":
+        # 自動投稿ジョブを APScheduler に登録して起動
+        from .tasks import init_scheduler
+        init_scheduler(app)
 
     login_manager.login_view = "main.login"
     return app
