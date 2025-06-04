@@ -71,8 +71,16 @@ def create_app() -> Flask:
         def load_user(user_id: str) -> User | None:  # type: ignore[name-defined]
             return User.query.get(int(user_id))
 
+    # ✅ スケジューラー：1プロセスのみで起動するよう制御
+    def is_main_process():
+        return (
+            os.environ.get("WERKZEUG_RUN_MAIN") == "true"
+            or os.environ.get("RUN_MAIN") == "true"
+            or os.getpid() == os.getppid()
+        )
+
 # ✅ 環境変数がある場合だけスケジューラを起動（← ここが重要）
-    if os.getenv("SCHEDULER_ENABLED") == "1" and multiprocessing.current_process().name == "MainProcess":
+    if os.getenv("SCHEDULER_ENABLED") == "1" and is_main_process():
     
         # 自動投稿ジョブを APScheduler に登録して起動
         from .tasks import init_scheduler
