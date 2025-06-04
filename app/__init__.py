@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import os
 from dotenv import load_dotenv
-import multiprocessing
 load_dotenv()
 
 from flask import Flask
@@ -14,9 +13,6 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_migrate import Migrate
 from celery import Celery
-
-
-
 
 # ── Flask-拡張の“空”インスタンスを先に作成 ───────────
 db            = SQLAlchemy()
@@ -57,7 +53,7 @@ def create_app() -> Flask:
 
     # ─── Blueprints 登録とスケジューラ起動 ───────
     with app.app_context():
-        # Blueprint の登録（main用 + admin用）
+        # Blueprint の登録（main用 + admin用 + webhook）
         from .routes import bp as main_bp, admin_bp, stripe_webhook_bp
         app.register_blueprint(main_bp)
         app.register_blueprint(admin_bp)
@@ -71,32 +67,14 @@ def create_app() -> Flask:
         def load_user(user_id: str) -> User | None:  # type: ignore[name-defined]
             return User.query.get(int(user_id))
 
-    # ✅ スケジューラー：1プロセスのみで起動するよう制御
-    def is_main_process():
-        return (
-            os.environ.get("WERKZEUG_RUN_MAIN") == "true"
-            or os.environ.get("RUN_MAIN") == "true"
-            or os.getpid() == os.getppid()
-        )
-    
-    app.logger.info(f"🌍 SCHEDULER_ENABLED = {os.getenv('SCHEDULER_ENABLED')}")
-    app.logger.info(f"🔍 is_main_process = {is_main_process()}")
-
-    if os.getenv("SCHEDULER_ENABLED") == "1" and is_main_process():
-        app.logger.info("✅ init_scheduler() が呼び出されます")
-        from .tasks import init_scheduler
-        init_scheduler(app)
-
-# ✅ 環境変数がある場合だけスケジューラを起動（← ここが重要）
-    if os.getenv("SCHEDULER_ENABLED") == "1" and is_main_process():
-    
-        # 自動投稿ジョブを APScheduler に登録して起動
+    # ✅ スケジューラー起動（--preload により1回のみ呼ばれる）
+    if os.getenv("SCHEDULER_ENABLED") == "1":
+        app.logger.info("✅ init_scheduler() を起動します（is_main_process チェックなし）")
         from .tasks import init_scheduler
         init_scheduler(app)
 
     login_manager.login_view = "main.login"
     return app
-
 
 # --------------------------------------------------
 # 2) Celery Factory
