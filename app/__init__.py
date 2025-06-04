@@ -70,6 +70,8 @@ def create_app() -> Flask:
         def load_user(user_id: str) -> User | None:  # type: ignore[name-defined]
             return User.query.get(int(user_id))
 
+# ✅ 環境変数がある場合だけスケジューラを起動（← ここが重要）
+    if os.getenv("SCHEDULER_ENABLED") == "1":
     
         # 自動投稿ジョブを APScheduler に登録して起動
         from .tasks import init_scheduler
