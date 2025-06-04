@@ -674,12 +674,10 @@ def accounting():
     if year_param == "all":
         logs = PaymentLog.query.order_by(PaymentLog.created_at.desc()).all()
         selected_year = "all"
-        selected_month = None  # 全期間なので月はなし
+        selected_month = None
     else:
-        # 通常の年と月の集計
         year = int(year_param)
         month = int(month_param)
-
         start_date = datetime(year, month, 1)
         if month == 12:
             end_date = datetime(year + 1, 1, 1)
@@ -694,22 +692,42 @@ def accounting():
         selected_year = year
         selected_month = month
 
-    # ✅ 集計処理（全期間 or 月単位のどちらでも対応）
+    # ✅ 基本集計
     total_amount = sum(log.amount for log in logs)
     total_fee = sum(log.fee or 0 for log in logs)
     total_net = sum(log.net_income or 0 for log in logs)
+
+    # ✅ 利益分配集計（追加）
+    ryu_total = 0
+    take_total = 0
+    expense_total = 0
+
+    for log in logs:
+        amount = log.amount or 0
+        if amount == 1000:
+            expense_total += amount
+        elif amount == 3000:
+            split = amount // 3
+            expense_total += split
+            ryu_total += split
+            take_total += split
+        elif amount == 20000:
+            ryu_total += int(amount * 0.8)
+            take_total += int(amount * 0.2)
+        # ※その他の金額は無視（必要なら将来追加）
 
     return render_template("admin/accounting.html",
         logs=logs,
         total_amount=total_amount,
         total_fee=total_fee,
         total_net=total_net,
+        ryu_total=ryu_total,
+        take_total=take_total,
+        expense_total=expense_total,
         selected_year=selected_year,
         selected_month=selected_month,
-        now_year=now_year  # HTML側で range に使うため
+        now_year=now_year
     )
-
-
 
 
 @admin_bp.route("/admin/user/<int:uid>/articles")

@@ -27,8 +27,8 @@
     </button>
   </form>
 
-  <!-- ✅ 集計カード -->
-  <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+  <!-- ✅ 集計カード（売上・手数料・運営者取り分） -->
+  <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
     <div class="bg-white rounded shadow p-4 text-center">
       <div class="text-sm text-gray-500 mb-1">
         {% if selected_year == 'all' %}
@@ -46,6 +46,22 @@
     <div class="bg-white rounded shadow p-4 text-center">
       <div class="text-sm text-gray-500 mb-1">運営者取り分</div>
       <div class="text-2xl font-bold text-blue-600">¥{{ total_net }}</div>
+    </div>
+  </div>
+
+  <!-- ✅ 分配カード（経費・ryu・take） -->
+  <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+    <div class="bg-gray-100 rounded shadow p-4 text-center">
+      <div class="text-sm text-gray-500 mb-1">経費</div>
+      <div class="text-2xl font-bold text-gray-800">¥{{ expense_total }}</div>
+    </div>
+    <div class="bg-gray-100 rounded shadow p-4 text-center">
+      <div class="text-sm text-gray-500 mb-1">ryu 取り分</div>
+      <div class="text-2xl font-bold text-green-700">¥{{ ryu_total }}</div>
+    </div>
+    <div class="bg-gray-100 rounded shadow p-4 text-center">
+      <div class="text-sm text-gray-500 mb-1">take 取り分</div>
+      <div class="text-2xl font-bold text-purple-700">¥{{ take_total }}</div>
     </div>
   </div>
 
