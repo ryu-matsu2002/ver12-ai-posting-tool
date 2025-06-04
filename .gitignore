@@ -10,3 +10,5 @@ instance/
 
 # 仮想環境
 venv/
+
+/credentials/service_account.json
