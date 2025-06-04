@@ -64,7 +64,7 @@ def create_app() -> Flask:
 
         from . import models
 
-    if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or os.environ.get("FLASK_RUN_FROM_CLI") == "true":
+    if os.environ.get("RUN_MAIN") == "true":
         # 自動投稿ジョブを APScheduler に登録して起動
         from .tasks import init_scheduler
         init_scheduler(app)
