@@ -1483,6 +1483,58 @@ def generate(username):
         status_filter=status_filter
     )
 
+from app.google_client import fetch_search_queries
+from app.models import Keyword  # 🔁 既存キーワード参照のため追加
+from app.article_generator import enqueue_generation  # 🔁 忘れずに
+
+@bp.route("/generate_from_gsc/<int:site_id>", methods=["POST"])
+@login_required
+def generate_from_gsc(site_id):
+    site = Site.query.get_or_404(site_id)
+    if site.user_id != current_user.id:
+        abort(403)
+
+    try:
+        rows = fetch_search_queries(site.url, days=7, row_limit=40)
+        keywords = [row["keys"][0] for row in rows if "keys" in row]
+    except Exception as e:
+        flash(f"Search Consoleからキーワードの取得に失敗しました: {e}", "danger")
+        return redirect(url_for("main.keywords", username=current_user.username))
+
+    if not keywords:
+        flash("検索クエリが見つかりませんでした。", "warning")
+        return redirect(url_for("main.keywords", username=current_user.username))
+
+    # ✅ 既存キーワードの重複チェック
+    existing_keywords = set(
+        k.keyword for k in Keyword.query.filter_by(site_id=site.id).all()
+    )
+    new_keywords = [kw for kw in keywords if kw not in existing_keywords]
+
+    if not new_keywords:
+        flash("すべてのキーワードが既に登録されています。", "info")
+        return redirect(url_for("main.keywords", username=current_user.username))
+
+    # ✅ GSC由来のキーワードとしてDBに追加
+    for kw in new_keywords:
+        db.session.add(Keyword(
+            keyword=kw,
+            site_id=site.id,
+            user_id=current_user.id,
+            source='gsc'
+        ))
+
+    # ✅ GSC接続状態を保存（初回のみ）
+    if not site.gsc_connected:
+        site.gsc_connected = True
+
+    db.session.commit()
+
+    # ✅ 記事生成キューへ
+    enqueue_generation(new_keywords, site_id=site.id, user_id=current_user.id)
+
+    flash(f"{len(new_keywords)}件のキーワードから記事生成を開始しました", "success")
+    return redirect(url_for("main.keywords", username=current_user.username))
 
 
 # ─────────── 生成ログ

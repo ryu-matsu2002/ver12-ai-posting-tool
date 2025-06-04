@@ -25,29 +25,30 @@
         </td>
         <td class="px-3 py-2 align-top break-all text-blue-700 underline">
           <a href="{{ site.url }}" target="_blank">{{ site.url }}</a>
+          {% if site.gsc_connected %}
+            <span class="ml-2 inline-block bg-green-600 text-white text-xs font-semibold px-2 py-0.5 rounded">
+              GSC接続済み ✅
+            </span>
+          {% endif %}
         </td>
         <td class="px-3 py-2 text-center text-black">{{ site.total or 0 }}</td>
         <td class="px-3 py-2 text-center text-green-600 font-bold">{{ site.done or 0 }}</td>
         <td class="px-3 py-2 text-center text-blue-600 font-bold">{{ site.posted or 0 }}</td>
         <td class="px-3 py-2 text-center text-red-600 font-bold">{{ site.error or 0 }}</td>
         <td class="px-3 py-2 text-center space-x-1 whitespace-nowrap">
-          <!-- 記事生成ボタン -->
           <a href="{{ url_for('main.generate', username=current_user.username) }}?site_id={{ site.id }}"
              class="inline-block py-1 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-sm">
             記事生成
           </a>
-          <!-- 記事一覧ボタン -->
           <a href="{{ url_for('main.log', username=current_user.username, site_id=site.id) }}"
              class="inline-block py-1 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm">
             記事一覧
           </a>
-          <!-- WP管理ボタン -->
           <a href="{{ site.url.rstrip('/') }}/admin"
              target="_blank"
              class="inline-block py-1 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-sm">
             WP管理
           </a>
-          <!-- 修正ボタン -->
           <a href="{{ url_for('main.edit_site', username=current_user.username, sid=site.id) }}"
              class="inline-block py-1 px-3 bg-gray-500 hover:bg-gray-600 text-white rounded text-sm">
             修正

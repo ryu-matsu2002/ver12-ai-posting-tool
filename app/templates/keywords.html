@@ -13,7 +13,16 @@
 
       <div>
         <label class="block font-semibold mb-1">対象サイト</label>
-        {{ form.site_id(class="w-full p-2 border rounded") }}
+        {{ form.site_id(class="w-full p-2 border rounded", id="site_id_select") }}
+      </div>
+
+      <!-- 🔘 Search Console連携ボタン -->
+      <div>
+        <button type="button"
+                class="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded mt-2"
+                onclick="generateFromGSC()">
+          🔍 Search Consoleから記事生成（最新キーワード取得）
+        </button>
       </div>
 
       <div>
@@ -43,7 +52,7 @@
             <span>▼</span>
           </button>
 
-          <!-- アコーディオン本体（初期状態：非表示） -->
+          <!-- アコーディオン本体 -->
           <div id="kw-site-{{ site_id }}" class="bg-white dark:bg-gray-800 hidden">
             <form method="post" action="{{ url_for('main.bulk_action_keywords', username=current_user.username) }}">
               <input type="hidden" name="site_id" value="{{ site_id }}">
@@ -79,7 +88,12 @@
                         <td class="p-2 text-center">
                           <input type="checkbox" class="kw-checkbox-{{ site_id }}" name="keyword_ids" value="{{ kw.id }}">
                         </td>
-                        <td class="p-2">{{ kw.keyword }}</td>
+                        <td class="p-2">
+                          {{ kw.keyword }}
+                          {% if kw.source == 'gsc' %}
+                            <span class="ml-2 inline-block text-xs bg-blue-600 text-white px-2 py-0.5 rounded">GSC</span>
+                          {% endif %}
+                        </td>
                         <td class="p-2 text-center">{{ "生成済み" if kw.used else "未生成" }}</td>
                         <td class="p-2 text-center space-x-2">
                           <a href="{{ url_for('main.edit_keyword', username=current_user.username, keyword_id=kw.id) }}" class="bg-green-600 hover:bg-green-700 text-white text-xs px-2 py-1 rounded">編集</a>
@@ -123,6 +137,17 @@
     const blockId = 'kw-site-' + siteId;
     localStorage.setItem("open_kw_block", blockId);
     window.location.href = window.location.pathname + "?" + params.toString();
+  }
+
+  function generateFromGSC() {
+    const siteId = document.getElementById("site_id_select").value;
+    if (!siteId) {
+      alert("先に対象サイトを選択してください");
+      return;
+    }
+    if (confirm("このサイトのSearch Consoleデータから記事生成を開始しますか？")) {
+      window.location.href = `/generate_from_gsc/${siteId}`;
+    }
   }
 
   window.addEventListener("DOMContentLoaded", () => {
