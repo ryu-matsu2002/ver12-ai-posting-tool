@@ -78,6 +78,14 @@ def create_app() -> Flask:
             or os.environ.get("RUN_MAIN") == "true"
             or os.getpid() == os.getppid()
         )
+    
+    app.logger.info(f"🌍 SCHEDULER_ENABLED = {os.getenv('SCHEDULER_ENABLED')}")
+    app.logger.info(f"🔍 is_main_process = {is_main_process()}")
+
+    if os.getenv("SCHEDULER_ENABLED") == "1" and is_main_process():
+        app.logger.info("✅ init_scheduler() が呼び出されます")
+        from .tasks import init_scheduler
+        init_scheduler(app)
 
 # ✅ 環境変数がある場合だけスケジューラを起動（← ここが重要）
     if os.getenv("SCHEDULER_ENABLED") == "1" and is_main_process():
