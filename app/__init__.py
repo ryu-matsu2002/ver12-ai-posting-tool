@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 from dotenv import load_dotenv
+import multiprocessing
 load_dotenv()
 
 from flask import Flask
@@ -71,7 +72,7 @@ def create_app() -> Flask:
             return User.query.get(int(user_id))
 
 # ✅ 環境変数がある場合だけスケジューラを起動（← ここが重要）
-    if os.getenv("SCHEDULER_ENABLED") == "1":
+    if os.getenv("SCHEDULER_ENABLED") == "1" and multiprocessing.current_process().name == "MainProcess":
     
         # 自動投稿ジョブを APScheduler に登録して起動
         from .tasks import init_scheduler
