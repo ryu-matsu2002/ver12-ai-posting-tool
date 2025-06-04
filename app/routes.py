@@ -1487,7 +1487,7 @@ from app.google_client import fetch_search_queries
 from app.models import Keyword  # 🔁 既存キーワード参照のため追加
 from app.article_generator import enqueue_generation  # 🔁 忘れずに
 
-@bp.route("/generate_from_gsc/<int:site_id>", methods=["POST"])
+@bp.route("/generate_from_gsc/<int:site_id>", methods=["GET", "POST"])  # ← 追加
 @login_required
 def generate_from_gsc(site_id):
     site = Site.query.get_or_404(site_id)
