@@ -19,9 +19,9 @@
               ✅ GSC連携済み
             </span>
           {% else %}
-            <a href="{{ url_for('main.connect_gsc', username=current_user.username, site_id=site.id) }}"
+            <a href="{{ url_for('main.authorize_gsc', username=current_user.username, site_id=site.id) }}"
                class="inline-block bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded">
-              🔌 GSCと接続
+              🔐 Googleに接続
             </a>
           {% endif %}
         </div>
