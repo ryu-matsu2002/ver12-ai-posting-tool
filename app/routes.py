@@ -1531,7 +1531,7 @@ def generate_from_gsc(site_id):
     db.session.commit()
 
     # ✅ 記事生成キューへ
-    enqueue_generation(new_keywords, site_id=site.id, user_id=current_user.id)
+    enqueue_generation(new_keywords, site.id, current_user.id)
 
     flash(f"{len(new_keywords)}件のキーワードから記事生成を開始しました", "success")
     return redirect(url_for("main.keywords", username=current_user.username))

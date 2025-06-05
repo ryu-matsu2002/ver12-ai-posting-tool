@@ -16,15 +16,6 @@
         {{ form.site_id(class="w-full p-2 border rounded", id="site_id_select") }}
       </div>
 
-      <!-- 🔘 Search Console連携ボタン -->
-      <div>
-        <button type="button"
-                class="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded mt-2"
-                onclick="generateFromGSC()">
-          🔍 Search Consoleから記事生成（最新キーワード取得）
-        </button>
-      </div>
-
       <div>
         {{ form.keywords.label(class="block font-semibold mb-1") }}
         {{ form.keywords(class="w-full p-2 border rounded", rows=10) }}
@@ -45,14 +36,11 @@
     {% if grouped_keywords %}
       {% for site_id, group in grouped_keywords.items() %}
         <div class="mb-6 border rounded">
-
-          <!-- アコーディオンヘッダー -->
           <button type="button" class="w-full px-4 py-2 bg-gray-100 dark:bg-gray-700 text-left font-bold text-black text-lg flex justify-between items-center" onclick="toggleAccordion('kw-site-{{ site_id }}')">
             <span>{{ group.site_name }}（{{ group.keywords|length }} 件）</span>
             <span>▼</span>
           </button>
 
-          <!-- アコーディオン本体 -->
           <div id="kw-site-{{ site_id }}" class="bg-white dark:bg-gray-800 hidden">
             <form method="post" action="{{ url_for('main.bulk_action_keywords', username=current_user.username) }}">
               <input type="hidden" name="site_id" value="{{ site_id }}">
@@ -66,7 +54,6 @@
                     <option value="unused" {% if group.status_filter == 'unused' %}selected{% endif %}>未生成</option>
                   </select>
                 </label>
-
                 <button type="submit" name="action" value="delete" class="bg-red-600 hover:bg-red-700 text-white text-sm px-3 py-1 rounded">
                   選択したキーワードを削除
                 </button>
@@ -137,17 +124,6 @@
     const blockId = 'kw-site-' + siteId;
     localStorage.setItem("open_kw_block", blockId);
     window.location.href = window.location.pathname + "?" + params.toString();
-  }
-
-  function generateFromGSC() {
-    const siteId = document.getElementById("site_id_select").value;
-    if (!siteId) {
-      alert("先に対象サイトを選択してください");
-      return;
-    }
-    if (confirm("このサイトのSearch Consoleデータから記事生成を開始しますか？")) {
-      window.location.href = `/generate_from_gsc/${siteId}`;
-    }
   }
 
   window.addEventListener("DOMContentLoaded", () => {
