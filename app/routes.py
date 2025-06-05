@@ -1097,7 +1097,7 @@ def login():
             (User.email == identifier) | (User.username == identifier)
         ).first()
 
-        if user and check_password_hash(user.password_hash, password):
+        if user and check_password_hash(user.password, password):
             login_user(user)
             flash("ログイン成功！", "success")
             return redirect(url_for("main.dashboard", username=user.username))
