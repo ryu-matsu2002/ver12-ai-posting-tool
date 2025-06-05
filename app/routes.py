@@ -1,5 +1,5 @@
 from __future__ import annotations
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from flask import (
     Blueprint, render_template, redirect, url_for,
@@ -28,7 +28,7 @@ import os
 import logging
 import openai
 import threading
-from datetime import datetime
+import datetime
 from .image_utils import fetch_featured_image  # ← ✅ 正しい
 from collections import defaultdict
 
@@ -1702,7 +1702,7 @@ def post_article(id):
 
     try:
         url = post_to_wp(art.site, art)
-        art.posted_at = datetime.utcnow()
+        art.posted_at = datetime.datetime.utcnow()
         art.status = "posted"
         db.session.commit()
         flash(f"WordPress へ投稿しました: {url}", "success")
