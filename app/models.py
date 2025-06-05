@@ -58,7 +58,7 @@ class Site(db.Model):
     username = db.Column(db.String(100), nullable=False)
     app_pass = db.Column(db.String(200), nullable=False)
     user_id  = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
-
+    gsc_connected = db.Column(db.Boolean, default=False)  # ✅ 追加
     # リレーション
     articles = db.relationship("Article", backref="site", lazy='selectin')
 
