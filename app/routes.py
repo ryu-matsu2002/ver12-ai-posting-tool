@@ -1536,6 +1536,34 @@ def generate_from_gsc(site_id):
     flash(f"{len(new_keywords)}件のキーワードから記事生成を開始しました", "success")
     return redirect(url_for("main.keywords", username=current_user.username))
 
+@bp.route("/gsc_generate", methods=["GET"])
+@login_required
+def gsc_generate():
+    from .models import Site, Keyword
+
+    # ✅ GSC連携済みサイトだけ取得
+    gsc_sites = Site.query.filter_by(user_id=current_user.id, gsc_connected=True).all()
+
+    # 初期状態：site_id がクエリにあるときだけ処理
+    site_id = request.args.get("site_id", type=int)
+    selected_site = None
+    gsc_keywords = []
+
+    if site_id:
+        selected_site = Site.query.get_or_404(site_id)
+        if selected_site.user_id != current_user.id:
+            abort(403)
+
+        # ✅ GSC由来キーワードのみ取得（source='gsc'）
+        gsc_keywords = Keyword.query.filter_by(site_id=site_id, source='gsc').order_by(Keyword.id.desc()).all()
+
+    return render_template(
+        "gsc_generate.html",
+        gsc_sites=gsc_sites,
+        selected_site=selected_site,
+        gsc_keywords=gsc_keywords
+    )
+
 
 # ─────────── 生成ログ
 @bp.route("/<username>/log/site/<int:site_id>")

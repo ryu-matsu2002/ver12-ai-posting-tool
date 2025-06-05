@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}GSC記事生成 | Site Craft{% endblock %}
+
+{% block content %}
+<h2 class="text-3xl font-bold mb-8">🔍 GSC記事生成</h2>
+
+<div class="grid md:grid-cols-2 gap-10 items-start">
+
+  <!-- 左カラム：サイト選択と生成開始 -->
+  <div>
+    <form id="gsc-form" method="GET">
+      <div class="mb-6">
+        <label class="block font-semibold mb-1 text-gray-800 dark:text-white">対象サイト</label>
+        <select id="gsc-site-id" name="site_id" class="w-full p-2 border rounded">
+          {% for site in gsc_sites %}
+            <option value="{{ site.id }}" {% if selected_site and selected_site.id == site.id %}selected{% endif %}>
+              {{ site.name }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <p class="mb-4 text-gray-600 dark:text-gray-300">
+        選択したサイトに対して、Search Consoleから検索クエリを取得し、自動で記事生成を開始します。
+      </p>
+
+      <button type="button"
+              onclick="startGSCGeneration()"
+              class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded">
+        🔁 GSCデータから記事生成を開始
+      </button>
+    </form>
+  </div>
+
+  <!-- 右カラム：既存のGSC由来キーワード（参考） -->
+  <div>
+    <h3 class="text-xl font-semibold mb-4">🔖 現在のGSCキーワード一覧</h3>
+    {% if gsc_keywords %}
+      <ul class="bg-white dark:bg-gray-800 border rounded shadow divide-y max-h-[400px] overflow-y-auto">
+        {% for kw in gsc_keywords %}
+          <li class="p-3 flex justify-between items-center">
+            <span>{{ kw.keyword }}</span>
+            <span class="text-sm text-gray-500">
+              {{ "生成済み" if kw.used else "未生成" }}
+            </span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-gray-500">まだGSC由来のキーワードは登録されていません。</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- JS -->
+<script>
+  function startGSCGeneration() {
+    const siteId = document.getElementById("gsc-site-id").value;
+    if (!siteId) {
+      alert("対象サイトを選択してください。");
+      return;
+    }
+    if (confirm("Search Consoleデータから記事生成を開始しますか？")) {
+      window.location.href = `/generate_from_gsc/${siteId}`;
+    }
+  }
+</script>
+{% endblock %}
