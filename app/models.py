@@ -163,3 +163,25 @@ class TokenUsageLog(db.Model):
     created_at = db.Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
     user = db.relationship("User", backref="token_logs")
+
+# ✅ GSC 認証トークン保存用モデル
+class GSCAuthToken(db.Model):
+    __tablename__ = 'gsc_auth_tokens'
+
+    id = db.Column(db.Integer, primary_key=True)
+    site_id = db.Column(db.Integer, db.ForeignKey('site.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+
+    access_token = db.Column(db.String(500), nullable=False)
+    refresh_token = db.Column(db.String(500), nullable=True)
+    token_expiry = db.Column(db.DateTime, nullable=True)
+
+    # 関連リレーション
+    user = db.relationship("User", backref="gsc_tokens")
+    site = db.relationship("Site", backref="gsc_tokens")
+
+    def is_expired(self):
+        from datetime import datetime, timedelta
+        if not self.token_expiry:
+            return True
+        return datetime.utcnow() >= self.token_expiry - timedelta(minutes=5)

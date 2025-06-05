@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 
 from flask import (
     Blueprint, render_template, redirect, url_for,
-    flash, request, abort, g, jsonify, current_app, send_from_directory
+    flash, request, abort, g, jsonify, current_app, send_from_directory, session
 )
 from flask_login import (
     login_user, logout_user, login_required, current_user
@@ -1097,7 +1097,7 @@ def login():
             (User.email == identifier) | (User.username == identifier)
         ).first()
 
-        if user and check_password_hash(user.password, password):
+        if user and check_password_hash(user.password_hash, password):
             login_user(user)
             flash("ログイン成功！", "success")
             return redirect(url_for("main.dashboard", username=user.username))
@@ -1819,3 +1819,83 @@ def debug_post(aid):
         return f"SUCCESS: {url}"
     except Exception as e:
         return f"ERROR: {e}", 500
+    
+import requests
+from app.models import GSCAuthToken, db
+import datetime
+
+# Google OAuth2 設定
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
+GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI")
+GOOGLE_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly"
+GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+
+
+@bp.route("/authorize_gsc/<int:site_id>")
+@login_required
+def authorize_gsc(site_id):
+    session["gsc_site_id"] = site_id  # 後でcallbackで参照するため保存
+    auth_url = (
+        f"{GOOGLE_AUTH_URL}?"
+        f"response_type=code&client_id={GOOGLE_CLIENT_ID}"
+        f"&redirect_uri={GOOGLE_REDIRECT_URI}"
+        f"&scope={GOOGLE_SCOPE}&access_type=offline&prompt=consent"
+    )
+    return redirect(auth_url)
+
+
+@bp.route("/oauth2callback")
+@login_required
+def oauth2callback():
+    from app.models import Site
+
+    code = request.args.get("code")
+    if not code:
+        flash("Google認証に失敗しました。", "danger")
+        return redirect(url_for("main.gsc_connect"))
+
+    site_id = session.get("gsc_site_id")
+    site = Site.query.get_or_404(site_id)
+
+    # トークン交換リクエスト
+    data = {
+        "code": code,
+        "client_id": GOOGLE_CLIENT_ID,
+        "client_secret": GOOGLE_CLIENT_SECRET,
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "grant_type": "authorization_code",
+    }
+    response = requests.post(GOOGLE_TOKEN_URL, data=data)
+    if response.status_code != 200:
+        flash("トークンの取得に失敗しました。", "danger")
+        return redirect(url_for("main.gsc_connect"))
+
+    tokens = response.json()
+    access_token = tokens["access_token"]
+    refresh_token = tokens.get("refresh_token")
+    expires_in = tokens.get("expires_in", 3600)
+    expiry = datetime.datetime.utcnow() + datetime.timedelta(seconds=expires_in)
+
+    # 保存（存在する場合は更新）
+    existing = GSCAuthToken.query.filter_by(site_id=site.id, user_id=current_user.id).first()
+    if existing:
+        existing.access_token = access_token
+        existing.refresh_token = refresh_token
+        existing.token_expiry = expiry
+    else:
+        new_token = GSCAuthToken(
+            site_id=site.id,
+            user_id=current_user.id,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_expiry=expiry,
+        )
+        db.session.add(new_token)
+
+    site.gsc_connected = True
+    db.session.commit()
+
+    flash(f"サイト「{site.name}」とGoogle Search Consoleの接続に成功しました。", "success")
+    return redirect(url_for("main.gsc_connect"))
