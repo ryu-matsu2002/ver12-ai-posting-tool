@@ -1483,6 +1483,8 @@ def generate(username):
         status_filter=status_filter
     )
 
+# ─────────── GSCルートコード
+
 from app.google_client import fetch_search_queries
 from app.models import Keyword  # 🔁 既存キーワード参照のため追加
 from app.article_generator import enqueue_generation  # 🔁 忘れずに
@@ -1563,6 +1565,36 @@ def gsc_generate():
         selected_site=selected_site,
         gsc_keywords=gsc_keywords
     )
+
+
+# --- 既存インポートの下に追加（必要に応じて） ---
+from flask import render_template, redirect, url_for, flash
+from flask_login import login_required, current_user
+from app.models import Site, db
+
+# ✅ /gsc-connect: GSC連携ページの表示
+@bp.route("/gsc-connect")
+@login_required
+def gsc_connect():
+    sites = Site.query.filter_by(user_id=current_user.id).all()
+    return render_template("gsc_connect.html", sites=sites)
+
+# ✅ /connect_gsc/<site_id>: GSC連携フラグ設定（ダミー連携）
+@bp.route("/connect_gsc/<int:site_id>")
+@login_required
+def connect_gsc(site_id):
+    site = Site.query.get_or_404(site_id)
+    if site.user_id != current_user.id:
+        flash("アクセス権がありません。", "danger")
+        return redirect(url_for("main.gsc_connect"))
+
+    # 実際のOAuth2認証処理などが未実装の場合、連携済みに更新だけしておく
+    site.gsc_connected = True
+    db.session.commit()
+
+    flash(f"サイト「{site.name}」とGSCの連携が完了しました。", "success")
+    return redirect(url_for("main.gsc_connect"))
+
 
 
 # ─────────── 生成ログ

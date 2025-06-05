@@ -67,6 +67,10 @@
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/chatgpt') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">smart_toy</span>ChatGPT
       </a>
+      <a href="{{ url_for('main.gsc_connect') }}"
+         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/gsc-connect') and 'font-semibold bg-[#0f2fa6]' }}">
+        <span class="material-icons align-middle mr-2">link</span>Search Console連携
+      </a>
       {% if current_user.is_authenticated and current_user.is_admin %}
       <a href="{{ url_for('admin.admin_dashboard') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full text-yellow-300 font-semibold">
