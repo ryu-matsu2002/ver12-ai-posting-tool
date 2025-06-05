@@ -1573,27 +1573,40 @@ from flask_login import login_required, current_user
 from app.models import Site, db
 
 # ✅ /gsc-connect: GSC連携ページの表示
+# ✅ /gsc-connect: GSC連携ページの表示（トークンの有無で判定）
 @bp.route("/gsc-connect")
 @login_required
 def gsc_connect():
     sites = Site.query.filter_by(user_id=current_user.id).all()
+
+    # トークン取得
+    from app.models import GSCAuthToken
+    tokens = {
+        token.site_id: token for token in GSCAuthToken.query.filter_by(user_id=current_user.id).all()
+    }
+
+    # 各サイトごとに is_token_connected フラグを付ける
+    for site in sites:
+        site.is_token_connected = site.id in tokens
+
     return render_template("gsc_connect.html", sites=sites)
 
-# ✅ /connect_gsc/<site_id>: GSC連携フラグ設定（ダミー連携）
+# ✅ /connect_gsc/<site_id>: GSC連携フラグ設定（ダミー版・今後は不要）
 @bp.route("/connect_gsc/<int:site_id>")
 @login_required
 def connect_gsc(site_id):
     site = Site.query.get_or_404(site_id)
     if site.user_id != current_user.id:
         flash("アクセス権がありません。", "danger")
-        return redirect(url_for("main.gsc_connect"))
+        return redirect(url_for("main.gsc_connect", username=current_user.username))
 
-    # 実際のOAuth2認証処理などが未実装の場合、連携済みに更新だけしておく
+    # （注意）本番では不要 → 本来は /authorize_gsc → /oauth2callback で接続
     site.gsc_connected = True
     db.session.commit()
 
-    flash(f"サイト「{site.name}」とGSCの連携が完了しました。", "success")
-    return redirect(url_for("main.gsc_connect"))
+    flash(f"サイト「{site.name}」とGoogleサーチコンソールの連携が完了しました。", "success")
+    return redirect(url_for("main.gsc_connect", username=current_user.username))
+
 
 
 
