@@ -49,6 +49,10 @@ def create_app() -> Flask:
     db.init_app(app)
     login_manager.init_app(app)
     migrate.init_app(app, db)
+
+    login_manager.login_message = "このページを開くにはログインが必要です。"
+    login_manager.login_message_category = "info"  # Bootstrapの黄色表示
+
     app.logger.setLevel("DEBUG")
 
     # ─── Blueprints 登録とスケジューラ起動 ───────
