@@ -10,9 +10,15 @@
 
     <!-- ユーザー名 -->
     <div>
-      <label class="block text-sm font-semibold mb-1">ユーザー名 <span class="text-red-600">必須</span></label>
+      <label class="block text-sm font-semibold mb-1">
+        ユーザー名 <span class="text-red-600">必須</span>
+      </label>
       {{ form.username(class="w-full border border-gray-300 p-2 rounded") }}
+      <small class="text-gray-500 text-sm">
+        ※ アルファベットの小文字のみで入力してください（例: ryunosuke123）
+      </small>
     </div>
+
 
     <!-- メールアドレス -->
     <div>
