@@ -1474,12 +1474,17 @@ from app.google_client import fetch_search_queries
 from app.models import Keyword  # 🔁 既存キーワード参照のため追加
 from app.article_generator import enqueue_generation  # 🔁 忘れずに
 
-@bp.route("/generate_from_gsc/<int:site_id>", methods=["GET", "POST"])  # ← 追加
+@bp.route("/generate_from_gsc/<int:site_id>", methods=["GET", "POST"])
 @login_required
 def generate_from_gsc(site_id):
     site = Site.query.get_or_404(site_id)
     if site.user_id != current_user.id:
         abort(403)
+
+    # ✅ GSC未接続のガード
+    if not site.gsc_connected:
+        flash("このサイトはまだSearch Consoleと接続されていません。", "danger")
+        return redirect(url_for("main.gsc_connect"))
 
     try:
         rows = fetch_search_queries(site.url, days=7, row_limit=40)
@@ -1511,7 +1516,7 @@ def generate_from_gsc(site_id):
             source='gsc'
         ))
 
-    # ✅ GSC接続状態を保存（初回のみ）
+    # ✅ GSC接続状態を保存（初回のみ）※保険として残す
     if not site.gsc_connected:
         site.gsc_connected = True
 
@@ -1522,6 +1527,7 @@ def generate_from_gsc(site_id):
 
     flash(f"{len(new_keywords)}件のキーワードから記事生成を開始しました", "success")
     return redirect(url_for("main.keywords", username=current_user.username))
+
 
 @bp.route("/gsc_generate", methods=["GET"])
 @login_required
