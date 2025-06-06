@@ -183,7 +183,8 @@
         submitButton.textContent = "🔄 決済中...";
 
         const result = await stripe.confirmCardPayment(data.clientSecret, {
-          payment_method: { card: card }
+          payment_method: { card: card },
+          return_url: window.location.href + "?success=true"  // ✅ 追加
         });
 
         if (result.error) {
@@ -197,12 +198,14 @@
           submitButton.disabled = false;
           submitButton.textContent = "支払う";
         } else {
+    // 3Dセキュア成功時は return_url にリダイレクトされるため、ここには来ないこともある
           paymentMessage.textContent = "✅ 支払い完了しました！サイト登録が可能になりました。";
           paymentMessage.className = "mt-4 p-4 bg-green-100 text-green-800 rounded shadow";
           paymentMessage.classList.remove("hidden");
           setTimeout(() => location.reload(), 2000);
         }
-      }, { once: true }); // ✅ 多重バインド防止
+      }, { once: true });
+
     } else {
       alert("Stripe連携に失敗しました。もう一度お試しください。");
       payNowButton.disabled = false;

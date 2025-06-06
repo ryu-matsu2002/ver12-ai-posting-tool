@@ -127,11 +127,12 @@
     const data = await response.json();
     if (data.clientSecret) {
       const result = await stripe.confirmCardPayment(data.clientSecret, {
-        payment_method: { card: card }
+        payment_method: { card: card },
+        return_url: window.location.href + "?success=true"  // ✅ ここを追加
       });
 
+      // ⚠️ 基本的に return_url にリダイレクトされるためここには来ないが、念のためのUI処理
       if (result.error) {
-        // エラー表示
         const message = result.error.message || "支払いに失敗しました。";
         paymentMessage.className = "mt-4 p-4 bg-red-100 text-red-800 rounded shadow";
         paymentMessage.innerHTML = `
@@ -142,11 +143,6 @@
         paymentMessage.classList.remove("hidden");
         submitButton.disabled = false;
         submitButton.textContent = "💳 サイト登録枠を購入する";
-      } else {
-        paymentMessage.textContent = "✅ 支払い完了しました！2秒後にサイト登録ページへ移動します。";
-        paymentMessage.className = "mt-4 text-center text-green-700 font-semibold";
-        paymentMessage.classList.remove("hidden");
-        setTimeout(() => window.location.href = window.location.href + "?success=true", 2000);
       }
     } else {
       paymentMessage.textContent = "❌ Stripeとの接続に失敗しました。もう一度お試しください。";
