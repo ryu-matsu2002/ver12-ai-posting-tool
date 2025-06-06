@@ -263,28 +263,38 @@ def create_payment_intent():
     try:
         data = request.get_json()
         plan_type = data.get("plan_type", "affiliate")
-        site_count = int(data.get("site_count", 1))
+        site_count_raw = data.get("site_count", "1")
         user_id = int(data.get("user_id"))  # 必須
-        special = data.get("special", "no")  # 特別プラン
+        special = data.get("special", "no")
 
-        # 🔸 特別プランかどうかで価格を設定
+        # site_count を整数に変換、安全対策
+        try:
+            site_count = int(site_count_raw)
+        except (ValueError, TypeError):
+            site_count = 1
+
+        if site_count <= 0:
+            return jsonify(error="サイト数が無効です"), 400
+
+        # 単価計算
         if special == "yes":
-            unit_price = 1000  # TCC特別価格
+            unit_price = 1000
         else:
             unit_price = 3000 if plan_type == "affiliate" else 20000
 
         total_amount = unit_price * site_count
+
+        if total_amount < 100:
+            return jsonify(error="支払い金額が無効です"), 400
 
         # Stripe PaymentIntent 作成
         intent = stripe.PaymentIntent.create(
             amount=total_amount,
             currency="jpy",
             automatic_payment_methods={"enabled": True},
-            confirmation_method="automatic",  # ← 明示的に追加
+            confirmation_method="automatic",
             payment_method_options={
-                "card": {
-                    "request_three_d_secure": "automatic"  # ← 重要！
-                }
+                "card": {"request_three_d_secure": "automatic"}
             },
             metadata={
                 "user_id": str(user_id),
@@ -297,8 +307,9 @@ def create_payment_intent():
         return jsonify({"clientSecret": intent.client_secret})
 
     except Exception as e:
-        return jsonify(error=str(e)), 400
-
+        # サーバー側ログ出力も追加
+        current_app.logger.error(f"[create-payment-intent エラー] {e}")
+        return jsonify(error="サーバーエラーが発生しました"), 400
 
 
 # ────────────── 通常購入ページ
