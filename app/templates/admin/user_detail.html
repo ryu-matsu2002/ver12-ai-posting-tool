@@ -14,7 +14,16 @@
       <tr><th class="p-2 bg-gray-100">電話番号</th><td class="p-2">{{ user.phone }}</td></tr>
       <tr><th class="p-2 bg-gray-100">住所</th><td class="p-2">{{ user.postal_code }} {{ user.address }}</td></tr>
       <tr><th class="p-2 bg-gray-100">ユーザー区分</th><td class="p-2">{{ '法人' if user.user_type == 'corporate' else '個人' }}</td></tr>
-      <tr><th class="p-2 bg-gray-100">登録日時</th><td class="p-2">{{ user.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</td></tr>
+      <tr>
+        <th class="p-2 bg-gray-100">登録日時</th>
+        <td class="p-2">
+          {% if user.created_at %}
+            {{ user.created_at.strftime("%Y-%m-%d %H:%M:%S") }}
+          {% else %}
+            未登録
+          {% endif %}
+        </td>
+      </tr>
       <tr><th class="p-2 bg-gray-100">管理者</th><td class="p-2">{{ '✅' if user.is_admin else '❌' }}</td></tr>
       <tr><th class="p-2 bg-gray-100">特別アクセス</th><td class="p-2">{{ '✅' if user.is_special_access else '❌' }}</td></tr>
     </tbody>
