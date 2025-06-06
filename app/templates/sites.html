@@ -125,6 +125,9 @@
   card.mount("#card-element");
 
   const priceMap = { affiliate: 3000, business: 20000 };
+  const submitButton = document.getElementById("submit-payment");
+  const payNowButton = document.getElementById("pay-now");
+  const paymentMessage = document.getElementById("payment-message");
 
   function updateTotal() {
     const plan = document.getElementById("plan_type").value;
@@ -137,24 +140,27 @@
     btn.addEventListener("click", () => {
       document.querySelectorAll(".site-option").forEach(b => b.classList.remove("selected"));
       btn.classList.add("selected");
-      const val = btn.getAttribute("data-value");
-      document.getElementById("site_count_hidden").value = val;
+      document.getElementById("site_count_hidden").value = btn.dataset.value;
       document.getElementById("site_count_custom").value = "";
       updateTotal();
     });
   });
 
-  document.getElementById("site_count_custom").addEventListener("input", (e) => {
+  document.getElementById("site_count_custom").addEventListener("input", e => {
     document.querySelectorAll(".site-option").forEach(b => b.classList.remove("selected"));
     document.getElementById("site_count_hidden").value = e.target.value;
     updateTotal();
   });
 
   document.getElementById("plan_type").addEventListener("change", updateTotal);
+  updateTotal();
 
-  document.getElementById("pay-now").addEventListener("click", async () => {
+  payNowButton.addEventListener("click", async () => {
     const plan = document.getElementById("plan_type").value;
     const count = parseInt(document.getElementById("site_count_hidden").value || 1);
+
+    payNowButton.disabled = true;
+    payNowButton.textContent = "🔄 処理中...";
 
     const response = await fetch("/create-payment-intent", {
       method: "POST",
@@ -171,21 +177,37 @@
       document.getElementById("plan-form").classList.add("hidden");
       document.getElementById("payment-form").classList.remove("hidden");
 
-      document.getElementById("submit-payment").addEventListener("click", async (e) => {
+      submitButton.addEventListener("click", async (e) => {
         e.preventDefault();
+        submitButton.disabled = true;
+        submitButton.textContent = "🔄 決済中...";
+
         const result = await stripe.confirmCardPayment(data.clientSecret, {
           payment_method: { card: card }
         });
+
         if (result.error) {
-          alert("支払いに失敗しました: " + result.error.message);
+          paymentMessage.innerHTML = `
+            ❌ <strong>支払いが失敗しました:</strong><br>
+            ${result.error.message || "不明なエラー"}<br>
+            <small class="text-xs">※ 3Dセキュア認証が完了していない可能性があります。</small>
+          `;
+          paymentMessage.className = "mt-4 p-4 bg-red-100 text-red-800 rounded shadow";
+          paymentMessage.classList.remove("hidden");
+          submitButton.disabled = false;
+          submitButton.textContent = "支払う";
         } else {
-          document.getElementById("payment-message").classList.remove("hidden");
-          setTimeout(() => window.location.reload(), 2000);
+          paymentMessage.textContent = "✅ 支払い完了しました！サイト登録が可能になりました。";
+          paymentMessage.className = "mt-4 p-4 bg-green-100 text-green-800 rounded shadow";
+          paymentMessage.classList.remove("hidden");
+          setTimeout(() => location.reload(), 2000);
         }
-      });
+      }, { once: true }); // ✅ 多重バインド防止
+    } else {
+      alert("Stripe連携に失敗しました。もう一度お試しください。");
+      payNowButton.disabled = false;
+      payNowButton.textContent = "💳 プランを購入する";
     }
   });
-
-  updateTotal();
 </script>
 {% endblock %}

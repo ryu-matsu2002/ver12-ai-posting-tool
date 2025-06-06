@@ -57,11 +57,11 @@
         合計金額: <span id="total_price">¥1,000</span>
       </div>
 
-      <button type="submit" class="w-full mt-4 py-3 bg-gradient-to-r from-blue-500 to-blue-700 hover:from-blue-600 hover:to-blue-800 text-white rounded-lg text-lg font-bold shadow-md transform hover:scale-105 transition">
+      <button id="submit-button" type="submit" class="w-full mt-4 py-3 bg-gradient-to-r from-blue-500 to-blue-700 hover:from-blue-600 hover:to-blue-800 text-white rounded-lg text-lg font-bold shadow-md transform hover:scale-105 transition">
         💳 サイト登録枠を購入する
       </button>
 
-      <div id="payment-message" class="mt-4 text-center text-green-700 font-semibold hidden">✅ 支払い完了しました！</div>
+      <div id="payment-message" class="mt-4 text-center text-green-700 font-semibold hidden"></div>
     </form>
   </div>
 </div>
@@ -75,9 +75,10 @@
   card.mount("#card-element");
 
   const unitPrice = 1000;
-
-  // ✅ user_id を HTML から取得
   const userId = parseInt(document.getElementById("user-id").dataset.id);
+  const siteButtons = document.querySelectorAll(".site-option");
+  const submitButton = document.getElementById("submit-button");
+  const paymentMessage = document.getElementById("payment-message");
 
   function updateTotal() {
     const count = parseInt(document.getElementById("site_count_hidden").value || 1);
@@ -85,17 +86,13 @@
     document.getElementById("total_price").textContent = `¥${price.toLocaleString()}`;
   }
 
-  const siteButtons = document.querySelectorAll(".site-option");
   siteButtons.forEach(btn => {
     btn.addEventListener("click", () => {
       const val = btn.getAttribute("data-value");
       document.getElementById("site_count_hidden").value = val;
       document.getElementById("site_count_custom").value = "";
 
-      siteButtons.forEach(b => {
-        b.classList.remove("border-blue-500", "bg-blue-50", "ring", "ring-offset-1");
-      });
-
+      siteButtons.forEach(b => b.classList.remove("border-blue-500", "bg-blue-50", "ring", "ring-offset-1"));
       btn.classList.add("border-blue-500", "bg-blue-50", "ring", "ring-offset-1");
 
       updateTotal();
@@ -104,9 +101,7 @@
 
   document.getElementById("site_count_custom").addEventListener("input", (e) => {
     document.getElementById("site_count_hidden").value = e.target.value;
-    siteButtons.forEach(b => {
-      b.classList.remove("border-blue-500", "bg-blue-50", "ring", "ring-offset-1");
-    });
+    siteButtons.forEach(b => b.classList.remove("border-blue-500", "bg-blue-50", "ring", "ring-offset-1"));
     updateTotal();
   });
 
@@ -115,6 +110,8 @@
   document.getElementById("payment-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const siteCount = parseInt(document.getElementById("site_count_hidden").value || 1);
+    submitButton.disabled = true;
+    submitButton.textContent = "🔄 支払い処理中...";
 
     const response = await fetch("{{ url_for('main.create_payment_intent') }}", {
       method: "POST",
@@ -123,7 +120,7 @@
         plan_type: "affiliate",
         site_count: siteCount,
         special: "yes",
-        user_id: userId  // ← 正しく送信
+        user_id: userId
       })
     });
 
@@ -132,12 +129,31 @@
       const result = await stripe.confirmCardPayment(data.clientSecret, {
         payment_method: { card: card }
       });
+
       if (result.error) {
-        alert("支払いに失敗しました: " + result.error.message);
+        // エラー表示
+        const message = result.error.message || "支払いに失敗しました。";
+        paymentMessage.className = "mt-4 p-4 bg-red-100 text-red-800 rounded shadow";
+        paymentMessage.innerHTML = `
+          ❌ <strong>支払いが失敗しました。</strong><br>
+          ${message}<br>
+          <small>※ スマホ認証や3Dセキュア確認に失敗した可能性があります。</small>
+        `;
+        paymentMessage.classList.remove("hidden");
+        submitButton.disabled = false;
+        submitButton.textContent = "💳 サイト登録枠を購入する";
       } else {
-        document.getElementById("payment-message").classList.remove("hidden");
+        paymentMessage.textContent = "✅ 支払い完了しました！2秒後にサイト登録ページへ移動します。";
+        paymentMessage.className = "mt-4 text-center text-green-700 font-semibold";
+        paymentMessage.classList.remove("hidden");
         setTimeout(() => window.location.href = window.location.href + "?success=true", 2000);
       }
+    } else {
+      paymentMessage.textContent = "❌ Stripeとの接続に失敗しました。もう一度お試しください。";
+      paymentMessage.className = "mt-4 p-4 bg-red-100 text-red-800 rounded shadow";
+      paymentMessage.classList.remove("hidden");
+      submitButton.disabled = false;
+      submitButton.textContent = "💳 サイト登録枠を購入する";
     }
   });
 </script>

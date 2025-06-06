@@ -280,6 +280,12 @@ def create_payment_intent():
             amount=total_amount,
             currency="jpy",
             automatic_payment_methods={"enabled": True},
+            confirmation_method="automatic",  # ← 明示的に追加
+            payment_method_options={
+                "card": {
+                    "request_three_d_secure": "automatic"  # ← 重要！
+                }
+            },
             metadata={
                 "user_id": str(user_id),
                 "plan_type": plan_type,
