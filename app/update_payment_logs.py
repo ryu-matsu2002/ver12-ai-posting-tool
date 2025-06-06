@@ -21,9 +21,9 @@ with app.app_context():
             balance_tx_id = charge.get("balance_transaction")
             balance_tx = BalanceTransaction.retrieve(balance_tx_id)
 
-            log.amount = balance_tx.amount // 100
-            log.fee = balance_tx.fee // 100
-            log.net_income = balance_tx.net // 100
+            log.amount = balance_tx.amount
+            log.fee = balance_tx.fee
+            log.net_income = balance_tx.net
             updated += 1
         except Exception as e:
             print(f"❌ Error updating log {log.id}: {e}")
