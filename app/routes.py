@@ -124,8 +124,15 @@ def stripe_webhook():
         user_id = metadata.get("user_id")
         site_count = int(metadata.get("site_count", 1))
         plan_type = metadata.get("plan_type", "affiliate")
+        stripe_payment_id = session.get("payment_intent")
 
-        # ✅ Quota 加算処理（既存）
+        # ✅ 重複チェック（最優先）
+        existing = PaymentLog.query.filter_by(stripe_payment_id=stripe_payment_id).first()
+        if existing:
+            current_app.logger.warning("⚠️ Checkout Webhook: この支払いはすでに処理済みです")
+            return jsonify({"message": "Already processed"}), 200
+
+        # ✅ Quota 加算処理
         if user_id:
             user = User.query.get(int(user_id))
             if user:
@@ -150,8 +157,7 @@ def stripe_webhook():
 
         # ✅ PaymentLog 保存処理
         email = session.get("customer_email")
-        amount = session.get("amount_total")// 100  # ← ✅ セントから円に変換
-        stripe_payment_id = session.get("payment_intent")
+        amount = session.get("amount_total") // 100  # セント → 円
 
         intent = stripe.PaymentIntent.retrieve(stripe_payment_id)
         charge_id = intent.get("latest_charge")
@@ -160,26 +166,22 @@ def stripe_webhook():
         balance_tx_id = charge.get("balance_transaction")
         balance_tx = stripe.BalanceTransaction.retrieve(balance_tx_id)
 
-        # 重複チェック
-        existing = PaymentLog.query.filter_by(stripe_payment_id=stripe_payment_id).first()
-        if not existing:
-            user = User.query.get(int(user_id)) if user_id else None
-            fee = balance_tx.fee // 100  # ← 任意で換算（必要なら
-            net = balance_tx.net // 100  # ← 任意で換算（必要なら）
+        fee = balance_tx.fee // 100
+        net = balance_tx.net // 100
 
-            log = PaymentLog(
-                user_id=user.id if user else None,
-                email=email,
-                amount=amount,
-                fee=fee,
-                net_income=net,
-                plan_type=plan_type,
-                stripe_payment_id=stripe_payment_id,
-                status="succeeded"  # ✅ 追加
-            )
-            db.session.add(log)
-            db.session.commit()
-            current_app.logger.info(f"💰 PaymentLog 保存（checkout）：{email} ¥{amount}")
+        log = PaymentLog(
+            user_id=user.id if user else None,
+            email=email,
+            amount=amount,
+            fee=fee,
+            net_income=net,
+            plan_type=plan_type,
+            stripe_payment_id=stripe_payment_id,
+            status="succeeded"
+        )
+        db.session.add(log)
+        db.session.commit()
+        current_app.logger.info(f"💰 PaymentLog 保存（checkout）：{email} ¥{amount}")
 
     # ✅ special_purchase 成功時
     elif event["type"] == "payment_intent.succeeded":
@@ -189,8 +191,15 @@ def stripe_webhook():
         site_count = int(metadata.get("site_count", 1))
         plan_type = metadata.get("plan_type", "affiliate")
         special = metadata.get("special", "no")
+        stripe_payment_id = intent.get("id")
 
-        # ✅ Quota 加算処理（既存）
+        # ✅ 重複チェック（最優先）
+        existing = PaymentLog.query.filter_by(stripe_payment_id=stripe_payment_id).first()
+        if existing:
+            current_app.logger.warning("⚠️ PaymentIntent Webhook: この支払いはすでに処理済みです")
+            return jsonify({"message": "Already processed"}), 200
+
+        # ✅ Quota 加算処理
         if user_id:
             user = User.query.get(int(user_id))
             if user:
@@ -214,9 +223,8 @@ def stripe_webhook():
             current_app.logger.warning("⚠️ Webhook: metadata に user_id が含まれていません")
 
         # ✅ PaymentLog 保存処理
-        amount = intent.get("amount")// 100  # ← ✅ セントから円に変換
+        amount = intent.get("amount") // 100
         email = intent.get("receipt_email") or intent.get("customer_email")
-        stripe_payment_id = intent.get("id")
 
         charge_id = intent.get("latest_charge")
         charge = stripe.Charge.retrieve(charge_id)
@@ -224,32 +232,25 @@ def stripe_webhook():
         balance_tx_id = charge.get("balance_transaction")
         balance_tx = stripe.BalanceTransaction.retrieve(balance_tx_id)
 
-        # 重複チェック
-        existing = PaymentLog.query.filter_by(stripe_payment_id=stripe_payment_id).first()
-        if not existing:
-            user = User.query.get(int(user_id)) if user_id else None
+        if not email and user:
+            email = user.email
 
-            # ✅ 修正点：emailが取得できなければユーザー情報から補完
-            if not email and user:
-                email = user.email  # ← これを追加！
+        fee = balance_tx.fee // 100
+        net = balance_tx.net // 100
 
-
-            fee = balance_tx.fee // 100  # ← 任意で換算（必要なら）
-            net = balance_tx.net // 100  # ← 任意で換算（必要なら）  
-
-            log = PaymentLog(
-                user_id=user.id if user else None,
-                email=email,
-                amount=amount,
-                fee=fee,
-                net_income=net,
-                plan_type=plan_type,
-                stripe_payment_id=stripe_payment_id,
-                status="succeeded"
-            )
-            db.session.add(log)
-            db.session.commit()
-            current_app.logger.info(f"💰 PaymentLog 保存（special）：{email} ¥{amount}")
+        log = PaymentLog(
+            user_id=user.id if user else None,
+            email=email,
+            amount=amount,
+            fee=fee,
+            net_income=net,
+            plan_type=plan_type,
+            stripe_payment_id=stripe_payment_id,
+            status="succeeded"
+        )
+        db.session.add(log)
+        db.session.commit()
+        current_app.logger.info(f"💰 PaymentLog 保存（special）：{email} ¥{amount}")
 
     return jsonify(success=True)
 
@@ -664,18 +665,16 @@ def accounting():
     if not current_user.is_admin:
         abort(403)
 
-    from datetime import datetime, timedelta
-    from sqlalchemy import extract
+    from datetime import datetime
     from app.models import PaymentLog
 
     now = datetime.utcnow()
-    now_year = now.year  # HTMLに渡す現在年
+    now_year = now.year
 
-    # ✅ クエリパラメータ取得
+    # パラメータ取得
     year_param = request.args.get("year", str(now.year))
     month_param = request.args.get("month", str(now.month))
 
-    # ✅ 年月に応じてログを抽出
     if year_param == "all":
         logs = PaymentLog.query.order_by(PaymentLog.created_at.desc()).all()
         selected_year = "all"
@@ -697,38 +696,19 @@ def accounting():
         selected_year = year
         selected_month = month
 
-    # ✅ 基本集計
-    total_amount = sum(log.amount for log in logs)
+    # ✅ Stripeから取得済みの値をそのまま使用
+    total_amount = sum(log.amount or 0 for log in logs)
     total_fee = sum(log.fee or 0 for log in logs)
     total_net = sum(log.net_income or 0 for log in logs)
-
-    # ✅ 利益分配集計（追加）
-    ryu_total = 0
-    take_total = 0
-    expense_total = 0
-
-    for log in logs:
-        amount = log.amount or 0
-        if amount == 1000:
-            expense_total += amount
-        elif amount == 3000:
-            split = amount // 3
-            expense_total += split
-            ryu_total += split
-            take_total += split
-        elif amount == 20000:
-            ryu_total += int(amount * 0.8)
-            take_total += int(amount * 0.2)
-        # ※その他の金額は無視（必要なら将来追加）
 
     return render_template("admin/accounting.html",
         logs=logs,
         total_amount=total_amount,
         total_fee=total_fee,
         total_net=total_net,
-        ryu_total=ryu_total,
-        take_total=take_total,
-        expense_total=expense_total,
+        ryu_total=0,         # ← 分配しない場合は0
+        take_total=0,
+        expense_total=0,
         selected_year=selected_year,
         selected_month=selected_month,
         now_year=now_year
