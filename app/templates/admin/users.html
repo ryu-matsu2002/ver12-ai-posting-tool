@@ -25,7 +25,8 @@
   <table class="w-full text-left table-auto bg-white shadow rounded">
     <thead class="bg-gray-100 text-gray-700">
       <tr class="border-b">
-        <th class="px-2 py-2">ID</th>
+        <th class="px-2 py-2">ID / 詳細</th>
+        <th class="px-2 py-2">名前（姓 名）</th>
         <th class="px-2 py-2">Email</th>
         <th class="px-2 py-2">記事数</th>
         <th class="px-2 py-2">TCC決済ページアクセス権</th>
@@ -35,11 +36,25 @@
     <tbody>
       {% for u in users %}
       <tr class="border-b hover:bg-gray-50">
-        <td class="px-2 py-2">{{ u.id }}</td>
+        <!-- ID + 詳細 -->
+        <td class="px-2 py-2 whitespace-nowrap">
+          {{ u.id }}
+          <a href="{{ url_for('admin.user_detail', uid=u.id) }}"
+             class="ml-2 px-2 py-1 text-xs bg-gray-100 text-blue-600 border border-blue-300 rounded hover:bg-blue-50">
+            詳細
+          </a>
+        </td>
+
+        <!-- 名前 -->
+        <td class="px-2 py-2">{{ u.last_name }} {{ u.first_name }}</td>
+
+        <!-- Email -->
         <td class="px-2 py-2">{{ u.email }}</td>
+
+        <!-- 記事数 -->
         <td class="px-2 py-2">{{ u.articles|length }}</td>
 
-        <!-- ✅ 特別アクセス + 切替ボタン + リンク -->
+        <!-- ✅ 決済ページアクセス権 -->
         <td class="px-2 py-2">
           {% if u.is_special_access %}
             <span class="text-green-600 font-semibold">✅ 有効</span>
@@ -53,7 +68,7 @@
           </form>
         </td>
 
-        <!-- ✅ 操作：記事一覧 / ログイン / 削除 -->
+        <!-- ✅ 操作 -->
         <td class="px-2 py-2 space-x-2 whitespace-nowrap">
           <!-- 記事一覧 -->
           <a href="{{ url_for('admin.user_articles', uid=u.id) }}" class="text-blue-600 hover:underline">
@@ -67,7 +82,7 @@
             </button>
           </form>
 
-          <!-- 削除ボタン -->
+          <!-- 削除 -->
           <form method="post"
                 action="{{ url_for('admin.delete_user', user_id=u.id) }}"
                 class="inline"

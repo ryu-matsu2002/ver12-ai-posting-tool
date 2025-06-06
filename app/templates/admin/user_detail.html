@@ -1,0 +1,27 @@
+{% extends "base_admin.html" %}
+{% block title %}ユーザー詳細 - {{ user.id }}{% endblock %}
+
+{% block content %}
+<div class="p-6">
+  <h2 class="text-2xl font-bold mb-6">👤 ユーザー詳細</h2>
+
+  <table class="table-auto w-full bg-white shadow rounded text-left">
+    <tbody>
+      <tr><th class="p-2 bg-gray-100">ID</th><td class="p-2">{{ user.id }}</td></tr>
+      <tr><th class="p-2 bg-gray-100">姓 名</th><td class="p-2">{{ user.last_name }} {{ user.first_name }}</td></tr>
+      <tr><th class="p-2 bg-gray-100">フリガナ</th><td class="p-2">{{ user.last_kana }} {{ user.first_kana }}</td></tr>
+      <tr><th class="p-2 bg-gray-100">メールアドレス</th><td class="p-2">{{ user.email }}</td></tr>
+      <tr><th class="p-2 bg-gray-100">電話番号</th><td class="p-2">{{ user.phone }}</td></tr>
+      <tr><th class="p-2 bg-gray-100">住所</th><td class="p-2">{{ user.postal_code }} {{ user.address }}</td></tr>
+      <tr><th class="p-2 bg-gray-100">ユーザー区分</th><td class="p-2">{{ '法人' if user.user_type == 'corporate' else '個人' }}</td></tr>
+      <tr><th class="p-2 bg-gray-100">登録日時</th><td class="p-2">{{ user.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</td></tr>
+      <tr><th class="p-2 bg-gray-100">管理者</th><td class="p-2">{{ '✅' if user.is_admin else '❌' }}</td></tr>
+      <tr><th class="p-2 bg-gray-100">特別アクセス</th><td class="p-2">{{ '✅' if user.is_special_access else '❌' }}</td></tr>
+    </tbody>
+  </table>
+
+  <div class="mt-6">
+    <a href="{{ url_for('admin.admin_users') }}" class="text-blue-600 underline">← ユーザー一覧に戻る</a>
+  </div>
+</div>
+{% endblock %}

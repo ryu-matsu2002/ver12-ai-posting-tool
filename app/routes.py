@@ -593,6 +593,18 @@ def admin_users():
         prompt_count=prompt_count,
         article_count=article_count
     )
+@admin_bp.route("/admin/user/<int:uid>")
+@login_required
+def admin_user_detail(uid):
+    if not current_user.is_admin:
+        abort(403)
+
+    user = User.query.get_or_404(uid)
+
+    return render_template("admin/user_detail.html", user=user)
+
+
+
 
 @admin_bp.post("/admin/user/<int:uid>/toggle-special")
 @login_required
