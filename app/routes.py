@@ -579,7 +579,7 @@ def admin_users():
     if not current_user.is_admin:
         abort(403)
 
-    users = User.query.all()
+    users = User.query.order_by(User.id).all()
 
     # 統計情報の取得
     site_count    = Site.query.count()

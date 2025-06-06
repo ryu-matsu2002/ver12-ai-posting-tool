@@ -27,8 +27,8 @@
       <tr class="border-b">
         <th class="px-2 py-2">ID / 詳細</th>
         <th class="px-2 py-2">名前（姓 名）</th>
-        <th class="px-2 py-2">Email</th>
         <th class="px-2 py-2">記事数</th>
+        <th class="px-2 py-2">登録サイト / プラン</th>
         <th class="px-2 py-2">TCC決済ページアクセス権</th>
         <th class="px-2 py-2">操作</th>
       </tr>
@@ -45,14 +45,31 @@
           </a>
         </td>
 
-        <!-- 名前 -->
-        <td class="px-2 py-2">{{ u.last_name }} {{ u.first_name }}</td>
-
-        <!-- Email -->
-        <td class="px-2 py-2">{{ u.email }}</td>
+        <!-- 名前 + 管理者/TCCラベル -->
+        <td class="px-2 py-2">
+          {% if u.is_admin %}
+            <span class="text-xs px-2 py-1 bg-red-100 text-red-700 border border-red-300 rounded mr-1">🛡 管理者</span>
+          {% endif %}
+          {{ u.last_name }} {{ u.first_name }}
+          {% if u.is_special_access %}
+            <span class="ml-2 text-xs px-2 py-1 bg-yellow-100 text-yellow-700 border border-yellow-400 rounded">💰 TCC</span>
+          {% endif %}
+        </td>
 
         <!-- 記事数 -->
         <td class="px-2 py-2">{{ u.articles|length }}</td>
+
+        <!-- 登録サイト数 / プラン -->
+        <td class="px-2 py-2 text-sm">
+          <span class="text-blue-700 font-semibold">{{ u.sites|length }}</span> サイト /
+          {% if u.site_quota %}
+            プラン: <strong>{{ u.site_quota.plan_type|capitalize }}</strong> /
+            使用済み: <strong>{{ u.site_quota.used_quota }}</strong> /
+            上限: <strong>{{ u.site_quota.total_quota }}</strong>
+          {% else %}
+            プランなし
+          {% endif %}
+        </td>
 
         <!-- ✅ 決済ページアクセス権 -->
         <td class="px-2 py-2">
