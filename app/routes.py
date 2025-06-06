@@ -1326,10 +1326,14 @@ def sites(username):
     form = SiteForm()
 
     quota = UserSiteQuota.query.filter_by(user_id=current_user.id).first()
-    remaining_quota = quota.total_quota - quota.used_quota if quota else 0
 
     # 🔸 現在のサイト一覧を取得
     site_list = Site.query.filter_by(user_id=current_user.id).all()
+
+    # 🔸 使用済み数をリアルタイムで取得（最も正確）
+    used_quota = len(site_list)
+    total_quota = quota.total_quota if quota else 0
+    remaining_quota = total_quota - used_quota
 
     # 🔸 POST時のサイト登録処理
     if form.validate_on_submit():
@@ -1345,10 +1349,6 @@ def sites(username):
             user_id  = current_user.id
         ))
 
-        # 🔸 used_quota を加算
-        if quota:
-            quota.used_quota += 1
-
         db.session.commit()
         flash("サイトを登録しました", "success")
         return redirect(url_for("main.sites", username=username))
@@ -1360,7 +1360,7 @@ def sites(username):
         remaining_quota=remaining_quota,
         plan_type=quota.plan_type if quota else "未契約",
         total_quota=quota.total_quota if quota else 0,
-        used_quota=quota.used_quota if quota else 0,
+        used_quota=used_quota,
         stripe_public_key=getenv("STRIPE_PUBLIC_KEY")
     )
 
