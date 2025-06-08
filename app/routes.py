@@ -1207,7 +1207,7 @@ def root_redirect():
 
 
 # ─────────── Dashboard
-from app.models import UserSiteQuota, Article, SiteQuotaLog  # ← SiteQuotaLog を追加
+from app.models import UserSiteQuota, Article, SiteQuotaLog, Site  # ← Site を追加
 
 @bp.route("/<username>/dashboard")
 @login_required
@@ -1229,11 +1229,11 @@ def dashboard(username):
     user = current_user
     quotas = UserSiteQuota.query.filter_by(user_id=user.id).all()
 
-    # プラン別にデータ構築
+    # プラン別にデータ構築（used をリアルタイムで取得）
     plans = {}
     for q in quotas:
         plan_type = q.plan_type
-        used = q.used_quota or 0
+        used = Site.query.filter_by(user_id=user.id, plan_type=plan_type).count()  # 🔄 used をリアルタイム算出
         total = q.total_quota or 0
         remaining = max(total - used, 0)
 
@@ -1246,9 +1246,9 @@ def dashboard(username):
             "logs": logs
         }
 
-    # 全体の合計（カード用）
+    # 全体の合計（カード用）もリアルタイムで
     total_quota = sum(q.total_quota for q in quotas)
-    used_quota = sum(q.used_quota for q in quotas)
+    used_quota = sum([Site.query.filter_by(user_id=user.id, plan_type=q.plan_type).count() for q in quotas])  # 🔄
     remaining_quota = max(total_quota - used_quota, 0)
 
     return render_template(
@@ -1261,8 +1261,9 @@ def dashboard(username):
         done=g.done,
         posted=g.posted,
         error=g.error,
-        plans=plans  # ✅ 追加
+        plans=plans
     )
+
 
 
 # ─────────── プロンプト CRUD（新規登録のみ）
