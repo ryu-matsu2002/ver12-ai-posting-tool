@@ -1329,7 +1329,6 @@ def purchase_history():
 from os import getenv
 from app.forms import SiteForm
 from app.models import SiteQuotaLog
-from . import bp
 
 @bp.route("/<username>/sites", methods=["GET", "POST"])
 @login_required
