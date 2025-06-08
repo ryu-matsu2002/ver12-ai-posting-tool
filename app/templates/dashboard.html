@@ -4,14 +4,40 @@
 {% block content %}
 <h2 class="text-3xl font-bold mb-8">ダッシュボード</h2>
 
-<!-- プラン情報 -->
-<div class="bg-gray-100 text-gray-800 p-4 rounded-lg shadow mb-8 dark:bg-gray-700 dark:text-white">
-  🧾 プラン: <strong>{{ plan_type|capitalize }}</strong> /
-  使用済み: <strong>{{ used_quota }}</strong> /
-  上限: <strong>{{ total_quota }}</strong> /
-  残り登録枠: <strong class="text-green-600">{{ remaining_quota }}</strong>
-</div>
+<!-- ✅ 登録枠の表示：サイト登録ページと同等 -->
+<div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow mb-8">
+  <h3 class="text-xl font-bold text-blue-800 mb-4">📦 登録枠の使用状況</h3>
+  {% for plan_name, plan in plans.items() %}
+    <div class="mb-4">
+      <p class="text-md font-semibold">
+        🧾 <strong>利用中のプラン:</strong>
+        {% if plan_name == 'affiliate' %}
+          アフィリエイト用プラン
+        {% elif plan_name == 'business' %}
+          事業用プラン
+        {% else %}
+          {{ plan_name }}
+        {% endif %}
+      </p>
+      <ul class="ml-4 mt-1 text-sm text-gray-700 dark:text-gray-300">
+        <li>● 登録サイト数：{{ plan.used }} サイト</li>
+        <li>● あと {{ plan.remaining }} サイト登録可能です。</li>
+      </ul>
 
+      {% if plan.logs %}
+        <details class="mt-2 ml-4">
+          <summary class="cursor-pointer text-blue-700 dark:text-blue-300">📜 登録枠の追加履歴を見る</summary>
+          <ul class="ml-6 list-disc mt-1 text-sm text-gray-600 dark:text-gray-400">
+            {% for log in plan.logs %}
+              <li>{{ log.created_at.strftime("%Y-%m-%d") }}：{{ log.count }}件（{{ log.reason }}）</li>
+            {% endfor %}
+          </ul>
+        </details>
+      {% endif %}
+    </div>
+    <hr class="my-4 border-gray-300 dark:border-gray-600">
+  {% endfor %}
+</div>
 
 <!-- ステータス表示 -->
 <div class="grid md:grid-cols-4 gap-6 mb-10">
@@ -24,7 +50,7 @@
     <p class="text-4xl font-extrabold text-blue-600">{{ done or 0 }}</p>
   </div>
   <div class="bg-white dark:bg-gray-800 p-6 rounded shadow text-center">
-    <p class="text-xl font-bold text-gray-800 mb-2">総記事数</p>
+    <p class="text-xl font-bold text-gray-800 dark:text-white mb-2">総記事数</p>
     <p class="text-4xl font-extrabold">{{ total_articles or 0 }}</p>
   </div>
   <div class="bg-white dark:bg-red-100 p-6 rounded shadow text-center">
