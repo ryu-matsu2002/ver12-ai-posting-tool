@@ -1343,18 +1343,17 @@ def sites(username):
     form = SiteForm()
     user = current_user
 
-    # 🔹 現在の登録済みサイト一覧と件数
+    # 🔹 登録済みサイト一覧と件数
     site_list = Site.query.filter_by(user_id=user.id).all()
-    site_count = len(site_list)
 
-    # 🔹 ユーザーが持つ全プランの登録枠データ
+    # 🔹 プランごとのクォータデータ
     quotas = UserSiteQuota.query.filter_by(user_id=user.id).all()
 
-    # 🔹 プランごとの使用状況と履歴ログを集計
+    # 🔹 プランごとのリアルタイム使用状況と履歴ログ
     quota_by_plan = {}
     for q in quotas:
         plan = q.plan_type
-        used = q.used_quota or 0
+        used = Site.query.filter_by(user_id=user.id, plan_type=plan).count()  # ← 🔄 used_quotaをリアルタイムで算出
         total = q.total_quota or 0
         remaining = max(total - used, 0)
         logs = SiteQuotaLog.query.filter_by(user_id=user.id, plan_type=plan).order_by(SiteQuotaLog.created_at.desc()).all()
@@ -1366,26 +1365,24 @@ def sites(username):
             "logs": logs
         }
 
-    # 🔹 全体としての合計上限
+    # 🔹 全体のトータル数と残数もリアルタイムで統一
     total_quota = sum([q.total_quota for q in quotas])
+    used_quota = sum([Site.query.filter_by(user_id=user.id, plan_type=q.plan_type).count() for q in quotas])
+    remaining_quota = total_quota - used_quota
 
     if form.validate_on_submit():
-        if site_count >= total_quota:
+        if used_quota >= total_quota:
             flash("サイト登録上限に達しています。追加するには課金が必要です。", "danger")
             return redirect(url_for("main.sites", username=username))
 
-        # 🔹 選択されたプランを取得
         selected_plan = form.plan_type.data
-
-        # 🔹 対象のプランの使用枠を1つ加算
         quota = UserSiteQuota.query.filter_by(user_id=user.id, plan_type=selected_plan).first()
         if quota:
-            quota.used_quota += 1
+            quota.used_quota = Site.query.filter_by(user_id=user.id, plan_type=selected_plan).count() + 1  # 🔄更新（念のため）
         else:
             flash("プラン情報が見つかりません。", "danger")
             return redirect(url_for("main.sites", username=username))
 
-        # 🔹 サイト登録（plan_typeを保存）
         db.session.add(Site(
             name       = form.name.data,
             url        = form.url.data.rstrip("/"),
@@ -1399,7 +1396,7 @@ def sites(username):
         flash("サイトを登録しました", "success")
         return redirect(url_for("main.sites", username=username))
 
-    # 🔹 Stripeでの支払い履歴（※登録枠履歴とは別）
+    # 🔹 Stripe履歴（参考表示用）
     history_logs = PaymentLog.query.filter_by(user_id=user.id).order_by(PaymentLog.created_at.desc()).all()
 
     return render_template(
@@ -1407,12 +1404,13 @@ def sites(username):
         form=form,
         sites=site_list,
         plans=quota_by_plan,
-        remaining_quota=total_quota - site_count,
+        remaining_quota=remaining_quota,  # ✅ ← 左上の表示に使用
         total_quota=total_quota,
-        used_quota=site_count,
+        used_quota=used_quota,
         history_logs=history_logs,
-        stripe_public_key=getenv("STRIPE_PUBLIC_KEY")
+        stripe_public_key=os.getenv("STRIPE_PUBLIC_KEY")
     )
+
 
 @bp.post("/<username>/sites/<int:sid>/delete")
 @login_required
