@@ -8,8 +8,10 @@
 <div class="bg-gray-100 text-gray-800 p-4 rounded-lg shadow mb-8 dark:bg-gray-700 dark:text-white">
   🧾 プラン: <strong>{{ plan_type|capitalize }}</strong> /
   使用済み: <strong>{{ used_quota }}</strong> /
-  上限: <strong>{{ total_quota }}</strong>
+  上限: <strong>{{ total_quota }}</strong> /
+  残り登録枠: <strong class="text-green-600">{{ remaining_quota }}</strong>
 </div>
+
 
 <!-- ステータス表示 -->
 <div class="grid md:grid-cols-4 gap-6 mb-10">

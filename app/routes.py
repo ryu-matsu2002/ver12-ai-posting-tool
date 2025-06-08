@@ -1229,11 +1229,15 @@ def dashboard(username):
     total_quota = quota.total_quota if quota else 0
     used_quota  = len(user.sites)
 
+    # ✅ 残り枠を明示（テンプレート側表示用に追加）
+    remaining_quota = total_quota - used_quota
+
     return render_template(
     "dashboard.html",
     plan_type=plan_type,
     total_quota=total_quota,
     used_quota=used_quota,
+    remaining_quota=remaining_quota,  # ← ✅ 追加
     total_articles=g.total_articles,
     done=g.done,
     posted=g.posted,

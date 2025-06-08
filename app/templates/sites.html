@@ -56,8 +56,18 @@
 
     <div class="mb-4 p-4 bg-yellow-100 border-l-4 border-yellow-500 rounded shadow text-sm text-yellow-800">
       <p>🧾 <strong>現在のプラン:</strong> {{ plan_type|capitalize }}</p>
-      <p>✅ <strong>使用済み:</strong> {{ used_quota }} / <strong>上限:</strong> {{ total_quota }}</p>
+      <p>
+        ✅ <strong>使用済み:</strong> {{ used_quota }} /
+        購入済み: <strong>{{ total_quota - used_quota }}</strong> /
+        上限: <strong>{{ total_quota }}</strong>
+      </p>
+      {% if remaining_quota > 0 %}
+        <p class="text-green-700 font-semibold mt-1">✅ あと {{ remaining_quota }} サイト登録可能です。</p>
+      {% else %}
+        <p class="text-red-600 font-semibold mt-1">⚠️ 登録上限に達しています。</p>
+      {% endif %}
     </div>
+
 
     <div id="plan-form">
       <div class="p-4 bg-blue-100 border border-blue-300 rounded shadow mb-4 text-sm leading-6">
