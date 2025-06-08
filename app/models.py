@@ -61,6 +61,8 @@ class Site(db.Model):
     gsc_connected = db.Column(db.Boolean, default=False)  # ✅ 追加
     # リレーション
     articles = db.relationship("Article", backref="site", lazy='selectin')
+    plan_type = db.Column(db.String(50), nullable=True)  # 'affiliate' または 'business'
+
 
 
 # ──── プロンプト ────

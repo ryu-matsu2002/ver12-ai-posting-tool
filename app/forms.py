@@ -122,6 +122,11 @@ class SiteForm(FlaskForm):
     url      = StringField("サイトURL",        validators=[DataRequired(), URL()])
     username = StringField("ユーザー名",        validators=[DataRequired()])
     app_pass = StringField("アプリケーションパスワード",  validators=[DataRequired()])
+    plan_type = SelectField(
+        "プラン種別",
+        choices=[("affiliate", "アフィリエイト用プラン"), ("business", "事業用プラン")],
+        validators=[DataRequired()]
+    )
     submit   = SubmitField("保存")
 
 # ✅ 新バージョンの KeywordForm（サイト選択＋一括保存対応）

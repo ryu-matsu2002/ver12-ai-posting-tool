@@ -40,6 +40,12 @@
         {{ form.app_pass(class="w-full p-3 text-base rounded border dark:bg-gray-700 dark:border-gray-600", disabled=(remaining_quota <= 0)) }}
         <small class="text-gray-500 dark:text-gray-400">WP の「アプリケーションパスワード」を入力</small>
       </div>
+
+      <div>
+        {{ form.plan_type.label(class="block mb-1 text-lg font-medium") }}
+        {{ form.plan_type(class="w-full p-3 text-base rounded border dark:bg-gray-700 dark:border-gray-600", disabled=(remaining_quota <= 0)) }}
+      </div>
+
       {% if remaining_quota > 0 %}
         {{ form.submit(class="py-3 px-6 bg-blue-600 hover:bg-blue-700 text-white text-lg rounded shadow") }}
       {% else %}
