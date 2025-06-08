@@ -56,14 +56,12 @@
         <!-- 記事数 -->
         <td class="px-2 py-2">{{ u.articles|length }}</td>
 
-        <!-- 登録サイト数 / プラン別に表示 -->
+        <!-- ✅ 登録サイト / プラン 表示 -->
         <td class="px-2 py-2 text-sm leading-6">
           {% if site_quota_summary[u.id] %}
             {% for plan_name, q in site_quota_summary[u.id].items() %}
-              {{ q.used }} サイト /
-              プラン: <strong>{{ plan_name|capitalize }}</strong> /
-              使用済み: <strong>{{ q.used }}</strong> /
-              上限: <strong>{{ q.total }}</strong><br>
+              {% set label = "アフィリエイト" if plan_name == "affiliate" else "事業用" if plan_name == "business" else plan_name %}
+              プラン：{{ label }}／登録済み：<strong>{{ q.used }}</strong>／残り：<strong>{{ q.remaining }}</strong><br>
             {% endfor %}
           {% else %}
             <span class="text-gray-500">プランなし</span>
