@@ -55,18 +55,34 @@
     </h3>
 
     <div class="mb-4 p-4 bg-yellow-100 border-l-4 border-yellow-500 rounded shadow text-sm text-yellow-800">
-      <p>🧾 <strong>現在のプラン:</strong> {{ plan_type|capitalize }}</p>
-      <p>
-        ✅ <strong>使用済み:</strong> {{ used_quota }} /
-        購入済み: <strong>{{ total_quota - used_quota }}</strong> /
-        上限: <strong>{{ total_quota }}</strong>
-      </p>
-      {% if remaining_quota > 0 %}
-        <p class="text-green-700 font-semibold mt-1">✅ あと {{ remaining_quota }} サイト登録可能です。</p>
+  {% for plan_name, plan in plans.items() %}
+    <p>🧾 <strong>利用中のプラン:</strong>
+      {% if plan_name == 'affiliate' %}
+        アフィリエイト用プラン
+      {% elif plan_name == 'business' %}
+        事業用プラン
       {% else %}
-        <p class="text-red-600 font-semibold mt-1">⚠️ 登録上限に達しています。</p>
+        {{ plan_name }}
       {% endif %}
-    </div>
+    </p>
+    <p>
+      ● 登録サイト数：{{ plan.used }}サイト<br>
+      ● あと {{ plan.remaining }} サイト登録可能です。
+    </p>
+    {% if plan.logs %}
+      <details class="mt-2 mb-2">
+        <summary class="cursor-pointer text-blue-700">📜 登録枠の追加履歴を見る</summary>
+        <ul class="ml-4 list-disc mt-1 text-gray-700">
+          {% for log in plan.logs %}
+            <li>{{ log.created_at.strftime("%Y-%m-%d") }}：{{ log.count }}件（{{ log.reason }}）</li>
+          {% endfor %}
+        </ul>
+      </details>
+    {% endif %}
+    <hr class="my-2 border-yellow-400">
+  {% endfor %}
+</div>
+
 
 
     <div id="plan-form">

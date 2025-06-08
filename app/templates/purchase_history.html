@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}購入履歴 | TCC autowize{% endblock %}
+
+{% block content %}
+<h2 class="text-3xl font-bold mb-8">🧾 登録枠の購入・追加履歴</h2>
+
+{% if logs %}
+  <div class="overflow-x-auto bg-white dark:bg-gray-800 rounded shadow">
+    <table class="min-w-full text-sm text-left text-gray-700 dark:text-gray-200">
+      <thead class="bg-gray-100 dark:bg-gray-700 text-xs font-semibold uppercase">
+        <tr>
+          <th class="px-4 py-3">日付</th>
+          <th class="px-4 py-3">プラン</th>
+          <th class="px-4 py-3">追加数</th>
+          <th class="px-4 py-3">理由</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for log in logs %}
+          <tr class="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600">
+            <td class="px-4 py-2">{{ log.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+            <td class="px-4 py-2">
+              {% if log.plan_type == 'affiliate' %}
+                アフィリエイト用
+              {% elif log.plan_type == 'business' %}
+                事業用
+              {% else %}
+                {{ log.plan_type }}
+              {% endif %}
+            </td>
+            <td class="px-4 py-2 font-semibold">{{ log.count }} サイト</td>
+            <td class="px-4 py-2 text-gray-600 dark:text-gray-300">{{ log.reason }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p class="text-gray-600 dark:text-gray-300">まだ購入・追加された履歴がありません。</p>
+{% endif %}
+
+<div class="mt-6">
+  <a href="{{ url_for('main.sites', username=current_user.username) }}" class="inline-block text-blue-600 hover:underline">
+    ← サイト登録ページに戻る
+  </a>
+</div>
+{% endblock %}

@@ -185,3 +185,16 @@ class GSCAuthToken(db.Model):
         if not self.token_expiry:
             return True
         return datetime.utcnow() >= self.token_expiry - timedelta(minutes=5)
+
+# ──── サイト登録枠の取得ログ ────
+class SiteQuotaLog(db.Model):
+    __tablename__ = 'site_quota_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    plan_type = db.Column(db.String(50), nullable=False)  # 'affiliate', 'business' など
+    count = db.Column(db.Integer, nullable=False)          # 加算（または減算）されたサイト数
+    reason = db.Column(db.String(255), nullable=False)     # 例："Stripe支払い", "管理者手動追加"
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship("User", backref="site_quota_logs")
