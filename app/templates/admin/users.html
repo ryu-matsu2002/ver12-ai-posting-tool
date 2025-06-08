@@ -61,12 +61,13 @@
           <span class="text-blue-700 font-semibold">{{ u.sites|length }}</span> サイト /
           {% if u.site_quota %}
             プラン: <strong>{{ u.site_quota.plan_type|capitalize }}</strong> /
-            使用済み: <strong>{{ u.site_quota.used_quota }}</strong> /
+            使用済み: <strong>{{ u.sites|length }}</strong> /
             上限: <strong>{{ u.site_quota.total_quota }}</strong>
           {% else %}
             プランなし
           {% endif %}
         </td>
+
 
         <!-- ✅ 決済ページアクセス権 -->
         <td class="px-2 py-2">
