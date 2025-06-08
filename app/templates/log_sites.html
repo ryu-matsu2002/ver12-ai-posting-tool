@@ -4,6 +4,16 @@
 {% block content %}
 <h2 class="text-2xl font-semibold mb-6">記事生成 - 投稿ログ - サイト一覧</h2>
 
+<!-- 🔽 フィルタ用セレクト -->
+<form method="get" class="mb-6">
+  <label for="status" class="font-medium mr-2">表示するステータス:</label>
+  <select id="status" name="plan_type" onchange="this.form.submit()" class="p-2 border rounded">
+    <option value="all" {% if selected_status == 'all' %}selected{% endif %}>すべてのステータス</option>
+    <option value="affiliate" {% if selected_status == 'affiliate' %}selected{% endif %}>アフィリエイト用</option>
+    <option value="business" {% if selected_status == 'business' %}selected{% endif %}>事業用</option>
+  </select>
+</form>
+
 {% if sites %}
   <table class="w-full table-auto text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700">
     <thead>
@@ -22,6 +32,15 @@
       <tr class="{% if loop.index0 % 2 == 0 %}bg-white{% else %}bg-blue-50{% endif %} border-b dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-900">
         <td class="px-3 py-2 align-top font-medium text-blue-700 dark:text-blue-300">
           [{{ site.name }}]
+          {% if site.plan_type == 'affiliate' %}
+            <span class="ml-2 inline-block bg-green-600 text-white text-xs font-semibold px-2 py-0.5 rounded">
+              アフィリエイト用
+            </span>
+          {% elif site.plan_type == 'business' %}
+            <span class="ml-2 inline-block bg-blue-600 text-white text-xs font-semibold px-2 py-0.5 rounded">
+              事業用
+            </span>
+          {% endif %}
         </td>
         <td class="px-3 py-2 align-top break-all text-blue-700 underline">
           <a href="{{ site.url }}" target="_blank">{{ site.url }}</a>
