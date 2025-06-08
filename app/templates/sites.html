@@ -81,6 +81,10 @@
     {% endif %}
     <hr class="my-2 border-yellow-400">
   {% endfor %}
+ <!-- ✅ 下線より下に追加する要素 -->
+  <p class="mt-2 text-sm text-blue-700">
+    🧾 <a href="{{ url_for('main.purchase_history') }}" class="underline hover:text-blue-900">購入履歴を表示する</a>
+  </p>
 </div>
 
 
