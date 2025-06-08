@@ -168,7 +168,7 @@ class TokenUsageLog(db.Model):
 
     created_at = db.Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
-    user = db.relationship("User", backref="token_logs")
+    
 
 # ✅ GSC 認証トークン保存用モデル
 class GSCAuthToken(db.Model):
