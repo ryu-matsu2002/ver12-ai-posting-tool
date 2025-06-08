@@ -1443,12 +1443,15 @@ def edit_site(username, sid: int):
         site.url      = form.url.data.rstrip("/")
         site.username = form.username.data
         site.app_pass = form.app_pass.data
+        site.plan_type  = form.plan_type.data
         db.session.commit()
         flash("サイト情報を更新しました", "success")
         return redirect(url_for("main.log_sites", username=username))
+    else:
+        if request.method == "POST":
+            print("❌ バリデーションエラー:", form.errors)
 
     return render_template("site_edit.html", form=form, site=site)
-
 
 
 
