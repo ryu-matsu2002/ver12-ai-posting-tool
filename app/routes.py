@@ -1205,8 +1205,9 @@ def root_redirect():
     return redirect(url_for("main.dashboard", username=current_user.username))
 
 
+
 # ─────────── Dashboard
-from app.models import UserSiteQuota, Article  # 追加
+from app.models import UserSiteQuota, Article, SiteQuotaLog  # ← SiteQuotaLog を追加
 
 @bp.route("/<username>/dashboard")
 @login_required
@@ -1224,29 +1225,45 @@ def dashboard(username):
     g.posted = Article.query.filter_by(user_id=current_user.id, status="posted").count()
     g.error  = Article.query.filter_by(user_id=current_user.id, status="error").count()
 
-    # ✅ user / quota 情報取得
+    # ユーザー情報
     user = current_user
-    quota = UserSiteQuota.query.filter_by(user_id=user.id).first()
+    quotas = UserSiteQuota.query.filter_by(user_id=user.id).all()
 
-    # ✅ 存在しない場合でも安全に表示
-    plan_type   = quota.plan_type if quota else "未契約"
-    total_quota = quota.total_quota if quota else 0
-    used_quota  = len(user.sites)
+    # プラン別にデータ構築
+    plans = {}
+    for q in quotas:
+        plan_type = q.plan_type
+        used = q.used_quota or 0
+        total = q.total_quota or 0
+        remaining = max(total - used, 0)
 
-    # ✅ 残り枠を明示（テンプレート側表示用に追加）
-    remaining_quota = total_quota - used_quota
+        logs = SiteQuotaLog.query.filter_by(user_id=user.id, plan_type=plan_type).order_by(SiteQuotaLog.created_at.desc()).all()
+
+        plans[plan_type] = {
+            "used": used,
+            "total": total,
+            "remaining": remaining,
+            "logs": logs
+        }
+
+    # 全体の合計（カード用）
+    total_quota = sum(q.total_quota for q in quotas)
+    used_quota = sum(q.used_quota for q in quotas)
+    remaining_quota = max(total_quota - used_quota, 0)
 
     return render_template(
-    "dashboard.html",
-    plan_type=plan_type,
-    total_quota=total_quota,
-    used_quota=used_quota,
-    remaining_quota=remaining_quota,  # ← ✅ 追加
-    total_articles=g.total_articles,
-    done=g.done,
-    posted=g.posted,
-    error=g.error
+        "dashboard.html",
+        plan_type=quotas[0].plan_type if quotas else "未契約",
+        total_quota=total_quota,
+        used_quota=used_quota,
+        remaining_quota=remaining_quota,
+        total_articles=g.total_articles,
+        done=g.done,
+        posted=g.posted,
+        error=g.error,
+        plans=plans  # ✅ 追加
     )
+
 
 # ─────────── プロンプト CRUD（新規登録のみ）
 @bp.route("/<username>/prompts", methods=["GET", "POST"])
