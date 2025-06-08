@@ -138,7 +138,6 @@ class UserSiteQuota(db.Model):
     used_quota = db.Column(db.Integer, default=0)   # 登録済みサイト数
     plan_type = db.Column(db.String(20))            # 例: 'affiliate' or 'business'
 
-    user = db.relationship('User', backref=db.backref('site_quota', uselist=False))
 
 class PaymentLog(db.Model):
     __tablename__ = 'payment_log'
