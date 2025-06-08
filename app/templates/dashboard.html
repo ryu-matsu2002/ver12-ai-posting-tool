@@ -4,39 +4,40 @@
 {% block content %}
 <h2 class="text-3xl font-bold mb-8">ダッシュボード</h2>
 
-<!-- ✅ 登録枠の表示：サイト登録ページと同等 -->
-<div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow mb-8">
-  <h3 class="text-xl font-bold text-blue-800 mb-4">📦 登録枠の使用状況</h3>
+<!-- ✅ 登録枠の表示：サイト登録ページと同様に -->
+<div class="mb-8 p-4 bg-yellow-100 border-l-4 border-yellow-500 rounded shadow text-sm text-yellow-800">
+  <h3 class="text-lg font-semibold mb-2 text-blue-900 flex items-center gap-2">
+    📦 登録枠の使用状況
+  </h3>
   {% for plan_name, plan in plans.items() %}
-    <div class="mb-4">
-      <p class="text-md font-semibold">
-        🧾 <strong>利用中のプラン:</strong>
-        {% if plan_name == 'affiliate' %}
-          アフィリエイト用プラン
-        {% elif plan_name == 'business' %}
-          事業用プラン
-        {% else %}
-          {{ plan_name }}
-        {% endif %}
-      </p>
-      <ul class="ml-4 mt-1 text-sm text-gray-700 dark:text-gray-300">
-        <li>● 登録サイト数：{{ plan.used }} サイト</li>
-        <li>● あと {{ plan.remaining }} サイト登録可能です。</li>
-      </ul>
-
-      {% if plan.logs %}
-        <details class="mt-2 ml-4">
-          <summary class="cursor-pointer text-blue-700 dark:text-blue-300">📜 登録枠の追加履歴を見る</summary>
-          <ul class="ml-6 list-disc mt-1 text-sm text-gray-600 dark:text-gray-400">
-            {% for log in plan.logs %}
-              <li>{{ log.created_at.strftime("%Y-%m-%d") }}：{{ log.count }}件（{{ log.reason }}）</li>
-            {% endfor %}
-          </ul>
-        </details>
+    <p>🧾 <strong>利用中のプラン:</strong>
+      {% if plan_name == 'affiliate' %}
+        アフィリエイト用プラン
+      {% elif plan_name == 'business' %}
+        事業用プラン
+      {% else %}
+        {{ plan_name }}
       {% endif %}
-    </div>
-    <hr class="my-4 border-gray-300 dark:border-gray-600">
+    </p>
+    <p>
+      ● 登録サイト数：{{ plan.used }}サイト<br>
+      ● あと {{ plan.remaining }} サイト登録可能です。
+    </p>
+    {% if plan.logs %}
+      <details class="mt-2 mb-2">
+        <summary class="cursor-pointer text-blue-700">📜 登録枠の追加履歴を見る</summary>
+        <ul class="ml-4 list-disc mt-1 text-gray-700">
+          {% for log in plan.logs %}
+            <li>{{ log.created_at.strftime("%Y-%m-%d") }}：{{ log.count }}件（{{ log.reason }}）</li>
+          {% endfor %}
+        </ul>
+      </details>
+    {% endif %}
+    <hr class="my-2 border-yellow-400">
   {% endfor %}
+  <p class="mt-2 text-sm text-blue-700">
+    🧾 <a href="{{ url_for('main.purchase_history') }}" class="underline hover:text-blue-900">購入履歴を表示する</a>
+  </p>
 </div>
 
 <!-- ステータス表示 -->
@@ -209,7 +210,7 @@
     });
   }
 
-  // 🔧 プロフィールメニュー用の再定義
+  // 🔧 プロフィールメニュー用
   function toggleUserDropdown() {
     const menu = document.getElementById('userDropdown');
     if (menu) menu.classList.toggle('hidden');
