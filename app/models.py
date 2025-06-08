@@ -43,11 +43,16 @@ class User(db.Model, UserMixin):
     has_purchased = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # リレーション
-    prompts  = db.relationship("PromptTemplate", backref="user", lazy=True)
-    articles = db.relationship("Article", backref="user", lazy='selectin')
-    sites    = db.relationship("Site",           backref="user", lazy=True)
-
+    # リレーション（削除時に関連データも自動削除）
+    prompts = db.relationship("PromptTemplate", backref="user", lazy=True, cascade="all, delete-orphan")
+    articles = db.relationship("Article", backref="user", lazy='selectin', cascade="all, delete-orphan")
+    sites = db.relationship("Site", backref="user", lazy=True, cascade="all, delete-orphan")
+    keywords = db.relationship("Keyword", backref="user", lazy=True, cascade="all, delete-orphan")
+    site_quota = db.relationship("UserSiteQuota", backref="user", lazy=True, uselist=False, cascade="all, delete-orphan")
+    payment_logs = db.relationship("PaymentLog", backref="user", lazy=True, cascade="all, delete-orphan")
+    token_logs = db.relationship("TokenUsageLog", backref="user", lazy=True, cascade="all, delete-orphan")
+    gsc_tokens = db.relationship("GSCAuthToken", backref="user", lazy=True, cascade="all, delete-orphan")
+    site_quota_logs = db.relationship("SiteQuotaLog", backref="user", lazy=True, cascade="all, delete-orphan")
 
 
 # ──── WP サイト ────

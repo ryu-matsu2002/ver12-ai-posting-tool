@@ -826,11 +826,15 @@ def fix_missing_images():
 def delete_user(user_id):
     if not current_user.is_admin:
         abort(403)
+
     user = User.query.get_or_404(user_id)
+
     db.session.delete(user)
     db.session.commit()
-    flash("ユーザーを削除しました。", "success")
+
+    flash("✅ ユーザーと関連データをすべて削除しました。", "success")
     return redirect(url_for("admin.admin_users"))
+
 
 
 
