@@ -183,7 +183,6 @@ class GSCAuthToken(db.Model):
     token_expiry = db.Column(db.DateTime, nullable=True)
 
     # 関連リレーション
-    user = db.relationship("User", backref="gsc_tokens")
     site = db.relationship("Site", backref="gsc_tokens")
 
     def is_expired(self):
@@ -203,4 +202,4 @@ class SiteQuotaLog(db.Model):
     reason = db.Column(db.String(255), nullable=False)     # 例："Stripe支払い", "管理者手動追加"
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    user = db.relationship("User", backref="site_quota_logs")
+   
