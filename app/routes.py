@@ -581,18 +581,45 @@ def admin_users():
 
     users = User.query.order_by(User.id).all()
 
-    # 統計情報の取得
+    # サイト / プロンプト / 記事 の全体統計
     site_count    = Site.query.count()
     prompt_count  = PromptTemplate.query.count()
     article_count = Article.query.count()
+
+    # 🔶 各ユーザーのサイト使用状況（plan別に辞書化）
+    from collections import defaultdict
+
+    user_quota_summary = {}
+
+    for user in users:
+        quotas = UserSiteQuota.query.filter_by(user_id=user.id).all()
+        summary = {}
+
+        for quota in quotas:
+            plan_type = quota.plan_type
+            total = quota.total_quota or 0
+            used  = Site.query.filter_by(user_id=user.id, plan_type=plan_type).count()
+            remaining = max(total - used, 0)
+
+            summary[plan_type] = {
+                "used": used,
+                "total": total,
+                "remaining": remaining
+            }
+
+        user_quota_summary[user.id] = summary
 
     return render_template(
         "admin/users.html",
         users=users,
         site_count=site_count,
         prompt_count=prompt_count,
-        article_count=article_count
+        article_count=article_count,
+        site_quota_summary=user_quota_summary  # ✅ 新規追加
     )
+
+
+
 @admin_bp.route("/admin/user/<int:uid>")
 @login_required
 def admin_user_detail(uid):

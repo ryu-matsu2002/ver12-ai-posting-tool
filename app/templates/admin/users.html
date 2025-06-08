@@ -45,7 +45,7 @@
           </a>
         </td>
 
-        <!-- 名前 + 管理者ラベルのみ -->
+        <!-- 名前 + 管理者ラベル -->
         <td class="px-2 py-2">
           {% if u.is_admin %}
             <span class="text-xs px-2 py-1 bg-red-100 text-red-700 border border-red-300 rounded mr-1">🛡 管理者</span>
@@ -56,18 +56,19 @@
         <!-- 記事数 -->
         <td class="px-2 py-2">{{ u.articles|length }}</td>
 
-        <!-- 登録サイト数 / プラン -->
-        <td class="px-2 py-2 text-sm">
-          <span class="text-blue-700 font-semibold">{{ u.sites|length }}</span> サイト /
-          {% if u.site_quota %}
-            プラン: <strong>{{ u.site_quota.plan_type|capitalize }}</strong> /
-            使用済み: <strong>{{ u.sites|length }}</strong> /
-            上限: <strong>{{ u.site_quota.total_quota }}</strong>
+        <!-- 登録サイト数 / プラン別に表示 -->
+        <td class="px-2 py-2 text-sm leading-6">
+          {% if site_quota_summary[u.id] %}
+            {% for plan_name, q in site_quota_summary[u.id].items() %}
+              {{ q.used }} サイト /
+              プラン: <strong>{{ plan_name|capitalize }}</strong> /
+              使用済み: <strong>{{ q.used }}</strong> /
+              上限: <strong>{{ q.total }}</strong><br>
+            {% endfor %}
           {% else %}
-            プランなし
+            <span class="text-gray-500">プランなし</span>
           {% endif %}
         </td>
-
 
         <!-- ✅ 決済ページアクセス権 -->
         <td class="px-2 py-2">
