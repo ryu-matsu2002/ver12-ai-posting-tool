@@ -47,7 +47,7 @@ class User(db.Model, UserMixin):
     prompts = db.relationship("PromptTemplate", backref="user", lazy=True, cascade="all, delete-orphan")
     articles = db.relationship("Article", backref="user", lazy='selectin', cascade="all, delete-orphan")
     sites = db.relationship("Site", backref="user", lazy=True, cascade="all, delete-orphan")
-    keywords = db.relationship("Keyword", backref="user", lazy=True, cascade="all, delete-orphan")
+    keywords = db.relationship("Keyword", back_populates="user", cascade="all, delete-orphan")
     site_quota = db.relationship("UserSiteQuota", backref="user", lazy=True, uselist=False, cascade="all, delete-orphan")
     payment_logs = db.relationship("PaymentLog", backref="user", lazy=True, cascade="all, delete-orphan")
     token_logs = db.relationship("TokenUsageLog", backref="user", lazy=True, cascade="all, delete-orphan")
@@ -128,7 +128,7 @@ class Keyword(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)  # 任意だが有用
     source = db.Column(db.String(20), default='manual')  # 'manual' または 'gsc'
     # リレーション
-    user = db.relationship("User", backref="keywords")
+    user = db.relationship("User", back_populates="keywords")
     site = db.relationship("Site", backref="keywords")
 
 class UserSiteQuota(db.Model):
