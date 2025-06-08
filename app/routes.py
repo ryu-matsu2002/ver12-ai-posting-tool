@@ -1202,7 +1202,7 @@ def root_redirect():
 
 
 # ─────────── Dashboard
-from app.models import UserSiteQuota  # 追加
+from app.models import UserSiteQuota, Article  # 追加
 
 @bp.route("/<username>/dashboard")
 @login_required
@@ -1227,7 +1227,7 @@ def dashboard(username):
     # ✅ 存在しない場合でも安全に表示
     plan_type   = quota.plan_type if quota else "未契約"
     total_quota = quota.total_quota if quota else 0
-    used_quota  = quota.used_quota if quota else 0
+    used_quota  = len(user.sites)
 
     return render_template(
     "dashboard.html",
@@ -1239,8 +1239,6 @@ def dashboard(username):
     posted=g.posted,
     error=g.error
     )
-
-
 
 # ─────────── プロンプト CRUD（新規登録のみ）
 @bp.route("/<username>/prompts", methods=["GET", "POST"])
