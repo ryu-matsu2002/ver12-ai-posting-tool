@@ -1810,29 +1810,38 @@ def log_sites(username):
 
     # フィルター取得（GETパラメータ）
     status_filter = request.args.get("plan_type", "all")
+    search_query = request.args.get("query", "").strip().lower()
 
     # サブクエリ：フィルター条件
     query = db.session.query(
         Site.id,
         Site.name,
         Site.url,
-        Site.plan_type,  # ← 追加
+        Site.plan_type,
         func.count(Article.id).label("total"),
         func.sum(case((Article.status == "done", 1), else_=0)).label("done"),
         func.sum(case((Article.status == "posted", 1), else_=0)).label("posted"),
         func.sum(case((Article.status == "error", 1), else_=0)).label("error"),
     ).outerjoin(Article, Site.id == Article.site_id)
 
-    # フィルター適用（ユーザーと plan_type）
+    # ユーザー別
     query = query.filter(Site.user_id == current_user.id)
+
+    # プランタイプのフィルター
     if status_filter in ["affiliate", "business"]:
         query = query.filter(Site.plan_type == status_filter)
 
-    # グループ化
+    # サイト名・URL 検索フィルター（部分一致、lower化で対応）
+    if search_query:
+        query = query.filter(
+            func.lower(Site.name).like(f"%{search_query}%") |
+            func.lower(Site.url).like(f"%{search_query}%")
+        )
+
+    # グループ化・取得
     result = query.group_by(Site.id).all()
 
-    return render_template("log_sites.html", sites=result, selected_status=status_filter)
-
+    return render_template("log_sites.html", sites=result, selected_status=status_filter, search_query=search_query)
 
 # ─────────── プレビュー
 @bp.route("/preview/<int:article_id>")
