@@ -13,29 +13,7 @@
     <h1 class="text-[6.7rem] font-extrabold tracking-wide text-custom-brand leading-none">SITE CRAFT</h1>
   </div>
 
-  <!-- プロフィールボタン（右上に1つだけ） -->
-  <div class="relative mt-6">
-    <button id="userDropdownBtn"
-            onclick="toggleUserDropdown()"
-            class="flex items-center space-x-2 bg-gray-100 px-5 py-2 rounded-full shadow hover:bg-gray-200 text-base">
-      <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-              d="M5.121 17.804A13.937 13.937 0 0112 15c2.122 0 4.144.495 5.879 1.374M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-      </svg>
-      <span class="text-gray-800 font-semibold">{{ current_user.username }}</span>
-      <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-      </svg>
-    </button>
-    <div id="userDropdown"
-         class="absolute right-0 mt-2 w-40 bg-white border border-gray-300 rounded shadow-lg hidden z-50">
-      <a href="{{ url_for('main.profile', username=current_user.username) }}"
-         class="block px-4 py-2 text-gray-700 hover:bg-gray-100">プロフィール</a>
-      <a href="{{ url_for('main.logout') }}"
-         class="block px-4 py-2 text-gray-700 hover:bg-gray-100">ログアウト</a>
-    </div>
-  </div>
-</div>
+  
 
 <!-- 📊 数字表示 -->
 <div class="grid md:grid-cols-4 gap-6 justify-center mt-12 mb-16 px-6">
