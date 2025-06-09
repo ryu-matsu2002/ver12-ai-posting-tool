@@ -3,12 +3,13 @@
 
 {% block content %}
 <div class="p-6">
-  <h1 class="text-2xl font-bold mb-6 flex items-center justify-between">
-    🧑‍💼 ユーザーごとの記事一覧
-    <a href="{{ url_for('admin.admin_site_register') }}" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold">🧑‍💼 ユーザーごとの記事一覧</h1>
+    <a href="{{ url_for('admin.admin_sites') }}"
+       class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
       ➕ サイト追加
     </a>
-  </h1>
+  </div>
 
   <!-- ✅ 統計カード -->
   <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
@@ -61,23 +62,27 @@
         <!-- 記事数 -->
         <td class="px-2 py-2">{{ u.articles|length }}</td>
 
-        <!-- ✅ 登録サイト / プラン 表示 -->
+        <!-- 登録サイト / プラン -->
         <td class="px-2 py-2 text-sm leading-6">
           {% if site_quota_summary[u.id] %}
             {% for plan_name, q in site_quota_summary[u.id].items() %}
               {% set label = "アフィリエイト用" if plan_name == "affiliate" else "事業用" if plan_name == "business" else plan_name %}
               プラン：{{ label }}／登録済み：<strong>{{ q.used }}</strong>／残り：<strong>{{ q.remaining }}</strong>
               <a href="{{ url_for('admin.admin_quota_edit', uid=u.id) }}"
-                 class="inline-block mt-1 px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded hover:bg-blue-200">＋ サイト枠追加</a><br>
+                 class="inline-block mt-1 px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded hover:bg-blue-200 ml-2">
+                ＋ サイト枠追加
+              </a><br>
             {% endfor %}
           {% else %}
-            <span class="text-gray-500">プランなし</span><br>
+            <span class="text-gray-500">プランなし</span>
             <a href="{{ url_for('admin.admin_quota_edit', uid=u.id) }}"
-               class="inline-block mt-1 px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded hover:bg-blue-200">＋ サイト枠追加</a>
+               class="inline-block mt-1 px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded hover:bg-blue-200 ml-2">
+              ＋ サイト枠追加
+            </a>
           {% endif %}
         </td>
 
-        <!-- ✅ 決済ページアクセス権 -->
+        <!-- 決済ページアクセス権 -->
         <td class="px-2 py-2">
           {% if u.is_special_access %}
             <span class="text-green-600 font-semibold">✅ 有効</span>
@@ -91,18 +96,16 @@
           </form>
         </td>
 
-        <!-- ✅ 操作 -->
+        <!-- 操作 -->
         <td class="px-2 py-2 space-x-2 whitespace-nowrap">
           <a href="{{ url_for('admin.user_articles', uid=u.id) }}" class="text-blue-600 hover:underline">
             記事一覧
           </a>
-
           <form action="{{ url_for('admin.admin_login_as', user_id=u.id) }}" method="post" class="inline">
             <button type="submit" class="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white text-sm rounded">
               ログイン
             </button>
           </form>
-
           <form method="post"
                 action="{{ url_for('admin.delete_user', user_id=u.id) }}"
                 class="inline"
