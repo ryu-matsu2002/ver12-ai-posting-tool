@@ -1,125 +1,62 @@
 {% extends "base.html" %}
-{% block title %}Dashboard | AI Posting Tool{% endblock %}
+{% block title %}Dashboard | SITE CRAFT{% endblock %}
 
 {% block content %}
-<h2 class="text-3xl font-bold mb-8">ダッシュボード</h2>
-
-
-<!-- ✅ 登録枠の表示：カード形式で横並びに -->
-<div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-  {% for plan_name, plan in plans.items() %}
-  <div class="bg-yellow-100 border-l-4 border-yellow-500 p-5 rounded shadow text-sm text-yellow-800">
-    <h3 class="text-md font-semibold text-blue-900 mb-2 flex items-center gap-2">
-      📦 利用中のプラン：
-      {% if plan_name == 'affiliate' %}
-        アフィリエイト用プラン
-      {% elif plan_name == 'business' %}
-        事業用プラン
-      {% else %}
-        {{ plan_name }}
-      {% endif %}
-    </h3>
-
-    <ul class="ml-2 leading-relaxed">
-      <li>● 登録サイト数：<strong>{{ plan.used }}</strong> サイト</li>
-      <li>● あと <strong>{{ plan.remaining }}</strong> サイト登録可能です。</li>
-    </ul>
-
-    {% if plan.logs %}
-    <details class="mt-3">
-      <summary class="cursor-pointer text-blue-700">📜 登録枠の追加履歴を見る</summary>
-      <ul class="ml-4 list-disc mt-1 text-gray-700">
-        {% for log in plan.logs %}
-        <li>{{ log.created_at.strftime("%Y-%m-%d") }}：{{ log.count }}件（{{ log.reason }}）</li>
-        {% endfor %}
-      </ul>
-    </details>
-    {% endif %}
-  </div>
-  {% endfor %}
+<!-- Google風センターヘッダー -->
+<div class="text-center mt-10 mb-12">
+  <h1 class="text-5xl font-bold text-blue-600 tracking-wide">SITE <span class="text-green-600">CRAFT</span></h1>
 </div>
 
-<!-- ✅ 購入履歴リンク -->
-<div class="text-sm text-blue-700 mb-10">
-  🧾 <a href="{{ url_for('main.purchase_history') }}" class="underline hover:text-blue-900">購入履歴を表示する</a>
-</div>
-
-<!-- ステータス表示 -->
-<div class="grid md:grid-cols-4 gap-6 mb-10">
-  <div class="bg-white dark:bg-gray-800 p-6 rounded shadow text-center">
+<!-- 記事情報（投稿完了・待機中・総数・エラー） -->
+<div class="grid md:grid-cols-4 gap-6 mb-12 px-4">
+  <div class="bg-white shadow rounded p-6 text-center">
     <p class="text-xl font-bold text-green-700 mb-2">投稿完了</p>
     <p class="text-4xl font-extrabold text-green-700">{{ posted or 0 }}</p>
   </div>
-  <div class="bg-white dark:bg-gray-800 p-6 rounded shadow text-center">
+  <div class="bg-white shadow rounded p-6 text-center">
     <p class="text-xl font-bold text-blue-600 mb-2">投稿待機中</p>
     <p class="text-4xl font-extrabold text-blue-600">{{ done or 0 }}</p>
   </div>
-  <div class="bg-white dark:bg-gray-800 p-6 rounded shadow text-center">
-    <p class="text-xl font-bold text-gray-800 dark:text-white mb-2">総記事数</p>
-    <p class="text-4xl font-extrabold">{{ total_articles or 0 }}</p>
+  <div class="bg-white shadow rounded p-6 text-center">
+    <p class="text-xl font-bold text-gray-900 mb-2">総記事数</p>
+    <p class="text-4xl font-extrabold text-gray-900">{{ total_articles or 0 }}</p>
   </div>
-  <div class="bg-white dark:bg-red-100 p-6 rounded shadow text-center">
+  <div class="bg-white shadow rounded p-6 text-center">
     <p class="text-xl font-bold text-red-600 mb-2">エラー</p>
     <p class="text-4xl font-extrabold text-red-600">{{ error or 0 }}</p>
   </div>
 </div>
 
-<!-- カード群 -->
-<div class="grid lg:grid-cols-4 md:grid-cols-2 sm:grid-cols-2 gap-6 mb-6">
-  <a href="{{ url_for('main.log_sites', username=current_user.username) }}"
-     class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center">
-    <div class="text-3xl mb-2">🗘</div>
-    <p class="font-semibold text-lg text-gray-900 dark:text-white">記事生成</p>
-    <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">サイト別に記事作成・状況確認・投稿が可能</p>
-  </a>
-  <a href="{{ url_for('main.sites', username=current_user.username) }}"
-     class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center">
-    <div class="text-3xl mb-2">🌐</div>
-    <p class="font-semibold text-lg text-gray-900 dark:text-white">新規サイト登録</p>
-    <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">WordPressサイトを登録して自動投稿先に設定</p>
-  </a>
-  <a href="{{ url_for('main.prompts', username=current_user.username) }}"
-     class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center">
-    <div class="text-3xl mb-2">📋</div>
-    <p class="font-semibold text-lg text-gray-900 dark:text-white">プロンプト登録</p>
-    <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">記事生成用プロンプトテンプレートを管理</p>
-  </a>
-  <a href="{{ url_for('main.keywords', username=current_user.username) }}"
-     class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center">
-    <div class="text-3xl mb-2">🏷</div>
-    <p class="font-semibold text-lg text-gray-900 dark:text-white">キーワード管理</p>
-    <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">ジャンル別にキーワードを登録・管理</p>
-  </a>
-</div>
-
-<!-- ChatGPTカードとロボット -->
-<div class="relative flex flex-wrap items-end gap-6">
+<!-- ロボットとChatGPTカード -->
+<div class="flex flex-wrap justify-center gap-10 mb-12">
+  <!-- ChatGPTカード -->
   <a href="{{ url_for('main.chatgpt', username=current_user.username) }}"
-     class="block bg-white dark:bg-gray-800 p-5 rounded-lg shadow hover:shadow-xl transition text-center w-[280px]">
+     class="block bg-white p-6 rounded-lg shadow hover:shadow-xl transition text-center w-72">
     <div class="text-3xl mb-2">🤖</div>
-    <p class="font-semibold text-lg text-gray-900 dark:text-white">ChatGPT</p>
-    <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">ChatGPTのページを新しいタブで開きます</p>
+    <p class="font-semibold text-lg text-gray-900">ChatGPT</p>
+    <p class="text-sm text-gray-600 mt-1">ChatGPTのページを新しいタブで開きます</p>
   </a>
 
-  <!-- ロボット画像とチャット -->
+  <!-- ロボット画像 -->
   <div class="relative">
     <img id="robotImage"
          src="{{ url_for('static', filename='images/robot.png') }}"
          alt="ロボット"
          class="w-32 h-auto cursor-pointer transition-transform duration-300"
          onclick="toggleChat(); robotTalk();" />
-
+    
     <div id="speechBubble"
          class="absolute left-36 bottom-20 bg-yellow-100 text-black text-sm px-3 py-2 rounded shadow-lg border border-gray-300 hidden z-30">
     </div>
 
+    <!-- チャットウィンドウ -->
     <div id="chatWindow"
-         class="absolute left-36 bottom-0 w-[500px] bg-white border border-gray-300 shadow-lg rounded-md hidden z-30">
+         class="absolute left-36 bottom-0 w-[400px] bg-white border border-gray-300 shadow-lg rounded-md hidden z-30">
       <div class="bg-blue-700 text-white px-4 py-2 rounded-t-md flex justify-between items-center">
-        🤖 site craft：：チャットルーム
+        🤖 site craft：チャットルーム
         <button onclick="toggleChat()" class="text-white">×</button>
       </div>
-      <div id="chatMessages" class="p-3 h-64 overflow-y-auto text-sm space-y-2 bg-gray-50"></div>
+      <div id="chatMessages" class="p-3 h-60 overflow-y-auto text-sm space-y-2 bg-gray-50"></div>
       <div class="p-2 border-t flex">
         <input id="chatInput" type="text"
                class="flex-1 border rounded px-2 py-1 text-sm"
@@ -213,20 +150,6 @@
       botMsg.textContent = "🤖 エラーが発生しました。";
     });
   }
-
-  // 🔧 プロフィールメニュー用
-  function toggleUserDropdown() {
-    const menu = document.getElementById('userDropdown');
-    if (menu) menu.classList.toggle('hidden');
-  }
-
-  document.addEventListener('click', function (e) {
-    const btn = document.getElementById('userDropdownBtn');
-    const menu = document.getElementById('userDropdown');
-    if (btn && menu && !btn.contains(e.target) && !menu.contains(e.target)) {
-      menu.classList.add('hidden');
-    }
-  });
 </script>
 
 <style>
