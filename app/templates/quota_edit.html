@@ -1,0 +1,51 @@
+{% extends "base_admin.html" %}
+{% block title %}サイト枠追加 | 管理者ページ{% endblock %}
+
+{% block content %}
+<div class="p-6 max-w-2xl mx-auto">
+  <h1 class="text-2xl font-bold mb-6">📦 サイト登録枠の追加</h1>
+
+  <!-- ✅ ユーザー情報 -->
+  <div class="mb-6 p-4 bg-white shadow rounded border">
+    <p><strong>対象ユーザー：</strong> {{ user.last_name }} {{ user.first_name }}（{{ user.username }}）</p>
+    <p><strong>メール：</strong> {{ user.email }}</p>
+  </div>
+
+  <form method="POST" class="bg-white p-6 rounded shadow border space-y-4">
+    {{ form.hidden_tag() }}
+
+    <!-- プラン種別 -->
+    <div>
+      <label class="block font-semibold mb-1">対象プラン</label>
+      {{ form.plan_type(class="w-full p-2 border rounded") }}
+    </div>
+
+    <!-- 枠数の追加数 -->
+    <div>
+      <label class="block font-semibold mb-1">追加するサイト枠数</label>
+      {{ form.count(class="w-full p-2 border rounded", placeholder="例: 3") }}
+    </div>
+
+    <!-- 理由 -->
+    <div>
+      <label class="block font-semibold mb-1">追加理由</label>
+      {{ form.reason(class="w-full p-2 border rounded", placeholder="例: 管理者手動追加") }}
+    </div>
+
+    <!-- 送信ボタン -->
+    <div class="text-right">
+      <button type="submit"
+              class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+        ✅ サイト枠を追加
+      </button>
+    </div>
+  </form>
+
+  <div class="mt-6">
+    <a href="{{ url_for('admin.admin_users') }}"
+       class="text-sm text-blue-600 underline hover:text-blue-800">
+      ← ユーザー一覧に戻る
+    </a>
+  </div>
+</div>
+{% endblock %}

@@ -184,4 +184,11 @@ class QuotaUpdateForm(FlaskForm):
             NumberRange(min=1, max=100, message="1～100の数値で入力してください。")
         ]
     )
+    reason = StringField(
+        "追加理由",
+        validators=[
+            DataRequired(),
+            Length(max=255)
+        ]
+    )
     submit = SubmitField("枠を追加する")
