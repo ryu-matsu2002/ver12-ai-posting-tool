@@ -32,15 +32,6 @@
       <tr class="{% if loop.index0 % 2 == 0 %}bg-white{% else %}bg-blue-50{% endif %} border-b dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-900">
         <td class="px-3 py-2 font-medium text-blue-700 dark:text-blue-300">
           [{{ site.name }}]
-          {% if site.plan_type == 'affiliate' %}
-            <span class="ml-2 inline-block bg-green-600 text-white text-xs font-semibold px-2 py-0.5 rounded">
-              アフィリエイト用
-            </span>
-          {% elif site.plan_type == 'business' %}
-            <span class="ml-2 inline-block bg-blue-600 text-white text-xs font-semibold px-2 py-0.5 rounded">
-              事業用
-            </span>
-          {% endif %}
         </td>
         <td class="px-3 py-2 break-all text-blue-700 underline">
           <a href="{{ site.url }}" target="_blank">{{ site.url }}</a>
