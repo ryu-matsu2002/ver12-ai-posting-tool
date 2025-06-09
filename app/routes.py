@@ -1480,7 +1480,9 @@ def sites(username):
     # 🔹 Stripe履歴（参考表示用）
     history_logs = PaymentLog.query.filter_by(user_id=user.id).order_by(PaymentLog.created_at.desc()).all()
 # 🔍 最初に優先表示するプラン（business優先）
-    default_plan = "business" if "business" in quota_by_plan else "affiliate"
+    # 例：affiliate を優先して初期表示にする
+    default_plan = "affiliate" if "affiliate" in quota_by_plan else "business"
+
 
     return render_template(
         "sites.html",

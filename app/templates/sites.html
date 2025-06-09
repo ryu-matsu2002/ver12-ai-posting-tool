@@ -87,13 +87,10 @@
     {% endif %}
     <hr class="my-2 border-yellow-400">
   {% endfor %}
- <!-- ✅ 下線より下に追加する要素 -->
   <p class="mt-2 text-sm text-blue-700">
     🧾 <a href="{{ url_for('main.purchase_history') }}" class="underline hover:text-blue-900">購入履歴を表示する</a>
   </p>
 </div>
-
-
 
     <div id="plan-form">
       <div class="p-4 bg-blue-100 border border-blue-300 rounded shadow mb-4 text-sm leading-6">
@@ -130,7 +127,7 @@
       </div>
 
       <div class="text-right font-bold text-lg text-green-700 mt-4">
-        合計金額: <span id="total_price">¥3,000</span>
+        合計金額: <span id="total_price">¥{{ 3000 if default_plan == 'affiliate' else 20000 }}</span>
       </div>
 
       <button id="pay-now" class="w-full mt-4 py-3 bg-gradient-to-r from-green-400 to-green-600 hover:from-green-500 hover:to-green-700 text-white rounded-lg text-lg font-bold shadow-md transform hover:scale-105 transition">
@@ -146,7 +143,6 @@
   </div>
 </div>
 
-<!-- CSS -->
 <style>
   .site-option.selected {
     background-color: #3b82f6;
@@ -155,7 +151,6 @@
   }
 </style>
 
-<!-- JavaScript -->
 <script src="https://js.stripe.com/v3/"></script>
 <script>
   const USER_ID = "{{ current_user.id }}";
@@ -224,7 +219,7 @@
 
         const result = await stripe.confirmCardPayment(data.clientSecret, {
           payment_method: { card: card },
-          return_url: window.location.href + "?success=true"  // ✅ 追加
+          return_url: window.location.href + "?success=true"
         });
 
         if (result.error) {
@@ -238,14 +233,12 @@
           submitButton.disabled = false;
           submitButton.textContent = "支払う";
         } else {
-    // 3Dセキュア成功時は return_url にリダイレクトされるため、ここには来ないこともある
           paymentMessage.textContent = "✅ 支払い完了しました！サイト登録が可能になりました。";
           paymentMessage.className = "mt-4 p-4 bg-green-100 text-green-800 rounded shadow";
           paymentMessage.classList.remove("hidden");
           setTimeout(() => location.reload(), 2000);
         }
       }, { once: true });
-
     } else {
       alert("Stripe連携に失敗しました。もう一度お試しください。");
       payNowButton.disabled = false;
