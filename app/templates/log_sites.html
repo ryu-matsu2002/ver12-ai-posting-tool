@@ -20,12 +20,10 @@
     <thead>
       <tr class="bg-gray-100 dark:bg-gray-700 text-left text-black font-bold text-sm">
         <th class="px-3 py-2">サイト名</th>
-        <th class="px-3 py-2">ステータス</th>
         <th class="px-3 py-2">URL</th>
         <th class="px-3 py-2 text-center">総記事数</th>
         <th class="px-3 py-2 text-center">記事生成済み</th>
         <th class="px-3 py-2 text-center">投稿完了</th>
-        <th class="px-3 py-2 text-center">エラー</th>
         <th class="px-3 py-2 text-center">詳細</th>
       </tr>
     </thead>
@@ -34,19 +32,13 @@
       <tr class="{% if loop.index0 % 2 == 0 %}bg-white{% else %}bg-blue-50{% endif %} border-b dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-900">
         <td class="px-3 py-2 font-medium text-blue-700 dark:text-blue-300">
           [{{ site.name }}]
-        </td>
-        <td class="px-3 py-2">
           {% if site.plan_type == 'affiliate' %}
-            <span class="inline-block bg-green-600 text-white text-xs font-semibold px-2 py-0.5 rounded">
+            <span class="ml-2 inline-block bg-green-600 text-white text-xs font-semibold px-2 py-0.5 rounded">
               アフィリエイト用
             </span>
           {% elif site.plan_type == 'business' %}
-            <span class="inline-block bg-blue-600 text-white text-xs font-semibold px-2 py-0.5 rounded">
+            <span class="ml-2 inline-block bg-blue-600 text-white text-xs font-semibold px-2 py-0.5 rounded">
               事業用
-            </span>
-          {% else %}
-            <span class="inline-block bg-gray-400 text-white text-xs font-semibold px-2 py-0.5 rounded">
-              未設定
             </span>
           {% endif %}
         </td>
@@ -61,7 +53,6 @@
         <td class="px-3 py-2 text-center text-black">{{ site.total or 0 }}</td>
         <td class="px-3 py-2 text-center text-green-600 font-bold">{{ site.done or 0 }}</td>
         <td class="px-3 py-2 text-center text-blue-600 font-bold">{{ site.posted or 0 }}</td>
-        <td class="px-3 py-2 text-center text-red-600 font-bold">{{ site.error or 0 }}</td>
         <td class="px-3 py-2 text-center space-x-1">
           {% if site.gsc_connected %}
             <a href="{{ url_for('main.gsc_generate', username=current_user.username) }}?site_id={{ site.id }}"
