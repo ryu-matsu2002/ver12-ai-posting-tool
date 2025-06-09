@@ -26,7 +26,7 @@ def _auto_post_job(app):
                 .filter(Article.status == "done", Article.scheduled_at <= now)
                 .options(selectinload(Article.site))
                 .order_by(Article.scheduled_at.asc())
-                .limit(20)
+                .limit(300)
                 .all()
             )
 
@@ -70,16 +70,16 @@ def init_scheduler(app):
     """
     Flask アプリ起動時に呼び出して:
       1) APScheduler に自動投稿ジョブを登録
-      2) 5分間隔で _auto_post_job を実行するようスケジュール
+      2) 3分間隔で _auto_post_job を実行するようスケジュール
     """
     scheduler.add_job(
         func=_auto_post_job,
         trigger="interval",
-        minutes=5,
+        minutes=3,
         args=[app],
         id="auto_post_job",
         replace_existing=True,
         max_instances=1
     )
     scheduler.start()
-    app.logger.info("Scheduler started: auto_post_job every 5 minutes")
+    app.logger.info("Scheduler started: auto_post_job every 3 minutes")

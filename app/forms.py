@@ -167,3 +167,21 @@ class ProfileForm(FlaskForm):
     postal_code = StringField("郵便番号", validators=[DataRequired()])
     address = StringField("住所", validators=[DataRequired(), Length(max=200)])
     submit = SubmitField("更新する")
+
+class QuotaUpdateForm(FlaskForm):
+    plan_type = SelectField(
+        "プラン種別",
+        choices=[
+            ("affiliate", "アフィリエイト用プラン"),
+            ("business", "事業用プラン")
+        ],
+        validators=[DataRequired()]
+    )
+    count = IntegerField(
+        "追加サイト数",
+        validators=[
+            DataRequired(),
+            NumberRange(min=1, max=100, message="1～100の数値で入力してください。")
+        ]
+    )
+    submit = SubmitField("枠を追加する")

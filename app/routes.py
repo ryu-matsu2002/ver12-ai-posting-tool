@@ -630,7 +630,43 @@ def admin_user_detail(uid):
 
     return render_template("admin/user_detail.html", user=user)
 
+from app.forms import QuotaUpdateForm
 
+@admin_bp.route("/admin/quota-edit/<int:uid>", methods=["GET", "POST"])
+@login_required
+def admin_quota_edit(uid):
+    if not current_user.is_admin:
+        abort(403)
+
+    user = User.query.get_or_404(uid)
+    form = QuotaUpdateForm()
+
+    if form.validate_on_submit():
+        plan_type = form.plan_type.data
+        count = form.count.data
+
+        # クォータ取得 or 作成
+        quota = UserSiteQuota.query.filter_by(user_id=user.id, plan_type=plan_type).first()
+        if not quota:
+            quota = UserSiteQuota(user_id=user.id, plan_type=plan_type, total_quota=0, used_quota=0)
+            db.session.add(quota)
+
+        quota.total_quota += count
+
+        log = SiteQuotaLog(
+            user_id=user.id,
+            plan_type=plan_type,
+            count=count,
+            reason="管理者手動追加",
+            created_at=datetime.utcnow()
+        )
+        db.session.add(log)
+        db.session.commit()
+
+        flash(f"✅ {plan_type}プランに{count}枠追加しました", "success")
+        return redirect(url_for("admin.admin_users"))
+
+    return render_template("admin/quota_edit.html", user=user, form=form)
 
 
 @admin_bp.post("/admin/user/<int:uid>/toggle-special")
