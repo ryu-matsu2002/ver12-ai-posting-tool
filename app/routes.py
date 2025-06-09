@@ -283,7 +283,7 @@ def create_payment_intent():
             automatic_payment_methods={"enabled": True},
             payment_method_options={
                 "card": {
-                    "request_three_d_secure": "automatic"
+                    "request_three_d_secure": "any"
                 }
             },
             metadata={
