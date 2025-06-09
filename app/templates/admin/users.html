@@ -60,11 +60,15 @@
         <td class="px-2 py-2 text-sm leading-6">
           {% if site_quota_summary[u.id] %}
             {% for plan_name, q in site_quota_summary[u.id].items() %}
-              {% set label = "アフィリエイト" if plan_name == "affiliate" else "事業用" if plan_name == "business" else plan_name %}
-              プラン：{{ label }}／登録済み：<strong>{{ q.used }}</strong>／残り：<strong>{{ q.remaining }}</strong><br>
+              {% set label = "アフィリエイト用" if plan_name == "affiliate" else "事業用" if plan_name == "business" else plan_name %}
+              プラン：{{ label }}／登録済み：<strong>{{ q.used }}</strong>／残り：<strong>{{ q.remaining }}</strong>
+              <a href="{{ url_for('admin.admin_quota_edit', uid=u.id) }}"
+                 class="ml-2 text-sm text-blue-600 underline hover:text-blue-800">＋サイト枠追加</a><br>
             {% endfor %}
           {% else %}
             <span class="text-gray-500">プランなし</span>
+            <a href="{{ url_for('admin.admin_quota_edit', uid=u.id) }}"
+               class="ml-2 text-sm text-blue-600 underline hover:text-blue-800">＋サイト枠追加</a>
           {% endif %}
         </td>
 
