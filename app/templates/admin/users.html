@@ -3,7 +3,12 @@
 
 {% block content %}
 <div class="p-6">
-  <h1 class="text-2xl font-bold mb-6">🧑‍💼 ユーザーごとの記事一覧</h1>
+  <h1 class="text-2xl font-bold mb-6 flex items-center justify-between">
+    🧑‍💼 ユーザーごとの記事一覧
+    <a href="{{ url_for('admin.admin_site_register') }}" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+      ➕ サイト追加
+    </a>
+  </h1>
 
   <!-- ✅ 統計カード -->
   <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
@@ -63,12 +68,12 @@
               {% set label = "アフィリエイト用" if plan_name == "affiliate" else "事業用" if plan_name == "business" else plan_name %}
               プラン：{{ label }}／登録済み：<strong>{{ q.used }}</strong>／残り：<strong>{{ q.remaining }}</strong>
               <a href="{{ url_for('admin.admin_quota_edit', uid=u.id) }}"
-                 class="ml-2 text-sm text-blue-600 underline hover:text-blue-800">＋サイト枠追加</a><br>
+                 class="inline-block mt-1 px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded hover:bg-blue-200">＋ サイト枠追加</a><br>
             {% endfor %}
           {% else %}
-            <span class="text-gray-500">プランなし</span>
+            <span class="text-gray-500">プランなし</span><br>
             <a href="{{ url_for('admin.admin_quota_edit', uid=u.id) }}"
-               class="ml-2 text-sm text-blue-600 underline hover:text-blue-800">＋サイト枠追加</a>
+               class="inline-block mt-1 px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded hover:bg-blue-200">＋ サイト枠追加</a>
           {% endif %}
         </td>
 
@@ -88,19 +93,16 @@
 
         <!-- ✅ 操作 -->
         <td class="px-2 py-2 space-x-2 whitespace-nowrap">
-          <!-- 記事一覧 -->
           <a href="{{ url_for('admin.user_articles', uid=u.id) }}" class="text-blue-600 hover:underline">
             記事一覧
           </a>
 
-          <!-- 管理者ログイン -->
           <form action="{{ url_for('admin.admin_login_as', user_id=u.id) }}" method="post" class="inline">
             <button type="submit" class="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white text-sm rounded">
               ログイン
             </button>
           </form>
 
-          <!-- 削除 -->
           <form method="post"
                 action="{{ url_for('admin.delete_user', user_id=u.id) }}"
                 class="inline"
