@@ -3,20 +3,18 @@
 
 {% block content %}
 
-<!-- 🔷 ロゴ + プロフィール（中央ロゴ + 右上プロフィール） -->
-<div class="flex justify-between items-start px-10 mt-6 mb-4">
-  <!-- ロゴとタイトル中央 -->
-  <div class="flex-grow flex justify-center items-center space-x-6 mt-8">
+<!-- 🔷 ロゴ中央表示 -->
+<div class="flex flex-col items-center justify-center mt-10 mb-6">
+  <div class="flex items-center space-x-6">
     <img src="{{ url_for('static', filename='images/tcc_logo.png') }}"
          alt="SITE CRAFT ロゴ"
          class="w-24 h-24" />
-    <h1 class="text-[6.7rem] font-extrabold tracking-wide text-custom-brand leading-none">SITE CRAFT</h1>
+    <h1 class="text-[5rem] font-extrabold tracking-wide text-custom-brand leading-none">SITE CRAFT</h1>
   </div>
-
-  
+</div>
 
 <!-- 📊 数字表示 -->
-<div class="grid md:grid-cols-4 gap-6 justify-center mt-12 mb-16 px-6">
+<div class="grid md:grid-cols-4 gap-6 justify-center mt-8 mb-16 px-6">
   <div class="bg-white shadow rounded p-6 text-center">
     <p class="text-xl font-bold text-green-700 mb-2">投稿完了</p>
     <p class="text-4xl font-extrabold text-green-700">{{ posted or 0 }}</p>
