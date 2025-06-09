@@ -658,7 +658,7 @@ def admin_quota_edit(uid):
             plan_type=plan_type,
             count=count,
             reason="管理者手動追加",
-            created_at=datetime.utcnow()
+            created_at = datetime.datetime.utcnow()  # ← import datetime のまま使う場合
         )
         db.session.add(log)
         db.session.commit()
