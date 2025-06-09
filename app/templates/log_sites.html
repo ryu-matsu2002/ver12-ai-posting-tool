@@ -5,7 +5,7 @@
 <h2 class="text-2xl font-semibold mb-6">記事生成 - 投稿ログ - サイト一覧</h2>
 
 <!-- 🔍 サイト検索＋ステータスフィルター -->
-<form method="get" class="mb-6 flex flex-wrap gap-4 items-center">
+<form method="get" class="mb-6 flex flex-wrap gap-4 items-center" id="search-form">
   <div class="flex items-center gap-2">
     <label for="query" class="font-medium">サイト検索:</label>
     <input type="text" id="query" name="query" placeholder="サイト名またはURL"
@@ -19,7 +19,7 @@
       <option value="business" {% if selected_status == 'business' %}selected{% endif %}>事業用</option>
     </select>
   </div>
-  <button type="submit" class="px-4 py-2 bg-blue-500 text-white rounded">検索</button>
+  <button type="submit" class="px-4 py-2 bg-blue-500 text-white rounded" id="search-button">検索</button>
 </form>
 
 {% if sites %}
@@ -87,4 +87,17 @@
     サイトがまだ登録されていません。
   </div>
 {% endif %}
+
+<!-- ✅ 検索送信時インジケーター -->
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  const form = document.getElementById("search-form");
+  const button = document.getElementById("search-button");
+  form.addEventListener("submit", function () {
+    button.disabled = true;
+    button.textContent = "検索中... ⏳";
+  });
+});
+</script>
+
 {% endblock %}
