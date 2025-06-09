@@ -25,7 +25,7 @@
     </button>
     <div id="userDropdown"
          class="absolute right-0 mt-2 w-40 bg-white border border-gray-300 rounded shadow-lg hidden z-50">
-      <a href="{{ url_for('main.profile') }}"
+      <a href="{{ url_for('main.profile', username=current_user.username) }}"
          class="block px-4 py-2 text-gray-700 hover:bg-gray-100">プロフィール</a>
       <a href="{{ url_for('main.logout') }}"
          class="block px-4 py-2 text-gray-700 hover:bg-gray-100">ログアウト</a>
@@ -86,7 +86,7 @@
   </div>
 </div>
 
-<!-- 📜 JS -->
+<!-- 📜 JavaScript -->
 <script>
   const chatUsername = "{{ current_user.username }}";
   const messageLog = [];
@@ -167,6 +167,7 @@
     });
   }
 
+  // 🔧 プロフィールメニュー用
   function toggleUserDropdown() {
     const menu = document.getElementById('userDropdown');
     if (menu) menu.classList.toggle('hidden');
@@ -181,7 +182,7 @@
   });
 </script>
 
-<!-- 🎨 カスタムCSS -->
+<!-- 🎨 CSS -->
 <style>
   @keyframes robot-dance {
     0% { transform: rotate(0deg); }
