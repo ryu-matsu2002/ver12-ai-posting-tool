@@ -3,22 +3,24 @@
 
 {% block content %}
 
-<!-- 🔷 ロゴ中央 + 巨大テキスト -->
-<div class="flex flex-col items-center mt-10 mb-6">
-  <div class="flex items-center space-x-6">
+<!-- 🔷 ロゴ + プロフィール（中央ロゴ + 右上プロフィール） -->
+<div class="flex justify-between items-start px-10 mt-6 mb-4">
+  <!-- ロゴとタイトル中央 -->
+  <div class="flex-grow flex justify-center items-center space-x-6 mt-8">
     <img src="{{ url_for('static', filename='images/tcc_logo.png') }}"
          alt="SITE CRAFT ロゴ"
-         class="w-32 h-32" />
-    <h1 class="text-[10rem] font-extrabold tracking-wide text-custom-brand leading-none">SITE CRAFT</h1>
+         class="w-24 h-24" />
+    <h1 class="text-[6.7rem] font-extrabold tracking-wide text-custom-brand leading-none">SITE CRAFT</h1>
   </div>
 
-  <!-- ✅ プロフィールメニューは下だけ、1つ表示 -->
-  <div class="relative mt-8">
+  <!-- プロフィールボタン（右上に1つだけ） -->
+  <div class="relative mt-6">
     <button id="userDropdownBtn"
             onclick="toggleUserDropdown()"
-            class="flex items-center space-x-2 bg-gray-100 px-6 py-3 rounded-full shadow hover:bg-gray-200 text-lg">
-      <svg class="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.121 17.804A13.937 13.937 0 0112 15c2.122 0 4.144.495 5.879 1.374M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+            class="flex items-center space-x-2 bg-gray-100 px-5 py-2 rounded-full shadow hover:bg-gray-200 text-base">
+      <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M5.121 17.804A13.937 13.937 0 0112 15c2.122 0 4.144.495 5.879 1.374M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
       </svg>
       <span class="text-gray-800 font-semibold">{{ current_user.username }}</span>
       <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -36,7 +38,7 @@
 </div>
 
 <!-- 📊 数字表示 -->
-<div class="grid md:grid-cols-4 gap-6 justify-center mt-32 mb-20 px-6">
+<div class="grid md:grid-cols-4 gap-6 justify-center mt-12 mb-16 px-6">
   <div class="bg-white shadow rounded p-6 text-center">
     <p class="text-xl font-bold text-green-700 mb-2">投稿完了</p>
     <p class="text-4xl font-extrabold text-green-700">{{ posted or 0 }}</p>
@@ -56,7 +58,7 @@
 </div>
 
 <!-- 🤖 ロボット -->
-<div class="flex justify-center mb-24">
+<div class="flex justify-center mb-10">
   <div class="relative">
     <img id="robotImage"
          src="{{ url_for('static', filename='images/robot.png') }}"
