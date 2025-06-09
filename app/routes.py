@@ -1479,6 +1479,8 @@ def sites(username):
 
     # 🔹 Stripe履歴（参考表示用）
     history_logs = PaymentLog.query.filter_by(user_id=user.id).order_by(PaymentLog.created_at.desc()).all()
+# 🔍 最初に優先表示するプラン（business優先）
+    default_plan = "business" if "business" in quota_by_plan else "affiliate"
 
     return render_template(
         "sites.html",
@@ -1489,7 +1491,8 @@ def sites(username):
         total_quota=total_quota,
         used_quota=used_quota,
         history_logs=history_logs,
-        stripe_public_key=os.getenv("STRIPE_PUBLIC_KEY")
+        stripe_public_key=os.getenv("STRIPE_PUBLIC_KEY"),
+        default_plan=default_plan  # ← 🔥追加！
     )
 
 

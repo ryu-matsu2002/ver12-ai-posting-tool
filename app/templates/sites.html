@@ -105,9 +105,10 @@
       <div>
         <label class="block mb-1 font-semibold text-sm text-gray-700">プラン種別</label>
         <select id="plan_type" class="p-3 w-full border rounded-lg shadow-sm bg-white">
-          <option value="affiliate">🟦 アフィリエイト用（¥3,000）</option>
-          <option value="business">🟨 事業用（月額 ¥20,000）</option>
+          <option value="affiliate" {% if default_plan == 'affiliate' %}selected{% endif %}>🟦 アフィリエイト用（¥3,000）</option>
+          <option value="business" {% if default_plan == 'business' %}selected{% endif %}>🟨 事業用（月額 ¥20,000）</option>
         </select>
+
       </div>
 
       <div class="mt-4">
