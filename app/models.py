@@ -54,6 +54,16 @@ class User(db.Model, UserMixin):
     gsc_tokens = db.relationship("GSCAuthToken", backref="user", lazy=True, cascade="all, delete-orphan")
     site_quota_logs = db.relationship("SiteQuotaLog", backref="user", lazy=True, cascade="all, delete-orphan")
 
+# ──── サイトジャンル ────
+class Genre(db.Model):
+    __tablename__ = 'genres'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)
+    description = db.Column(db.Text, nullable=True)
+
+    # 🔄 関連
+    sites = db.relationship("Site", backref="genre", lazy=True)
 
 # ──── WP サイト ────
 class Site(db.Model):
@@ -66,6 +76,7 @@ class Site(db.Model):
     gsc_connected = db.Column(db.Boolean, default=False)  # ✅ 追加
     clicks = db.Column(db.Integer, default=0)         # 総クリック数（GSC）
     impressions = db.Column(db.Integer, default=0)    # 表示回数（GSC）
+    genre_id = db.Column(db.Integer, db.ForeignKey('genres.id'), nullable=True)  # ← 追加
 
     # リレーション
     articles = db.relationship("Article", backref="site", lazy='selectin')
