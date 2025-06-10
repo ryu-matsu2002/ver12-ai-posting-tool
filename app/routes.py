@@ -1800,6 +1800,7 @@ def log(username, site_id):
 
 
 # ─────────── ログ：サイト選択ページ（ユーザー別）
+# ─────────── ログ：サイト選択ページ（ユーザー別）
 @bp.route("/<username>/log/sites")
 @login_required
 def log_sites(username):
@@ -1808,9 +1809,11 @@ def log_sites(username):
 
     from sqlalchemy import func, case
 
-    # フィルター取得（GETパラメータ）
+    # GETパラメータ取得
     status_filter = request.args.get("plan_type", "all")
     search_query = request.args.get("query", "").strip().lower()
+    sort_key = request.args.get("sort", "total")  # デフォルト: 総記事数
+    sort_order = request.args.get("order", "desc")  # デフォルト: 降順（多い順）
 
     # サブクエリ：フィルター条件
     query = db.session.query(
@@ -1841,7 +1844,24 @@ def log_sites(username):
     # グループ化・取得
     result = query.group_by(Site.id).all()
 
-    return render_template("log_sites.html", sites=result, selected_status=status_filter, search_query=search_query)
+    # 並び替えキー定義（total, done, posted）
+    sort_options = {
+        "total": lambda x: x.total or 0,
+        "done": lambda x: x.done or 0,
+        "posted": lambda x: x.posted or 0,
+    }
+    if sort_key in sort_options:
+        reverse = (sort_order == "desc")
+        result.sort(key=sort_options[sort_key], reverse=reverse)
+
+    return render_template(
+        "log_sites.html",
+        sites=result,
+        selected_status=status_filter,
+        search_query=search_query,
+        sort_key=sort_key,
+        sort_order=sort_order
+    )
 
 # ─────────── プレビュー
 @bp.route("/preview/<int:article_id>")
