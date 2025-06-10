@@ -29,28 +29,8 @@
       <tr class="bg-gray-100 dark:bg-gray-700 text-left text-black font-bold text-sm">
         <th class="px-3 py-2">サイト名</th>
         <th class="px-3 py-2">URL</th>
-        <th class="px-3 py-2 text-center">
-          <a href="?sort=total&order={{ 'asc' if sort_key == 'total' and sort_order == 'desc' else 'desc' }}&query={{ search_query }}&plan_type={{ selected_status }}"
-             class="flex justify-center items-center gap-1">
-            総記事数
-            {% if sort_key == 'total' %}
-              <span class="text-lg font-bold text-blue-700">{{ '↓' if sort_order == 'desc' else '↑' }}</span>
-            {% else %}
-              <span class="text-gray-400 text-sm">⇅</span>
-            {% endif %}
-          </a>
-        </th>
-        <th class="px-3 py-2 text-center">
-          <a href="?sort=done&order={{ 'asc' if sort_key == 'done' and sort_order == 'desc' else 'desc' }}&query={{ search_query }}&plan_type={{ selected_status }}"
-             class="flex justify-center items-center gap-1">
-            記事生成済み
-            {% if sort_key == 'done' %}
-              <span class="text-lg font-bold text-green-600">{{ '↓' if sort_order == 'desc' else '↑' }}</span>
-            {% else %}
-              <span class="text-gray-400 text-sm">⇅</span>
-            {% endif %}
-          </a>
-        </th>
+
+        <!-- 投稿完了 -->
         <th class="px-3 py-2 text-center">
           <a href="?sort=posted&order={{ 'asc' if sort_key == 'posted' and sort_order == 'desc' else 'desc' }}&query={{ search_query }}&plan_type={{ selected_status }}"
              class="flex justify-center items-center gap-1">
@@ -62,6 +42,59 @@
             {% endif %}
           </a>
         </th>
+
+        <!-- 記事生成済み -->
+        <th class="px-3 py-2 text-center">
+          <a href="?sort=done&order={{ 'asc' if sort_key == 'done' and sort_order == 'desc' else 'desc' }}&query={{ search_query }}&plan_type={{ selected_status }}"
+             class="flex justify-center items-center gap-1">
+            記事生成済み
+            {% if sort_key == 'done' %}
+              <span class="text-lg font-bold text-green-600">{{ '↓' if sort_order == 'desc' else '↑' }}</span>
+            {% else %}
+              <span class="text-gray-400 text-sm">⇅</span>
+            {% endif %}
+          </a>
+        </th>
+
+        <!-- 総記事数 -->
+        <th class="px-3 py-2 text-center">
+          <a href="?sort=total&order={{ 'asc' if sort_key == 'total' and sort_order == 'desc' else 'desc' }}&query={{ search_query }}&plan_type={{ selected_status }}"
+             class="flex justify-center items-center gap-1">
+            総記事数
+            {% if sort_key == 'total' %}
+              <span class="text-lg font-bold text-blue-700">{{ '↓' if sort_order == 'desc' else '↑' }}</span>
+            {% else %}
+              <span class="text-gray-400 text-sm">⇅</span>
+            {% endif %}
+          </a>
+        </th>
+
+        <!-- クリック数 -->
+        <th class="px-3 py-2 text-center">
+          <a href="?sort=clicks&order={{ 'asc' if sort_key == 'clicks' and sort_order == 'desc' else 'desc' }}&query={{ search_query }}&plan_type={{ selected_status }}"
+             class="flex justify-center items-center gap-1">
+            クリック数
+            {% if sort_key == 'clicks' %}
+              <span class="text-lg font-bold text-rose-600">{{ '↓' if sort_order == 'desc' else '↑' }}</span>
+            {% else %}
+              <span class="text-gray-400 text-sm">⇅</span>
+            {% endif %}
+          </a>
+        </th>
+
+        <!-- 表示回数 -->
+        <th class="px-3 py-2 text-center">
+          <a href="?sort=impressions&order={{ 'asc' if sort_key == 'impressions' and sort_order == 'desc' else 'desc' }}&query={{ search_query }}&plan_type={{ selected_status }}"
+             class="flex justify-center items-center gap-1">
+            表示回数
+            {% if sort_key == 'impressions' %}
+              <span class="text-lg font-bold text-purple-600">{{ '↓' if sort_order == 'desc' else '↑' }}</span>
+            {% else %}
+              <span class="text-gray-400 text-sm">⇅</span>
+            {% endif %}
+          </a>
+        </th>
+
         <th class="px-3 py-2 text-center">詳細</th>
       </tr>
     </thead>
@@ -79,9 +112,11 @@
             </span>
           {% endif %}
         </td>
-        <td class="px-3 py-2 text-center text-black">{{ site.total or 0 }}</td>
+        <td class="px-3 py-2 text-center text-indigo-600 font-bold">{{ site.posted or 0 }}</td>
         <td class="px-3 py-2 text-center text-green-600 font-bold">{{ site.done or 0 }}</td>
-        <td class="px-3 py-2 text-center text-blue-600 font-bold">{{ site.posted or 0 }}</td>
+        <td class="px-3 py-2 text-center text-black">{{ site.total or 0 }}</td>
+        <td class="px-3 py-2 text-center text-rose-600 font-bold">{{ site.clicks or 0 }}</td>
+        <td class="px-3 py-2 text-center text-purple-600 font-bold">{{ site.impressions or 0 }}</td>
         <td class="px-3 py-2 text-center space-x-1">
           {% if site.gsc_connected %}
             <a href="{{ url_for('main.gsc_generate', username=current_user.username) }}?site_id={{ site.id }}"
