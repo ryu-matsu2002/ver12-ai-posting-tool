@@ -2,7 +2,6 @@
 {% block title %}記事一覧 | AI Posting Tool{% endblock %}
 
 {% block content %}
-<!-- 🔙 サイト一覧に戻るリンク（上部） -->
 <div class="mb-4">
   <a href="{{ url_for('main.log_sites', username=current_user.username) }}" class="text-lg text-blue-700 hover:underline font-semibold">
     ← サイト一覧に戻る
@@ -11,7 +10,6 @@
 
 <h2 class="text-2xl font-semibold mb-4">記事一覧</h2>
 
-<!-- ✅ 現在の投稿先サイト -->
 <div class="mb-4 text-base font-semibold">
   現在の投稿先サイト：
   {% if site %}
@@ -26,15 +24,9 @@
   {% endif %}
 </div>
 
-<!-- ✅ ステータス絞り込み -->
 <form method="get" class="mb-6 flex items-center flex-wrap gap-3">
   <label for="statusFilter" class="font-medium shrink-0">表示するステータス:</label>
-  <select
-    id="statusFilter"
-    name="status"
-    onchange="this.form.submit()"
-    class="p-2 rounded border dark:bg-gray-700 dark:border-gray-600 min-w-[200px]"
-  >
+  <select id="statusFilter" name="status" onchange="this.form.submit()" class="p-2 rounded border min-w-[200px]">
     <option value="">すべてのステータス</option>
     <option value="posted" {% if status == "posted" %}selected{% endif %}>✅ 投稿完了</option>
     <option value="done" {% if status == "done" %}selected{% endif %}>📝 記事生成済み</option>
@@ -43,7 +35,6 @@
   </select>
 </form>
 
-<!-- ✅ 一括操作フォーム -->
 <form method="post" action="{{ url_for('main.bulk_delete_articles', username=current_user.username) }}">
   <div class="mb-4 flex items-center gap-2">
     <select name="action" class="p-2 rounded border">
@@ -57,13 +48,36 @@
     </button>
   </div>
 
-  <!-- ✅ 表 -->
   <table class="w-full bg-white dark:bg-gray-800 text-sm table-fixed">
     <thead class="bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white font-semibold">
       <tr class="whitespace-nowrap">
         <th class="px-2 py-2 text-left w-[40px]"><input type="checkbox" onclick="toggleAll(this)"></th>
         <th class="px-2 py-2 text-left w-[15%]">検索キーワード</th>
-        <th class="px-2 py-2 text-left w-[12%]">サイト名</th>
+
+        <!-- 🔄 クリック数 -->
+        <th class="px-2 py-2 text-center w-[7%]">
+          <a href="?sort=clicks&order={{ 'asc' if sort_key == 'clicks' and sort_order == 'desc' else 'desc' }}" class="flex items-center justify-center gap-1">
+            クリック数
+            {% if sort_key == 'clicks' %}
+              <span class="text-rose-600 font-bold">{{ '↓' if sort_order == 'desc' else '↑' }}</span>
+            {% else %}
+              <span class="text-gray-400 text-xs">⇅</span>
+            {% endif %}
+          </a>
+        </th>
+
+        <!-- 🔄 表示回数 -->
+        <th class="px-2 py-2 text-center w-[7%]">
+          <a href="?sort=impr&order={{ 'asc' if sort_key == 'impr' and sort_order == 'desc' else 'desc' }}" class="flex items-center justify-center gap-1">
+            表示回数
+            {% if sort_key == 'impr' %}
+              <span class="text-purple-600 font-bold">{{ '↓' if sort_order == 'desc' else '↑' }}</span>
+            {% else %}
+              <span class="text-gray-400 text-xs">⇅</span>
+            {% endif %}
+          </a>
+        </th>
+
         <th class="px-2 py-2 text-left w-[10%]">現在の状態</th>
         <th class="px-2 py-2 text-left w-[6%]">進行状況</th>
         <th class="px-2 py-2 text-left w-[10%]">投稿予定日</th>
@@ -78,7 +92,8 @@
       <tr class="{% if loop.index0 % 2 == 0 %}bg-white{% else %}bg-blue-50{% endif %}">
         <td class="px-2 py-2"><input type="checkbox" name="selected_ids" value="{{ a.id }}"></td>
         <td class="px-2 py-2">{{ a.keyword }}</td>
-        <td class="px-2 py-2">{% if a.site %}{{ a.site.name }}{% else %}—{% endif %}</td>
+        <td class="px-2 py-2 text-center text-rose-600">{{ a.site.clicks or 0 }}</td>
+        <td class="px-2 py-2 text-center text-purple-600">{{ a.site.impressions or 0 }}</td>
         <td class="px-2 py-2">
           {% if a.status == "posted" %}<span class="text-green-600 font-bold">投稿完了</span>
           {% elif a.status == "done" %}<span class="text-red-600 font-bold">記事生成済み</span>
@@ -132,7 +147,7 @@
       </tr>
       {% else %}
       <tr>
-        <td colspan="10" class="px-4 py-6 text-center text-gray-500">
+        <td colspan="11" class="px-4 py-6 text-center text-gray-500">
           該当する記事がありません
         </td>
       </tr>

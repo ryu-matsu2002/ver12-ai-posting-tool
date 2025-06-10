@@ -11,6 +11,7 @@ from flask_login import (
 from werkzeug.security import generate_password_hash, check_password_hash
 from pytz import timezone
 from sqlalchemy import asc, nulls_last
+from sqlalchemy.orm import selectinload
 
 from . import db
 from .models import User, Article, PromptTemplate, Site, Keyword
@@ -1747,7 +1748,6 @@ def connect_gsc(site_id):
 
 
 
-
 # ─────────── 生成ログ
 @bp.route("/<username>/log/site/<int:site_id>")
 @login_required
@@ -1758,8 +1758,10 @@ def log(username, site_id):
     from collections import defaultdict
     from .article_generator import _generate_slots_per_site
 
-    # ステータスフィルタを取得
+    # ステータス & ソートキー取得
     status = request.args.get("status")
+    sort_key = request.args.get("sort", "scheduled_at")
+    sort_order = request.args.get("order", "desc")
 
     # 未スケジュール記事の slot を自動割当
     unscheduled = Article.query.filter(
@@ -1783,18 +1785,33 @@ def log(username, site_id):
     q = Article.query.filter_by(user_id=current_user.id, site_id=site_id)
     if status:
         q = q.filter_by(status=status)
+
+    # 必ず site 情報も preload（clicks/impressions用）
+    q = q.options(selectinload(Article.site))
+
+    # 初期並び順：投稿予定日時優先
     q = q.order_by(
         nulls_last(asc(Article.scheduled_at)),
         Article.created_at.desc(),
     )
 
+    articles = q.all()
+
+    # 🔽 並び替え（Python側）
+    if sort_key == "clicks":
+        articles.sort(key=lambda a: a.site.clicks or 0, reverse=(sort_order == "desc"))
+    elif sort_key == "impr":
+        articles.sort(key=lambda a: a.site.impressions or 0, reverse=(sort_order == "desc"))
+
     site = Site.query.get_or_404(site_id)
 
     return render_template(
         "log.html",
-        articles=q.all(),
+        articles=articles,
         site=site,
         status=status,
+        sort_key=sort_key,
+        sort_order=sort_order,
         jst=JST
     )
 
