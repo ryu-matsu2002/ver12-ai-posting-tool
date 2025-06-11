@@ -1915,7 +1915,11 @@ def log_sites(username):
         )
 
     # グループ化・取得
-    result = query.group_by(Site.id).all()
+    # 🔁 修正すべき1行（group_by拡張）
+    result = query.group_by(
+        Site.id, Site.name, Site.url, Site.plan_type, Site.clicks, Site.impressions
+    ).all()
+
 
     # 並び替えキー定義（total, done, posted, clicks, impressions）
     sort_options = {
