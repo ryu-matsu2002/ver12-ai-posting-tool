@@ -194,6 +194,11 @@ def stripe_webhook():
         special = metadata.get("special", "no")
         stripe_payment_id = intent.get("id")
 
+        # ✅ special=no の場合は処理をスキップ（通常購入はcheckoutで処理済）
+        if special != "yes":
+            current_app.logger.info("✅ 通常購入は checkout.session.completed で処理済みのためスキップ")
+            return jsonify({"message": "Skipped non-special intent"}), 200
+
         # ✅ 重複チェック（最優先）
         existing = PaymentLog.query.filter_by(stripe_payment_id=stripe_payment_id).first()
         if existing:
