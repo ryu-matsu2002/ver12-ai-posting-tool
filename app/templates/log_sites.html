@@ -6,20 +6,24 @@
 
 <!-- 🔍 サイト検索＋ジャンルフィルター -->
 <form method="get" class="mb-6 flex flex-wrap gap-4 items-center" id="search-form">
+  <!-- サイト検索 -->
   <div class="flex items-center gap-2">
     <label for="query" class="font-medium">サイト検索:</label>
     <input type="text" id="query" name="query" placeholder="サイト名またはURL"
            value="{{ search_query or '' }}" class="p-2 border rounded w-64">
+    <button type="submit" class="px-3 py-2 bg-blue-500 text-white rounded" id="search-site-button">検索</button>
   </div>
+
+  <!-- ジャンル検索 -->
   <div class="flex items-center gap-2">
     <label for="genre_id" class="font-medium">ジャンルで絞り込み:</label>
-    <select id="genre_id" name="genre_id" onchange="this.form.submit()" class="p-2 border rounded">
+    <select id="genre_id" name="genre_id" class="p-2 border rounded">
       {% for gid, gname in genre_choices %}
         <option value="{{ gid }}" {% if selected_genre_id == gid %}selected{% endif %}>{{ gname }}</option>
       {% endfor %}
     </select>
+    <button type="submit" class="px-3 py-2 bg-blue-500 text-white rounded" id="search-genre-button">絞り込む</button>
   </div>
-  <button type="submit" class="px-4 py-2 bg-blue-500 text-white rounded" id="search-button">検索</button>
 </form>
 
 {% if sites %}
@@ -141,10 +145,15 @@
 <script>
 document.addEventListener("DOMContentLoaded", function () {
   const form = document.getElementById("search-form");
-  const button = document.getElementById("search-button");
-  form.addEventListener("submit", function () {
-    button.disabled = true;
-    button.textContent = "検索中... ⏳";
+  const buttons = [document.getElementById("search-site-button"), document.getElementById("search-genre-button")];
+
+  buttons.forEach(button => {
+    if (button) {
+      button.addEventListener("click", function () {
+        buttons.forEach(b => b.disabled = true);
+        this.textContent = "検索中... ⏳";
+      });
+    }
   });
 });
 </script>
