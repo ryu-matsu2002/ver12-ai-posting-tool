@@ -14,7 +14,7 @@ class User(db.Model, UserMixin):
     email    = db.Column(db.String(120), unique=True, nullable=False)
     password = db.Column(db.String(300), nullable=False)
     username = db.Column(db.String(50), unique=True, nullable=False)
-    
+
     # 区分（個人 or 法人）
     user_type = db.Column(db.String(20), nullable=False, default="personal")  # "personal" or "corporate"
 
@@ -173,8 +173,8 @@ class PaymentLog(db.Model):
     status = db.Column(db.String(20), default="succeeded")  # ← これを追加
 
     def __repr__(self):
-        return f"<PaymentLog {self.email} {self.amount}円 {self.created_at}>"    
-    
+        return f"<PaymentLog {self.email} {self.amount}円 {self.created_at}>"
+
 # ──── API使用ログ ────
 class TokenUsageLog(db.Model):
     __tablename__ = 'token_usage_logs'
@@ -187,7 +187,7 @@ class TokenUsageLog(db.Model):
 
     created_at = db.Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
-    
+
 
 # ✅ GSC 認証トークン保存用モデル
 class GSCAuthToken(db.Model):
@@ -210,15 +210,15 @@ class GSCAuthToken(db.Model):
             return True
         return datetime.utcnow() >= self.token_expiry - timedelta(minutes=5)
 
-# ──── サイト登録枠の取得ログ ────
+
+
 class SiteQuotaLog(db.Model):
     __tablename__ = 'site_quota_logs'
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
-    plan_type = db.Column(db.String(50), nullable=False)  # 'affiliate', 'business' など
-    count = db.Column(db.Integer, nullable=False)          # 加算（または減算）されたサイト数
-    reason = db.Column(db.String(255), nullable=False)     # 例："Stripe支払い", "管理者手動追加"
+    stripe_payment_id = db.Column(db.String(255), nullable=True)
+    site_count = db.Column(db.Integer, nullable=False)
+    reason = db.Column(db.String(100), nullable=False, default="Stripe支払い")
+    plan_type = db.Column(db.String(50), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-   

@@ -104,7 +104,7 @@ def stripe_webhook():
     sig_header = request.headers.get("stripe-signature")
     webhook_secret = current_app.config["STRIPE_WEBHOOK_SECRET"]
 
-    # ✅ ログ出力：受信記録
+    # ログ出力：受信記録
     current_app.logger.info("📩 Stripe Webhook Received")
     current_app.logger.info(payload.decode("utf-8"))
 
@@ -117,7 +117,7 @@ def stripe_webhook():
         current_app.logger.error(f"❌ Error parsing webhook: {str(e)}")
         return f"Error parsing webhook: {str(e)}", 400
 
-    # ✅ PaymentIntent（通常購入も特別購入もここで処理）
+    # PaymentIntent（通常購入も特別購入もここで処理）
     if event["type"] == "payment_intent.succeeded":
         intent = event["data"]["object"]
         metadata = intent.get("metadata", {})
@@ -128,7 +128,7 @@ def stripe_webhook():
         special = metadata.get("special", "no")
         stripe_payment_id = intent.get("id")
 
-        # ✅ 値のチェック
+        # 値のチェック
         if special not in ["yes", "no"]:
             current_app.logger.warning(f"⚠️ 無効な special フラグ：{special}")
             return jsonify({"message": "Invalid special flag"}), 400
@@ -137,18 +137,18 @@ def stripe_webhook():
             current_app.logger.warning("⚠️ metadata に user_id が含まれていません")
             return jsonify({"message": "Missing user_id"}), 400
 
-        # ✅ 二重処理防止
-        existing = PaymentLog.query.filter_by(stripe_payment_id=stripe_payment_id).first()
-        if existing:
-            current_app.logger.warning("⚠️ この支払いはすでに処理済みです")
-            return jsonify({"message": "Already processed"}), 200
+        # SiteQuotaLogでの冪等性チェック（重複処理防止）
+        existing_quota_log = SiteQuotaLog.query.filter_by(stripe_payment_id=stripe_payment_id).first()
+        if existing_quota_log:
+            current_app.logger.warning("⚠️ この支払いはすでにQuotaに反映済みです")
+            return jsonify({"message": "Quota already granted"}), 200
 
         user = User.query.get(int(user_id))
         if not user:
             current_app.logger.warning(f"⚠️ user_id={user_id} のユーザーが見つかりません")
             return jsonify({"message": "User not found"}), 400
 
-        # ✅ Quota加算処理
+        # Quota加算処理
         quota = UserSiteQuota.query.filter_by(user_id=user.id).first()
         if not quota:
             quota = UserSiteQuota(user_id=user.id, total_quota=0, used_quota=0, plan_type=plan_type)
@@ -162,7 +162,17 @@ def stripe_webhook():
             f"✅ Quota加算: user_id={user.id}, plan={plan_type}, site_count={site_count}, special={special}"
         )
 
-        # ✅ PaymentLog保存処理
+        # SiteQuotaLogに履歴を保存
+        quota_log = SiteQuotaLog(
+            user_id=user.id,
+            stripe_payment_id=stripe_payment_id,
+            site_count=site_count,
+            reason="Stripe支払い"
+        )
+        db.session.add(quota_log)
+        db.session.commit()
+
+        # PaymentLog保存処理
         amount = intent.get("amount") // 100
         email = intent.get("receipt_email") or intent.get("customer_email")
 
@@ -193,7 +203,6 @@ def stripe_webhook():
         current_app.logger.info(f"💰 PaymentLog 保存：{email} ¥{amount}")
 
     return jsonify(success=True)
-
 
 
 # Stripe APIキーを読み込み
