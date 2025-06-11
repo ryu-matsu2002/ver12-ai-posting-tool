@@ -4,26 +4,25 @@
 {% block content %}
 <h2 class="text-2xl font-semibold mb-6">記事生成 - 投稿ログ - サイト一覧</h2>
 
-<!-- 🔍 サイト検索＋ジャンルフィルター -->
-<form method="get" class="mb-6 flex flex-wrap gap-4 items-center" id="search-form">
-  <!-- サイト検索 -->
-  <div class="flex items-center gap-2">
-    <label for="query" class="font-medium">サイト検索:</label>
-    <input type="text" id="query" name="query" placeholder="サイト名またはURL"
-           value="{{ search_query or '' }}" class="p-2 border rounded w-64">
-    <button type="submit" class="px-3 py-2 bg-blue-500 text-white rounded" id="search-site-button">検索</button>
-  </div>
+<!-- 🔍 サイト検索フォーム（単独） -->
+<form method="get" class="mb-4 flex flex-wrap gap-3 items-center" id="search-form-site">
+  <label for="query" class="font-medium">サイト検索:</label>
+  <input type="text" id="query" name="query" placeholder="サイト名またはURL"
+         value="{{ search_query or '' }}" class="p-2 border rounded w-64">
+  <input type="hidden" name="genre_id" value="{{ selected_genre_id }}">
+  <button type="submit" class="px-4 py-2 bg-blue-500 text-white rounded" id="search-site-button">検索</button>
+</form>
 
-  <!-- ジャンル検索 -->
-  <div class="flex items-center gap-2">
-    <label for="genre_id" class="font-medium">ジャンルで絞り込み:</label>
-    <select id="genre_id" name="genre_id" class="p-2 border rounded">
-      {% for gid, gname in genre_choices %}
-        <option value="{{ gid }}" {% if selected_genre_id == gid %}selected{% endif %}>{{ gname }}</option>
-      {% endfor %}
-    </select>
-    <button type="submit" class="px-3 py-2 bg-blue-500 text-white rounded" id="search-genre-button">絞り込む</button>
-  </div>
+<!-- 🧩 ジャンルフィルター（単独） -->
+<form method="get" class="mb-6 flex flex-wrap gap-3 items-center" id="search-form-genre">
+  <label for="genre_id" class="font-medium">ジャンルで絞り込み:</label>
+  <select id="genre_id" name="genre_id" class="p-2 border rounded">
+    {% for gid, gname in genre_choices %}
+      <option value="{{ gid }}" {% if selected_genre_id == gid %}selected{% endif %}>{{ gname }}</option>
+    {% endfor %}
+  </select>
+  <input type="hidden" name="query" value="{{ search_query }}">
+  <button type="submit" class="px-4 py-2 bg-blue-500 text-white rounded" id="search-genre-button">絞り込む</button>
 </form>
 
 {% if sites %}
@@ -33,8 +32,6 @@
       <tr class="bg-gray-100 dark:bg-gray-700 text-left text-black font-bold text-sm">
         <th class="px-3 py-2">サイト名</th>
         <th class="px-3 py-2">URL</th>
-
-        <!-- 投稿完了 -->
         <th class="px-3 py-2 text-center">
           <a href="?sort=posted&order={{ 'asc' if sort_key == 'posted' and sort_order == 'desc' else 'desc' }}&query={{ search_query }}&genre_id={{ selected_genre_id }}"
              class="flex justify-center items-center gap-1">
@@ -46,8 +43,6 @@
             {% endif %}
           </a>
         </th>
-
-        <!-- 記事生成済み -->
         <th class="px-3 py-2 text-center">
           <a href="?sort=done&order={{ 'asc' if sort_key == 'done' and sort_order == 'desc' else 'desc' }}&query={{ search_query }}&genre_id={{ selected_genre_id }}"
              class="flex justify-center items-center gap-1">
@@ -59,8 +54,6 @@
             {% endif %}
           </a>
         </th>
-
-        <!-- 総記事数 -->
         <th class="px-3 py-2 text-center">
           <a href="?sort=total&order={{ 'asc' if sort_key == 'total' and sort_order == 'desc' else 'desc' }}&query={{ search_query }}&genre_id={{ selected_genre_id }}"
              class="flex justify-center items-center gap-1">
@@ -72,8 +65,6 @@
             {% endif %}
           </a>
         </th>
-
-        <!-- クリック数 -->
         <th class="px-3 py-2 text-center">
           <a href="?sort=clicks&order={{ 'asc' if sort_key == 'clicks' and sort_order == 'desc' else 'desc' }}&query={{ search_query }}&genre_id={{ selected_genre_id }}"
              class="flex justify-center items-center gap-1">
@@ -85,8 +76,6 @@
             {% endif %}
           </a>
         </th>
-
-        <!-- 表示回数 -->
         <th class="px-3 py-2 text-center">
           <a href="?sort=impressions&order={{ 'asc' if sort_key == 'impressions' and sort_order == 'desc' else 'desc' }}&query={{ search_query }}&genre_id={{ selected_genre_id }}"
              class="flex justify-center items-center gap-1">
@@ -98,7 +87,6 @@
             {% endif %}
           </a>
         </th>
-
         <th class="px-3 py-2 text-center">詳細</th>
       </tr>
     </thead>
@@ -109,9 +97,7 @@
         <td class="px-3 py-2 break-all text-blue-700 underline">
           <a href="{{ site.url }}" target="_blank">{{ site.url }}</a>
           {% if site.gsc_connected %}
-            <span class="ml-2 inline-block bg-green-600 text-white text-xs font-semibold px-2 py-0.5 rounded">
-              GSC接続済み ✅
-            </span>
+            <span class="ml-2 inline-block bg-green-600 text-white text-xs font-semibold px-2 py-0.5 rounded">GSC接続済み ✅</span>
           {% endif %}
         </td>
         <td class="px-3 py-2 text-center text-indigo-600 font-bold">{{ site.posted or 0 }}</td>
@@ -121,17 +107,12 @@
         <td class="px-3 py-2 text-center text-purple-600 font-bold">{{ site.impressions or 0 }}</td>
         <td class="px-3 py-2 text-center space-x-1">
           {% if site.gsc_connected %}
-            <a href="{{ url_for('main.gsc_generate', username=current_user.username) }}?site_id={{ site.id }}"
-               class="inline-block py-1 px-3 bg-lime-600 hover:bg-lime-700 text-white rounded text-sm">GSC生成</a>
+            <a href="{{ url_for('main.gsc_generate', username=current_user.username) }}?site_id={{ site.id }}" class="py-1 px-3 bg-lime-600 hover:bg-lime-700 text-white rounded text-sm">GSC生成</a>
           {% endif %}
-          <a href="{{ url_for('main.generate', username=current_user.username) }}?site_id={{ site.id }}"
-             class="inline-block py-1 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-sm">記事生成</a>
-          <a href="{{ url_for('main.log', username=current_user.username, site_id=site.id) }}"
-             class="inline-block py-1 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm">記事一覧</a>
-          <a href="{{ site.url.rstrip('/') }}/admin" target="_blank"
-             class="inline-block py-1 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-sm">WP管理</a>
-          <a href="{{ url_for('main.edit_site', username=current_user.username, sid=site.id) }}"
-             class="inline-block py-1 px-3 bg-gray-500 hover:bg-gray-600 text-white rounded text-sm">修正</a>
+          <a href="{{ url_for('main.generate', username=current_user.username) }}?site_id={{ site.id }}" class="py-1 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-sm">記事生成</a>
+          <a href="{{ url_for('main.log', username=current_user.username, site_id=site.id) }}" class="py-1 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm">記事一覧</a>
+          <a href="{{ site.url.rstrip('/') }}/admin" target="_blank" class="py-1 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-sm">WP管理</a>
+          <a href="{{ url_for('main.edit_site', username=current_user.username, sid=site.id) }}" class="py-1 px-3 bg-gray-500 hover:bg-gray-600 text-white rounded text-sm">修正</a>
         </td>
       </tr>
       {% endfor %}
@@ -139,22 +120,27 @@
   </table>
 </div>
 {% else %}
-  <div class="text-gray-500 text-center py-12">サイトがまだ登録されていません。</div>
+<div class="text-gray-500 text-center py-12">サイトがまだ登録されていません。</div>
 {% endif %}
 
 <script>
 document.addEventListener("DOMContentLoaded", function () {
-  const form = document.getElementById("search-form");
-  const buttons = [document.getElementById("search-site-button"), document.getElementById("search-genre-button")];
+  const siteBtn = document.getElementById("search-site-button");
+  const genreBtn = document.getElementById("search-genre-button");
 
-  buttons.forEach(button => {
-    if (button) {
-      button.addEventListener("click", function () {
-        buttons.forEach(b => b.disabled = true);
-        this.textContent = "検索中... ⏳";
-      });
-    }
-  });
+  if (siteBtn) {
+    siteBtn.addEventListener("click", () => {
+      siteBtn.disabled = true;
+      siteBtn.textContent = "検索中... ⏳";
+    });
+  }
+
+  if (genreBtn) {
+    genreBtn.addEventListener("click", () => {
+      genreBtn.disabled = true;
+      genreBtn.textContent = "絞り込み中... ⏳";
+    });
+  }
 });
 </script>
 {% endblock %}
