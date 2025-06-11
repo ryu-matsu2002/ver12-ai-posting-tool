@@ -658,7 +658,7 @@ def admin_quota_edit(uid):
         log = SiteQuotaLog(
             user_id=user.id,
             plan_type=plan_type,
-            count=count,
+            site_count=count,
             reason="管理者手動追加",
             created_at = datetime.datetime.utcnow()  # ← import datetime のまま使う場合
         )
