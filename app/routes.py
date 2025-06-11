@@ -1565,12 +1565,13 @@ def edit_site(username, sid: int):
 
     form = SiteForm(obj=site)
 
-    # ✅ 自分のジャンルのみ表示
+    # ✅ 自分のジャンルだけを選択肢に含める
     genre_list = Genre.query.filter_by(user_id=current_user.id).order_by(Genre.name).all()
     form.genre_id.choices = [(0, "ジャンル未選択")] + [(g.id, g.name) for g in genre_list]
 
-    # ✅ 明示的なNoneチェック（← ここが重要）
-    form.genre_id.data = site.genre_id if site.genre_id is not None else 0
+    # ✅ 初期値は GET のときだけ設定（POST時に上書きしない！）
+    if request.method == "GET":
+        form.genre_id.data = site.genre_id if site.genre_id is not None else 0
 
     if form.validate_on_submit():
         site.name       = form.name.data
@@ -1579,12 +1580,15 @@ def edit_site(username, sid: int):
         site.app_pass   = form.app_pass.data
         site.plan_type  = form.plan_type.data
         site.genre_id   = form.genre_id.data if form.genre_id.data != 0 else None
+
         db.session.commit()
         flash("サイト情報を更新しました", "success")
         return redirect(url_for("main.log_sites", username=username))
+
     else:
         if request.method == "POST":
             print("❌ バリデーションエラー:", form.errors)
+            print("📌 ジャンルID:", form.genre_id.data)
 
     return render_template("site_edit.html", form=form, site=site)
 
