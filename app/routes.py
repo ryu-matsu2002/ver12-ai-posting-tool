@@ -2171,3 +2171,66 @@ def oauth2callback():
 
     flash(f"サイト「{site.name}」とGoogle Search Consoleの接続に成功しました。", "success")
     return redirect(url_for("main.gsc_connect"))
+
+from app.forms import GenreForm
+
+# ─────────── ジャンル管理ページ
+@bp.route("/<username>/genres", methods=["GET", "POST"])
+@login_required
+def manage_genres(username):
+    if current_user.username != username:
+        abort(403)
+
+    form = GenreForm()
+    if form.validate_on_submit():
+        # 🔹 既存ジャンル名と重複しないようにチェック（同一ユーザー内）
+        existing = Genre.query.filter_by(user_id=current_user.id, name=form.name.data.strip()).first()
+        if existing:
+            flash("同じ名前のジャンルが既に存在します。", "warning")
+        else:
+            genre = Genre(
+                name=form.name.data.strip(),
+                description=form.description.data.strip(),
+                user_id=current_user.id
+            )
+            db.session.add(genre)
+            db.session.commit()
+            flash("ジャンルを追加しました。", "success")
+        return redirect(url_for("main.manage_genres", username=username))
+
+    genres = Genre.query.filter_by(user_id=current_user.id).order_by(Genre.name).all()
+    return render_template("genres.html", form=form, genres=genres)
+
+
+# ─────────── ジャンル編集
+@bp.route("/<username>/genres/edit/<int:genre_id>", methods=["GET", "POST"])
+@login_required
+def edit_genre(username, genre_id):
+    if current_user.username != username:
+        abort(403)
+
+    genre = Genre.query.filter_by(id=genre_id, user_id=current_user.id).first_or_404()
+    form = GenreForm(obj=genre)
+
+    if form.validate_on_submit():
+        genre.name = form.name.data.strip()
+        genre.description = form.description.data.strip()
+        db.session.commit()
+        flash("ジャンルを更新しました。", "success")
+        return redirect(url_for("main.manage_genres", username=username))
+
+    return render_template("genres.html", form=form, genres=[], edit_genre=genre)
+
+
+# ─────────── ジャンル削除
+@bp.route("/<username>/genres/delete/<int:genre_id>", methods=["POST"])
+@login_required
+def delete_genre(username, genre_id):
+    if current_user.username != username:
+        abort(403)
+
+    genre = Genre.query.filter_by(id=genre_id, user_id=current_user.id).first_or_404()
+    db.session.delete(genre)
+    db.session.commit()
+    flash("ジャンルを削除しました。", "info")
+    return redirect(url_for("main.manage_genres", username=username))

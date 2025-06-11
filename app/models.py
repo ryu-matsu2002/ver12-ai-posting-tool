@@ -54,16 +54,21 @@ class User(db.Model, UserMixin):
     gsc_tokens = db.relationship("GSCAuthToken", backref="user", lazy=True, cascade="all, delete-orphan")
     site_quota_logs = db.relationship("SiteQuotaLog", backref="user", lazy=True, cascade="all, delete-orphan")
 
-# ──── サイトジャンル ────
+
+# ──── サイトジャンル（ユーザーごとに管理可能） ────
 class Genre(db.Model):
     __tablename__ = 'genres'
 
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False, unique=True)
+    name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text, nullable=True)
 
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)  # ✅ 追加（ユーザー専用）
+
     # 🔄 関連
+    user = db.relationship("User", backref="genres")  # ✅ 追加
     sites = db.relationship("Site", backref="genre", lazy=True)
+
 
 # ──── WP サイト ────
 class Site(db.Model):

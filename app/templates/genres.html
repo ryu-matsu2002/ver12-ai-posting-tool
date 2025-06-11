@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}ジャンル管理 | Site Craft{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto py-10">
+
+  <h2 class="text-2xl font-bold mb-6">🗂️ ジャンル管理</h2>
+
+  <!-- フラッシュメッセージ -->
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="mb-4 space-y-2">
+        {% for category, message in messages %}
+          <div class="p-3 rounded bg-{{ 'red' if category=='danger' else 'green' if category=='success' else 'yellow' }}-100 text-{{ 'red' if category=='danger' else 'green' if category=='success' else 'yellow' }}-800">
+            {{ message }}
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  <!-- 🔹 ジャンル追加フォーム -->
+  <div class="bg-white p-6 rounded shadow mb-10">
+    <h3 class="text-lg font-semibold mb-4">{{ edit_genre.name if edit_genre else '新しいジャンルを追加' }}</h3>
+    <form method="POST">
+      {{ form.hidden_tag() }}
+      <div class="mb-4">
+        {{ form.name.label(class="block font-medium") }}
+        {{ form.name(class="w-full border rounded p-2") }}
+      </div>
+      <div class="mb-4">
+        {{ form.description.label(class="block font-medium") }}
+        {{ form.description(class="w-full border rounded p-2") }}
+      </div>
+      {{ form.submit(class="bg-blue-600 text-white px-4 py-2 rounded") }}
+    </form>
+  </div>
+
+  <!-- 🔹 ジャンル一覧表示 -->
+  <div class="bg-white p-6 rounded shadow">
+    <h3 class="text-lg font-semibold mb-4">登録済みジャンル</h3>
+    {% if genres %}
+      <ul class="space-y-3">
+        {% for genre in genres %}
+          <li class="flex justify-between items-center border-b pb-2">
+            <div>
+              <div class="font-bold">{{ genre.name }}</div>
+              <div class="text-sm text-gray-600">{{ genre.description }}</div>
+            </div>
+            <div class="space-x-2">
+              <a href="{{ url_for('main.edit_genre', username=current_user.username, genre_id=genre.id) }}"
+                 class="text-blue-600 hover:underline">編集</a>
+              <form method="POST" action="{{ url_for('main.delete_genre', username=current_user.username, genre_id=genre.id) }}" class="inline-block" onsubmit="return confirm('本当に削除しますか？');">
+                <button type="submit" class="text-red-600 hover:underline">削除</button>
+              </form>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-gray-500">ジャンルがまだ登録されていません。</p>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}
