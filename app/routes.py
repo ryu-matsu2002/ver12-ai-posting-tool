@@ -98,16 +98,15 @@ from app.models import User, UserSiteQuota, PaymentLog
 
 stripe_webhook_bp = Blueprint('stripe_webhook', __name__)
 
-# ────────────── Webhook ハンドラ（通常購入／特別プラン両対応）
 @stripe_webhook_bp.route("/stripe/webhook", methods=["POST"])
 def stripe_webhook():
     payload = request.data
     sig_header = request.headers.get("stripe-signature")
     webhook_secret = current_app.config["STRIPE_WEBHOOK_SECRET"]
 
-    # ✅ 追加: Webhookのペイロードをログ出力
+    # ✅ ログ出力：受信記録
     current_app.logger.info("📩 Stripe Webhook Received")
-    current_app.logger.info(payload.decode("utf-8"))  # JSON形式で出力
+    current_app.logger.info(payload.decode("utf-8"))
 
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
@@ -118,134 +117,68 @@ def stripe_webhook():
         current_app.logger.error(f"❌ Error parsing webhook: {str(e)}")
         return f"Error parsing webhook: {str(e)}", 400
 
-    # ✅ Stripe Checkout支払い完了（通常プラン）
-    if event["type"] == "checkout.session.completed":
-        session = event["data"]["object"]
-        metadata = session.get("metadata", {})
-        user_id = metadata.get("user_id")
-        site_count = int(metadata.get("site_count", 1))
-        plan_type = metadata.get("plan_type", "affiliate")
-        stripe_payment_id = session.get("payment_intent")
-
-        # ✅ 重複チェック（最優先）
-        existing = PaymentLog.query.filter_by(stripe_payment_id=stripe_payment_id).first()
-        if existing:
-            current_app.logger.warning("⚠️ Checkout Webhook: この支払いはすでに処理済みです")
-            return jsonify({"message": "Already processed"}), 200
-
-        # ✅ Quota 加算処理
-        if user_id:
-            user = User.query.get(int(user_id))
-            if user:
-                quota = UserSiteQuota.query.filter_by(user_id=user.id).first()
-                if not quota:
-                    quota = UserSiteQuota(
-                        user_id=user.id, total_quota=0, used_quota=0, plan_type=plan_type
-                    )
-                    db.session.add(quota)
-
-                quota.total_quota += site_count
-                quota.plan_type = plan_type
-                db.session.commit()
-
-                current_app.logger.info(
-                    f"✅ Checkout Webhook: user_id={user.id}, plan={plan_type}, site_count={site_count}"
-                )
-            else:
-                current_app.logger.warning(f"⚠️ Checkout Webhook: user_id={user_id} のユーザーが見つかりません")
-        else:
-            current_app.logger.warning("⚠️ Checkout Webhook: metadata に user_id が含まれていません")
-
-        # ✅ PaymentLog 保存処理
-        email = session.get("customer_email")
-        amount = session.get("amount_total") // 100  # セント → 円
-
-        intent = stripe.PaymentIntent.retrieve(stripe_payment_id)
-        charge_id = intent.get("latest_charge")
-        charge = stripe.Charge.retrieve(charge_id)
-
-        balance_tx_id = charge.get("balance_transaction")
-        balance_tx = stripe.BalanceTransaction.retrieve(balance_tx_id)
-
-        fee = balance_tx.fee // 100
-        net = balance_tx.net // 100
-
-        log = PaymentLog(
-            user_id=user.id if user else None,
-            email=email,
-            amount=amount,
-            fee=fee,
-            net_income=net,
-            plan_type=plan_type,
-            stripe_payment_id=stripe_payment_id,
-            status="succeeded"
-        )
-        db.session.add(log)
-        db.session.commit()
-        current_app.logger.info(f"💰 PaymentLog 保存（checkout）：{email} ¥{amount}")
-
-    # ✅ special_purchase 成功時
-    elif event["type"] == "payment_intent.succeeded":
+    # ✅ PaymentIntent（通常購入も特別購入もここで処理）
+    if event["type"] == "payment_intent.succeeded":
         intent = event["data"]["object"]
         metadata = intent.get("metadata", {})
+
         user_id = metadata.get("user_id")
         site_count = int(metadata.get("site_count", 1))
         plan_type = metadata.get("plan_type", "affiliate")
         special = metadata.get("special", "no")
         stripe_payment_id = intent.get("id")
 
-        # ✅ special=no の場合は処理をスキップ（通常購入はcheckoutで処理済）
-        if special != "yes":
-            current_app.logger.info("✅ 通常購入は checkout.session.completed で処理済みのためスキップ")
-            return jsonify({"message": "Skipped non-special intent"}), 200
+        # ✅ 値のチェック
+        if special not in ["yes", "no"]:
+            current_app.logger.warning(f"⚠️ 無効な special フラグ：{special}")
+            return jsonify({"message": "Invalid special flag"}), 400
 
-        # ✅ 重複チェック（最優先）
+        if not user_id:
+            current_app.logger.warning("⚠️ metadata に user_id が含まれていません")
+            return jsonify({"message": "Missing user_id"}), 400
+
+        # ✅ 二重処理防止
         existing = PaymentLog.query.filter_by(stripe_payment_id=stripe_payment_id).first()
         if existing:
-            current_app.logger.warning("⚠️ PaymentIntent Webhook: この支払いはすでに処理済みです")
+            current_app.logger.warning("⚠️ この支払いはすでに処理済みです")
             return jsonify({"message": "Already processed"}), 200
 
-        # ✅ Quota 加算処理
-        if user_id:
-            user = User.query.get(int(user_id))
-            if user:
-                quota = UserSiteQuota.query.filter_by(user_id=user.id).first()
-                if not quota:
-                    quota = UserSiteQuota(
-                        user_id=user.id, total_quota=0, used_quota=0, plan_type=plan_type
-                    )
-                    db.session.add(quota)
+        user = User.query.get(int(user_id))
+        if not user:
+            current_app.logger.warning(f"⚠️ user_id={user_id} のユーザーが見つかりません")
+            return jsonify({"message": "User not found"}), 400
 
-                quota.total_quota += site_count
-                quota.plan_type = plan_type
-                db.session.commit()
+        # ✅ Quota加算処理
+        quota = UserSiteQuota.query.filter_by(user_id=user.id).first()
+        if not quota:
+            quota = UserSiteQuota(user_id=user.id, total_quota=0, used_quota=0, plan_type=plan_type)
+            db.session.add(quota)
 
-                current_app.logger.info(
-                    f"✅ Webhook: user_id={user.id}, plan={plan_type}, special={special}, site_count={site_count}"
-                )
-            else:
-                current_app.logger.warning(f"⚠️ Webhook: user_id={user_id} のユーザーが見つかりません")
-        else:
-            current_app.logger.warning("⚠️ Webhook: metadata に user_id が含まれていません")
+        quota.total_quota += site_count
+        quota.plan_type = plan_type
+        db.session.commit()
 
-        # ✅ PaymentLog 保存処理
+        current_app.logger.info(
+            f"✅ Quota加算: user_id={user.id}, plan={plan_type}, site_count={site_count}, special={special}"
+        )
+
+        # ✅ PaymentLog保存処理
         amount = intent.get("amount") // 100
         email = intent.get("receipt_email") or intent.get("customer_email")
 
         charge_id = intent.get("latest_charge")
         charge = stripe.Charge.retrieve(charge_id)
-
         balance_tx_id = charge.get("balance_transaction")
         balance_tx = stripe.BalanceTransaction.retrieve(balance_tx_id)
 
-        if not email and user:
+        if not email:
             email = user.email
 
         fee = balance_tx.fee // 100
         net = balance_tx.net // 100
 
         log = PaymentLog(
-            user_id=user.id if user else None,
+            user_id=user.id,
             email=email,
             amount=amount,
             fee=fee,
@@ -256,9 +189,11 @@ def stripe_webhook():
         )
         db.session.add(log)
         db.session.commit()
-        current_app.logger.info(f"💰 PaymentLog 保存（special）：{email} ¥{amount}")
+
+        current_app.logger.info(f"💰 PaymentLog 保存：{email} ¥{amount}")
 
     return jsonify(success=True)
+
 
 
 # Stripe APIキーを読み込み
@@ -269,10 +204,23 @@ stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 def create_payment_intent():
     try:
         data = request.get_json()
+
+        # ✅ 値の取得とバリデーション
+        user_id = data.get("user_id")
+        if user_id is None:
+            raise ValueError("user_id is required")
+
         plan_type = data.get("plan_type", "affiliate")
         site_count = int(data.get("site_count", 1))
-        user_id = int(data.get("user_id"))  # 必須
-        special = data.get("special", "no")  # 特別プラン
+        special = data.get("special", "no")
+
+        # ✅ special, plan_type のバリデーション
+        if special not in ["yes", "no"]:
+            raise ValueError(f"Invalid special value: {special}")
+        if plan_type not in ["affiliate", "business"]:
+            raise ValueError(f"Invalid plan_type: {plan_type}")
+
+        user_id = int(user_id)  # ✅ int変換は後にする（エラー対処のため）
 
         # 🔸 特別プランかどうかで価格を設定
         if special == "yes":
@@ -282,7 +230,7 @@ def create_payment_intent():
 
         total_amount = unit_price * site_count
 
-        # ✅ 修正：confirmation_method は削除！
+        # ✅ Stripe PaymentIntent を作成
         intent = stripe.PaymentIntent.create(
             amount=total_amount,
             currency="jpy",
@@ -292,7 +240,7 @@ def create_payment_intent():
                     "request_three_d_secure": "any"
                 }
             },
-            metadata={
+            metadata={  # ✅ Webhookで必要な情報をすべて埋め込む
                 "user_id": str(user_id),
                 "plan_type": plan_type,
                 "site_count": str(site_count),
@@ -300,12 +248,18 @@ def create_payment_intent():
             }
         )
 
+        # ✅ 成功ログ（デバッグしやすく）
+        current_app.logger.info(
+            f"✅ PaymentIntent 作成: user_id={user_id}, plan_type={plan_type}, site_count={site_count}, special={special}, amount={total_amount}"
+        )
+
         return jsonify({"clientSecret": intent.client_secret})
 
     except Exception as e:
+        import traceback
         current_app.logger.error(f"[create-payment-intent エラー] {e}")
+        current_app.logger.error(traceback.format_exc())
         return jsonify(error=str(e)), 400
-
 
 # ────────────── 通常購入ページ
 @bp.route("/purchase", methods=["GET", "POST"])
