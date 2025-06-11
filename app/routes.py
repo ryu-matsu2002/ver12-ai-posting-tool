@@ -1935,7 +1935,7 @@ def log_sites(username):
         result.sort(key=sort_options[sort_key], reverse=reverse)
 
     # ✅ ジャンル一覧を取得（ドロップダウン表示用）
-    genre_list = Genre.query.order_by(Genre.name).all()
+    genre_list = Genre.query.filter_by(user_id=current_user.id).order_by(Genre.name).all()
     genre_choices = [(0, "すべてのジャンル")] + [(g.id, g.name) for g in genre_list]    
 
     return render_template(
