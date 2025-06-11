@@ -127,6 +127,7 @@ class SiteForm(FlaskForm):
         choices=[("affiliate", "アフィリエイト用プラン"), ("business", "事業用プラン")],
         validators=[DataRequired()]
     )
+    genre_id = SelectField("ジャンル", coerce=int, choices=[])  # ✅ 追加
     submit   = SubmitField("保存")
 
 # ✅ 新バージョンの KeywordForm（サイト選択＋一括保存対応）
@@ -192,3 +193,9 @@ class QuotaUpdateForm(FlaskForm):
         ]
     )
     submit = SubmitField("枠を追加する")
+
+# ──── ジャンル登録・編集用フォーム ────
+class GenreForm(FlaskForm):
+    name = StringField("ジャンル名", validators=[DataRequired(), Length(max=100)])
+    description = TextAreaField("説明", validators=[Length(max=300)])
+    submit = SubmitField("保存")

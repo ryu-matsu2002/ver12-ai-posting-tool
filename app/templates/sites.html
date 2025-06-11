@@ -44,6 +44,14 @@
         {{ form.plan_type.label(class="block mb-1 text-lg font-medium") }}
         {{ form.plan_type(class="w-full p-3 text-base rounded border dark:bg-gray-700 dark:border-gray-600", disabled=(remaining_quota <= 0)) }}
       </div>
+      <div>
+        <label for="genre_id" class="block mb-1 text-lg font-medium">ジャンル（任意）</label>
+        <select name="genre_id" id="genre_id" class="w-full p-3 text-base rounded border dark:bg-gray-700 dark:border-gray-600" {% if remaining_quota <= 0 %}disabled{% endif %}>
+          {% for gid, gname in form.genre_id.choices %}
+            <option value="{{ gid }}" {% if form.genre_id.data == gid %}selected{% endif %}>{{ gname }}</option>
+          {% endfor %}
+        </select>
+      </div>
       {% if remaining_quota > 0 %}
         {{ form.submit(class="py-3 px-6 bg-blue-600 hover:bg-blue-700 text-white text-lg rounded shadow") }}
       {% else %}
@@ -52,6 +60,7 @@
     </form>
   </div>
 
+  
   <!-- 右：プラン・支払いフォーム -->
   <div id="purchase" class="p-6 bg-gradient-to-br from-blue-50 to-white rounded-lg shadow-xl h-full">
     <h3 class="text-2xl font-extrabold mb-4 text-blue-800 flex items-center gap-2">

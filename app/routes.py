@@ -14,7 +14,7 @@ from sqlalchemy import asc, nulls_last
 from sqlalchemy.orm import selectinload
 
 from . import db
-from .models import User, Article, PromptTemplate, Site, Keyword
+from .models import User, Article, PromptTemplate, Site, Keyword, Genre
 from .forms import (
     LoginForm, RegisterForm,
     GenerateForm, PromptForm, ArticleForm, SiteForm, 
@@ -572,6 +572,39 @@ def download_revenue_log():
         headers={"Content-Disposition": "attachment;filename=revenue_log.csv"}
     )
 
+# ─────────── 管理者：ジャンル管理
+@admin_bp.route("/admin/genres", methods=["GET", "POST"])
+@login_required
+def manage_genres():
+    if not current_user.is_admin:
+        abort(403)
+
+    from .forms import GenreForm
+    from .models import Genre
+
+    form = GenreForm()
+    genres = Genre.query.order_by(Genre.id.desc()).all()
+
+    if form.validate_on_submit():
+        new_genre = Genre(name=form.name.data.strip(), description=form.description.data.strip())
+        db.session.add(new_genre)
+        db.session.commit()
+        flash("ジャンルを追加しました", "success")
+        return redirect(url_for("admin.manage_genres"))
+
+    return render_template("admin/genres.html", form=form, genres=genres)
+
+@admin_bp.route("/admin/genres/delete/<int:genre_id>", methods=["POST"])
+@login_required
+def delete_genre(genre_id):
+    if not current_user.is_admin:
+        abort(403)
+
+    genre = Genre.query.get_or_404(genre_id)
+    db.session.delete(genre)
+    db.session.commit()
+    flash("ジャンルを削除しました", "info")
+    return redirect(url_for("admin.manage_genres"))
 
 
 @admin_bp.route("/admin/users")
@@ -1425,6 +1458,10 @@ def sites(username):
     form = SiteForm()
     user = current_user
 
+    # ✅ ジャンルの選択肢をセット
+    genre_list = Genre.query.order_by(Genre.name).all()
+    form.genre_id.choices = [(0, "ジャンル未選択")] + [(g.id, g.name) for g in genre_list]
+
     # 🔹 登録済みサイト一覧と件数
     site_list = Site.query.filter_by(user_id=user.id).all()
 
@@ -1471,7 +1508,8 @@ def sites(username):
             username   = form.username.data,
             app_pass   = form.app_pass.data,
             user_id    = user.id,
-            plan_type  = selected_plan
+            plan_type  = selected_plan,
+            genre_id   = form.genre_id.data if form.genre_id.data != 0 else None  # ✅
         ))
 
         db.session.commit()
@@ -1527,12 +1565,18 @@ def edit_site(username, sid: int):
 
     form = SiteForm(obj=site)
 
+    # ✅ ジャンル選択肢をセット
+    genre_list = Genre.query.order_by(Genre.name).all()
+    form.genre_id.choices = [(0, "ジャンル未選択")] + [(g.id, g.name) for g in genre_list]
+    form.genre_id.data = site.genre_id or 0  # ← 初期値設定
+
     if form.validate_on_submit():
         site.name     = form.name.data
         site.url      = form.url.data.rstrip("/")
         site.username = form.username.data
         site.app_pass = form.app_pass.data
         site.plan_type  = form.plan_type.data
+        site.genre_id   = form.genre_id.data if form.genre_id.data != 0 else None  # ✅
         db.session.commit()
         flash("サイト情報を更新しました", "success")
         return redirect(url_for("main.log_sites", username=username))
@@ -1824,12 +1868,19 @@ def log_sites(username):
         abort(403)
 
     from sqlalchemy import func, case
+    from app.models import Genre  # ✅ ジャンルモデルをインポート
 
     # GETパラメータ取得
     status_filter = request.args.get("plan_type", "all")
     search_query = request.args.get("query", "").strip().lower()
     sort_key = request.args.get("sort", "total")  # デフォルト: 総記事数
     sort_order = request.args.get("order", "desc")  # デフォルト: 降順（多い順）
+    genre_id = request.args.get("genre_id", "0")  # ✅ デフォルトは0（未選択）
+
+    try:
+        genre_id = int(genre_id)
+    except ValueError:
+        genre_id = 0
 
     # サブクエリ：記事数に関する集計（total, done, posted, error）
     query = db.session.query(
@@ -1851,6 +1902,10 @@ def log_sites(username):
     # プランタイプのフィルター
     if status_filter in ["affiliate", "business"]:
         query = query.filter(Site.plan_type == status_filter)
+
+    # 🔸 ジャンルフィルター
+    if genre_id > 0:
+        query = query.filter(Site.genre_id == genre_id)    
 
     # サイト名・URL 検索フィルター（部分一致、lower化で対応）
     if search_query:
@@ -1875,10 +1930,16 @@ def log_sites(username):
         reverse = (sort_order == "desc")
         result.sort(key=sort_options[sort_key], reverse=reverse)
 
+    # ✅ ジャンル一覧を取得（ドロップダウン表示用）
+    genre_list = Genre.query.order_by(Genre.name).all()
+    genre_choices = [(0, "すべてのジャンル")] + [(g.id, g.name) for g in genre_list]    
+
     return render_template(
         "log_sites.html",
         sites=result,
         selected_status=status_filter,
+        selected_genre_id=genre_id,        # ✅ 選択中ジャンルを渡す
+        genre_choices=genre_choices,       # ✅ 選択肢リストを渡す
         search_query=search_query,
         sort_key=sort_key,
         sort_order=sort_order

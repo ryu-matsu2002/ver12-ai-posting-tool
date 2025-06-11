@@ -4,7 +4,7 @@
 {% block content %}
 <h2 class="text-2xl font-semibold mb-6">記事生成 - 投稿ログ - サイト一覧</h2>
 
-<!-- 🔍 サイト検索＋ステータスフィルター -->
+<!-- 🔍 サイト検索＋ジャンルフィルター -->
 <form method="get" class="mb-6 flex flex-wrap gap-4 items-center" id="search-form">
   <div class="flex items-center gap-2">
     <label for="query" class="font-medium">サイト検索:</label>
@@ -12,11 +12,11 @@
            value="{{ search_query or '' }}" class="p-2 border rounded w-64">
   </div>
   <div class="flex items-center gap-2">
-    <label for="status" class="font-medium">表示するステータス:</label>
-    <select id="status" name="plan_type" onchange="this.form.submit()" class="p-2 border rounded">
-      <option value="all" {% if selected_status == 'all' %}selected{% endif %}>すべてのステータス</option>
-      <option value="affiliate" {% if selected_status == 'affiliate' %}selected{% endif %}>アフィリエイト用</option>
-      <option value="business" {% if selected_status == 'business' %}selected{% endif %}>事業用</option>
+    <label for="genre_id" class="font-medium">ジャンルで絞り込み:</label>
+    <select id="genre_id" name="genre_id" onchange="this.form.submit()" class="p-2 border rounded">
+      {% for gid, gname in genre_choices %}
+        <option value="{{ gid }}" {% if selected_genre_id == gid %}selected{% endif %}>{{ gname }}</option>
+      {% endfor %}
     </select>
   </div>
   <button type="submit" class="px-4 py-2 bg-blue-500 text-white rounded" id="search-button">検索</button>
@@ -32,7 +32,7 @@
 
         <!-- 投稿完了 -->
         <th class="px-3 py-2 text-center">
-          <a href="?sort=posted&order={{ 'asc' if sort_key == 'posted' and sort_order == 'desc' else 'desc' }}&query={{ search_query }}&plan_type={{ selected_status }}"
+          <a href="?sort=posted&order={{ 'asc' if sort_key == 'posted' and sort_order == 'desc' else 'desc' }}&query={{ search_query }}&genre_id={{ selected_genre_id }}"
              class="flex justify-center items-center gap-1">
             投稿完了
             {% if sort_key == 'posted' %}
@@ -45,7 +45,7 @@
 
         <!-- 記事生成済み -->
         <th class="px-3 py-2 text-center">
-          <a href="?sort=done&order={{ 'asc' if sort_key == 'done' and sort_order == 'desc' else 'desc' }}&query={{ search_query }}&plan_type={{ selected_status }}"
+          <a href="?sort=done&order={{ 'asc' if sort_key == 'done' and sort_order == 'desc' else 'desc' }}&query={{ search_query }}&genre_id={{ selected_genre_id }}"
              class="flex justify-center items-center gap-1">
             記事生成済み
             {% if sort_key == 'done' %}
@@ -58,7 +58,7 @@
 
         <!-- 総記事数 -->
         <th class="px-3 py-2 text-center">
-          <a href="?sort=total&order={{ 'asc' if sort_key == 'total' and sort_order == 'desc' else 'desc' }}&query={{ search_query }}&plan_type={{ selected_status }}"
+          <a href="?sort=total&order={{ 'asc' if sort_key == 'total' and sort_order == 'desc' else 'desc' }}&query={{ search_query }}&genre_id={{ selected_genre_id }}"
              class="flex justify-center items-center gap-1">
             総記事数
             {% if sort_key == 'total' %}
@@ -71,7 +71,7 @@
 
         <!-- クリック数 -->
         <th class="px-3 py-2 text-center">
-          <a href="?sort=clicks&order={{ 'asc' if sort_key == 'clicks' and sort_order == 'desc' else 'desc' }}&query={{ search_query }}&plan_type={{ selected_status }}"
+          <a href="?sort=clicks&order={{ 'asc' if sort_key == 'clicks' and sort_order == 'desc' else 'desc' }}&query={{ search_query }}&genre_id={{ selected_genre_id }}"
              class="flex justify-center items-center gap-1">
             クリック数
             {% if sort_key == 'clicks' %}
@@ -84,7 +84,7 @@
 
         <!-- 表示回数 -->
         <th class="px-3 py-2 text-center">
-          <a href="?sort=impressions&order={{ 'asc' if sort_key == 'impressions' and sort_order == 'desc' else 'desc' }}&query={{ search_query }}&plan_type={{ selected_status }}"
+          <a href="?sort=impressions&order={{ 'asc' if sort_key == 'impressions' and sort_order == 'desc' else 'desc' }}&query={{ search_query }}&genre_id={{ selected_genre_id }}"
              class="flex justify-center items-center gap-1">
             表示回数
             {% if sort_key == 'impressions' %}
@@ -101,9 +101,7 @@
     <tbody>
       {% for site in sites %}
       <tr class="{% if loop.index0 % 2 == 0 %}bg-white{% else %}bg-blue-50{% endif %} border-b dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-900">
-        <td class="px-3 py-2 font-medium text-blue-700 dark:text-blue-300">
-          [{{ site.name }}]
-        </td>
+        <td class="px-3 py-2 font-medium text-blue-700 dark:text-blue-300">[{{ site.name }}]</td>
         <td class="px-3 py-2 break-all text-blue-700 underline">
           <a href="{{ site.url }}" target="_blank">{{ site.url }}</a>
           {% if site.gsc_connected %}
@@ -120,27 +118,16 @@
         <td class="px-3 py-2 text-center space-x-1">
           {% if site.gsc_connected %}
             <a href="{{ url_for('main.gsc_generate', username=current_user.username) }}?site_id={{ site.id }}"
-               class="inline-block py-1 px-3 bg-lime-600 hover:bg-lime-700 text-white rounded text-sm">
-              GSC生成
-            </a>
+               class="inline-block py-1 px-3 bg-lime-600 hover:bg-lime-700 text-white rounded text-sm">GSC生成</a>
           {% endif %}
           <a href="{{ url_for('main.generate', username=current_user.username) }}?site_id={{ site.id }}"
-             class="inline-block py-1 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-sm">
-            記事生成
-          </a>
+             class="inline-block py-1 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-sm">記事生成</a>
           <a href="{{ url_for('main.log', username=current_user.username, site_id=site.id) }}"
-             class="inline-block py-1 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm">
-            記事一覧
-          </a>
-          <a href="{{ site.url.rstrip('/') }}/admin"
-             target="_blank"
-             class="inline-block py-1 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-sm">
-            WP管理
-          </a>
+             class="inline-block py-1 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm">記事一覧</a>
+          <a href="{{ site.url.rstrip('/') }}/admin" target="_blank"
+             class="inline-block py-1 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-sm">WP管理</a>
           <a href="{{ url_for('main.edit_site', username=current_user.username, sid=site.id) }}"
-             class="inline-block py-1 px-3 bg-gray-500 hover:bg-gray-600 text-white rounded text-sm">
-            修正
-          </a>
+             class="inline-block py-1 px-3 bg-gray-500 hover:bg-gray-600 text-white rounded text-sm">修正</a>
         </td>
       </tr>
       {% endfor %}
@@ -148,12 +135,9 @@
   </table>
 </div>
 {% else %}
-  <div class="text-gray-500 text-center py-12">
-    サイトがまだ登録されていません。
-  </div>
+  <div class="text-gray-500 text-center py-12">サイトがまだ登録されていません。</div>
 {% endif %}
 
-<!-- ✅ 検索送信時インジケーター -->
 <script>
 document.addEventListener("DOMContentLoaded", function () {
   const form = document.getElementById("search-form");
@@ -164,5 +148,4 @@ document.addEventListener("DOMContentLoaded", function () {
   });
 });
 </script>
-
 {% endblock %}
