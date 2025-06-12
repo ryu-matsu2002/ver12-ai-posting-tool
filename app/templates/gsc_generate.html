@@ -26,8 +26,8 @@
           <option value="">― 使わない ―</option>
           {% for p in saved_prompts %}
             <option value="{{ p.id }}"
-                    data-title='{{ p.title_prompt|default("")|tojson }}'
-                    data-body='{{ p.body_prompt|default("")|tojson }}'>
+                    data-title='{{ p.title_pt|default("")|tojson }}'
+                    data-body='{{ p.body_pt|default("")|tojson }}'>
               {{ p.genre }}
             </option>
           {% endfor %}
