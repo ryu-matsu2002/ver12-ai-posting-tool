@@ -6,33 +6,56 @@
 
 <div class="grid md:grid-cols-2 gap-10 items-start">
 
-  <!-- 左カラム：サイト選択と生成開始 -->
+  <!-- 左カラム：プロンプト選択 + GSC生成開始 -->
   <div>
-    <form id="gsc-form" method="GET">
-      <div class="mb-6">
+    <form method="POST" action="{{ url_for('main.gsc_generate') }}">
+      <input type="hidden" name="site_id" value="{{ selected_site.id if selected_site else '' }}">
+
+      <!-- 🔸 対象サイト（固定表示） -->
+      <div class="mb-4">
         <label class="block font-semibold mb-1 text-gray-800 dark:text-white">対象サイト</label>
-        <select id="gsc-site-id" name="site_id" class="w-full p-2 border rounded">
-          {% for site in gsc_sites %}
-            <option value="{{ site.id }}" {% if selected_site and selected_site.id == site.id %}selected{% endif %}>
-              {{ site.name }}
-            </option>
+        <div class="p-2 bg-gray-100 rounded">
+          {{ selected_site.name if selected_site else "（未選択）" }}
+        </div>
+      </div>
+
+      <!-- 🔸 保存済みプロンプト -->
+      <div class="mb-4">
+        <label class="block font-semibold mb-1 text-gray-800 dark:text-white">保存済みプロンプト</label>
+        <select id="prompt_select" name="prompt_id" class="w-full p-2 border rounded">
+          <option value="">― 使わない ―</option>
+          {% for p in saved_prompts %}
+            <option value="{{ p.id }}">{{ p.genre }}</option>
           {% endfor %}
         </select>
       </div>
 
-      <p class="mb-4 text-gray-600 dark:text-gray-300">
-        選択したサイトに対して、Search Consoleから検索クエリを取得し、自動で記事生成を開始します。
-      </p>
+      <!-- 🔸 詳細プロンプトエリア（トグル表示） -->
+      <div class="mb-4">
+        <button type="button" onclick="toggleDetailPrompt()" class="text-blue-600 hover:underline text-sm">
+          ＋ 詳細プロンプトを表示
+        </button>
+      </div>
 
-      <button type="button"
-              onclick="startGSCGeneration()"
+      <div id="detail_prompt_area" class="hidden mb-6 space-y-4">
+        <div>
+          <label class="block font-semibold mb-1 text-gray-800 dark:text-white">タイトルプロンプト</label>
+          <textarea name="title_prompt" rows="2" class="w-full p-2 border rounded">{{ title_prompt or '' }}</textarea>
+        </div>
+        <div>
+          <label class="block font-semibold mb-1 text-gray-800 dark:text-white">本文プロンプト</label>
+          <textarea name="body_prompt" rows="4" class="w-full p-2 border rounded">{{ body_prompt or '' }}</textarea>
+        </div>
+      </div>
+
+      <button type="submit"
               class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded">
         🔁 GSCデータから記事生成を開始
       </button>
     </form>
   </div>
 
-  <!-- 右カラム：既存のGSC由来キーワード（参考） -->
+  <!-- 右カラム：現在のGSCキーワード一覧 -->
   <div>
     <h3 class="text-xl font-semibold mb-4">🔖 現在のGSCキーワード一覧</h3>
     {% if gsc_keywords %}
@@ -52,17 +75,11 @@
   </div>
 </div>
 
-<!-- JS -->
+<!-- 🔧 詳細プロンプトトグルスクリプト -->
 <script>
-  function startGSCGeneration() {
-    const siteId = document.getElementById("gsc-site-id").value;
-    if (!siteId) {
-      alert("対象サイトを選択してください。");
-      return;
-    }
-    if (confirm("Search Consoleデータから記事生成を開始しますか？")) {
-      window.location.href = `/generate_from_gsc/${siteId}`;
-    }
-  }
+function toggleDetailPrompt() {
+  const area = document.getElementById("detail_prompt_area");
+  area.classList.toggle("hidden");
+}
 </script>
 {% endblock %}

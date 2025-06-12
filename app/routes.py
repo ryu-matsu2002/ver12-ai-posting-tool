@@ -1695,17 +1695,77 @@ from app.article_generator import enqueue_generation  # 🔁 忘れずに
     #return redirect(url_for("main.keywords", username=current_user.username))
 
 
-@bp.route("/gsc_generate")
+@bp.route("/gsc_generate", methods=["GET", "POST"])
 @login_required
 def gsc_generate():
     from app.google_client import fetch_search_queries_for_site
     from app.article_generator import enqueue_generation
-    from app.models import Keyword
+    from app.models import Keyword, PromptTemplate
 
+    # --- POST（記事生成処理） ---
+    if request.method == "POST":
+        site_id = request.form.get("site_id", type=int)
+        prompt_id = request.form.get("prompt_id", type=int)
+        title_prompt = request.form.get("title_prompt", "").strip()
+        body_prompt = request.form.get("body_prompt", "").strip()
+
+        if not site_id:
+            flash("サイトIDが指定されていません。", "danger")
+            return redirect(url_for("main.log_sites", username=current_user.username))
+
+        site = Site.query.get_or_404(site_id)
+        if site.user_id != current_user.id:
+            abort(403)
+
+        if not site.gsc_connected:
+            flash("このサイトはまだGSCと接続されていません。", "danger")
+            return redirect(url_for("main.gsc_connect"))
+
+        # GSCクエリ取得
+        try:
+            queries = fetch_search_queries_for_site(site.url, days=28, row_limit=1000)
+        except Exception as e:
+            flash(f"GSCからのクエリ取得に失敗しました: {e}", "danger")
+            return redirect(url_for("main.log_sites", username=current_user.username))
+
+        # 重複排除
+        existing = set(k.keyword for k in Keyword.query.filter_by(site_id=site.id).all())
+        new_keywords = [q for q in queries if q not in existing]
+
+        if not new_keywords:
+            flash("すべてのクエリが既に登録されています。", "info")
+            return redirect(url_for("main.log_sites", username=current_user.username))
+
+        # DBに登録（source='gsc'）
+        for kw in new_keywords:
+            keyword = Keyword(site_id=site.id, keyword=kw, user_id=current_user.id, source="gsc")
+            db.session.add(keyword)
+        db.session.commit()
+
+        # 🔸プロンプト取得（保存済みを優先）
+        if prompt_id:
+            saved_prompt = PromptTemplate.query.filter_by(id=prompt_id, user_id=current_user.id).first()
+            if saved_prompt:
+                title_prompt = saved_prompt.title_pt
+                body_prompt = saved_prompt.body_pt
+
+        # 🔁 記事生成をキューに追加
+        enqueue_generation(
+            user_id=current_user.id,
+            site_id=site.id,
+            keywords=new_keywords,
+            title_prompt=title_prompt,
+            body_prompt=body_prompt,
+        )
+
+        flash(f"{len(new_keywords)}件のGSCキーワードから記事生成を開始しました", "success")
+        return redirect(url_for("main.log_sites", username=current_user.username))
+
+    # --- GET（フォーム表示） ---
     site_id = request.args.get("site_id", type=int)
     if not site_id:
         flash("サイトIDが指定されていません。", "danger")
-        return redirect(url_for("main.log_sites"))
+        return redirect(url_for("main.log_sites", username=current_user.username))
 
     site = Site.query.get_or_404(site_id)
     if site.user_id != current_user.id:
@@ -1715,29 +1775,20 @@ def gsc_generate():
         flash("このサイトはまだGSCと接続されていません。", "danger")
         return redirect(url_for("main.gsc_connect"))
 
-    try:
-        queries = fetch_search_queries_for_site(site.url, days=28, row_limit=1000)
-    except Exception as e:
-        flash(f"GSCからのクエリ取得に失敗しました: {e}", "danger")
-        return redirect(url_for("main.log_sites"))
+    # GSCキーワード一覧（参考表示用）
+    gsc_keywords = Keyword.query.filter_by(site_id=site.id, source="gsc").order_by(Keyword.created_at.desc()).all()
 
-    # 重複排除
-    existing = set(k.keyword for k in Keyword.query.filter_by(site_id=site.id).all())
-    new_keywords = [q for q in queries if q not in existing]
+    # 保存済みプロンプト
+    saved_prompts = PromptTemplate.query.filter_by(user_id=current_user.id).order_by(PromptTemplate.genre).all()
 
-    if not new_keywords:
-        flash("すべてのクエリが既に登録されています。", "info")
-        return redirect(url_for("main.log_sites"))
-
-    for kw in new_keywords:
-        keyword = Keyword(site_id=site.id, keyword=kw, user_id=current_user.id, source="gsc")
-        db.session.add(keyword)
-
-    db.session.commit()
-
-    enqueue_generation(current_user.id, site.id, new_keywords)
-    flash(f"{len(new_keywords)}件のGSCキーワードから記事生成を開始しました", "success")
-    return redirect(url_for("main.log_sites"))
+    return render_template(
+        "gsc_generate.html",
+        selected_site=site,
+        gsc_keywords=gsc_keywords,
+        saved_prompts=saved_prompts,
+        title_prompt="",  # 初期値
+        body_prompt="",   # 初期値
+    )
 
 
 
