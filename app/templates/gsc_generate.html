@@ -25,7 +25,11 @@
         <select id="prompt_select" name="prompt_id" class="w-full p-2 border rounded">
           <option value="">― 使わない ―</option>
           {% for p in saved_prompts %}
-            <option value="{{ p.id }}">{{ p.genre }}</option>
+            <option value="{{ p.id }}"
+                    data-title="{{ p.title_prompt|e }}"
+                    data-body="{{ p.body_prompt|e }}">
+              {{ p.genre }}
+            </option>
           {% endfor %}
         </select>
       </div>
@@ -40,11 +44,11 @@
       <div id="detail_prompt_area" class="hidden mb-6 space-y-4">
         <div>
           <label class="block font-semibold mb-1 text-gray-800 dark:text-white">タイトルプロンプト</label>
-          <textarea name="title_prompt" rows="2" class="w-full p-2 border rounded">{{ title_prompt or '' }}</textarea>
+          <textarea id="title_prompt" name="title_prompt" rows="2" class="w-full p-2 border rounded">{{ title_prompt or '' }}</textarea>
         </div>
         <div>
           <label class="block font-semibold mb-1 text-gray-800 dark:text-white">本文プロンプト</label>
-          <textarea name="body_prompt" rows="4" class="w-full p-2 border rounded">{{ body_prompt or '' }}</textarea>
+          <textarea id="body_prompt" name="body_prompt" rows="4" class="w-full p-2 border rounded">{{ body_prompt or '' }}</textarea>
         </div>
       </div>
 
@@ -75,11 +79,20 @@
   </div>
 </div>
 
-<!-- 🔧 詳細プロンプトトグルスクリプト -->
+<!-- 🔧 詳細プロンプトトグルスクリプト + 選択反映JS -->
 <script>
 function toggleDetailPrompt() {
   const area = document.getElementById("detail_prompt_area");
   area.classList.toggle("hidden");
 }
+
+document.getElementById("prompt_select")?.addEventListener("change", function () {
+  const selected = this.options[this.selectedIndex];
+  const title = selected.getAttribute("data-title") || "";
+  const body = selected.getAttribute("data-body") || "";
+
+  document.getElementById("title_prompt").value = title;
+  document.getElementById("body_prompt").value = body;
+});
 </script>
 {% endblock %}
