@@ -79,6 +79,71 @@ def _gsc_metrics_job(app):
         except Exception as e:
             current_app.logger.error(f"❌ GSCメトリクス更新失敗: {str(e)}")
 
+def gsc_loop_generate(site):
+    """
+    🔁 GSCからのクエリで1000記事未満なら記事生成をループ継続
+    """
+    from app.google_client import fetch_search_queries_for_site
+    from app.models import Keyword
+    from app.article_generator import enqueue_generation
+
+    # ✅ GSC接続されていないサイトはスキップ
+    if not site.gsc_connected:
+        current_app.logger.info(f"[GSC LOOP] スキップ：未接続サイト {site.name}")
+        return
+
+    # ✅ すでに1000記事以上生成済みならスキップ
+    total_keywords = Keyword.query.filter_by(site_id=site.id).count()
+    if total_keywords >= 1000:
+        current_app.logger.info(f"[GSC LOOP] {site.name} は既に1000記事に到達済み")
+        return
+
+    # ✅ GSCからクエリ取得
+    try:
+        queries = fetch_search_queries_for_site(site.url)
+    except Exception as e:
+        current_app.logger.warning(f"[GSC LOOP] クエリ取得失敗 - {site.url}: {e}")
+        return
+
+    # ✅ 重複キーワード排除
+    existing = set(k.keyword for k in Keyword.query.filter_by(site_id=site.id).all())
+    new_keywords = [q for q in queries if q not in existing]
+
+    if not new_keywords:
+        current_app.logger.info(f"[GSC LOOP] {site.name} に新規キーワードなし")
+        return
+
+    # ✅ DB保存（source='gsc'）＋記事生成キュー追加
+    for kw in new_keywords:
+        db.session.add(Keyword(
+            keyword=kw,
+            site_id=site.id,
+            user_id=site.user_id,
+            source='gsc'
+        ))
+
+    db.session.commit()
+    enqueue_generation(site.user_id, site.id, new_keywords)
+    current_app.logger.info(f"[GSC LOOP] {site.name} に {len(new_keywords)} 件生成キュー投入")
+
+def _gsc_generation_job(app):
+    """
+    ✅ GSC記事自動生成ジョブ（毎日）
+    """
+    with app.app_context():
+        from app.models import Site
+
+        current_app.logger.info("📝 GSC記事生成ジョブを開始します")
+        sites = Site.query.filter_by(gsc_connected=True).all()
+
+        for site in sites:
+            try:
+                gsc_loop_generate(site)
+            except Exception as e:
+                current_app.logger.warning(f"[GSC自動生成] 失敗 - {site.url}: {e}")
+
+        current_app.logger.info("✅ GSC記事生成ジョブが完了しました")
+
 
 def init_scheduler(app):
     """
@@ -108,6 +173,20 @@ def init_scheduler(app):
         max_instances=1
     )
 
+    # ✅ GSC記事生成ジョブ
+    scheduler.add_job(
+        func=_gsc_generation_job,
+        trigger="cron",
+        hour=1,
+        minute=0,
+        args=[app],
+        id="gsc_generation_job",
+        replace_existing=True,
+        max_instances=1
+    )
+
+
     scheduler.start()
     app.logger.info("Scheduler started: auto_post_job every 3 minutes")
     app.logger.info("Scheduler started: gsc_metrics_job daily at 0:00")
+    app.logger.info("Scheduler started: gsc_generation_job daily at 1:00")

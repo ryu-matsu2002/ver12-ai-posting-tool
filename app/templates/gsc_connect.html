@@ -14,15 +14,17 @@
         </div>
 
         <div class="text-right space-y-1">
-          {% if site.is_token_connected %}
+          {% if site.gsc_connected %}
             <span class="inline-block bg-green-600 text-white text-xs font-semibold px-3 py-1 rounded">
               ✅ GSC連携済み
             </span>
           {% else %}
-            <a href="{{ url_for('main.authorize_gsc', username=current_user.username, site_id=site.id) }}"
-               class="inline-block bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded">
-              🔐 Googleに接続
-            </a>
+            <form method="post" action="{{ url_for('main.connect_gsc', site_id=site.id) }}">
+              <button type="submit"
+                      class="inline-block bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded">
+                🔐 Googleに接続
+              </button>
+            </form>
           {% endif %}
         </div>
       </div>

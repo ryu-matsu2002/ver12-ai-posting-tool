@@ -24,14 +24,20 @@
   {% endif %}
 </div>
 
-<form method="get" class="mb-6 flex items-center flex-wrap gap-3">
-  <label for="statusFilter" class="font-medium shrink-0">表示するステータス:</label>
-  <select id="statusFilter" name="status" onchange="this.form.submit()" class="p-2 rounded border min-w-[200px]">
+<form method="get" class="mb-4 flex items-center gap-3">
+  <label for="statusFilter" class="font-medium">ステータス:</label>
+  <select id="statusFilter" name="status" onchange="this.form.submit()" class="p-2 rounded border">
     <option value="">すべてのステータス</option>
     <option value="posted" {% if status == "posted" %}selected{% endif %}>✅ 投稿完了</option>
     <option value="done" {% if status == "done" %}selected{% endif %}>📝 記事生成済み</option>
     <option value="pending" {% if status == "pending" %}selected{% endif %}>⏳ 記事生成中</option>
     <option value="error" {% if status == "error" %}selected{% endif %}>❌ エラー</option>
+  </select>
+
+  <label for="source" class="font-medium">絞り込み:</label>
+  <select name="source" id="source" onchange="this.form.submit()" class="p-2 border rounded">
+    <option value="all" {% if selected_source == 'all' %}selected{% endif %}>すべての記事</option>
+    <option value="gsc" {% if selected_source == 'gsc' %}selected{% endif %}>🔖 GSC記事のみ</option>
   </select>
 </form>
 
@@ -53,31 +59,8 @@
       <tr class="whitespace-nowrap">
         <th class="px-2 py-2 text-left w-[40px]"><input type="checkbox" onclick="toggleAll(this)"></th>
         <th class="px-2 py-2 text-left w-[15%]">検索キーワード</th>
-
-        <!-- 🔄 クリック数 -->
-        <th class="px-2 py-2 text-center w-[7%]">
-          <a href="?sort=clicks&order={{ 'asc' if sort_key == 'clicks' and sort_order == 'desc' else 'desc' }}" class="flex items-center justify-center gap-1">
-            クリック数
-            {% if sort_key == 'clicks' %}
-              <span class="text-rose-600 font-bold">{{ '↓' if sort_order == 'desc' else '↑' }}</span>
-            {% else %}
-              <span class="text-gray-400 text-xs">⇅</span>
-            {% endif %}
-          </a>
-        </th>
-
-        <!-- 🔄 表示回数 -->
-        <th class="px-2 py-2 text-center w-[7%]">
-          <a href="?sort=impr&order={{ 'asc' if sort_key == 'impr' and sort_order == 'desc' else 'desc' }}" class="flex items-center justify-center gap-1">
-            表示回数
-            {% if sort_key == 'impr' %}
-              <span class="text-purple-600 font-bold">{{ '↓' if sort_order == 'desc' else '↑' }}</span>
-            {% else %}
-              <span class="text-gray-400 text-xs">⇅</span>
-            {% endif %}
-          </a>
-        </th>
-
+        <th class="px-2 py-2 text-center w-[7%]">クリック数</th>
+        <th class="px-2 py-2 text-center w-[7%]">表示回数</th>
         <th class="px-2 py-2 text-left w-[10%]">現在の状態</th>
         <th class="px-2 py-2 text-left w-[6%]">進行状況</th>
         <th class="px-2 py-2 text-left w-[10%]">投稿予定日</th>
@@ -107,7 +90,14 @@
             {{ a.scheduled_at.astimezone(jst).strftime("%Y-%m-%d %H:%M") }}
           {% else %}—{% endif %}
         </td>
-        <td class="px-2 py-2 break-words text-sm leading-snug" title="{{ a.title }}">{{ a.title }}</td>
+        <td class="px-2 py-2 break-words text-sm leading-snug" title="{{ a.title }}">
+          {{ a.title }}
+          {% if a.source == 'gsc' %}
+            <span class="ml-2 inline-block bg-yellow-200 text-yellow-900 text-xs font-bold px-2 py-1 rounded-full border border-yellow-400">
+              🔖 GSC
+            </span>
+          {% endif %}
+        </td>
         <td class="px-2 py-2">
           {% if a.status in ["done", "posted"] %}
             <a href="{{ url_for('main.preview', username=current_user.username, article_id=a.id) }}"

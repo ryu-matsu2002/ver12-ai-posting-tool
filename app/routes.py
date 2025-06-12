@@ -1640,88 +1640,105 @@ from app.google_client import fetch_search_queries
 from app.models import Keyword  # 🔁 既存キーワード参照のため追加
 from app.article_generator import enqueue_generation  # 🔁 忘れずに
 
-@bp.route("/generate_from_gsc/<int:site_id>", methods=["GET", "POST"])
+#@bp.route("/generate_from_gsc/<int:site_id>", methods=["GET", "POST"])
+#@login_required
+#def generate_from_gsc(site_id):
+    #site = Site.query.get_or_404(site_id)
+    #if site.user_id != current_user.id:
+       # abort(403)
+
+    # ✅ GSC未接続のガード
+    #if not site.gsc_connected:
+        #flash("このサイトはまだSearch Consoleと接続されていません。", "danger")
+        #return redirect(url_for("main.gsc_connect"))
+
+    #try:
+        #rows = fetch_search_queries(site.url, days=7, row_limit=40)
+        #keywords = [row["keys"][0] for row in rows if "keys" in row]
+    #except Exception as e:
+        #flash(f"Search Consoleからキーワードの取得に失敗しました: {e}", "danger")
+        #return redirect(url_for("main.keywords", username=current_user.username))
+
+    #if not keywords:
+        #flash("検索クエリが見つかりませんでした。", "warning")
+        #return redirect(url_for("main.keywords", username=current_user.username))
+
+    # ✅ 既存キーワードの重複チェック
+    #existing_keywords = set(
+        #k.keyword for k in Keyword.query.filter_by(site_id=site.id).all()
+    #)
+    #new_keywords = [kw for kw in keywords if kw not in existing_keywords]
+
+    #if not new_keywords:
+        #flash("すべてのキーワードが既に登録されています。", "info")
+        #return redirect(url_for("main.keywords", username=current_user.username))
+
+    # ✅ GSC由来のキーワードとしてDBに追加
+    #for kw in new_keywords:
+        #db.session.add(Keyword(
+            #keyword=kw,
+            #site_id=site.id,
+            #user_id=current_user.id,
+            #source='gsc'
+        #))
+
+    # ✅ GSC接続状態を保存（初回のみ）※保険として残す
+    #if not site.gsc_connected:
+        #site.gsc_connected = True
+
+    #db.session.commit()
+
+    # ✅ 記事生成キューへ
+    #enqueue_generation(new_keywords, site.id, current_user.id)
+
+    #flash(f"{len(new_keywords)}件のキーワードから記事生成を開始しました", "success")
+    #return redirect(url_for("main.keywords", username=current_user.username))
+
+
+@bp.route("/gsc_generate")
 @login_required
-def generate_from_gsc(site_id):
+def gsc_generate():
+    from app.google_client import fetch_search_queries_for_site
+    from app.article_generator import enqueue_generation
+    from app.models import Keyword
+
+    site_id = request.args.get("site_id", type=int)
+    if not site_id:
+        flash("サイトIDが指定されていません。", "danger")
+        return redirect(url_for("main.log_sites"))
+
     site = Site.query.get_or_404(site_id)
     if site.user_id != current_user.id:
         abort(403)
 
-    # ✅ GSC未接続のガード
     if not site.gsc_connected:
-        flash("このサイトはまだSearch Consoleと接続されていません。", "danger")
+        flash("このサイトはまだGSCと接続されていません。", "danger")
         return redirect(url_for("main.gsc_connect"))
 
     try:
-        rows = fetch_search_queries(site.url, days=7, row_limit=40)
-        keywords = [row["keys"][0] for row in rows if "keys" in row]
+        queries = fetch_search_queries_for_site(site.url, days=28, row_limit=1000)
     except Exception as e:
-        flash(f"Search Consoleからキーワードの取得に失敗しました: {e}", "danger")
-        return redirect(url_for("main.keywords", username=current_user.username))
+        flash(f"GSCからのクエリ取得に失敗しました: {e}", "danger")
+        return redirect(url_for("main.log_sites"))
 
-    if not keywords:
-        flash("検索クエリが見つかりませんでした。", "warning")
-        return redirect(url_for("main.keywords", username=current_user.username))
-
-    # ✅ 既存キーワードの重複チェック
-    existing_keywords = set(
-        k.keyword for k in Keyword.query.filter_by(site_id=site.id).all()
-    )
-    new_keywords = [kw for kw in keywords if kw not in existing_keywords]
+    # 重複排除
+    existing = set(k.keyword for k in Keyword.query.filter_by(site_id=site.id).all())
+    new_keywords = [q for q in queries if q not in existing]
 
     if not new_keywords:
-        flash("すべてのキーワードが既に登録されています。", "info")
-        return redirect(url_for("main.keywords", username=current_user.username))
+        flash("すべてのクエリが既に登録されています。", "info")
+        return redirect(url_for("main.log_sites"))
 
-    # ✅ GSC由来のキーワードとしてDBに追加
     for kw in new_keywords:
-        db.session.add(Keyword(
-            keyword=kw,
-            site_id=site.id,
-            user_id=current_user.id,
-            source='gsc'
-        ))
-
-    # ✅ GSC接続状態を保存（初回のみ）※保険として残す
-    if not site.gsc_connected:
-        site.gsc_connected = True
+        keyword = Keyword(site_id=site.id, keyword=kw, user_id=current_user.id, source="gsc")
+        db.session.add(keyword)
 
     db.session.commit()
 
-    # ✅ 記事生成キューへ
-    enqueue_generation(new_keywords, site.id, current_user.id)
+    enqueue_generation(current_user.id, site.id, new_keywords)
+    flash(f"{len(new_keywords)}件のGSCキーワードから記事生成を開始しました", "success")
+    return redirect(url_for("main.log_sites"))
 
-    flash(f"{len(new_keywords)}件のキーワードから記事生成を開始しました", "success")
-    return redirect(url_for("main.keywords", username=current_user.username))
-
-
-@bp.route("/gsc_generate", methods=["GET"])
-@login_required
-def gsc_generate():
-    from .models import Site, Keyword
-
-    # ✅ GSC連携済みサイトだけ取得
-    gsc_sites = Site.query.filter_by(user_id=current_user.id, gsc_connected=True).all()
-
-    # 初期状態：site_id がクエリにあるときだけ処理
-    site_id = request.args.get("site_id", type=int)
-    selected_site = None
-    gsc_keywords = []
-
-    if site_id:
-        selected_site = Site.query.get_or_404(site_id)
-        if selected_site.user_id != current_user.id:
-            abort(403)
-
-        # ✅ GSC由来キーワードのみ取得（source='gsc'）
-        gsc_keywords = Keyword.query.filter_by(site_id=site_id, source='gsc').order_by(Keyword.id.desc()).all()
-
-    return render_template(
-        "gsc_generate.html",
-        gsc_sites=gsc_sites,
-        selected_site=selected_site,
-        gsc_keywords=gsc_keywords
-    )
 
 
 # --- 既存インポートの下に追加（必要に応じて） ---
@@ -1748,21 +1765,19 @@ def gsc_connect():
 
     return render_template("gsc_connect.html", sites=sites)
 
-# ✅ /connect_gsc/<site_id>: GSC連携フラグ設定（ダミー版・今後は不要）
-@bp.route("/connect_gsc/<int:site_id>")
+@bp.route("/connect_gsc/<int:site_id>", methods=["POST"])
 @login_required
 def connect_gsc(site_id):
     site = Site.query.get_or_404(site_id)
     if site.user_id != current_user.id:
         flash("アクセス権がありません。", "danger")
-        return redirect(url_for("main.gsc_connect", username=current_user.username))
+        return redirect(url_for("main.gsc_connect"))
 
-    # （注意）本番では不要 → 本来は /authorize_gsc → /oauth2callback で接続
     site.gsc_connected = True
     db.session.commit()
 
-    flash(f"サイト「{site.name}」とGoogleサーチコンソールの連携が完了しました。", "success")
-    return redirect(url_for("main.gsc_connect", username=current_user.username))
+    flash(f"✅ サイト「{site.name}」とGoogleサーチコンソールの接続が完了しました。", "success")
+    return redirect(url_for("main.gsc_connect"))
 
 
 
@@ -1780,6 +1795,9 @@ def log(username, site_id):
     status = request.args.get("status")
     sort_key = request.args.get("sort", "scheduled_at")
     sort_order = request.args.get("order", "desc")
+
+    # ✅ GSC絞り込み用パラメータ取得
+    source = request.args.get("source", "all")
 
     # 未スケジュール記事の slot を自動割当
     unscheduled = Article.query.filter(
@@ -1803,6 +1821,9 @@ def log(username, site_id):
     q = Article.query.filter_by(user_id=current_user.id, site_id=site_id)
     if status:
         q = q.filter_by(status=status)
+
+    if source == "gsc":
+        q = q.filter_by(source="gsc")  # ✅ GSC記事のみフィルタ
 
     # 必ず site 情報も preload（clicks/impressions用）
     q = q.options(selectinload(Article.site))
@@ -1830,8 +1851,10 @@ def log(username, site_id):
         status=status,
         sort_key=sort_key,
         sort_order=sort_order,
+        selected_source=source,  # ✅ フィルタUIの状態保持用
         jst=JST
     )
+
 
 
 # ─────────── ログ：サイト選択ページ（ユーザー別）
