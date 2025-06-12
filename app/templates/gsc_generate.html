@@ -26,8 +26,8 @@
           <option value="">― 使わない ―</option>
           {% for p in saved_prompts %}
             <option value="{{ p.id }}"
-                    data-title="{{ p.title_prompt|e }}"
-                    data-body="{{ p.body_prompt|e }}">
+                    data-title='{{ p.title_prompt|tojson }}'
+                    data-body='{{ p.body_prompt|tojson }}'>
               {{ p.genre }}
             </option>
           {% endfor %}
@@ -81,18 +81,31 @@
 
 <!-- 🔧 詳細プロンプトトグルスクリプト + 選択反映JS -->
 <script>
+document.addEventListener("DOMContentLoaded", function () {
+  const select = document.getElementById("prompt_select");
+  const titleField = document.getElementById("title_prompt");
+  const bodyField = document.getElementById("body_prompt");
+
+  if (select && titleField && bodyField) {
+    select.addEventListener("change", function () {
+      const selected = this.options[this.selectedIndex];
+      const title = selected.getAttribute("data-title") || "";
+      const body = selected.getAttribute("data-body") || "";
+
+      try {
+        titleField.value = JSON.parse(title);
+        bodyField.value = JSON.parse(body);
+      } catch {
+        titleField.value = title;
+        bodyField.value = body;
+      }
+    });
+  }
+});
+
 function toggleDetailPrompt() {
   const area = document.getElementById("detail_prompt_area");
   area.classList.toggle("hidden");
 }
-
-document.getElementById("prompt_select")?.addEventListener("change", function () {
-  const selected = this.options[this.selectedIndex];
-  const title = selected.getAttribute("data-title") || "";
-  const body = selected.getAttribute("data-body") || "";
-
-  document.getElementById("title_prompt").value = title;
-  document.getElementById("body_prompt").value = body;
-});
 </script>
 {% endblock %}
