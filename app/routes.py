@@ -1636,7 +1636,7 @@ def generate(username):
 
 # ─────────── GSCルートコード
 
-from app.google_client import fetch_search_queries
+from app.google_client import fetch_search_queries_for_site
 from app.models import Keyword  # 🔁 既存キーワード参照のため追加
 from app.article_generator import enqueue_generation  # 🔁 忘れずに
 
