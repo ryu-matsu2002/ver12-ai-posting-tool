@@ -390,6 +390,7 @@ def enqueue_generation(
                 for _ in range(c):
                     try:
                         title = _unique_title(kw.strip(), title_prompt)
+                        kobj = kw_map.get(kw)
                         art = Article(
                             keyword=kw.strip(),
                             title=title,
@@ -398,6 +399,7 @@ def enqueue_generation(
                             status="pending",
                             progress=0,
                             scheduled_at=next(slots, None),
+                            source=kobj.source if kobj else None  # ✅ ここが重要
                         )
                         db.session.add(art)
                         db.session.flush()
