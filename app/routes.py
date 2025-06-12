@@ -1887,6 +1887,7 @@ def log_sites(username):
         Site.plan_type,
         Site.clicks,
         Site.impressions,
+        Site.gsc_connected,
         func.count(Article.id).label("total"),
         func.sum(case((Article.status == "done", 1), else_=0)).label("done"),
         func.sum(case((Article.status == "posted", 1), else_=0)).label("posted"),
@@ -1914,7 +1915,7 @@ def log_sites(username):
     # グループ化・取得
     # 🔁 修正すべき1行（group_by拡張）
     result = query.group_by(
-        Site.id, Site.name, Site.url, Site.plan_type, Site.clicks, Site.impressions
+        Site.id, Site.name, Site.url, Site.plan_type, Site.clicks, Site.impressions, Site.gsc_connected
     ).all()
 
 
