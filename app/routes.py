@@ -1724,6 +1724,10 @@ def gsc_generate():
         # GSCクエリ取得
         try:
             queries = fetch_search_queries_for_site(site.url, days=28, row_limit=1000)
+
+            # 🔧 追加: 取得件数ログ
+            current_app.logger.info(f"[GSC] {len(queries)} 件のクエリを取得 - {site.url}")
+
         except Exception as e:
             flash(f"GSCからのクエリ取得に失敗しました: {e}", "danger")
             return redirect(url_for("main.log_sites", username=current_user.username))
@@ -1732,8 +1736,14 @@ def gsc_generate():
         existing = set(k.keyword for k in Keyword.query.filter_by(site_id=site.id).all())
         new_keywords = [q for q in queries if q not in existing]
 
+        # 🔧 追加: 空 or 全重複の分岐で別メッセージ
         if not new_keywords:
-            flash("すべてのクエリが既に登録されています。", "info")
+            if not queries:
+                flash("⚠️ GSCからクエリを取得できませんでした。URL形式が一致していない可能性があります。", "warning")
+                current_app.logger.warning(f"[GSC] クエリが0件でした - {site.url}")
+            else:
+                flash("すべてのクエリが既に登録されています。", "info")
+                current_app.logger.info(f"[GSC] 全クエリが既存のため登録スキップ - {site.url}")
             return redirect(url_for("main.log_sites", username=current_user.username))
 
         # DBに登録（source='gsc'）
@@ -1759,6 +1769,7 @@ def gsc_generate():
         )
 
         flash(f"{len(new_keywords)}件のGSCキーワードから記事生成を開始しました", "success")
+        current_app.logger.info(f"[GSC] ✅ {len(new_keywords)} 件の記事生成キューを追加 - {site.url}")
         return redirect(url_for("main.log_sites", username=current_user.username))
 
     # --- GET（フォーム表示） ---
@@ -1789,7 +1800,6 @@ def gsc_generate():
         title_prompt="",  # 初期値
         body_prompt="",   # 初期値
     )
-
 
 
 # --- 既存インポートの下に追加（必要に応じて） ---
