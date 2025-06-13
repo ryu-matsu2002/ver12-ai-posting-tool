@@ -384,7 +384,7 @@ def admin_prompt_list():
     prompts = (
         db.session.query(PromptTemplate, User)
         .join(User, PromptTemplate.user_id == User.id)
-        .order_by(PromptTemplate.updated_at.desc())
+        .order_by(PromptTemplate.id.desc())
         .all()
     )
 
@@ -420,7 +420,6 @@ def admin_gsc_status():
             Site.id,
             Site.name,
             Site.url,
-            Site.created_at,
             Site.plan_type,
             User.name.label("user_name"),
             func.count(Article.id).label("article_count"),
@@ -430,7 +429,7 @@ def admin_gsc_status():
         .outerjoin(Article, Article.site_id == Site.id)
         .outerjoin(GSCConfig, GSCConfig.site_id == Site.id)
         .group_by(Site.id, User.id)
-        .order_by(Site.created_at.desc())
+        .order_by(func.count(Article.id).desc())
         .all()
     )
 
@@ -459,7 +458,7 @@ def job_status():
 def api_usage():
     from app.models import TokenUsageLog, User
     from sqlalchemy import func
-
+    from datetime import datetime
     # 日別集計（過去30日）
     today = datetime.utcnow().date()
     date_30_days_ago = today - timedelta(days=29)
@@ -501,7 +500,7 @@ def api_usage():
 def revenue_summary():
     from app.models import PaymentLog, User
     from sqlalchemy import func
-
+    from datetime import datetime
     # 今月の開始日を取得（UTC）
     today = datetime.utcnow()
     first_day = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -775,7 +774,6 @@ def admin_sites():
             Site.name,
             Site.url,
             Site.plan_type,
-            Site.created_at,
             User.name.label("user_name"),
             User.email.label("user_email"),
             func.count(Article.id).label("total"),
@@ -786,7 +784,7 @@ def admin_sites():
         .join(User, Site.user_id == User.id)
         .outerjoin(Article, Site.id == Article.site_id)
         .group_by(Site.id, User.id)
-        .order_by(Site.created_at.desc())
+        .order_by(func.count(Article.id).desc())
         .all()
     )
 
