@@ -50,7 +50,7 @@
               <a href="{{ s.url }}" target="_blank" class="underline">{{ s.name }}</a>
             </td>
             <td class="py-2 px-4">
-              {% if s.gsc_connected %}
+              {% if s.gsc_connected == True %}
                 <span class="inline-block bg-green-100 text-green-800 text-xs font-bold px-2 py-1 rounded mr-2">GSC</span>
               {% endif %}
               <a href="{{ s.url }}" target="_blank" class="text-blue-600 underline">{{ s.url }}</a>
