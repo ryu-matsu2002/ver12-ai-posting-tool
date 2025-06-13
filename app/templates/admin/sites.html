@@ -52,7 +52,7 @@
               <a href="{{ s.url }}" target="_blank" class="underline">{{ s.name }}</a>
             </td>
             <td class="py-2 px-4">
-              {% if s.gsc_connected == True %}
+              {% if s.gsc_connected is true %}
                 <span class="inline-block bg-green-600 text-white text-xs font-bold px-2 py-1 rounded mr-2">GSC</span>
               {% endif %}
               <a href="{{ s.url }}" target="_blank" class="text-blue-600 underline">{{ s.url }}</a>
@@ -70,10 +70,6 @@
               <a href="{{ s.url }}/wp-admin" target="_blank"
                  class="inline-block bg-purple-700 hover:bg-purple-800 text-white text-xs font-bold px-2 py-1 rounded">
                 WP管理
-              </a>
-              <a href="{{ url_for('admin.admin_quota_edit', uid=uid) }}"
-                 class="inline-block bg-gray-500 hover:bg-gray-600 text-white text-xs font-bold px-2 py-1 rounded">
-                修正
               </a>
             </td>
           </tr>
