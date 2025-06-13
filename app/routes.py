@@ -1022,12 +1022,12 @@ def site_articles(site_id):
     if not current_user.is_admin:
         abort(403)
 
-    from app.models import Site, Article
+    from app.models import Site, Article, User
     from sqlalchemy.orm import selectinload
     from sqlalchemy import asc, nulls_last
 
-    site = Site.query.get_or_404(site_id)
-    user = site.user
+    site = Site.query.options(selectinload(Site.user)).get_or_404(site_id)
+    user = site.user  # ✅ ここで site に紐づく正しい user を取得
 
     status = request.args.get("status")
     source = request.args.get("source", "all")
@@ -1046,13 +1046,14 @@ def site_articles(site_id):
         "admin/user_articles.html",
         articles=articles,
         site=site,
-        user=user,
+        user=user,  # ✅ この user は site に紐づいたもの
         status=status,
         sort_key=None,
         sort_order=None,
         selected_source=source,
         jst=JST
     )
+
 
 
 @admin_bp.post("/admin/user/<int:uid>/delete-stuck")
