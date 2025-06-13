@@ -13,14 +13,16 @@
   <!-- ✅ 左サイドメニュー -->
   <aside class="w-64 bg-gray-900 text-white flex flex-col p-4 space-y-3">
 
-    <!-- ロゴ＋SITE CRAFT -->
-    <a href="{{ url_for('admin.admin_dashboard') }}" class="flex items-center space-x-2 mb-4">
-      <img src="/static/logo.png" alt="Logo" class="w-8 h-8">
-      <span class="text-lg font-bold leading-tight">SITE<br>CRAFT</span>
+    <!-- 🔧 ロゴ＋SITE CRAFT（黒背景） -->
+    <a href="{{ url_for('admin.admin_dashboard') }}" class="flex items-center mb-6">
+      <img src="{{ url_for('static', filename='images/tcc_logo.png') }}" alt="Logo" class="w-9 h-9 mr-2">
+      <div class="text-white text-lg font-bold leading-tight">
+        <div>SITE</div>
+        <div>CRAFT</div>
+      </div>
     </a>
 
-    <!-- メニュー一覧 -->
-    <a href="{{ url_for('admin.admin_dashboard') }}" class="hover:text-yellow-400 font-semibold">📊 ダッシュボード</a>
+    <!-- ✅ メニュー一覧（ダッシュボード削除済み） -->
     <a href="{{ url_for('admin.admin_users') }}" class="hover:text-yellow-400">👤 ユーザー管理</a>
     <a href="{{ url_for('admin.admin_sites') }}" class="hover:text-yellow-400">🌐 サイト投稿状況</a>
     <a href="{{ url_for('admin.manage_genres') }}" class="hover:text-yellow-400">🗂️ ジャンル管理</a>
