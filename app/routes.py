@@ -788,10 +788,10 @@ def admin_sites():
     from app.models import Site, Article, User, Genre, GSCConfig
     from collections import defaultdict
 
-    # 🔹 ジャンルID→ジャンル名辞書
+    # 🔹 ジャンルID→ジャンル名の辞書を事前取得
     genre_dict = {g.id: g.name for g in Genre.query.all()}
 
-    # 🔹 サイトごとの集計データ取得
+    # 🔹 サイトごとの統計情報（投稿数など）＋GSC接続状態を取得
     raw = (
         db.session.query(
             Site.id,
@@ -817,7 +817,7 @@ def admin_sites():
         .all()
     )
 
-    # 🔹 ユーザー単位にまとめる
+    # 🔹 ユーザー単位でまとめてテンプレートに渡すための構造を構築
     sites_by_user = defaultdict(lambda: {"user_id": None, "sites": [], "genres": set()})
 
     for row in raw:
@@ -825,6 +825,7 @@ def admin_sites():
         genre_id = row.genre_id
         genre_name = genre_dict.get(genre_id, "") if genre_id else ""
 
+        # 各サイトの情報
         site_info = {
             "name": row.name,
             "url": row.url,
@@ -836,21 +837,25 @@ def admin_sites():
             "clicks": row.clicks or 0,
             "impressions": row.impressions or 0,
             "genre": genre_name,
-            "gsc_connected": bool(row.gsc_connected)  # ← ✅ 修正ポイント
+            "gsc_connected": bool(row.gsc_connected)  # ← GSC接続ラベルに正しく対応
         }
 
-        # 初回のみuser_idを設定
+        # 初回時のみ user_id を登録
         if sites_by_user[user_name]["user_id"] is None:
             sites_by_user[user_name]["user_id"] = row.user_id
 
+        # サイト情報を格納
         sites_by_user[user_name]["sites"].append(site_info)
+
+        # ジャンル名があれば追加（重複回避のため set）
         if genre_name:
             sites_by_user[user_name]["genres"].add(genre_name)
 
-    # 🔹 genres セットをリストに変換
+    # 🔹 最終的に genres をソートされたリストに変換（select要素用）
     for user_data in sites_by_user.values():
         user_data["genres"] = sorted(user_data["genres"])
 
+    # 🔹 テンプレートに渡す
     return render_template("admin/sites.html", sites_by_user=sites_by_user)
 
 

@@ -18,9 +18,8 @@
 
     <!-- 🔍 検索＆ジャンルフィルタ -->
     <div class="flex flex-wrap items-center gap-4 px-4 pt-4">
-      <input type="text" placeholder="サイト名またはURL" oninput="filterSites(this, '{{ user_name }}')"
-             class="p-2 border rounded w-64" />
-      <select onchange="filterSites(this, '{{ user_name }}')" class="p-2 border rounded">
+      <input type="text" placeholder="サイト名またはURL" class="p-2 border rounded w-64 site-search" />
+      <select class="p-2 border rounded site-genre-filter">
         <option value="">すべてのジャンル</option>
         {% for genre in genres %}
         <option value="{{ genre }}">{{ genre }}</option>
@@ -84,21 +83,29 @@
 
 </div>
 
-<!-- JS：検索＆ジャンルフィルタ -->
+<!-- ✅ JS：検索＋ジャンルフィルタ機能 -->
 <script>
-function filterSites(input, user) {
-  const table = document.getElementById(`table-${user}`);
-  const keyword = input.value?.toLowerCase() || "";
-  const isSelect = input.tagName === "SELECT";
-  const rows = table.querySelectorAll("tbody tr");
+document.querySelectorAll("details").forEach(wrapper => {
+  const input = wrapper.querySelector(".site-search");
+  const select = wrapper.querySelector(".site-genre-filter");
+  const table = wrapper.querySelector("table");
 
-  rows.forEach(row => {
-    const siteText = row.dataset.site.toLowerCase();
-    const genre = row.dataset.genre;
-    const matchText = !keyword || (!isSelect && siteText.includes(keyword));
-    const matchGenre = isSelect ? (!keyword || genre === keyword) : true;
-    row.style.display = matchText && matchGenre ? "" : "none";
-  });
-}
+  function filter() {
+    const keyword = input.value.toLowerCase();
+    const selectedGenre = select.value;
+    const rows = table.querySelectorAll("tbody tr");
+
+    rows.forEach(row => {
+      const siteText = row.dataset.site.toLowerCase();
+      const genre = row.dataset.genre;
+      const matchText = !keyword || siteText.includes(keyword);
+      const matchGenre = !selectedGenre || genre === selectedGenre;
+      row.style.display = matchText && matchGenre ? "" : "none";
+    });
+  }
+
+  input.addEventListener("input", filter);
+  select.addEventListener("change", filter);
+});
 </script>
 {% endblock %}
