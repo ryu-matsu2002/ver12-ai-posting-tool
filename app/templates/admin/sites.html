@@ -9,13 +9,14 @@
   {% for user_name, user_data in sites_by_user.items() %}
   {% set user_sites = user_data['sites'] %}
   {% set genres = user_data['genres'] %}
+  {% set uid = user_data['user_id'] %}
 
   <details class="bg-blue-50 shadow rounded border border-blue-200" style="overflow: hidden;">
     <summary class="px-4 py-3 cursor-pointer bg-blue-100 text-lg font-semibold border-b border-blue-300">
       👤 {{ user_name }}（{{ user_sites|length }} サイト）
     </summary>
 
-    <!-- 🔍 検索＆ジャンルフィルタ（ユーザー単位） -->
+    <!-- 🔍 検索＆ジャンルフィルタ -->
     <div class="flex flex-wrap items-center gap-4 px-4 pt-4">
       <input type="text" placeholder="サイト名またはURL" oninput="filterSites(this, '{{ user_name }}')"
              class="p-2 border rounded w-64" />
@@ -27,18 +28,19 @@
       </select>
     </div>
 
-    <!-- 📝 サイトテーブル -->
+    <!-- サイトテーブル -->
     <div class="overflow-x-auto mt-4" id="table-{{ user_name }}">
       <table class="min-w-full text-sm text-left site-table">
         <thead class="bg-blue-100 text-blue-800 font-semibold">
           <tr>
             <th class="py-2 px-4">サイト名</th>
             <th class="py-2 px-4">URL</th>
-            <th class="py-2 px-4 text-green-700">投稿完了</th>
-            <th class="py-2 px-4 text-blue-700">記事生成済み</th>
-            <th class="py-2 px-4 text-gray-800">総記事数</th>
-            <th class="py-2 px-4 text-purple-700">クリック数</th>
-            <th class="py-2 px-4 text-pink-700">表示回数</th>
+            <th class="py-2 px-2 text-green-700">投稿完了</th>
+            <th class="py-2 px-2 text-blue-700">記事生成済み</th>
+            <th class="py-2 px-2">総記事数</th>
+            <th class="py-2 px-2 text-purple-700">クリック数</th>
+            <th class="py-2 px-2 text-pink-700">表示回数</th>
+            <th class="py-2 px-4">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -51,15 +53,29 @@
             </td>
             <td class="py-2 px-4">
               {% if s.gsc_connected == True %}
-                <span class="inline-block bg-green-100 text-green-800 text-xs font-bold px-2 py-1 rounded mr-2">GSC</span>
+                <span class="inline-block bg-green-600 text-white text-xs font-bold px-2 py-1 rounded mr-2">GSC</span>
               {% endif %}
               <a href="{{ s.url }}" target="_blank" class="text-blue-600 underline">{{ s.url }}</a>
             </td>
-            <td class="py-2 px-4 text-green-700">{{ s.posted or 0 }}</td>
-            <td class="py-2 px-4 text-blue-700">{{ s.done or 0 }}</td>
-            <td class="py-2 px-4">{{ s.total or 0 }}</td>
-            <td class="py-2 px-4 text-purple-700">{{ s.clicks or 0 }}</td>
-            <td class="py-2 px-4 text-pink-700">{{ s.impressions or 0 }}</td>
+            <td class="py-2 px-2 text-green-700 text-center">{{ s.posted or 0 }}</td>
+            <td class="py-2 px-2 text-blue-700 text-center">{{ s.done or 0 }}</td>
+            <td class="py-2 px-2 text-center">{{ s.total or 0 }}</td>
+            <td class="py-2 px-2 text-purple-700 text-center">{{ s.clicks or 0 }}</td>
+            <td class="py-2 px-2 text-pink-700 text-center">{{ s.impressions or 0 }}</td>
+            <td class="py-2 px-4 space-x-1 whitespace-nowrap">
+              <a href="{{ url_for('admin.user_articles', uid=uid) }}"
+                 class="inline-block bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-2 py-1 rounded">
+                記事一覧
+              </a>
+              <a href="{{ s.url }}/wp-admin" target="_blank"
+                 class="inline-block bg-purple-700 hover:bg-purple-800 text-white text-xs font-bold px-2 py-1 rounded">
+                WP管理
+              </a>
+              <a href="{{ url_for('admin.admin_quota_edit', uid=uid) }}"
+                 class="inline-block bg-gray-500 hover:bg-gray-600 text-white text-xs font-bold px-2 py-1 rounded">
+                修正
+              </a>
+            </td>
           </tr>
           {% endfor %}
         </tbody>
@@ -72,7 +88,7 @@
 
 </div>
 
-<!-- ✅ 検索＆ジャンル絞り込み JS -->
+<!-- JS：検索＆ジャンルフィルタ -->
 <script>
 function filterSites(input, user) {
   const table = document.getElementById(`table-${user}`);

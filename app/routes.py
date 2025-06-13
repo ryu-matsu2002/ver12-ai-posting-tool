@@ -788,7 +788,10 @@ def admin_sites():
     from app.models import Site, Article, User, Genre, GSCConfig
     from collections import defaultdict
 
-    # サイトごとの集計
+    # 🔹 ジャンルID→ジャンル名辞書
+    genre_dict = {g.id: g.name for g in Genre.query.all()}
+
+    # 🔹 サイトごとの集計データ取得
     raw = (
         db.session.query(
             Site.id,
@@ -796,6 +799,7 @@ def admin_sites():
             Site.url,
             Site.plan_type,
             Site.genre_id,
+            Site.user_id,
             func.concat(User.last_name, literal(" "), User.first_name).label("user_name"),
             func.count(Article.id).label("total"),
             func.sum(case((Article.status == "done", 1), else_=0)).label("done"),
@@ -813,15 +817,12 @@ def admin_sites():
         .all()
     )
 
-    # 🔸 genre_id を genre名に変換する辞書
-    genre_dict = {g.id: g.name for g in Genre.query.all()}
-
-    # ユーザー単位にまとめる
-    sites_by_user = defaultdict(lambda: {"sites": [], "genres": set()})
+    # 🔹 ユーザー単位にまとめる
+    sites_by_user = defaultdict(lambda: {"user_id": None, "sites": [], "genres": set()})
 
     for row in raw:
         user_name = row.user_name
-        genre_id = getattr(row, "genre_id", None)
+        genre_id = row.genre_id
         genre_name = genre_dict.get(genre_id, "") if genre_id else ""
 
         site_info = {
@@ -838,11 +839,15 @@ def admin_sites():
             "gsc_connected": row.gsc_connected
         }
 
+        # 初回のみuser_idを設定
+        if sites_by_user[user_name]["user_id"] is None:
+            sites_by_user[user_name]["user_id"] = row.user_id
+
         sites_by_user[user_name]["sites"].append(site_info)
         if genre_name:
             sites_by_user[user_name]["genres"].add(genre_name)
 
-    # genres をリストに変換
+    # 🔹 genres セットをリストに変換
     for user_data in sites_by_user.values():
         user_data["genres"] = sorted(user_data["genres"])
 
