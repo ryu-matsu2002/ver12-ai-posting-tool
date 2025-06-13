@@ -6,41 +6,37 @@
   <meta name="robots" content="noindex, nofollow">
   <title>{% block title %}管理画面{% endblock %}</title>
   <script src="https://cdn.tailwindcss.com/3.4.4"></script>
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 </head>
 <body class="bg-gray-100 h-screen text-gray-800 flex">
 
   <!-- ✅ 左サイドメニュー -->
-  <aside class="w-64 bg-gray-900 text-white flex flex-col p-4 space-y-4">
-    <h2 class="text-xl font-bold mb-4">Admin Menu</h2>
+  <aside class="w-64 bg-gray-900 text-white flex flex-col p-4 space-y-3">
 
-    <!-- 📊 ダッシュボード -->
-    <div>
-      <div class="font-bold text-gray-200 mb-1">📊 ダッシュボード</div>
-      <ul class="ml-2 space-y-1 text-sm text-gray-300">
-        <li>
-          <a href="{{ url_for('admin.admin_dashboard') }}" class="hover:text-yellow-400">├ 統計サマリ</a>
-        </li>
-        <li>
-          <a href="{{ url_for('admin.job_status') }}" class="hover:text-yellow-400">├ 処理中ジョブ一覧 🔄</a>
-        </li>
-        <li>
-          <a href="{{ url_for('admin.api_usage') }}" class="hover:text-yellow-400">├ API使用量 / トークン分析</a>
-        </li>
-        <li>
-          <a href="{{ url_for('admin.revenue_summary') }}" class="hover:text-yellow-400">├ 今月の売上＆取り分サマリ 💰</a>
-        </li>
-        <li>
-          <a href="{{ url_for('admin.revenue_graph') }}" class="hover:text-yellow-400">└ 売上推移グラフ／経理帳票ダウンロード</a>
-        </li>
-      </ul>
-    </div>
-
-    <!-- 他のメニュー（必要に応じて調整） -->
-    <a href="{{ url_for('admin.admin_users') }}" class="hover:text-yellow-400">ユーザー管理</a>
-    <a href="{{ url_for('admin.admin_sites') }}" class="hover:text-yellow-400">📊 サイト投稿状況</a>
-    <a href="{{ url_for('admin.accounting') }}" class="block px-4 py-2 hover:bg-gray-200 text-white">
-      💰 経理ダッシュボード
+    <!-- ロゴ＋SITE CRAFT -->
+    <a href="{{ url_for('admin.admin_dashboard') }}" class="flex items-center space-x-2 mb-4">
+      <img src="/static/logo.png" alt="Logo" class="w-8 h-8">
+      <span class="text-lg font-bold leading-tight">SITE<br>CRAFT</span>
     </a>
+
+    <!-- メニュー一覧 -->
+    <a href="{{ url_for('admin.admin_dashboard') }}" class="hover:text-yellow-400 font-semibold">📊 ダッシュボード</a>
+    <a href="{{ url_for('admin.admin_users') }}" class="hover:text-yellow-400">👤 ユーザー管理</a>
+    <a href="{{ url_for('admin.admin_sites') }}" class="hover:text-yellow-400">🌐 サイト投稿状況</a>
+    <a href="{{ url_for('admin.manage_genres') }}" class="hover:text-yellow-400">🗂️ ジャンル管理</a>
+    <a href="{{ url_for('admin.admin_users') }}#prompt" class="hover:text-yellow-400">🧠 プロンプト管理</a>
+    <a href="{{ url_for('admin.admin_users') }}#keyword" class="hover:text-yellow-400">🔑 キーワード管理</a>
+    <a href="{{ url_for('admin.api_usage') }}" class="hover:text-yellow-400">💬 ChatGPT使用量</a>
+    <a href="{{ url_for('admin.job_status') }}" class="hover:text-yellow-400">🔄 処理中ジョブ</a>
+    <a href="{{ url_for('admin.revenue_summary') }}" class="hover:text-yellow-400">💰 売上＆取り分</a>
+    <a href="{{ url_for('admin.revenue_graph') }}" class="hover:text-yellow-400">📈 売上グラフ/CSV</a>
+    <a href="{{ url_for('admin.accounting') }}" class="hover:text-yellow-400">🧾 経理ダッシュボード</a>
+    <a href="{{ url_for('admin.admin_dashboard') }}" class="hover:text-yellow-400">🔍 Search Console連携</a>
+
+    <!-- 区切り -->
+    <hr class="border-gray-700 my-2">
+
+    <a href="{{ url_for('main.logout') }}" class="hover:text-red-400">🚪 ログアウト</a>
   </aside>
 
   <!-- ✅ メインコンテンツ -->
