@@ -54,43 +54,61 @@ admin_bp = Blueprint("admin", __name__)
 def robots_txt():
     return send_from_directory('static', 'robots.txt')
 
+# routes.py または api.py 内
+
+from app.models import User, ChatLog
+from datetime import datetime
+
 @bp.route("/api/chat", methods=["POST"])
 def chat_api():
     data = request.get_json()
-    user_msg = data.get("message", "")
+    user_msg = data.get("message", "").strip()
     username = data.get("username", "ユーザー")
-    history = data.get("history", [])
 
     if not user_msg:
         return jsonify({"reply": "メッセージが空です。"})
 
     try:
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({"reply": "ユーザーが見つかりません。"})
+
+        # 過去の履歴（最新10件）
+        logs = ChatLog.query.filter_by(user_id=user.id).order_by(ChatLog.timestamp.desc()).limit(10).all()
+        logs = list(reversed(logs))  # 時系列順にする
+
+        # 会話履歴を構成
+        messages = [
+            {
+                "role": "system",
+                "content": f"あなたはVER12.AI-posting-tool『site craft』専属のAIアシスタントです。ユーザー（{username}さん）を名前で呼びながら、親しみやすくサポートしてください。"
+            }
+        ]
+        for log in logs:
+            messages.append({"role": log.role, "content": log.content})
+
+        messages.append({"role": "user", "content": user_msg})
+
+        # OpenAI呼び出し
         client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-        # 履歴付きメッセージ
-        messages = [{"role": "system", "content": f"あなたはVER12.AI-posting-tool『site craft』専属のAIアシスタントです。ユーザー（{username}さん）を名前で呼びながら、親しみやすくサポートしてください。"}]
-
-        # 履歴追加
-        for msg in history:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            messages.append({"role": role, "content": content})
-
-        # 今回の発言を最後に追加（すでにJS側で送ってるので重複しないよう注意）
-        if not history or history[-1].get("content") != user_msg:
-            messages.append({"role": "user", "content": user_msg})
-
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=messages,
             max_tokens=300,
             temperature=0.7
         )
-
         reply = response.choices[0].message.content.strip()
+
+        # ✅ DBに保存
+        db.session.add(ChatLog(user_id=user.id, role="user", content=user_msg))
+        db.session.add(ChatLog(user_id=user.id, role="assistant", content=reply))
+        db.session.commit()
+
         return jsonify({"reply": reply})
+
     except Exception as e:
         return jsonify({"reply": f"エラー：{str(e)}"})
+
 
 import stripe
 from app import db

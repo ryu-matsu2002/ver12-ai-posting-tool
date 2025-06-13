@@ -236,3 +236,11 @@ class GSCConfig(db.Model):
 
     user = db.relationship("User", backref="gsc_configs")
     site = db.relationship("Site", backref="gsc_configs")
+
+# app/models.py
+class ChatLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    role = db.Column(db.String(10))  # "user" or "assistant"
+    content = db.Column(db.Text)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
