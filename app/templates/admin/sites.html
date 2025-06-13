@@ -2,7 +2,7 @@
 {% block title %}サイト投稿状況 | 管理者{% endblock %}
 
 {% block content %}
-<h1 class="text-2xl font-bold mb-6">🌐 サイト投稿状況一覧</h1>
+<h1 class="text-2xl font-bold mb-6">🌐 登録サイト/記事管理</h1>
 
 <div class="space-y-6">
 
@@ -52,7 +52,7 @@
               <a href="{{ s.url }}" target="_blank" class="underline">{{ s.name }}</a>
             </td>
             <td class="py-2 px-4">
-              {% if s.gsc_connected is true %}
+              {% if s.gsc_connected %}
                 <span class="inline-block bg-green-600 text-white text-xs font-bold px-2 py-1 rounded mr-2">GSC</span>
               {% endif %}
               <a href="{{ s.url }}" target="_blank" class="text-blue-600 underline">{{ s.url }}</a>
