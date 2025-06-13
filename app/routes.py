@@ -858,6 +858,22 @@ def admin_sites():
     # 🔹 テンプレートに渡す
     return render_template("admin/sites.html", sites_by_user=sites_by_user)
 
+@admin_bp.route("/admin/user/<int:uid>/bulk-delete", methods=["POST"])
+@login_required
+def bulk_delete_articles(uid):
+    if not current_user.is_admin:
+        abort(403)
+
+    # pending または gen 状態の記事を一括削除
+    Article.query.filter(
+        Article.user_id == uid,
+        Article.status.in_(["pending", "gen"])
+    ).delete()
+
+    db.session.commit()
+    flash("✅ 途中状態の記事を一括削除しました", "success")
+    return redirect(url_for("admin.user_articles", uid=uid))
+
 
 
 @admin_bp.post("/admin/delete-stuck-articles")
