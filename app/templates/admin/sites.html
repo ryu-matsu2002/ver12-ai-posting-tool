@@ -4,34 +4,54 @@
 {% block content %}
 <h1 class="text-2xl font-bold mb-6">🌐 サイト投稿状況一覧</h1>
 
-<table class="min-w-full bg-white shadow rounded text-sm">
-  <thead class="bg-gray-100 text-left">
-    <tr>
-      <th class="py-2 px-4">ユーザー名</th>
-      <th class="py-2 px-4">サイト名</th>
-      <th class="py-2 px-4">URL</th>
-      <th class="py-2 px-4">プラン</th>
-      <th class="py-2 px-4">投稿済</th>
-      <th class="py-2 px-4">待機中</th>
-      <th class="py-2 px-4">エラー</th>
-      <th class="py-2 px-4">登録日</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for s in sites %}
-    <tr class="border-t">
-      <td class="py-2 px-4 text-blue-800 font-medium">{{ s.user_name }}</td>
-      <td class="py-2 px-4">{{ s.name }}</td>
-      <td class="py-2 px-4"><a href="{{ s.url }}" target="_blank" class="text-blue-600 underline">{{ s.url }}</a></td>
-      <td class="py-2 px-4">{{ s.plan_type or "未設定" }}</td>
-      <td class="py-2 px-4 text-green-700">{{ s.posted or 0 }}</td>
-      <td class="py-2 px-4 text-blue-700">{{ s.done or 0 }}</td>
-      <td class="py-2 px-4 text-red-700">{{ s.error or 0 }}</td>
-      <td class="py-2 px-4 text-gray-500">{{ s.created_at.strftime('%Y-%m-%d') if s.created_at else '-' }}</td>
-    </tr>
-    {% else %}
-    <tr><td colspan="8" class="py-4 px-4 text-center text-gray-500">サイトが登録されていません。</td></tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="space-y-6">
+
+  {% for user_name, user_sites in sites_by_user.items() %}
+  <details open class="bg-white shadow rounded">
+    <summary class="px-4 py-3 cursor-pointer bg-gray-100 text-lg font-semibold border-b border-gray-200">
+      👤 {{ user_name }}（{{ user_sites|length }} サイト）
+    </summary>
+
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm text-left">
+        <thead class="bg-gray-50 border-b">
+          <tr>
+            <th class="py-2 px-4">サイト名</th>
+            <th class="py-2 px-4">URL</th>
+            <th class="py-2 px-4 text-green-700">投稿完了</th>
+            <th class="py-2 px-4 text-blue-700">記事生成済み</th>
+            <th class="py-2 px-4 text-gray-800">総記事数</th>
+            <th class="py-2 px-4 text-purple-700">クリック数</th>
+            <th class="py-2 px-4 text-pink-700">表示回数</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in user_sites %}
+          <tr class="border-t hover:bg-gray-50">
+            <td class="py-2 px-4 font-medium">
+              <a href="{{ s.url }}" target="_blank" class="text-blue-700 underline">
+                {{ s.name }}
+              </a>
+            </td>
+            <td class="py-2 px-4">
+              <a href="{{ s.url }}" target="_blank" class="text-blue-600 underline">{{ s.url }}</a>
+            </td>
+            <td class="py-2 px-4 text-green-700">{{ s.posted or 0 }}</td>
+            <td class="py-2 px-4 text-blue-700">{{ s.done or 0 }}</td>
+            <td class="py-2 px-4">{{ s.total or 0 }}</td>
+            <td class="py-2 px-4 text-purple-700">{{ s.clicks or 0 }}</td>
+            <td class="py-2 px-4 text-pink-700">{{ s.impressions or 0 }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="7" class="py-3 px-4 text-gray-500">このユーザーに登録されたサイトはありません。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% else %}
+  <div class="text-gray-500">登録されたサイトがありません。</div>
+  {% endfor %}
+
+</div>
 {% endblock %}

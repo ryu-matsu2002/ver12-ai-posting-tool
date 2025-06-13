@@ -787,27 +787,35 @@ def admin_sites():
     from sqlalchemy import func, case, literal
     from app.models import Site, Article, User
 
-    result = (
+    # サイトごとの集計
+    raw = (
         db.session.query(
             Site.id,
             Site.name,
             Site.url,
             Site.plan_type,
             func.concat(User.last_name, literal(" "), User.first_name).label("user_name"),
-            User.email.label("user_email"),
             func.count(Article.id).label("total"),
             func.sum(case((Article.status == "done", 1), else_=0)).label("done"),
             func.sum(case((Article.status == "posted", 1), else_=0)).label("posted"),
             func.sum(case((Article.status == "error", 1), else_=0)).label("error"),
+            func.coalesce(Site.clicks, 0).label("clicks"),
+            func.coalesce(Site.impressions, 0).label("impressions"),
         )
         .join(User, Site.user_id == User.id)
         .outerjoin(Article, Site.id == Article.site_id)
         .group_by(Site.id, User.id)
-        .order_by(func.count(Article.id).desc())
+        .order_by(User.id, Site.created_at.desc())
         .all()
     )
 
-    return render_template("admin/sites.html", sites=result)
+    # ユーザー単位でまとめる
+    from collections import defaultdict
+    sites_by_user = defaultdict(list)
+    for row in raw:
+        sites_by_user[row.user_name].append(row)
+
+    return render_template("admin/sites.html", sites_by_user=sites_by_user)
 
 
 @admin_bp.post("/admin/delete-stuck-articles")
