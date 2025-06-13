@@ -784,7 +784,7 @@ def admin_sites():
         flash("このページにはアクセスできません。", "error")
         return redirect(url_for("main.dashboard", username=current_user.username))
 
-    from sqlalchemy import func, case
+    from sqlalchemy import func, case, literal
     from app.models import Site, Article, User
 
     result = (
@@ -793,7 +793,7 @@ def admin_sites():
             Site.name,
             Site.url,
             Site.plan_type,
-            User.name.label("user_name"),
+            func.concat(User.last_name, literal(" "), User.first_name).label("user_name"),
             User.email.label("user_email"),
             func.count(Article.id).label("total"),
             func.sum(case((Article.status == "done", 1), else_=0)).label("done"),
