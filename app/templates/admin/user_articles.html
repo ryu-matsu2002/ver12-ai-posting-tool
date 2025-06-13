@@ -14,7 +14,7 @@
   ユーザー: <span class="text-blue-700 font-bold">{{ user.email }}</span>
 </div>
 
-<form method="get" class="mb-4 flex items-center gap-3">
+<form method="get" class="mb-4 flex items-center gap-3 flex-wrap">
   <label for="statusFilter" class="font-medium">ステータス:</label>
   <select id="statusFilter" name="status" onchange="this.form.submit()" class="p-2 rounded border">
     <option value="">すべてのステータス</option>
@@ -99,7 +99,7 @@
             <img src="{{ a.image_url }}" class="h-12 w-16 object-cover rounded mx-auto">
           {% else %}—{% endif %}
         </td>
-        <td class="px-2 py-2 space-x-2">
+        <td class="px-2 py-2 space-y-1">
           {% if a.status == "error" %}
             <form action="{{ url_for('admin.retry_article', uid=user.id, id=a.id) }}" method="post" class="inline">
               <button type="submit" class="py-1 px-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded text-xs">再生成</button>

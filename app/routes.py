@@ -950,7 +950,7 @@ def user_articles(uid):
     sort_order = request.args.get("order", "desc")
     source = request.args.get("source", "all")
 
-    # 🔹 未スケジュールのslot自動割当
+    # 🔹 未スケジュールの記事にslot自動割当
     unscheduled = Article.query.filter(
         Article.user_id == user.id,
         Article.scheduled_at.is_(None)
@@ -968,7 +968,7 @@ def user_articles(uid):
                 art.scheduled_at = next(slots)
         db.session.commit()
 
-    # 🔹 記事取得
+    # 🔹 記事取得クエリ
     q = Article.query.filter_by(user_id=user.id)
     if status:
         q = q.filter_by(status=status)
@@ -988,7 +988,7 @@ def user_articles(uid):
     return render_template(
         "admin/user_articles.html",
         articles=articles,
-        site=None,  # サイト別ではない一覧なのでNone
+        site=None,
         user=user,
         status=status,
         sort_key=sort_key,
