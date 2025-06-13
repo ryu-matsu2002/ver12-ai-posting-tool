@@ -99,30 +99,8 @@
             <img src="{{ a.image_url }}" class="h-12 w-16 object-cover rounded mx-auto">
           {% else %}—{% endif %}
         </td>
-        <td class="px-2 py-2 space-y-1">
-          {% if a.status == "error" %}
-            <form action="{{ url_for('admin.retry_article', uid=user.id, id=a.id) }}" method="post" class="inline">
-              <button type="submit" class="py-1 px-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded text-xs">再生成</button>
-            </form>
-          {% endif %}
-          <a href="{{ url_for('admin.edit_article', uid=user.id, id=a.id) }}"
-             class="text-green-600 hover:underline text-sm">編集</a>
-          <form action="{{ url_for('admin.delete_article', uid=user.id, id=a.id) }}" method="post"
-                class="inline" onsubmit="return confirm('削除しますか？');">
-            <button type="submit" class="text-red-600 hover:underline text-sm">削除</button>
-          </form>
-          {% if a.status == "done" and a.site_id %}
-            <form action="{{ url_for('admin.post_article', uid=user.id, id=a.id) }}" method="post" class="inline">
-              <button type="submit" class="py-1 px-3 bg-green-600 hover:bg-green-700 text-white rounded text-xs">
-                即時投稿
-              </button>
-            </form>
-          {% endif %}
-          {% if a.status == "posted" and a.posted_url %}
-            <a href="{{ a.posted_url }}" target="_blank"
-               class="py-1 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs"
-               title="公開ページを表示">記事表示</a>
-          {% endif %}
+        <td class="px-2 py-2">
+          <!-- 操作列のボタン削除済み -->
         </td>
       </tr>
       {% else %}
