@@ -785,7 +785,8 @@ def admin_sites():
         return redirect(url_for("main.dashboard", username=current_user.username))
 
     from sqlalchemy import func, case, literal
-    from app.models import Site, Article, User
+    from app.models import Site, Article, User, Genre, GSCConfig
+    from collections import defaultdict
 
     # サイトごとの集計
     raw = (
@@ -794,6 +795,7 @@ def admin_sites():
             Site.name,
             Site.url,
             Site.plan_type,
+            Site.genre_id,
             func.concat(User.last_name, literal(" "), User.first_name).label("user_name"),
             func.count(Article.id).label("total"),
             func.sum(case((Article.status == "done", 1), else_=0)).label("done"),
@@ -801,21 +803,51 @@ def admin_sites():
             func.sum(case((Article.status == "error", 1), else_=0)).label("error"),
             func.coalesce(Site.clicks, 0).label("clicks"),
             func.coalesce(Site.impressions, 0).label("impressions"),
+            func.max(GSCConfig.id).isnot(None).label("gsc_connected")
         )
         .join(User, Site.user_id == User.id)
         .outerjoin(Article, Site.id == Article.site_id)
+        .outerjoin(GSCConfig, Site.id == GSCConfig.site_id)
         .group_by(Site.id, User.id)
-        .order_by(User.id, Site.id.desc())  # ← 修正済み
+        .order_by(User.id, Site.id.desc())
         .all()
     )
 
-    # ユーザー単位でまとめる
-    from collections import defaultdict
-    sites_by_user = defaultdict(list)
+    # 🔸 genre_id を genre名に変換する辞書
+    genre_dict = {g.id: g.name for g in Genre.query.all()}
+
+    # ユーザー単位にまとめる
+    sites_by_user = defaultdict(lambda: {"sites": [], "genres": set()})
+
     for row in raw:
-        sites_by_user[row.user_name].append(row)
+        user_name = row.user_name
+        genre_id = getattr(row, "genre_id", None)
+        genre_name = genre_dict.get(genre_id, "") if genre_id else ""
+
+        site_info = {
+            "name": row.name,
+            "url": row.url,
+            "plan_type": row.plan_type,
+            "total": row.total or 0,
+            "done": row.done or 0,
+            "posted": row.posted or 0,
+            "error": row.error or 0,
+            "clicks": row.clicks or 0,
+            "impressions": row.impressions or 0,
+            "genre": genre_name,
+            "gsc_connected": row.gsc_connected
+        }
+
+        sites_by_user[user_name]["sites"].append(site_info)
+        if genre_name:
+            sites_by_user[user_name]["genres"].add(genre_name)
+
+    # genres をリストに変換
+    for user_data in sites_by_user.values():
+        user_data["genres"] = sorted(user_data["genres"])
 
     return render_template("admin/sites.html", sites_by_user=sites_by_user)
+
 
 
 @admin_bp.post("/admin/delete-stuck-articles")
