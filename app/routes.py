@@ -375,6 +375,68 @@ def admin_dashboard():
 
     return redirect(url_for("admin.admin_users"))
 
+@admin_bp.route("/admin/prompts")
+@login_required
+def admin_prompt_list():
+    if not current_user.is_admin:
+        abort(403)
+
+    prompts = (
+        db.session.query(PromptTemplate, User)
+        .join(User, PromptTemplate.user_id == User.id)
+        .order_by(PromptTemplate.updated_at.desc())
+        .all()
+    )
+
+    return render_template("admin/prompts.html", prompts=prompts)
+
+@admin_bp.route("/admin/keywords")
+@login_required
+def admin_keyword_list():
+    if not current_user.is_admin:
+        abort(403)
+
+    keywords = (
+        db.session.query(Keyword, User)
+        .join(User, Keyword.user_id == User.id)
+        .order_by(Keyword.created_at.desc())
+        .all()
+    )
+
+    return render_template("admin/keywords.html", keywords=keywords)
+
+@admin_bp.route("/admin/gsc-status")
+@login_required
+def admin_gsc_status():
+    if not current_user.is_admin:
+        abort(403)
+
+    from app.models import Site, Article, User, GSCConfig
+    from sqlalchemy import func, case
+
+    # 各サイトの投稿数・GSC設定を取得
+    results = (
+        db.session.query(
+            Site.id,
+            Site.name,
+            Site.url,
+            Site.created_at,
+            Site.plan_type,
+            User.name.label("user_name"),
+            func.count(Article.id).label("article_count"),
+            func.max(GSCConfig.id).label("gsc_configured")
+        )
+        .join(User, Site.user_id == User.id)
+        .outerjoin(Article, Article.site_id == Site.id)
+        .outerjoin(GSCConfig, GSCConfig.site_id == Site.id)
+        .group_by(Site.id, User.id)
+        .order_by(Site.created_at.desc())
+        .all()
+    )
+
+    return render_template("admin/gsc_status.html", results=results)
+
+
 # --- ダッシュボード強化系ルート ---
 
 # 📊 統計サマリ（既存）
@@ -622,7 +684,23 @@ def admin_user_detail(uid):
 
     user = User.query.get_or_404(uid)
 
-    return render_template("admin/user_detail.html", user=user)
+    # 関連情報をすべて取得
+    sites = Site.query.filter_by(user_id=uid).all()
+    prompts = PromptTemplate.query.filter_by(user_id=uid).all()
+    keywords = Keyword.query.filter_by(user_id=uid).all()
+    articles = Article.query.filter_by(user_id=uid).order_by(Article.created_at.desc()).limit(20).all()
+    payments = PaymentLog.query.filter_by(user_id=uid).order_by(PaymentLog.created_at.desc()).all()
+
+    return render_template(
+        "admin/user_detail.html",
+        user=user,
+        sites=sites,
+        prompts=prompts,
+        keywords=keywords,
+        articles=articles,
+        payments=payments
+    )
+
 
 from app.forms import QuotaUpdateForm
 
@@ -688,29 +766,32 @@ def admin_sites():
         flash("このページにはアクセスできません。", "error")
         return redirect(url_for("main.dashboard", username=current_user.username))
 
-    from sqlalchemy import func
+    from sqlalchemy import func, case
     from app.models import Site, Article, User
-    from sqlalchemy import case
 
-    # サイト情報と記事ステータス集計を取得
     result = (
-    db.session.query(
-        Site.id,
-        Site.name,
-        Site.url,
-        User.email.label("user_email"),
-        func.count(Article.id).label("total"),
-        func.sum(case((Article.status == "done", 1), else_=0)).label("done"),
-        func.sum(case((Article.status == "posted", 1), else_=0)).label("posted"),
-        func.sum(case((Article.status == "error", 1), else_=0)).label("error"),
+        db.session.query(
+            Site.id,
+            Site.name,
+            Site.url,
+            Site.plan_type,
+            Site.created_at,
+            User.name.label("user_name"),
+            User.email.label("user_email"),
+            func.count(Article.id).label("total"),
+            func.sum(case((Article.status == "done", 1), else_=0)).label("done"),
+            func.sum(case((Article.status == "posted", 1), else_=0)).label("posted"),
+            func.sum(case((Article.status == "error", 1), else_=0)).label("error"),
+        )
+        .join(User, Site.user_id == User.id)
+        .outerjoin(Article, Site.id == Article.site_id)
+        .group_by(Site.id, User.id)
+        .order_by(Site.created_at.desc())
+        .all()
     )
-    .join(User, Site.user_id == User.id)
-    .outerjoin(Article, Site.id == Article.site_id)
-    .group_by(Site.id, User.email)
-    .all()
-)
 
     return render_template("admin/sites.html", sites=result)
+
 
 @admin_bp.post("/admin/delete-stuck-articles")
 @login_required

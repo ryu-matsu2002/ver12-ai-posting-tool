@@ -1,0 +1,49 @@
+{% extends "base_admin.html" %}
+{% block title %}Search Console連携状況 | 管理者{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-bold mb-6">🔍 GSC連携状況 ＆ 投稿未対応サイト</h1>
+
+<table class="min-w-full bg-white shadow rounded text-sm">
+  <thead class="bg-gray-100 text-left">
+    <tr>
+      <th class="py-2 px-4">ユーザー名</th>
+      <th class="py-2 px-4">サイト名</th>
+      <th class="py-2 px-4">URL</th>
+      <th class="py-2 px-4">GSC連携</th>
+      <th class="py-2 px-4">記事数</th>
+      <th class="py-2 px-4">アドバイス</th>
+      <th class="py-2 px-4">登録日</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for site in results %}
+    <tr class="border-t">
+      <td class="py-2 px-4">{{ site.user_name }}</td>
+      <td class="py-2 px-4">{{ site.name }}</td>
+      <td class="py-2 px-4"><a href="{{ site.url }}" target="_blank" class="text-blue-600 underline">{{ site.url }}</a></td>
+      <td class="py-2 px-4">
+        {% if site.gsc_configured %}
+          <span class="text-green-700 font-bold">✅ 連携済</span>
+        {% else %}
+          <span class="text-red-600 font-bold">❌ 未連携</span>
+        {% endif %}
+      </td>
+      <td class="py-2 px-4">{{ site.article_count or 0 }}</td>
+      <td class="py-2 px-4">
+        {% if not site.article_count %}
+          <span class="text-yellow-600 font-semibold">⚠ 記事未投稿です</span>
+        {% elif not site.gsc_configured %}
+          <span class="text-blue-600">GSC連携をおすすめします</span>
+        {% else %}
+          -
+        {% endif %}
+      </td>
+      <td class="py-2 px-4 text-gray-500">{{ site.created_at.strftime('%Y-%m-%d') if site.created_at else '-' }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7" class="py-4 px-4 text-center text-gray-500">サイト情報がありません。</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

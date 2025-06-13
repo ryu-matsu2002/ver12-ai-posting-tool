@@ -1,35 +1,37 @@
 {% extends "base_admin.html" %}
-{% block title %}サイト投稿状況{% endblock %}
+{% block title %}サイト投稿状況 | 管理者{% endblock %}
 
 {% block content %}
-<div class="p-6">
-  <h1 class="text-2xl font-bold mb-6">📊 サイトごとの投稿状況</h1>
+<h1 class="text-2xl font-bold mb-6">🌐 サイト投稿状況一覧</h1>
 
-  <table class="w-full table-auto border border-gray-200">
-    <thead class="bg-gray-100">
-      <tr>
-        <th class="px-4 py-2">サイト名</th>
-        <th class="px-4 py-2">URL</th>
-        <th class="px-4 py-2">登録者</th>
-        <th class="px-4 py-2">記事数</th>
-        <th class="px-4 py-2 text-green-600">完了</th>
-        <th class="px-4 py-2 text-blue-600">投稿済</th>
-        <th class="px-4 py-2 text-red-500">エラー</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for s in sites %}
-      <tr class="text-sm border-t">
-        <td class="px-4 py-2 font-semibold">{{ s.name }}</td>
-        <td class="px-4 py-2 text-blue-600"><a href="{{ s.url }}" target="_blank">{{ s.url }}</a></td>
-        <td class="px-4 py-2">{{ s.user_email }}</td>
-        <td class="px-4 py-2">{{ s.total }}</td>
-        <td class="px-4 py-2">{{ s.done or 0 }}</td>
-        <td class="px-4 py-2">{{ s.posted or 0 }}</td>
-        <td class="px-4 py-2">{{ s.error or 0 }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
+<table class="min-w-full bg-white shadow rounded text-sm">
+  <thead class="bg-gray-100 text-left">
+    <tr>
+      <th class="py-2 px-4">ユーザー名</th>
+      <th class="py-2 px-4">サイト名</th>
+      <th class="py-2 px-4">URL</th>
+      <th class="py-2 px-4">プラン</th>
+      <th class="py-2 px-4">投稿済</th>
+      <th class="py-2 px-4">待機中</th>
+      <th class="py-2 px-4">エラー</th>
+      <th class="py-2 px-4">登録日</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for s in sites %}
+    <tr class="border-t">
+      <td class="py-2 px-4 text-blue-800 font-medium">{{ s.user_name }}</td>
+      <td class="py-2 px-4">{{ s.name }}</td>
+      <td class="py-2 px-4"><a href="{{ s.url }}" target="_blank" class="text-blue-600 underline">{{ s.url }}</a></td>
+      <td class="py-2 px-4">{{ s.plan_type or "未設定" }}</td>
+      <td class="py-2 px-4 text-green-700">{{ s.posted or 0 }}</td>
+      <td class="py-2 px-4 text-blue-700">{{ s.done or 0 }}</td>
+      <td class="py-2 px-4 text-red-700">{{ s.error or 0 }}</td>
+      <td class="py-2 px-4 text-gray-500">{{ s.created_at.strftime('%Y-%m-%d') if s.created_at else '-' }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="8" class="py-4 px-4 text-center text-gray-500">サイトが登録されていません。</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
 {% endblock %}

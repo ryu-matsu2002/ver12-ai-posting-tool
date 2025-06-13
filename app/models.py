@@ -224,3 +224,15 @@ class SiteQuotaLog(db.Model):
     reason = db.Column(db.String(100), nullable=False, default="Stripe支払い")
     plan_type = db.Column(db.String(50), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class GSCConfig(db.Model):
+    __tablename__ = 'gsc_configs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    site_id = db.Column(db.Integer, db.ForeignKey("site.id"), nullable=False)
+    property_uri = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship("User", backref="gsc_configs")
+    site = db.relationship("Site", backref="gsc_configs")

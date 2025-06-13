@@ -1,0 +1,29 @@
+{% extends "base_admin.html" %}
+{% block title %}プロンプト管理 | 管理者{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-bold mb-6">🧠 ユーザーごとのプロンプト一覧</h1>
+
+<table class="min-w-full bg-white shadow rounded">
+  <thead class="bg-gray-100 text-left text-sm">
+    <tr>
+      <th class="py-2 px-4">ユーザー名</th>
+      <th class="py-2 px-4">タイトルプロンプト</th>
+      <th class="py-2 px-4">本文プロンプト</th>
+      <th class="py-2 px-4">最終更新</th>
+    </tr>
+  </thead>
+  <tbody class="text-sm">
+    {% for prompt, user in prompts %}
+    <tr class="border-t">
+      <td class="py-2 px-4 font-medium text-blue-800">{{ user.name }}</td>
+      <td class="py-2 px-4 whitespace-pre-wrap">{{ prompt.title_pt }}</td>
+      <td class="py-2 px-4 whitespace-pre-wrap">{{ prompt.body_pt }}</td>
+      <td class="py-2 px-4 text-gray-500">{{ prompt.updated_at.strftime('%Y-%m-%d %H:%M') if prompt.updated_at else '-' }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4" class="py-4 px-4 text-center text-gray-500">プロンプトが見つかりません。</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

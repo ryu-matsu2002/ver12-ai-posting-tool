@@ -1,36 +1,92 @@
 {% extends "base_admin.html" %}
-{% block title %}ユーザー詳細 - {{ user.id }}{% endblock %}
+{% block title %}ユーザー詳細 | 管理者{% endblock %}
 
 {% block content %}
-<div class="p-6">
-  <h2 class="text-2xl font-bold mb-6">👤 ユーザー詳細</h2>
+<h1 class="text-2xl font-bold mb-4">🧑‍💼 {{ user.last_name }} {{ user.first_name }}（{{ user.email }}）</h1>
 
-  <table class="table-auto w-full bg-white shadow rounded text-left">
-    <tbody>
-      <tr><th class="p-2 bg-gray-100">ID</th><td class="p-2">{{ user.id }}</td></tr>
-      <tr><th class="p-2 bg-gray-100">姓 名</th><td class="p-2">{{ user.last_name }} {{ user.first_name }}</td></tr>
-      <tr><th class="p-2 bg-gray-100">フリガナ</th><td class="p-2">{{ user.last_kana }} {{ user.first_kana }}</td></tr>
-      <tr><th class="p-2 bg-gray-100">メールアドレス</th><td class="p-2">{{ user.email }}</td></tr>
-      <tr><th class="p-2 bg-gray-100">電話番号</th><td class="p-2">{{ user.phone }}</td></tr>
-      <tr><th class="p-2 bg-gray-100">住所</th><td class="p-2">{{ user.postal_code }} {{ user.address }}</td></tr>
-      <tr><th class="p-2 bg-gray-100">ユーザー区分</th><td class="p-2">{{ '法人' if user.user_type == 'corporate' else '個人' }}</td></tr>
-      <tr>
-        <th class="p-2 bg-gray-100">登録日時</th>
-        <td class="p-2">
-          {% if user.created_at %}
-            {{ user.created_at.strftime("%Y-%m-%d %H:%M:%S") }}
-          {% else %}
-            未登録
-          {% endif %}
-        </td>
-      </tr>
-      <tr><th class="p-2 bg-gray-100">管理者</th><td class="p-2">{{ '✅' if user.is_admin else '❌' }}</td></tr>
-      <tr><th class="p-2 bg-gray-100">特別アクセス</th><td class="p-2">{{ '✅' if user.is_special_access else '❌' }}</td></tr>
-    </tbody>
-  </table>
+<!-- 基本情報（登録時の全情報） -->
+<div class="mb-8 p-4 bg-white rounded shadow text-sm space-y-1">
+  <p>🆔 ユーザー名：<strong>{{ user.username }}</strong></p>
+  <p>📛 氏名：{{ user.last_name }} {{ user.first_name }}</p>
+  <p>📛 フリガナ：{{ user.last_kana }} {{ user.first_kana }}</p>
+  <p>📨 メールアドレス：{{ user.email }}</p>
+  <p>👥 区分：{{ '法人' if user.user_type == 'corporate' else '個人' }}</p>
 
-  <div class="mt-6">
-    <a href="{{ url_for('admin.admin_users') }}" class="text-blue-600 underline">← ユーザー一覧に戻る</a>
-  </div>
+  {% if user.user_type == 'corporate' %}
+    <p>🏢 会社名：{{ user.company_name or '―' }}</p>
+    <p>🏢 フリガナ：{{ user.company_kana or '―' }}</p>
+  {% endif %}
+
+  <p>🏠 住所：〒{{ user.postal_code }} {{ user.address or '' }}</p>
+  <p>📞 電話番号：{{ user.phone }}</p>
+  <p>🕒 登録日：{{ user.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
 </div>
+
+
+<!-- サイト一覧 -->
+<h2 class="text-xl font-semibold mb-2">🌐 登録サイト一覧</h2>
+<ul class="mb-6">
+  {% for site in sites %}
+    <li class="mb-1">
+      <a href="{{ site.url }}" class="text-blue-600 underline" target="_blank">{{ site.name }}</a>
+      （{{ site.plan_type or '未設定' }} / 投稿数: {{ site.articles|length }}）
+    </li>
+  {% else %}
+    <li class="text-gray-500">登録されたサイトはありません。</li>
+  {% endfor %}
+</ul>
+
+<!-- プロンプト一覧 -->
+<h2 class="text-xl font-semibold mb-2">🧠 保存プロンプト</h2>
+<ul class="mb-6">
+  {% for pt in prompts %}
+    <li class="mb-2">
+      <strong>[{{ pt.genre }}]</strong><br>
+      タイトル: {{ pt.title_pt }}<br>
+      本文: {{ pt.body_pt }}
+    </li>
+  {% else %}
+    <li class="text-gray-500">保存されたプロンプトはありません。</li>
+  {% endfor %}
+</ul>
+
+<!-- キーワード一覧 -->
+<h2 class="text-xl font-semibold mb-2">🔑 キーワード一覧</h2>
+<ul class="mb-6">
+  {% for kw in keywords %}
+    <li class="mb-1">
+      {{ kw.keyword }}（{{ kw.genre or 'ジャンル不明' }} / 使用済: {{ '✅' if kw.used else '❌' }}）
+    </li>
+  {% else %}
+    <li class="text-gray-500">登録されたキーワードはありません。</li>
+  {% endfor %}
+</ul>
+
+<!-- 記事ログ -->
+<h2 class="text-xl font-semibold mb-2">📝 投稿記事（直近20件）</h2>
+<ul class="mb-6">
+  {% for article in articles %}
+    <li class="mb-1">
+      {{ article.title }}（{{ article.status }}）
+      {% if article.posted_url %}
+        - <a href="{{ article.posted_url }}" class="text-blue-600 underline" target="_blank">表示</a>
+      {% endif %}
+    </li>
+  {% else %}
+    <li class="text-gray-500">記事がありません。</li>
+  {% endfor %}
+</ul>
+
+<!-- 決済ログ -->
+<h2 class="text-xl font-semibold mb-2">💳 決済履歴</h2>
+<ul class="mb-6">
+  {% for log in payments %}
+    <li class="mb-1">
+      {{ log.plan_type }} - {{ log.amount // 100 }}円 - {{ log.created_at.strftime('%Y-%m-%d') }}（{{ log.status }}）
+    </li>
+  {% else %}
+    <li class="text-gray-500">決済履歴はありません。</li>
+  {% endfor %}
+</ul>
+
 {% endblock %}
