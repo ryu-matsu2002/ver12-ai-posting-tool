@@ -948,6 +948,7 @@ def accounting():
     )
 
 
+# --- 既存: ユーザー全記事表示 ---
 @admin_bp.route("/admin/user/<int:uid>/articles")
 @login_required
 def user_articles(uid):
@@ -1013,6 +1014,45 @@ def user_articles(uid):
         jst=JST
     )
 
+
+# --- ✅ 追加: サイト単位の記事一覧表示 ---
+@admin_bp.route("/admin/site/<int:site_id>/articles")
+@login_required
+def site_articles(site_id):
+    if not current_user.is_admin:
+        abort(403)
+
+    from app.models import Site, Article
+    from sqlalchemy.orm import selectinload
+    from sqlalchemy import asc, nulls_last
+
+    site = Site.query.get_or_404(site_id)
+    user = site.user
+
+    status = request.args.get("status")
+    source = request.args.get("source", "all")
+
+    q = Article.query.filter_by(site_id=site.id)
+    if status:
+        q = q.filter_by(status=status)
+    if source == "gsc":
+        q = q.filter_by(source="gsc")
+
+    q = q.options(selectinload(Article.site))
+    q = q.order_by(nulls_last(asc(Article.scheduled_at)), Article.created_at.desc())
+    articles = q.all()
+
+    return render_template(
+        "admin/user_articles.html",
+        articles=articles,
+        site=site,
+        user=user,
+        status=status,
+        sort_key=None,
+        sort_order=None,
+        selected_source=source,
+        jst=JST
+    )
 
 
 @admin_bp.post("/admin/user/<int:uid>/delete-stuck")

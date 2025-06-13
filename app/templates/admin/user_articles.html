@@ -8,7 +8,13 @@
   </a>
 </div>
 
-<h2 class="text-2xl font-semibold mb-4">記事一覧</h2>
+<h2 class="text-2xl font-semibold mb-4">
+  {% if site %}
+    サイト: <a href="{{ site.url }}" target="_blank" class="text-blue-700 underline">{{ site.name }}</a> の記事一覧
+  {% else %}
+    ユーザーの記事一覧
+  {% endif %}
+</h2>
 
 <div class="mb-4 text-base font-semibold">
   ユーザー: <span class="text-blue-700 font-bold">{{ user.email }}</span>
