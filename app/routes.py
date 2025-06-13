@@ -688,7 +688,8 @@ def admin_users():
         site_count=site_count,
         prompt_count=prompt_count,
         article_count=article_count,
-        site_quota_summary=user_quota_summary  # ✅ 新規追加
+        site_quota_summary=user_quota_summary,  # ✅ 新規追加
+        user_count=len(users)
     )
 
 
