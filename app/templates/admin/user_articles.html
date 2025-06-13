@@ -2,63 +2,144 @@
 {% block title %}ユーザーの記事一覧{% endblock %}
 
 {% block content %}
-<div class="p-6">
-  <h1 class="text-xl font-bold mb-4">📝 {{ user.email }} の記事一覧</h1>
+<div class="mb-4">
+  <a href="{{ url_for('admin.dashboard') }}" class="text-lg text-blue-700 hover:underline font-semibold">
+    ← 管理ダッシュボードに戻る
+  </a>
+</div>
 
-  <!-- ✅ 削除対象件数表示 + 削除ボタン + 再生成ボタン -->
-  <div class="mb-4 flex items-center gap-4">
-    <p class="text-sm text-red-600 font-semibold">
-      🚫 途中停止状態の記事: <span class="text-lg">{{ stuck_count }}</span> 件
-    </p>
+<h2 class="text-2xl font-semibold mb-4">記事一覧</h2>
 
-    {% if stuck_count > 0 %}
-    <!-- ✅ 一括削除ボタン -->
-    <form method="post" action="{{ url_for('admin.delete_user_stuck_articles', uid=user.id) }}"
-          onsubmit="return confirm('途中停止中の記事（pending / gen）を削除しますか？');">
-      <button type="submit"
-              class="py-2 px-6 bg-red-600 hover:bg-red-700 text-white rounded">
-        一括削除
-      </button>
-    </form>
+<div class="mb-4 text-base font-semibold">
+  ユーザー: <span class="text-blue-700 font-bold">{{ user.email }}</span>
+</div>
 
-    <!-- ✅ 一括再生成ボタン -->
-    <form method="post" action="{{ url_for('admin.regenerate_user_stuck_articles', uid=user.id) }}"
-          onsubmit="return confirm('途中停止中の記事（pending / gen）を再生成しますか？');">
-      <button type="submit"
-              class="py-2 px-6 bg-blue-600 hover:bg-blue-700 text-white rounded">
-        🔄 一括再生成
-      </button>
-    </form>
-    {% endif %}
+<form method="get" class="mb-4 flex items-center gap-3">
+  <label for="statusFilter" class="font-medium">ステータス:</label>
+  <select id="statusFilter" name="status" onchange="this.form.submit()" class="p-2 rounded border">
+    <option value="">すべてのステータス</option>
+    <option value="posted" {% if status == "posted" %}selected{% endif %}>✅ 投稿完了</option>
+    <option value="done" {% if status == "done" %}selected{% endif %}>📝 記事生成済み</option>
+    <option value="pending" {% if status == "pending" %}selected{% endif %}>⏳ 記事生成中</option>
+    <option value="error" {% if status == "error" %}selected{% endif %}>❌ エラー</option>
+  </select>
+
+  <label for="source" class="font-medium">絞り込み:</label>
+  <select name="source" id="source" onchange="this.form.submit()" class="p-2 border rounded">
+    <option value="all" {% if selected_source == 'all' %}selected{% endif %}>すべての記事</option>
+    <option value="gsc" {% if selected_source == 'gsc' %}selected{% endif %}>🔖 GSC記事のみ</option>
+  </select>
+</form>
+
+<form method="post" action="{{ url_for('admin.bulk_delete_articles', uid=user.id) }}">
+  <div class="mb-4 flex items-center gap-2">
+    <select name="action" class="p-2 rounded border">
+      <option value="">一括操作</option>
+      <option value="delete">削除</option>
+    </select>
+    <button type="submit"
+            onclick="return confirm('選択された記事を削除しますか？');"
+            class="py-1 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded">
+      適用
+    </button>
   </div>
 
-  <!-- 記事一覧テーブル -->
-  <table class="w-full table-auto">
-    <thead>
-      <tr class="border-b">
-        <th class="px-2 py-2">ID</th>
-        <th class="px-2 py-2">タイトル</th>
-        <th class="px-2 py-2">状態</th>
-        <th class="px-2 py-2">作成日</th>
+  <table class="w-full bg-white dark:bg-gray-800 text-sm table-fixed">
+    <thead class="bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white font-semibold">
+      <tr class="whitespace-nowrap">
+        <th class="px-2 py-2 text-left w-[40px]"><input type="checkbox" onclick="toggleAll(this)"></th>
+        <th class="px-2 py-2 text-left w-[15%]">検索キーワード</th>
+        <th class="px-2 py-2 text-center w-[7%]">クリック数</th>
+        <th class="px-2 py-2 text-center w-[7%]">表示回数</th>
+        <th class="px-2 py-2 text-left w-[10%]">現在の状態</th>
+        <th class="px-2 py-2 text-left w-[6%]">進行状況</th>
+        <th class="px-2 py-2 text-left w-[10%]">投稿予定日</th>
+        <th class="px-2 py-2 text-left w-[20%]">Q＆A記事タイトル</th>
+        <th class="px-2 py-2 text-left w-[7%]">プレビュー</th>
+        <th class="px-2 py-2 text-left w-[10%]">アイキャッチ</th>
+        <th class="px-2 py-2 text-left w-[15%]">操作</th>
       </tr>
     </thead>
     <tbody>
       {% for a in articles %}
-      <tr class="border-b hover:bg-gray-100">
-        <td class="px-2 py-2">{{ a.id }}</td>
-        <td class="px-2 py-2">{{ a.title[:30] }}...</td>
+      <tr class="{% if loop.index0 % 2 == 0 %}bg-white{% else %}bg-blue-50{% endif %}">
+        <td class="px-2 py-2"><input type="checkbox" name="selected_ids" value="{{ a.id }}"></td>
+        <td class="px-2 py-2">{{ a.keyword }}</td>
+        <td class="px-2 py-2 text-center text-rose-600">{{ a.site.clicks or 0 }}</td>
+        <td class="px-2 py-2 text-center text-purple-600">{{ a.site.impressions or 0 }}</td>
         <td class="px-2 py-2">
-          {{ a.status }}
-          {% if a.status == 'posted' and a.posted_url %}
-            <a href="{{ a.posted_url }}" target="_blank"
-               class="ml-2 text-blue-600 underline hover:text-blue-800"
-               title="投稿されたWordPress記事を開く">View</a>
+          {% if a.status == "posted" %}<span class="text-green-600 font-bold">投稿完了</span>
+          {% elif a.status == "done" %}<span class="text-red-600 font-bold">記事生成済み</span>
+          {% elif a.status == "pending" %}<span class="text-black font-bold">記事生成中</span>
+          {% elif a.status == "error" %}<span class="text-red-600 font-bold">エラー</span>
+          {% else %}{{ a.status }}{% endif %}
+        </td>
+        <td class="px-2 py-2">{{ a.progress }}%</td>
+        <td class="px-2 py-2 whitespace-nowrap">
+          {% if a.scheduled_at %}
+            {{ a.scheduled_at.astimezone(jst).strftime("%Y-%m-%d %H:%M") }}
+          {% else %}—{% endif %}
+        </td>
+        <td class="px-2 py-2 break-words text-sm leading-snug" title="{{ a.title }}">
+          {{ a.title }}
+          {% if a.source == 'gsc' %}
+            <span class="ml-2 inline-block bg-yellow-200 text-yellow-900 text-xs font-bold px-2 py-1 rounded-full border border-yellow-400">
+              🔖 GSC
+            </span>
           {% endif %}
         </td>
-        <td class="px-2 py-2">{{ a.created_at.strftime('%Y-%m-%d') }}</td>
+        <td class="px-2 py-2">
+          {% if a.status in ["done", "posted"] %}
+            <a href="{{ url_for('main.preview', username=user.username, article_id=a.id) }}"
+               class="text-blue-600 hover:underline text-sm">プレビュー</a>
+          {% else %}—{% endif %}
+        </td>
+        <td class="px-2 py-2 text-center">
+          {% if a.image_url %}
+            <img src="{{ a.image_url }}" class="h-12 w-16 object-cover rounded mx-auto">
+          {% else %}—{% endif %}
+        </td>
+        <td class="px-2 py-2 space-x-2">
+          {% if a.status == "error" %}
+            <form action="{{ url_for('admin.retry_article', uid=user.id, id=a.id) }}" method="post" class="inline">
+              <button type="submit" class="py-1 px-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded text-xs">再生成</button>
+            </form>
+          {% endif %}
+          <a href="{{ url_for('admin.edit_article', uid=user.id, id=a.id) }}"
+             class="text-green-600 hover:underline text-sm">編集</a>
+          <form action="{{ url_for('admin.delete_article', uid=user.id, id=a.id) }}" method="post"
+                class="inline" onsubmit="return confirm('削除しますか？');">
+            <button type="submit" class="text-red-600 hover:underline text-sm">削除</button>
+          </form>
+          {% if a.status == "done" and a.site_id %}
+            <form action="{{ url_for('admin.post_article', uid=user.id, id=a.id) }}" method="post" class="inline">
+              <button type="submit" class="py-1 px-3 bg-green-600 hover:bg-green-700 text-white rounded text-xs">
+                即時投稿
+              </button>
+            </form>
+          {% endif %}
+          {% if a.status == "posted" and a.posted_url %}
+            <a href="{{ a.posted_url }}" target="_blank"
+               class="py-1 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs"
+               title="公開ページを表示">記事表示</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="11" class="px-4 py-6 text-center text-gray-500">
+          該当する記事がありません
+        </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
-</div>
+</form>
+
+<script>
+function toggleAll(master) {
+  const checkboxes = document.querySelectorAll('input[name="selected_ids"]');
+  checkboxes.forEach(cb => cb.checked = master.checked);
+}
+</script>
 {% endblock %}

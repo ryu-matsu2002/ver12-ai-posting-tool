@@ -937,16 +937,66 @@ def accounting():
 def user_articles(uid):
     if not current_user.is_admin:
         abort(403)
+
+    from collections import defaultdict
+    from app.article_generator import _generate_slots_per_site
+    from app.models import User, Article, Site
+    from sqlalchemy.orm import selectinload
+    from sqlalchemy import asc, nulls_last
+
     user = User.query.get_or_404(uid)
-    articles = Article.query.filter_by(user_id=uid).order_by(Article.created_at.desc()).all()
+    status = request.args.get("status")
+    sort_key = request.args.get("sort", "scheduled_at")
+    sort_order = request.args.get("order", "desc")
+    source = request.args.get("source", "all")
 
-    # ✅ pending/gen の件数をカウント
-    stuck_count = Article.query.filter(
-        Article.user_id == uid,
-        Article.status.in_(["pending", "gen"])
-    ).count()
+    # 🔹 未スケジュールのslot自動割当
+    unscheduled = Article.query.filter(
+        Article.user_id == user.id,
+        Article.scheduled_at.is_(None)
+    ).all()
 
-    return render_template("admin/user_articles.html", user=user, articles=articles, stuck_count=stuck_count)
+    if unscheduled:
+        site_map = defaultdict(list)
+        for art in unscheduled:
+            if art.site_id:
+                site_map[art.site_id].append(art)
+
+        for sid, articles in site_map.items():
+            slots = iter(_generate_slots_per_site(current_app, sid, len(articles)))
+            for art in articles:
+                art.scheduled_at = next(slots)
+        db.session.commit()
+
+    # 🔹 記事取得
+    q = Article.query.filter_by(user_id=user.id)
+    if status:
+        q = q.filter_by(status=status)
+    if source == "gsc":
+        q = q.filter_by(source="gsc")
+
+    q = q.options(selectinload(Article.site))
+    q = q.order_by(nulls_last(asc(Article.scheduled_at)), Article.created_at.desc())
+    articles = q.all()
+
+    # 🔽 並び替え（Python側）
+    if sort_key == "clicks":
+        articles.sort(key=lambda a: a.site.clicks or 0, reverse=(sort_order == "desc"))
+    elif sort_key == "impr":
+        articles.sort(key=lambda a: a.site.impressions or 0, reverse=(sort_order == "desc"))
+
+    return render_template(
+        "admin/user_articles.html",
+        articles=articles,
+        site=None,  # サイト別ではない一覧なのでNone
+        user=user,
+        status=status,
+        sort_key=sort_key,
+        sort_order=sort_order,
+        selected_source=source,
+        jst=JST
+    )
+
 
 
 @admin_bp.post("/admin/user/<int:uid>/delete-stuck")
