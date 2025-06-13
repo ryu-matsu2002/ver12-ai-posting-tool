@@ -836,7 +836,7 @@ def admin_sites():
             "clicks": row.clicks or 0,
             "impressions": row.impressions or 0,
             "genre": genre_name,
-            "gsc_connected": row.gsc_connected
+            "gsc_connected": bool(row.gsc_connected)  # ← ✅ 修正ポイント
         }
 
         # 初回のみuser_idを設定
