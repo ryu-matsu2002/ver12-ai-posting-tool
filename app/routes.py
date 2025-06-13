@@ -373,15 +373,7 @@ def admin_dashboard():
         # 全ユーザーを記録（missing=0でも）
         missing_count_map[user.id] = len(missing)
 
-    return render_template(
-        "admin/dashboard.html",
-        user_count=user_count,
-        site_count=site_count,
-        prompt_count=prompt_count,
-        article_count=article_count,
-        users=users,
-        missing_count_map=missing_count_map
-    )
+    return redirect(url_for("admin.admin_users"))
 
 # --- ダッシュボード強化系ルート ---
 
