@@ -805,7 +805,7 @@ def admin_sites():
         .join(User, Site.user_id == User.id)
         .outerjoin(Article, Site.id == Article.site_id)
         .group_by(Site.id, User.id)
-        .order_by(User.id, Site.created_at.desc())
+        .order_by(User.id, Site.id.desc())  # ← 修正済み
         .all()
     )
 
