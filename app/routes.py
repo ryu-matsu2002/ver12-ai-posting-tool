@@ -827,6 +827,7 @@ def admin_sites():
 
         # 各サイトの情報
         site_info = {
+            "id": row.id,  # ← ✅ この行を追加してください
             "name": row.name,
             "url": row.url,
             "plan_type": row.plan_type,
