@@ -33,7 +33,6 @@
         <thead class="bg-blue-100 text-blue-800 font-semibold">
           <tr>
             <th class="py-2 px-4">サイト名</th>
-            <th class="py-2 px-4">URL</th>
             <th class="py-2 px-2 text-green-700">投稿完了</th>
             <th class="py-2 px-2 text-blue-700">記事生成済み</th>
             <th class="py-2 px-2">総記事数</th>
@@ -48,13 +47,12 @@
               data-site="{{ s.name }} {{ s.url }}"
               data-genre="{{ s.genre or '' }}">
             <td class="py-2 px-4 font-medium text-blue-900">
-              <a href="{{ s.url }}" target="_blank" class="underline">{{ s.name }}</a>
-            </td>
-            <td class="py-2 px-4">
-              {% if s.gsc_connected %}
-                <span class="inline-block bg-green-600 text-white text-xs font-bold px-2 py-1 rounded mr-2">GSC</span>
-              {% endif %}
-              <a href="{{ s.url }}" target="_blank" class="text-blue-600 underline">{{ s.url }}</a>
+              <div class="flex items-center gap-2">
+                {% if s.gsc_connected %}
+                  <span class="inline-block bg-green-600 text-white text-xs font-bold px-2 py-1 rounded">GSC</span>
+                {% endif %}
+                <a href="{{ s.url }}" target="_blank" class="underline">{{ s.name }}</a>
+              </div>
             </td>
             <td class="py-2 px-2 text-green-700 text-center">{{ s.posted or 0 }}</td>
             <td class="py-2 px-2 text-blue-700 text-center">{{ s.done or 0 }}</td>
@@ -62,11 +60,11 @@
             <td class="py-2 px-2 text-purple-700 text-center">{{ s.clicks or 0 }}</td>
             <td class="py-2 px-2 text-pink-700 text-center">{{ s.impressions or 0 }}</td>
             <td class="py-2 px-4 space-x-1 whitespace-nowrap">
-              <a href="{{ url_for('admin.user_articles', uid=uid) }}"
+              <a href="{{ url_for('admin.site_articles', site_id=s.id) }}"
                  class="inline-block bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-2 py-1 rounded">
                 記事一覧
               </a>
-              <a href="{{ s.url }}/wp-admin" target="_blank"
+              <a href="{{ s.url.rstrip('/') }}/wp-admin" target="_blank"
                  class="inline-block bg-purple-700 hover:bg-purple-800 text-white text-xs font-bold px-2 py-1 rounded">
                 WP管理
               </a>
