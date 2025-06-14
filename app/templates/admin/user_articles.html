@@ -37,7 +37,7 @@
   </select>
 </form>
 
-<form method="post" action="{{ url_for('admin.bulk_delete_articles', uid=user.id) }}">
+<form method="post" action="{{ url_for('admin.bulk_delete_articles', uid=user['id']) }}">
   <div class="mb-4 flex items-center gap-2">
     <select name="action" class="p-2 rounded border">
       <option value="">一括操作</option>
@@ -69,7 +69,7 @@
     <tbody>
       {% for a in articles %}
       <tr class="{% if loop.index0 % 2 == 0 %}bg-white{% else %}bg-blue-50{% endif %}">
-        <td class="px-2 py-2"><input type="checkbox" name="selected_ids" value="{{ a.id }}"></td>
+        <td class="px-2 py-2"><input type="checkbox" name="selected_ids" value="{{ a['id'] }}"></td>
         <td class="px-2 py-2">{{ a.keyword }}</td>
         <td class="px-2 py-2 text-center text-rose-600">{{ a.site.clicks or 0 }}</td>
         <td class="px-2 py-2 text-center text-purple-600">{{ a.site.impressions or 0 }}</td>
@@ -96,7 +96,7 @@
         </td>
         <td class="px-2 py-2">
           {% if a.status in ["done", "posted"] %}
-            <a href="{{ url_for('main.preview', username=user.username, article_id=a.id) }}"
+            <a href="{{ url_for('main.preview', username=user['username'], article_id=a['id']) }}"
                class="text-blue-600 hover:underline text-sm">プレビュー</a>
           {% else %}—{% endif %}
         </td>
