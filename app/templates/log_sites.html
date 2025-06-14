@@ -4,7 +4,7 @@
 {% block content %}
 <h2 class="text-2xl font-semibold mb-6">記事生成 - 投稿ログ - サイト一覧</h2>
 
-<!-- ✅ サイト検索フォーム（form1） -->
+<!-- ✅ サイト検索フォーム -->
 <form method="get" class="mb-4 flex items-center gap-2">
   <label for="query" class="font-medium">サイト検索:</label>
   <input type="text" id="query" name="query" value="{{ search_query or '' }}"
@@ -13,7 +13,7 @@
   <button type="submit" class="px-3 py-2 bg-blue-500 text-white rounded">検索</button>
 </form>
 
-<!-- ✅ ジャンル絞り込みフォーム（form2） -->
+<!-- ✅ ジャンル絞り込みフォーム -->
 <form method="get" class="mb-6 flex items-center gap-2">
   <label for="genre_id" class="font-medium">ジャンルで絞り込み:</label>
   <select id="genre_id" name="genre_id" class="p-2 border rounded">
@@ -30,7 +30,6 @@
     <thead>
       <tr class="bg-gray-100 dark:bg-gray-700 text-left text-black font-bold text-sm">
         <th class="px-3 py-2">サイト名</th>
-        <th class="px-3 py-2">URL</th>
         <th class="px-3 py-2 text-center">
           <a href="?sort=posted&order={{ 'asc' if sort_key == 'posted' and sort_order == 'desc' else 'desc' }}&query={{ search_query }}&genre_id={{ selected_genre_id }}"
              class="flex justify-center items-center gap-1">
@@ -92,15 +91,12 @@
     <tbody>
       {% for site in sites %}
       <tr class="{% if loop.index0 % 2 == 0 %}bg-white{% else %}bg-blue-50{% endif %} border-b dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-900">
-        <td class="px-3 py-2 font-medium text-blue-700 dark:text-blue-300">[{{ site.name }}]</td>
-        <td class="px-3 py-2 break-all text-blue-700 underline">
-          <div class="flex flex-col sm:flex-row sm:items-center sm:gap-2">
+        <td class="px-3 py-2 font-medium text-blue-700 dark:text-blue-300">
+          <div class="flex items-center gap-2">
             {% if site.gsc_connected %}
-              <span class="mb-1 sm:mb-0 inline-block bg-green-600 text-white text-xs font-semibold px-2 py-0.5 rounded">
-                GSC
-              </span>
+              <span class="inline-block bg-green-600 text-white text-xs font-semibold px-2 py-0.5 rounded">GSC</span>
             {% endif %}
-            <a href="{{ site.url }}" target="_blank">{{ site.url }}</a>
+            <a href="{{ site.url }}" target="_blank" class="underline">{{ site.name }}</a>
           </div>
         </td>
         <td class="px-3 py-2 text-center text-indigo-600 font-bold">{{ site.posted or 0 }}</td>
