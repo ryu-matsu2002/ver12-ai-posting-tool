@@ -48,6 +48,13 @@ class User(db.Model, UserMixin):
     articles = db.relationship("Article", backref="user", lazy='selectin', cascade="all, delete-orphan")
     sites = db.relationship("Site", backref="user", lazy=True, cascade="all, delete-orphan")
     keywords = db.relationship("Keyword", back_populates="user", cascade="all, delete-orphan")
+    # ✅ 追加：GSCキーワードのみ抽出用（source='gsc'）
+    gsc_keywords = db.relationship(
+        "Keyword",
+        primaryjoin="and_(User.id==Keyword.user_id, Keyword.source=='gsc')",
+        viewonly=True,
+        lazy=True
+    )
     site_quota = db.relationship("UserSiteQuota", backref="user", lazy=True, uselist=False, cascade="all, delete-orphan")
     payment_logs = db.relationship("PaymentLog", backref="user", lazy=True, cascade="all, delete-orphan")
     token_logs = db.relationship("TokenUsageLog", backref="user", lazy=True, cascade="all, delete-orphan")

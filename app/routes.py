@@ -399,14 +399,9 @@ def admin_prompt_list():
     if not current_user.is_admin:
         abort(403)
 
-    prompts = (
-        db.session.query(PromptTemplate, User)
-        .join(User, PromptTemplate.user_id == User.id)
-        .order_by(PromptTemplate.id.desc())
-        .all()
-    )
+    users = User.query.order_by(User.last_name, User.first_name).all()
+    return render_template("admin/prompts.html", users=users)
 
-    return render_template("admin/prompts.html", prompts=prompts)
 
 @admin_bp.route("/admin/keywords")
 @login_required
@@ -414,14 +409,10 @@ def admin_keyword_list():
     if not current_user.is_admin:
         abort(403)
 
-    keywords = (
-        db.session.query(Keyword, User)
-        .join(User, Keyword.user_id == User.id)
-        .order_by(Keyword.created_at.desc())
-        .all()
-    )
+    # 全ユーザー取得（first_name/last_name順で表示順が安定）
+    users = User.query.order_by(User.last_name, User.first_name).all()
+    return render_template("admin/keywords.html", users=users)
 
-    return render_template("admin/keywords.html", keywords=keywords)
 
 @admin_bp.route("/admin/gsc-status")
 @login_required

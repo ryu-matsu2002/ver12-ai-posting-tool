@@ -4,26 +4,69 @@
 {% block content %}
 <h1 class="text-2xl font-bold mb-6">🔑 ユーザーごとのキーワード一覧</h1>
 
-<table class="min-w-full bg-white shadow rounded">
-  <thead class="bg-gray-100 text-left text-sm">
-    <tr>
-      <th class="py-2 px-4">ユーザー名</th>
-      <th class="py-2 px-4">キーワード</th>
-      <th class="py-2 px-4">ジャンル</th>
-      <th class="py-2 px-4">登録日</th>
-    </tr>
-  </thead>
-  <tbody class="text-sm">
-    {% for keyword, user in keywords %}
-    <tr class="border-t">
-      <td class="py-2 px-4 font-medium text-blue-800">{{ user.name }}</td>
-      <td class="py-2 px-4">{{ keyword.word }}</td>
-      <td class="py-2 px-4">{{ keyword.genre.name if keyword.genre else "未設定" }}</td>
-      <td class="py-2 px-4 text-gray-500">{{ keyword.created_at.strftime('%Y-%m-%d %H:%M') if keyword.created_at else "-" }}</td>
-    </tr>
-    {% else %}
-    <tr><td colspan="4" class="py-4 px-4 text-center text-gray-500">キーワードが見つかりません。</td></tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="space-y-6">
+  {% for user in users %}
+    <details class="bg-blue-100 border border-blue-300 rounded p-4">
+      <summary class="cursor-pointer font-semibold text-lg flex items-center">
+        <span class="material-icons mr-2">person</span>
+        {{ user.last_name }} {{ user.first_name }}
+        （通常: {{ user.keywords | length }}件 / GSC: {{ user.gsc_keywords | length }}件）
+      </summary>
+
+      <!-- 🔹 通常キーワード -->
+      <h2 class="mt-4 font-semibold text-base text-blue-800">📝 通常キーワード（{{ user.keywords | length }}件）</h2>
+      {% if user.keywords %}
+        <table class="mt-2 w-full bg-white text-sm border rounded shadow">
+          <thead class="bg-gray-200">
+            <tr>
+              <th class="py-2 px-4">キーワード</th>
+              <th class="py-2 px-4">ジャンル</th>
+              <th class="py-2 px-4">登録日</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for keyword in user.keywords %}
+            <tr class="border-t">
+              <td class="py-2 px-4">{{ keyword.word }}</td>
+              <td class="py-2 px-4">{{ keyword.genre.name if keyword.genre else "未設定" }}</td>
+              <td class="py-2 px-4 text-gray-500">
+                {{ keyword.created_at.strftime('%Y-%m-%d %H:%M') if keyword.created_at else "-" }}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="text-gray-600 mt-2">通常キーワードは登録されていません。</p>
+      {% endif %}
+
+      <!-- 🔹 GSCキーワード -->
+      <h2 class="mt-6 font-semibold text-base text-green-800">🔍 GSCキーワード（{{ user.gsc_keywords | length }}件）</h2>
+      {% if user.gsc_keywords %}
+        <table class="mt-2 w-full bg-white text-sm border rounded shadow">
+          <thead class="bg-gray-200">
+            <tr>
+              <th class="py-2 px-4">キーワード</th>
+              <th class="py-2 px-4">ジャンル</th>
+              <th class="py-2 px-4">登録日</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for keyword in user.gsc_keywords %}
+            <tr class="border-t">
+              <td class="py-2 px-4">{{ keyword.word }}</td>
+              <td class="py-2 px-4">{{ keyword.genre.name if keyword.genre else "未設定" }}</td>
+              <td class="py-2 px-4 text-gray-500">
+                {{ keyword.created_at.strftime('%Y-%m-%d %H:%M') if keyword.created_at else "-" }}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="text-gray-600 mt-2">GSCキーワードは登録されていません。</p>
+      {% endif %}
+    </details>
+  {% endfor %}
+</div>
 {% endblock %}
