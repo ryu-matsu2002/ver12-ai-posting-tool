@@ -4,31 +4,36 @@
 {% block content %}
 <h1 class="text-2xl font-bold mb-6">🧠 API使用量 / トークン分析</h1>
 
-<!-- 📈 日別トークン使用量（グラフ） -->
-<div class="bg-white p-6 rounded shadow mb-10">
-  <h2 class="text-xl font-semibold mb-4">📅 日別トークン使用量（過去30日）</h2>
-  <canvas id="dailyChart" height="100"></canvas>
-</div>
+<!-- ✅ 横並び2カラム：グラフと表 -->
+<div class="flex flex-col lg:flex-row gap-6">
 
-<!-- 👤 ユーザー別使用量 -->
-<div class="bg-white p-6 rounded shadow">
-  <h2 class="text-xl font-semibold mb-4">👤 ユーザー別トークン使用量（過去30日）</h2>
-  <table class="w-full table-auto">
-    <thead class="bg-gray-100 text-gray-700">
-      <tr>
-        <th class="p-2 text-left">ユーザー</th>
-        <th class="p-2 text-left">使用トークン数</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for email, tokens in user_data %}
-      <tr class="border-b">
-        <td class="p-2">{{ email }}</td>
-        <td class="p-2">{{ tokens }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <!-- 📈 日別トークン使用量（グラフ） -->
+  <div class="bg-white p-4 rounded shadow w-full lg:w-1/2">
+    <h2 class="text-lg font-semibold mb-2">📅 日別トークン使用量（過去30日）</h2>
+    <canvas id="dailyChart" height="60"></canvas>
+  </div>
+
+  <!-- 👤 ユーザー別使用量 -->
+  <div class="bg-white p-4 rounded shadow w-full lg:w-1/2">
+    <h2 class="text-lg font-semibold mb-2">👤 ユーザー別トークン使用量（過去30日）</h2>
+    <table class="w-full table-auto text-sm">
+      <thead class="bg-gray-100 text-gray-700">
+        <tr>
+          <th class="p-2 text-left">ユーザー</th>
+          <th class="p-2 text-left">使用トークン数</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for email, tokens in user_data %}
+        <tr class="border-b">
+          <td class="p-2">{{ email }}</td>
+          <td class="p-2">{{ tokens }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
 </div>
 
 <!-- 👇 JSONデータをdata属性付きタグに埋め込む -->
@@ -57,6 +62,7 @@
     },
     options: {
       responsive: true,
+      maintainAspectRatio: false,
       scales: {
         y: {
           beginAtZero: true,
