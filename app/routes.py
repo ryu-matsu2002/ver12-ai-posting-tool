@@ -472,13 +472,15 @@ def log_stream():
             stderr=subprocess.STDOUT
         ).decode("utf-8")
 
-        # 翻訳・整形
         from app.utils.log_utils import parse_logs
         logs = parse_logs(output)
-
         return jsonify({"logs": logs})
     except Exception as e:
+        import traceback
+        print("❌ log_stream failed:", str(e))
+        traceback.print_exc()
         return jsonify({"error": str(e)})
+
 
 
 # 🧠 API使用量／トークン分析
