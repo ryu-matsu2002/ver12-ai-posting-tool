@@ -47,14 +47,8 @@ function fetchLogs() {
       const box = document.getElementById("log-box");
       if (data.logs) {
         box.innerHTML = data.logs.map(line => {
-          const safe = line.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-          if (line.includes("❌")) {
-            return `<div class="text-red-400 font-semibold">${safe}</div>`;
-          } else if (line.includes("⚠️")) {
-            return `<div class="text-yellow-300">${safe}</div>`;
-          } else {
-            return `<div class="text-gray-200">${safe}</div>`;
-          }
+          const safe = line.message.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+          return `<div class="${line.color}">${safe}</div>`;
         }).join("");
         box.scrollTop = box.scrollHeight;
       } else {

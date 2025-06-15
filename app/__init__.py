@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 import os
+import logging  # ✅ 追加
+from logging.handlers import RotatingFileHandler  # ✅ 追加
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -53,7 +55,18 @@ def create_app() -> Flask:
     login_manager.login_message = "このページを開くにはログインが必要です。"
     login_manager.login_message_category = "info"  # Bootstrapの黄色表示
 
-    app.logger.setLevel("DEBUG")
+    # ✅ ログ出力設定（logs/system.log に出力）
+    if not os.path.exists("logs"):
+        os.makedirs("logs")  # logsフォルダがなければ作成
+
+    file_handler = RotatingFileHandler("logs/system.log", maxBytes=1024 * 1024, backupCount=3)
+    file_handler.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s %(levelname)s in %(module)s: %(message)s')
+    file_handler.setFormatter(formatter)
+
+    app.logger.addHandler(file_handler)
+    app.logger.setLevel(logging.INFO)
+    app.logger.info("✅ Flaskアプリが初期化されました")  # 明示ログ
 
     # ─── Blueprints 登録とスケジューラ起動 ───────
     with app.app_context():

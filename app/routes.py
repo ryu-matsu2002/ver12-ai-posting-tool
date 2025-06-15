@@ -466,20 +466,25 @@ from flask import jsonify
 @admin_bp.route("/admin/log-stream")
 @login_required
 def log_stream():
+    """最新の system.log を読み込んでJSONで返す（最大30行）"""
     try:
-        output = subprocess.check_output(
-            ["journalctl", "-u", "ai-posting.service", "-n", "30", "--no-pager", "--output=short"],
-            stderr=subprocess.STDOUT
-        ).decode("utf-8")
-
         from app.utils.log_utils import parse_logs
-        logs = parse_logs(output)
+        log_path = os.path.join("logs", "system.log")
+
+        # ログファイルの末尾から最大30行を取得
+        with open(log_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()[-30:]
+
+        # 1行ごとに整形
+        logs = parse_logs(lines)
         return jsonify({"logs": logs})
+
     except Exception as e:
         import traceback
         print("❌ log_stream failed:", str(e))
         traceback.print_exc()
         return jsonify({"error": str(e)})
+
 
 
 
