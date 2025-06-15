@@ -2,16 +2,19 @@
 {% block title %}Dashboard | SITE CRAFT{% endblock %}
 
 {% block content %}
-<!-- 🔷 ロゴ -->
+
+<!-- 🔷 ロゴ中央表示 -->
 <div class="flex flex-col items-center justify-center mt-10 mb-6">
   <div class="flex items-center space-x-6">
-    <img src="{{ url_for('static', filename='images/tcc_logo.png') }}" alt="SITE CRAFT ロゴ" class="w-24 h-24" />
+    <img src="{{ url_for('static', filename='images/tcc_logo.png') }}"
+         alt="SITE CRAFT ロゴ"
+         class="w-24 h-24" />
     <h1 class="text-[5rem] font-extrabold tracking-wide text-custom-brand leading-none">SITE CRAFT</h1>
   </div>
 </div>
 
-<!-- 📊 投稿ステータスカード -->
-<div class="grid md:grid-cols-4 gap-6 justify-center mt-8 mb-8 px-6">
+<!-- 📊 数字表示 -->
+<div class="grid md:grid-cols-4 gap-6 justify-center mt-8 mb-16 px-6">
   <div class="bg-white shadow rounded p-6 text-center">
     <p class="text-xl font-bold text-green-700 mb-2">投稿完了</p>
     <p class="text-4xl font-extrabold text-green-700">{{ posted or 0 }}</p>
@@ -30,13 +33,13 @@
   </div>
 </div>
 
-<!-- 🤖 ロボット画像（中央） -->
-<div class="w-full flex justify-center mb-10">
+<!-- 🤖 ロボット -->
+<div class="flex justify-center mb-10">
   <div class="relative">
     <img id="robotImage"
          src="{{ url_for('static', filename='images/robot.png') }}"
          alt="ロボット"
-         class="w-48 h-auto cursor-pointer transition-transform duration-300"
+         class="w-56 h-auto cursor-pointer transition-transform duration-300"
          onclick="toggleChat(); robotTalk();" />
 
     <div id="speechBubble"
@@ -44,7 +47,7 @@
     </div>
 
     <div id="chatWindow"
-         class="absolute left-[10rem] bottom-0 w-[400px] bg-white border border-gray-300 shadow-lg rounded-md hidden z-30">
+         class="absolute left-[15rem] bottom-0 w-[400px] bg-white border border-gray-300 shadow-lg rounded-md hidden z-30">
       <div class="bg-blue-700 text-white px-4 py-2 rounded-t-md flex justify-between items-center">
         🤖 site craft：チャットルーム
         <button onclick="toggleChat()" class="text-white">×</button>
@@ -63,27 +66,24 @@
   </div>
 </div>
 
-<!-- 👑 ユーザーランキング -->
-<div class="px-6 mb-10">
-  <h2 class="text-2xl font-bold mb-4">👑 ユーザーランキング</h2>
-  <div class="flex gap-2 mb-4">
-    <button onclick="loadRanking('site')" class="ranking-btn bg-blue-100 hover:bg-blue-200 text-sm px-3 py-1 rounded">サイト数</button>
-    <button onclick="loadRanking('impressions')" class="ranking-btn bg-blue-100 hover:bg-blue-200 text-sm px-3 py-1 rounded">表示回数</button>
-    <button onclick="loadRanking('clicks')" class="ranking-btn bg-blue-100 hover:bg-blue-200 text-sm px-3 py-1 rounded">クリック数</button>
-  </div>
-  <div id="rankingTable" class="overflow-y-auto max-h-[400px] border bg-white shadow rounded"></div>
-</div>
-
-<!-- 🔧 スクリプト -->
+<!-- 📜 JavaScript -->
 <script>
   const chatUsername = "{{ current_user.username }}";
   const messageLog = [];
-  const phrases = ["今日もいい記事を書こう！", "クリックありがとう！", "SEOもバッチリ対応中！", "自動化は最高だよね！", "ロボも歩きたいなぁ..."];
+
+  const phrases = [
+    "今日もいい記事を書こう！",
+    "クリックありがとう！",
+    "SEOもバッチリ対応中！",
+    "自動化は最高だよね！",
+    "ロボも歩きたいなぁ..."
+  ];
 
   function toggleChat() {
     const chat = document.getElementById("chatWindow");
     const messages = document.getElementById("chatMessages");
     chat.classList.toggle("hidden");
+
     if (!chat.dataset.initialized) {
       const greeting = document.createElement("div");
       greeting.textContent = `🤖 こんにちは、${chatUsername}さん！ご質問があればお気軽にどうぞ。`;
@@ -97,8 +97,10 @@
     const robot = document.getElementById('robotImage');
     const bubble = document.getElementById('speechBubble');
     if (!robot || !bubble) return;
+
     robot.classList.add('dance-animation');
     setTimeout(() => robot.classList.remove('dance-animation'), 800);
+
     const random = phrases[Math.floor(Math.random() * phrases.length)];
     bubble.textContent = random;
     bubble.classList.remove('hidden');
@@ -110,21 +112,29 @@
     const messages = document.getElementById("chatMessages");
     const userText = input.value.trim();
     if (!userText) return;
+
     const userMsg = document.createElement("div");
     userMsg.textContent = "👤 " + userText;
     userMsg.className = "text-right text-gray-800";
     messages.appendChild(userMsg);
     messageLog.push({ role: "user", content: userText });
+
     const botMsg = document.createElement("div");
     botMsg.textContent = "🤖 考え中...";
     botMsg.className = "text-left text-blue-700";
     messages.appendChild(botMsg);
+
     messages.scrollTop = messages.scrollHeight;
     input.value = "";
+
     fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: userText, history: messageLog, username: chatUsername })
+      body: JSON.stringify({
+        message: userText,
+        history: messageLog,
+        username: chatUsername
+      })
     })
     .then(res => res.json())
     .then(data => {
@@ -132,46 +142,26 @@
       messageLog.push({ role: "assistant", content: data.reply });
       messages.scrollTop = messages.scrollHeight;
     })
-    .catch(() => {
+    .catch(err => {
       botMsg.textContent = "🤖 エラーが発生しました。";
     });
   }
 
-  function loadRanking(type = 'site') {
-    fetch(`/api/rankings?type=${type}`)
-      .then(res => res.json())
-      .then(data => {
-        console.log("✅ ランキング取得:", data);
-        const table = document.createElement("table");
-        table.className = "w-full text-sm";
-        table.innerHTML = `
-          <thead class="bg-gray-100 text-gray-700">
-            <tr>
-              <th class="p-2 text-left">順位</th>
-              <th class="p-2 text-left">ユーザー名</th>
-              <th class="p-2 text-center">${type === 'site' ? 'サイト数' : type === 'impressions' ? '表示回数' : 'クリック数'}</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${data.map((r, i) => `
-              <tr class="border-b">
-                <td class="p-2 font-semibold">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}</td>
-                <td class="p-2">${r.last_name} ${r.first_name}</td>
-                <td class="p-2 text-center">${type === 'site' ? r.site_count : type === 'impressions' ? r.impressions : r.clicks}</td>
-              </tr>
-            `).join('')}
-          </tbody>`;
-        const container = document.getElementById("rankingTable");
-        container.innerHTML = "";
-        container.appendChild(table);
-      })
-      .catch(err => console.error("❌ ランキング取得エラー:", err));
+  function toggleUserDropdown() {
+    const menu = document.getElementById('userDropdown');
+    if (menu) menu.classList.toggle('hidden');
   }
 
-  document.addEventListener("DOMContentLoaded", () => loadRanking("site"));
+  document.addEventListener('click', function (e) {
+    const btn = document.getElementById('userDropdownBtn');
+    const menu = document.getElementById('userDropdown');
+    if (btn && menu && !btn.contains(e.target) && !menu.contains(e.target)) {
+      menu.classList.add('hidden');
+    }
+  });
 </script>
 
-<!-- 💅 CSS -->
+<!-- 🎨 CSS -->
 <style>
   @keyframes robot-dance {
     0% { transform: rotate(0deg); }
@@ -180,11 +170,14 @@
     75% { transform: rotate(3deg); }
     100% { transform: rotate(0deg); }
   }
+
   .dance-animation {
     animation: robot-dance 0.8s ease-in-out;
   }
+
   .text-custom-brand {
     color: #23185E;
   }
 </style>
+
 {% endblock %}
