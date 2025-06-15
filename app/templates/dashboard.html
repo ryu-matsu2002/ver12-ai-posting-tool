@@ -2,18 +2,15 @@
 {% block title %}Dashboard | SITE CRAFT{% endblock %}
 
 {% block content %}
-
-<!-- 🔷 ロゴ中央表示 -->
+<!-- 🔷 ロゴ -->
 <div class="flex flex-col items-center justify-center mt-10 mb-6">
   <div class="flex items-center space-x-6">
-    <img src="{{ url_for('static', filename='images/tcc_logo.png') }}"
-         alt="SITE CRAFT ロゴ"
-         class="w-24 h-24" />
+    <img src="{{ url_for('static', filename='images/tcc_logo.png') }}" alt="SITE CRAFT ロゴ" class="w-24 h-24" />
     <h1 class="text-[5rem] font-extrabold tracking-wide text-custom-brand leading-none">SITE CRAFT</h1>
   </div>
 </div>
 
-<!-- 📊 数字表示 -->
+<!-- 📊 数字カード -->
 <div class="grid md:grid-cols-4 gap-6 justify-center mt-8 mb-16 px-6">
   <div class="bg-white shadow rounded p-6 text-center">
     <p class="text-xl font-bold text-green-700 mb-2">投稿完了</p>
@@ -33,12 +30,19 @@
   </div>
 </div>
 
-<!-- 🏆 ランキング + 🤖 ロボット -->
+<!-- 🏆 ランキング + 🤖 -->
 <div class="flex flex-col lg:flex-row justify-center items-start gap-12 px-6 mb-20">
-  <!-- 🏅 ユーザーランキング -->
-  <div class="w-full lg:w-1/2">
+  <!-- 🏅 ランキング -->
+  <div class="w-full lg:w-3/5">
     <h2 class="text-2xl font-bold mb-4">👑 ユーザーランキング</h2>
-    <div class="overflow-x-auto">
+    <div class="mb-4 flex space-x-4">
+      <button onclick="loadRanking('site')" class="ranking-tab px-4 py-2 rounded bg-blue-100 text-blue-800 font-semibold">サイト数</button>
+      <button onclick="loadRanking('impressions')" class="ranking-tab px-4 py-2 rounded bg-gray-100 text-gray-800">表示回数</button>
+      <button onclick="loadRanking('clicks')" class="ranking-tab px-4 py-2 rounded bg-gray-100 text-gray-800">クリック数</button>
+    </div>
+
+    <div id="ranking-container" class="overflow-y-auto max-h-[400px]">
+      <!-- 初期ランキング表示（サーバーサイド出力） -->
       <table class="w-full bg-white shadow rounded">
         <thead class="bg-gray-100 text-sm text-gray-700">
           <tr>
@@ -49,21 +53,13 @@
             <th class="p-2 text-center">クリック数</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody id="ranking-body">
           {% for r in rankings %}
           <tr class="border-b">
             <td class="p-2 font-semibold">
-              {% if loop.index == 1 %}
-                🥇
-              {% elif loop.index == 2 %}
-                🥈
-              {% elif loop.index == 3 %}
-                🥉
-              {% else %}
-                #{{ loop.index }}
-              {% endif %}
+              {% if loop.index == 1 %}🥇{% elif loop.index == 2 %}🥈{% elif loop.index == 3 %}🥉{% else %}#{{ loop.index }}{% endif %}
             </td>
-            <td class="p-2">{{ r.user.username }}</td>
+            <td class="p-2">{{ r.user.last_name }} {{ r.user.first_name }}</td>
             <td class="p-2 text-center">{{ r.site_count }}</td>
             <td class="p-2 text-center">{{ r.impressions }}</td>
             <td class="p-2 text-center">{{ r.clicks }}</td>
@@ -75,17 +71,15 @@
   </div>
 
   <!-- 🤖 ロボット -->
-  <div class="relative">
+  <div class="relative w-1/4 flex-shrink-0">
     <img id="robotImage"
          src="{{ url_for('static', filename='images/robot.png') }}"
          alt="ロボット"
          class="w-56 h-auto cursor-pointer transition-transform duration-300"
          onclick="toggleChat(); robotTalk();" />
-
     <div id="speechBubble"
          class="absolute left-36 bottom-20 bg-yellow-100 text-black text-sm px-3 py-2 rounded shadow-lg border border-gray-300 hidden z-30">
     </div>
-
     <div id="chatWindow"
          class="absolute left-[15rem] bottom-0 w-[400px] bg-white border border-gray-300 shadow-lg rounded-md hidden z-30">
       <div class="bg-blue-700 text-white px-4 py-2 rounded-t-md flex justify-between items-center">
@@ -94,13 +88,8 @@
       </div>
       <div id="chatMessages" class="p-3 h-60 overflow-y-auto text-sm space-y-2 bg-gray-50"></div>
       <div class="p-2 border-t flex">
-        <input id="chatInput" type="text"
-               class="flex-1 border rounded px-2 py-1 text-sm"
-               placeholder="メッセージを入力..." />
-        <button onclick="sendMessage()"
-                class="ml-2 bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm">
-          送信
-        </button>
+        <input id="chatInput" type="text" class="flex-1 border rounded px-2 py-1 text-sm" placeholder="メッセージを入力..." />
+        <button onclick="sendMessage()" class="ml-2 bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm">送信</button>
       </div>
     </div>
   </div>
@@ -108,116 +97,115 @@
 
 <!-- 📜 JavaScript -->
 <script>
-  const chatUsername = "{{ current_user.username }}";
-  const messageLog = [];
+const chatUsername = "{{ current_user.username }}";
+const messageLog = [];
+const phrases = ["今日もいい記事を書こう！", "クリックありがとう！", "SEOもバッチリ対応中！", "自動化は最高だよね！", "ロボも歩きたいなぁ..."];
 
-  const phrases = [
-    "今日もいい記事を書こう！",
-    "クリックありがとう！",
-    "SEOもバッチリ対応中！",
-    "自動化は最高だよね！",
-    "ロボも歩きたいなぁ..."
-  ];
-
-  function toggleChat() {
-    const chat = document.getElementById("chatWindow");
-    const messages = document.getElementById("chatMessages");
-    chat.classList.toggle("hidden");
-
-    if (!chat.dataset.initialized) {
-      const greeting = document.createElement("div");
-      greeting.textContent = `🤖 こんにちは、${chatUsername}さん！ご質問があればお気軽にどうぞ。`;
-      greeting.className = "text-left text-blue-700";
-      messages.appendChild(greeting);
-      chat.dataset.initialized = true;
-    }
+function toggleChat() {
+  const chat = document.getElementById("chatWindow");
+  const messages = document.getElementById("chatMessages");
+  chat.classList.toggle("hidden");
+  if (!chat.dataset.initialized) {
+    const greeting = document.createElement("div");
+    greeting.textContent = `🤖 こんにちは、${chatUsername}さん！ご質問があればお気軽にどうぞ。`;
+    greeting.className = "text-left text-blue-700";
+    messages.appendChild(greeting);
+    chat.dataset.initialized = true;
   }
-
-  function robotTalk() {
-    const robot = document.getElementById('robotImage');
-    const bubble = document.getElementById('speechBubble');
-    if (!robot || !bubble) return;
-
-    robot.classList.add('dance-animation');
-    setTimeout(() => robot.classList.remove('dance-animation'), 800);
-
-    const random = phrases[Math.floor(Math.random() * phrases.length)];
-    bubble.textContent = random;
-    bubble.classList.remove('hidden');
-    setTimeout(() => bubble.classList.add('hidden'), 2500);
-  }
-
-  function sendMessage() {
-    const input = document.getElementById("chatInput");
-    const messages = document.getElementById("chatMessages");
-    const userText = input.value.trim();
-    if (!userText) return;
-
-    const userMsg = document.createElement("div");
-    userMsg.textContent = "👤 " + userText;
-    userMsg.className = "text-right text-gray-800";
-    messages.appendChild(userMsg);
-    messageLog.push({ role: "user", content: userText });
-
-    const botMsg = document.createElement("div");
-    botMsg.textContent = "🤖 考え中...";
-    botMsg.className = "text-left text-blue-700";
-    messages.appendChild(botMsg);
-
+}
+function robotTalk() {
+  const robot = document.getElementById('robotImage');
+  const bubble = document.getElementById('speechBubble');
+  if (!robot || !bubble) return;
+  robot.classList.add('dance-animation');
+  setTimeout(() => robot.classList.remove('dance-animation'), 800);
+  const random = phrases[Math.floor(Math.random() * phrases.length)];
+  bubble.textContent = random;
+  bubble.classList.remove('hidden');
+  setTimeout(() => bubble.classList.add('hidden'), 2500);
+}
+function sendMessage() {
+  const input = document.getElementById("chatInput");
+  const messages = document.getElementById("chatMessages");
+  const userText = input.value.trim();
+  if (!userText) return;
+  const userMsg = document.createElement("div");
+  userMsg.textContent = "👤 " + userText;
+  userMsg.className = "text-right text-gray-800";
+  messages.appendChild(userMsg);
+  messageLog.push({ role: "user", content: userText });
+  const botMsg = document.createElement("div");
+  botMsg.textContent = "🤖 考え中...";
+  botMsg.className = "text-left text-blue-700";
+  messages.appendChild(botMsg);
+  messages.scrollTop = messages.scrollHeight;
+  input.value = "";
+  fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: userText, history: messageLog, username: chatUsername })
+  })
+  .then(res => res.json())
+  .then(data => {
+    botMsg.textContent = "🤖 " + data.reply;
+    messageLog.push({ role: "assistant", content: data.reply });
     messages.scrollTop = messages.scrollHeight;
-    input.value = "";
+  })
+  .catch(() => {
+    botMsg.textContent = "🤖 エラーが発生しました。";
+  });
+}
 
-    fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message: userText,
-        history: messageLog,
-        username: chatUsername
-      })
-    })
+function loadRanking(type) {
+  fetch(`/api/rankings?type=${type}`)
     .then(res => res.json())
     .then(data => {
-      botMsg.textContent = "🤖 " + data.reply;
-      messageLog.push({ role: "assistant", content: data.reply });
-      messages.scrollTop = messages.scrollHeight;
-    })
-    .catch(err => {
-      botMsg.textContent = "🤖 エラーが発生しました。";
+      const tbody = document.getElementById("ranking-body");
+      tbody.innerHTML = "";
+      data.forEach((row, index) => {
+        const tr = document.createElement("tr");
+        tr.className = "border-b";
+        const rankIcon = index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : "#" + (index + 1);
+        tr.innerHTML = `
+          <td class="p-2 font-semibold">${rankIcon}</td>
+          <td class="p-2">${row.last_name} ${row.first_name}</td>
+          <td class="p-2 text-center">${row.site_count}</td>
+          <td class="p-2 text-center">${row.impressions}</td>
+          <td class="p-2 text-center">${row.clicks}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      document.querySelectorAll(".ranking-tab").forEach(btn => {
+        btn.classList.remove("bg-blue-100", "text-blue-800");
+        btn.classList.add("bg-gray-100", "text-gray-800");
+      });
+      const activeBtn = document.querySelector(`.ranking-tab[onclick="loadRanking('${type}')"]`);
+      if (activeBtn) {
+        activeBtn.classList.remove("bg-gray-100", "text-gray-800");
+        activeBtn.classList.add("bg-blue-100", "text-blue-800");
+      }
     });
-  }
-
-  function toggleUserDropdown() {
-    const menu = document.getElementById('userDropdown');
-    if (menu) menu.classList.toggle('hidden');
-  }
-
-  document.addEventListener('click', function (e) {
-    const btn = document.getElementById('userDropdownBtn');
-    const menu = document.getElementById('userDropdown');
-    if (btn && menu && !btn.contains(e.target) && !menu.contains(e.target)) {
-      menu.classList.add('hidden');
-    }
-  });
+}
+window.addEventListener("DOMContentLoaded", () => {
+  loadRanking("site");
+});
 </script>
 
 <!-- 🎨 CSS -->
 <style>
-  @keyframes robot-dance {
-    0% { transform: rotate(0deg); }
-    25% { transform: rotate(3deg); }
-    50% { transform: rotate(-3deg); }
-    75% { transform: rotate(3deg); }
-    100% { transform: rotate(0deg); }
-  }
-
-  .dance-animation {
-    animation: robot-dance 0.8s ease-in-out;
-  }
-
-  .text-custom-brand {
-    color: #23185E;
-  }
+@keyframes robot-dance {
+  0% { transform: rotate(0deg); }
+  25% { transform: rotate(3deg); }
+  50% { transform: rotate(-3deg); }
+  75% { transform: rotate(3deg); }
+  100% { transform: rotate(0deg); }
+}
+.dance-animation {
+  animation: robot-dance 0.8s ease-in-out;
+}
+.text-custom-brand {
+  color: #23185E;
+}
 </style>
-
 {% endblock %}
