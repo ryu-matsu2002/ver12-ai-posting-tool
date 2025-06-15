@@ -87,11 +87,12 @@ def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float, user_id: int = No
         try:
             from app.models import TokenUsageLog
             if hasattr(res, "usage") and user_id:
+                usage = res.usage  # ← 🔧 これが必要です！！
                 usage_log = TokenUsageLog(
                     user_id=user_id,  # ✅ 明示的に渡された user_id を使用
-                    prompt_tokens=res.usage.get("prompt_tokens", 0),
-                    completion_tokens=res.usage.get("completion_tokens", 0),
-                    total_tokens=res.usage.get("total_tokens", 0),
+                    prompt_tokens=getattr(usage, "prompt_tokens", 0),
+                    completion_tokens=getattr(usage, "completion_tokens", 0),
+                    total_tokens=getattr(usage, "total_tokens", 0),
                 )
                 db.session.add(usage_log)
                 db.session.commit()
