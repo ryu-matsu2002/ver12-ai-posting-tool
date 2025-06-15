@@ -66,7 +66,7 @@ def _tok(s: str) -> int:
 # ============================================
 # 🔧 OpenAIチャット呼び出し関数
 # ============================================
-def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float) -> str:
+def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float, user_id: int = None) -> str:
     used = sum(_tok(m["content"]) for m in msgs)
     available = CTX_LIMIT - used - 16
     max_t = min(max_t, available)
@@ -86,10 +86,9 @@ def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float) -> str:
         # ✅ TokenUsageLog保存処理（あれば）
         try:
             from app.models import TokenUsageLog
-            from flask_login import current_user
-            if hasattr(res, "usage") and current_user and current_user.is_authenticated:
+            if hasattr(res, "usage") and user_id:
                 usage_log = TokenUsageLog(
-                    user_id=current_user.id,
+                    user_id=user_id,  # ✅ 明示的に渡された user_id を使用
                     prompt_tokens=res.usage.get("prompt_tokens", 0),
                     completion_tokens=res.usage.get("completion_tokens", 0),
                     total_tokens=res.usage.get("total_tokens", 0),
@@ -154,7 +153,7 @@ def _unique_title(kw: str, pt: str) -> str:
 # ============================================
 # ✅ ユーザーの希望文字数をGPTに明示して長さ不足を防止
 # ============================================
-def _compose_body(kw: str, pt: str, format: str = "html", self_review: bool = False) -> str:
+def _compose_body(kw: str, pt: str, format: str = "html", self_review: bool = False, user_id: int = None) -> str:
     """
     SEO記事本文を生成する関数（追記なし・構造強制・装飾ガイドライン付き）
 
@@ -163,6 +162,7 @@ def _compose_body(kw: str, pt: str, format: str = "html", self_review: bool = Fa
         pt: ユーザープロンプト
         format: "html" または "markdown"
         self_review: True で自己添削を実行
+        user_id: トークンログ記録用のユーザーID（✅ 新規追加）
 
     Returns:
         本文（HTMLまたはMarkdown形式）
@@ -201,7 +201,7 @@ def _compose_body(kw: str, pt: str, format: str = "html", self_review: bool = Fa
     full = _chat([
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt}
-    ], TOKENS["block"], TEMP["block"])
+    ], TOKENS["block"], TEMP["block"], user_id=user_id)  # ✅ user_idを明示的に渡す
 
     # ✅自己添削オプション（任意）
     if self_review:
@@ -209,7 +209,7 @@ def _compose_body(kw: str, pt: str, format: str = "html", self_review: bool = Fa
         full = _chat([
             {"role": "system", "content": "あなたはSEO記事の編集者です。以下の記事を添削し、構成と論理を強化してください。"},
             {"role": "user", "content": full}
-        ], TOKENS["block"], TEMP["block"])
+        ], TOKENS["block"], TEMP["block"], user_id=user_id)  # ✅ 添削時も user_id を渡す
 
     # ✅文字数制限超過対応
     if len(full) > max_total:
@@ -283,7 +283,7 @@ def _generate_slots_per_site(app, site_id: int, n: int) -> List[datetime]:
 # ============================================
 # 🔧 単体記事生成処理（タイトル→本文→画像→完了）
 # ============================================
-def _generate(app, aid: int, tpt: str, bpt: str, format: str = "html", self_review: bool = False):
+def _generate(app, aid: int, tpt: str, bpt: str, format: str = "html", self_review: bool = False, user_id: int = None):
     """
     単体記事生成関数（1記事ごとに呼び出される）
     - タイトル生成
@@ -297,6 +297,7 @@ def _generate(app, aid: int, tpt: str, bpt: str, format: str = "html", self_revi
         bpt: 本文プロンプト
         format: "html" または "markdown"
         self_review: True の場合、GPTに自己添削を依頼する
+        user_id: ✅ トークンログ記録用に渡すユーザーID
     """
     with app.app_context():
         art = Article.query.get(aid)
@@ -319,7 +320,8 @@ def _generate(app, aid: int, tpt: str, bpt: str, format: str = "html", self_revi
                 kw=art.keyword,
                 pt=bpt,
                 format=format,
-                self_review=self_review
+                self_review=self_review,
+                user_id=user_id  # ✅ 明示的にユーザーIDを渡す
             )
             art.progress = 80
             db.session.flush()
@@ -418,7 +420,7 @@ def enqueue_generation(
             # ▼ 並列生成処理（本文などを非同期で）
             with ThreadPoolExecutor(max_workers=4) as executor:
                 futures = [
-                    executor.submit(_generate, app, aid, title_prompt, body_prompt, format, self_review)
+                    executor.submit(_generate, app, aid, title_prompt, body_prompt, format, self_review, user_id=user_id)  # ✅ user_id を渡す)
                     for aid in ids
                 ]
                 for future in as_completed(futures):
