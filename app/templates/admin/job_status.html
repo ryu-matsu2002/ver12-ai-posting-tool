@@ -33,31 +33,125 @@
   <p class="text-gray-600">現在、実行中のジョブはありません。</p>
 {% endif %}
 
-<!-- ✅ リアルタイムログ表示エリア -->
-<h2 class="text-xl font-semibold mt-10 mb-3">🧾 リアルタイムログ（直近30件）</h2>
-<div id="log-box" class="bg-black text-white text-sm p-4 rounded h-64 overflow-y-scroll font-mono whitespace-pre-line">
+<!-- ✅ 検索バー -->
+<div class="mt-10 mb-4">
+  <label class="block text-gray-700 mb-1 font-medium">🔍 ログ絞り込み:</label>
+  <input type="text" id="log-filter" placeholder="例: 2025-06-16 / Article 1234 / 投稿先サイト未設定"
+         class="w-full p-2 border border-gray-300 rounded" oninput="applyFilter()">
+</div>
+
+<!-- ✅ ログ表示ボックス -->
+<h2 class="text-xl font-semibold mb-3">🧾 リアルタイムログ（直近30件）</h2>
+<div id="log-box" class="bg-black text-white text-sm p-4 rounded h-[36rem] overflow-y-scroll font-mono whitespace-pre-line">
   読み込み中...
 </div>
 
+<!-- ✅ 要約 -->
+<h2 class="text-xl font-semibold mt-10 mb-2">❌⚠️ エラー・警告まとめ</h2>
+<ul id="summary-list" class="list-disc list-inside text-sm text-red-500 space-y-1">
+  <li>読み込み中...</li>
+</ul>
+
+<!-- ✅ AIによる対処ガイド -->
+<h2 class="text-xl font-semibold mt-10 mb-2">🧠 自動対応ガイド（AI分類）</h2>
+<ul id="ai-guide" class="list-disc list-inside text-sm text-blue-700 space-y-1">
+  <li>分析中...</li>
+</ul>
+
 <script>
+let summaryMap = {};
+let logsRaw = [];
+let checkedMap = {};
+
 function fetchLogs() {
   fetch("/admin/log-stream")
     .then(res => res.json())
     .then(data => {
       const box = document.getElementById("log-box");
+      const summary = document.getElementById("summary-list");
+      const guide = document.getElementById("ai-guide");
+
       if (data.logs) {
-        box.innerHTML = data.logs.map(line => {
+        logsRaw = data.logs;
+        summaryMap = {};
+
+        // ログ表示
+        const html = data.logs.map(line => {
           const safe = line.message.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+          if (safe.includes("❌") || safe.includes("⚠️")) {
+            const brief = safe.replace(/^.*(?:❌|⚠️)\s*/, "").slice(0, 100);
+            summaryMap[brief] = (summaryMap[brief] || 0) + 1;
+          }
           return `<div class="${line.color}">${safe}</div>`;
-        }).join("");
+        });
+
+        box.innerHTML = html.join("");
         box.scrollTop = box.scrollHeight;
-      } else {
-        box.innerHTML = "<div class='text-red-400'>ログ取得に失敗しました。</div>";
+
+        // 要約描画
+        summary.innerHTML = "";
+        Object.entries(summaryMap).forEach(([msg, count], index) => {
+          const id = "error-" + index;
+          const isChecked = checkedMap[id] ? "checked" : "";
+          summary.innerHTML += `
+            <li id="${id}">
+              <label class="flex items-start gap-2">
+                <input type="checkbox" onchange="checkedMap['${id}'] = this.checked" ${isChecked}>
+                <span>${msg} ×${count}回</span>
+              </label>
+              <button onclick="copyText(\`${msg}\`)" class="ml-2 text-xs bg-blue-600 text-white px-2 py-0.5 rounded">📋 Copy</button>
+            </li>`;
+        });
+
+        if (Object.keys(summaryMap).length === 0) {
+          summary.innerHTML = "<li>現在、エラーや警告は検出されていません。</li>";
+        }
+
+        // 対処ガイド
+        const guideItems = [];
+        for (const msg of Object.keys(summaryMap)) {
+          if (msg.includes("rest_cannot_create") || msg.includes("投稿を編集する権限")) {
+            guideItems.push("🛠 WordPressのアプリケーションパスワードまたはユーザー権限を確認してください。");
+          } else if (msg.includes("投稿先サイト未設定")) {
+            guideItems.push("📌 記事に関連付けるサイトが設定されているか確認してください。");
+          } else if (msg.includes("スケジューラが起動")) {
+            // 無視
+          } else {
+            guideItems.push(`🔍 その他：${msg}`);
+          }
+        }
+        guide.innerHTML = guideItems.length > 0 ? guideItems.map(i => `<li>${i}</li>`).join("") :
+          "<li>対応が必要なエラーは現在ありません。</li>";
+
+        applyFilter();
       }
     });
 }
 
-// 3秒ごとに更新
+// 🔍 フィルタ処理
+function applyFilter() {
+  const keyword = document.getElementById("log-filter").value.trim().toLowerCase();
+  const box = document.getElementById("log-box");
+  if (!logsRaw.length) return;
+
+  const filtered = logsRaw.filter(line =>
+    line.message.toLowerCase().includes(keyword)
+  ).map(line => {
+    const safe = line.message.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return `<div class="${line.color}">${safe}</div>`;
+  });
+
+  box.innerHTML = filtered.length ? filtered.join("") :
+    "<div class='text-gray-400'>該当するログはありません。</div>";
+}
+
+// 📋 テキストコピー関数
+function copyText(text) {
+  navigator.clipboard.writeText(text).then(() => {
+    alert("コピーしました");
+  });
+}
+
 setInterval(fetchLogs, 3000);
 fetchLogs();
 </script>
