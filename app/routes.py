@@ -611,27 +611,19 @@ def download_revenue_log():
         headers={"Content-Disposition": "attachment;filename=revenue_log.csv"}
     )
 
-# ─────────── 管理者：ジャンル管理
-@admin_bp.route("/admin/genres", methods=["GET", "POST"])
+
+# ─────────── 管理者：ジャンル管理（ユーザーごとのジャンル表示）
+@admin_bp.route("/admin/genres", methods=["GET"])
 @login_required
 def manage_genres():
     if not current_user.is_admin:
         abort(403)
 
-    from .forms import GenreForm
-    from .models import Genre
+    from app.models import User  # 念のためUserをインポート
+    users = User.query.order_by(User.last_name, User.first_name).all()
 
-    form = GenreForm()
-    genres = Genre.query.order_by(Genre.id.desc()).all()
+    return render_template("admin/genres.html", users=users)
 
-    if form.validate_on_submit():
-        new_genre = Genre(name=form.name.data.strip(), description=form.description.data.strip())
-        db.session.add(new_genre)
-        db.session.commit()
-        flash("ジャンルを追加しました", "success")
-        return redirect(url_for("admin.manage_genres"))
-
-    return render_template("admin/genres.html", form=form, genres=genres)
 
 @admin_bp.route("/admin/genres/delete/<int:genre_id>", methods=["POST"])
 @login_required

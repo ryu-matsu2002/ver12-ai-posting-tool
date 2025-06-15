@@ -2,45 +2,45 @@
 {% block title %}ジャンル管理{% endblock %}
 
 {% block content %}
-<h2 class="text-2xl font-bold mb-6">📚 ジャンル管理</h2>
+<h2 class="text-2xl font-bold mb-6">📚 ジャンル管理（ユーザー別）</h2>
 
-<!-- ✅ フォーム -->
-<form method="post" class="mb-6">
-  {{ form.hidden_tag() }}
-  <div class="mb-4">
-    {{ form.name.label(class="block font-semibold mb-1") }}
-    {{ form.name(class="w-full p-2 border rounded") }}
-  </div>
-  <div class="mb-4">
-    {{ form.description.label(class="block font-semibold mb-1") }}
-    {{ form.description(class="w-full p-2 border rounded") }}
-  </div>
-  {{ form.submit(class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded") }}
-</form>
+<div class="space-y-4">
+  {% for user in users %}
+    <details class="bg-blue-100 border border-blue-300 rounded p-4">
+      <summary class="cursor-pointer font-semibold text-lg flex items-center">
+        <span class="material-icons mr-2">person</span>
+        {{ user.last_name }} {{ user.first_name }}（{{ user.genres|length }}ジャンル）
+      </summary>
 
-<!-- ✅ 一覧 -->
-<table class="w-full bg-white text-sm border rounded shadow">
-  <thead class="bg-gray-200">
-    <tr>
-      <th class="px-3 py-2">ID</th>
-      <th class="px-3 py-2">ジャンル名</th>
-      <th class="px-3 py-2">説明</th>
-      <th class="px-3 py-2">操作</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for genre in genres %}
-    <tr class="border-t">
-      <td class="px-3 py-2">{{ genre.id }}</td>
-      <td class="px-3 py-2 font-semibold">{{ genre.name }}</td>
-      <td class="px-3 py-2 text-gray-700">{{ genre.description or "（なし）" }}</td>
-      <td class="px-3 py-2">
-        <form method="post" action="{{ url_for('admin.delete_genre', genre_id=genre.id) }}" onsubmit="return confirm('削除しますか？');">
-          <button type="submit" class="text-red-600 hover:underline text-sm">削除</button>
-        </form>
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+      {% if user.genres %}
+        <table class="mt-4 w-full bg-white text-sm border rounded shadow">
+          <thead class="bg-gray-200">
+            <tr>
+              <th class="px-3 py-2">ID</th>
+              <th class="px-3 py-2">ジャンル名</th>
+              <th class="px-3 py-2">説明</th>
+              <th class="px-3 py-2">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for genre in user.genres %}
+            <tr class="border-t">
+              <td class="px-3 py-2">{{ genre.id }}</td>
+              <td class="px-3 py-2 font-semibold">{{ genre.name }}</td>
+              <td class="px-3 py-2 text-gray-700">{{ genre.description or "（なし）" }}</td>
+              <td class="px-3 py-2">
+                <form method="post" action="{{ url_for('admin.delete_genre', genre_id=genre.id) }}" onsubmit="return confirm('削除しますか？');">
+                  <button type="submit" class="text-red-600 hover:underline text-sm">削除</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="mt-2 text-gray-600">ジャンルが登録されていません。</p>
+      {% endif %}
+    </details>
+  {% endfor %}
+</div>
 {% endblock %}
