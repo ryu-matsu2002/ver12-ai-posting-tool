@@ -1674,8 +1674,8 @@ def sites(username):
     form = SiteForm()
     user = current_user
 
-    # ✅ ジャンルの選択肢をセット
-    genre_list = Genre.query.order_by(Genre.name).all()
+    # ✅ ジャンルの選択肢をセット（自分が追加したジャンルのみ）
+    genre_list = Genre.query.filter_by(user_id=current_user.id).order_by(Genre.name).all()
     form.genre_id.choices = [(0, "ジャンル未選択")] + [(g.id, g.name) for g in genre_list]
 
     # 🔹 登録済みサイト一覧と件数
