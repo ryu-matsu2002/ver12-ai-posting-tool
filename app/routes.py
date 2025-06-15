@@ -1528,9 +1528,11 @@ def root_redirect():
     return redirect(url_for("main.dashboard", username=current_user.username))
 
 
-
 # ─────────── Dashboard
-from app.models import UserSiteQuota, Article, SiteQuotaLog, Site  # ← Site を追加
+from app.models import UserSiteQuota, Article, SiteQuotaLog, Site, User  # ← User を追加
+from sqlalchemy import func
+from flask import g
+from collections import defaultdict
 
 @bp.route("/<username>/dashboard")
 @login_required
@@ -1571,8 +1573,42 @@ def dashboard(username):
 
     # 全体の合計（カード用）もリアルタイムで
     total_quota = sum(q.total_quota for q in quotas)
-    used_quota = sum([Site.query.filter_by(user_id=user.id, plan_type=q.plan_type).count() for q in quotas])  # 🔄
+    used_quota = sum([Site.query.filter_by(user_id=user.id, plan_type=q.plan_type).count() for q in quotas])
     remaining_quota = max(total_quota - used_quota, 0)
+
+    # ────────────── 🔥 ランキング用データ集計 ──────────────
+    users = User.query.all()
+    rankings = []
+
+    for u in users:
+        sites = Site.query.filter_by(user_id=u.id).all()
+        site_count = len(sites)
+        total_impressions = sum(s.impressions or 0 for s in sites)
+        total_clicks = sum(s.clicks or 0 for s in sites)
+
+        rankings.append({
+            "user": u,
+            "site_count": site_count,
+            "impressions": total_impressions,
+            "clicks": total_clicks
+        })
+
+    # 🔄 順位付け処理
+    for key in ["site_count", "impressions", "clicks"]:
+        sorted_list = sorted(rankings, key=lambda x: x[key], reverse=True)
+        for rank, item in enumerate(sorted_list, start=1):
+            item[f"{key}_rank"] = rank
+
+    # 🏅 総合スコア：順位の合計（順位が低い＝上位）
+    for item in rankings:
+        item["total_score"] = (
+            item["site_count_rank"] +
+            item["impressions_rank"] +
+            item["clicks_rank"]
+        )
+
+    # 総合順位で並び替え
+    rankings.sort(key=lambda x: x["total_score"])
 
     return render_template(
         "dashboard.html",
@@ -1584,9 +1620,9 @@ def dashboard(username):
         done=g.done,
         posted=g.posted,
         error=g.error,
-        plans=plans
+        plans=plans,
+        rankings=rankings  # 🔥 新たにテンプレートへ渡す
     )
-
 
 
 # ─────────── プロンプト CRUD（新規登録のみ）
