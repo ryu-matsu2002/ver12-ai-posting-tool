@@ -32,4 +32,39 @@
 {% else %}
   <p class="text-gray-600">現在、実行中のジョブはありません。</p>
 {% endif %}
+
+<!-- ✅ リアルタイムログ表示エリア -->
+<h2 class="text-xl font-semibold mt-10 mb-3">🧾 リアルタイムログ（直近30件）</h2>
+<div id="log-box" class="bg-black text-white text-sm p-4 rounded h-64 overflow-y-scroll font-mono whitespace-pre-line">
+  読み込み中...
+</div>
+
+<script>
+function fetchLogs() {
+  fetch("/admin/log-stream")
+    .then(res => res.json())
+    .then(data => {
+      const box = document.getElementById("log-box");
+      if (data.logs) {
+        box.innerHTML = data.logs.map(line => {
+          const safe = line.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+          if (line.includes("❌")) {
+            return `<div class="text-red-400 font-semibold">${safe}</div>`;
+          } else if (line.includes("⚠️")) {
+            return `<div class="text-yellow-300">${safe}</div>`;
+          } else {
+            return `<div class="text-gray-200">${safe}</div>`;
+          }
+        }).join("");
+        box.scrollTop = box.scrollHeight;
+      } else {
+        box.innerHTML = "<div class='text-red-400'>ログ取得に失敗しました。</div>";
+      }
+    });
+}
+
+// 3秒ごとに更新
+setInterval(fetchLogs, 3000);
+fetchLogs();
+</script>
 {% endblock %}

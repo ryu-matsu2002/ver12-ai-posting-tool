@@ -460,6 +460,26 @@ def job_status():
     processing_articles = Article.query.filter_by(status="gen").order_by(Article.created_at.desc()).all()
     return render_template("admin/job_status.html", articles=processing_articles)
 
+import subprocess
+from flask import jsonify
+
+@admin_bp.route("/admin/log-stream")
+@login_required
+def log_stream():
+    try:
+        output = subprocess.check_output(
+            ["journalctl", "-u", "ai-posting.service", "-n", "30", "--no-pager", "--output=short"],
+            stderr=subprocess.STDOUT
+        ).decode("utf-8")
+
+        # 翻訳・整形
+        from app.utils.log_utils import parse_logs
+        logs = parse_logs(output)
+
+        return jsonify({"logs": logs})
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
 
 # 🧠 API使用量／トークン分析
 @admin_bp.route("/admin/api-usage")
