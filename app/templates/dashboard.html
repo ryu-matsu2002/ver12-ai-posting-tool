@@ -2,7 +2,8 @@
 {% block title %}Dashboard | SITE CRAFT{% endblock %}
 
 {% block content %}
-<!-- 🔷 ロゴ -->
+
+<!-- 🔷 ヘッダーロゴ -->
 <div class="flex flex-col items-center justify-center mt-10 mb-6">
   <div class="flex items-center space-x-6">
     <img src="{{ url_for('static', filename='images/tcc_logo.png') }}" alt="SITE CRAFT ロゴ" class="w-24 h-24" />
@@ -10,7 +11,7 @@
   </div>
 </div>
 
-<!-- 📊 数字カード -->
+<!-- 📊 投稿数カード -->
 <div class="grid md:grid-cols-4 gap-6 justify-center mt-8 mb-16 px-6">
   <div class="bg-white shadow rounded p-6 text-center">
     <p class="text-xl font-bold text-green-700 mb-2">投稿完了</p>
@@ -30,29 +31,31 @@
   </div>
 </div>
 
-<!-- 🏆 ランキング + 🤖 -->
+<!-- ランキング＋ロボット -->
 <div class="flex flex-col lg:flex-row justify-center items-start gap-12 px-6 mb-20">
   <!-- 🏅 ランキング -->
-  <div class="w-full lg:w-[45%]">
+  <div class="w-full lg:w-[50%]">
     <h2 class="text-2xl font-bold mb-4">👑 ユーザーランキング</h2>
+
+    <!-- タブ -->
     <div class="mb-4 flex space-x-4">
       <button onclick="loadRanking('site')" class="ranking-tab px-4 py-2 rounded bg-blue-100 text-blue-800 font-semibold">サイト数</button>
       <button onclick="loadRanking('impressions')" class="ranking-tab px-4 py-2 rounded bg-gray-100 text-gray-800">表示回数</button>
       <button onclick="loadRanking('clicks')" class="ranking-tab px-4 py-2 rounded bg-gray-100 text-gray-800">クリック数</button>
     </div>
+
+    <!-- ランキング表 -->
     <div id="ranking-container" class="overflow-y-auto max-h-[500px] border border-gray-200 rounded">
-      <table class="w-full bg-white shadow">
-        <thead class="bg-gray-100 text-sm text-gray-700 sticky top-0 z-10">
+      <table class="w-full bg-white shadow text-sm">
+        <thead class="bg-gray-100 text-gray-700 sticky top-0 z-10">
           <tr>
             <th class="p-2 text-left">順位</th>
             <th class="p-2 text-left">ユーザー名</th>
-            <th class="p-2 text-center">サイト数</th>
-            <th class="p-2 text-center">表示回数</th>
-            <th class="p-2 text-center">クリック数</th>
+            <th id="value-label" class="p-2 text-center">登録サイト数</th>
           </tr>
         </thead>
         <tbody id="ranking-body">
-          <!-- JavaScriptで非同期に描画 -->
+          <!-- JavaScriptで描画 -->
         </tbody>
       </table>
     </div>
@@ -65,11 +68,9 @@
          alt="ロボット"
          class="w-56 h-auto cursor-pointer transition-transform duration-300"
          onclick="toggleChat(); robotTalk();" />
-
     <div id="speechBubble"
          class="absolute left-36 bottom-20 bg-yellow-100 text-black text-sm px-3 py-2 rounded shadow-lg border border-gray-300 hidden z-30">
     </div>
-
     <div id="chatWindow"
          class="absolute left-[10rem] bottom-0 w-[400px] bg-white border border-gray-300 shadow-lg rounded-md hidden z-30">
       <div class="bg-blue-700 text-white px-4 py-2 rounded-t-md flex justify-between items-center">
@@ -78,13 +79,8 @@
       </div>
       <div id="chatMessages" class="p-3 h-60 overflow-y-auto text-sm space-y-2 bg-gray-50"></div>
       <div class="p-2 border-t flex">
-        <input id="chatInput" type="text"
-               class="flex-1 border rounded px-2 py-1 text-sm"
-               placeholder="メッセージを入力..." />
-        <button onclick="sendMessage()"
-                class="ml-2 bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm">
-          送信
-        </button>
+        <input id="chatInput" type="text" class="flex-1 border rounded px-2 py-1 text-sm" placeholder="メッセージを入力..." />
+        <button onclick="sendMessage()" class="ml-2 bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm">送信</button>
       </div>
     </div>
   </div>
@@ -92,121 +88,131 @@
 
 <!-- 📜 JavaScript -->
 <script>
-const chatUsername = "{{ current_user.username }}";
-const messageLog = [];
-const phrases = ["今日もいい記事を書こう！", "クリックありがとう！", "SEOもバッチリ対応中！", "自動化は最高だよね！", "ロボも歩きたいなぁ..."];
+  const labelMap = {
+    "site": "登録サイト数",
+    "impressions": "表示回数",
+    "clicks": "クリック数"
+  };
 
-function toggleChat() {
-  const chat = document.getElementById("chatWindow");
-  const messages = document.getElementById("chatMessages");
-  chat.classList.toggle("hidden");
-  if (!chat.dataset.initialized) {
-    const greeting = document.createElement("div");
-    greeting.textContent = `🤖 こんにちは、${chatUsername}さん！ご質問があればお気軽にどうぞ。`;
-    greeting.className = "text-left text-blue-700";
-    messages.appendChild(greeting);
-    chat.dataset.initialized = true;
-  }
-}
-function robotTalk() {
-  const robot = document.getElementById('robotImage');
-  const bubble = document.getElementById('speechBubble');
-  if (!robot || !bubble) return;
-  robot.classList.add('dance-animation');
-  setTimeout(() => robot.classList.remove('dance-animation'), 800);
-  const random = phrases[Math.floor(Math.random() * phrases.length)];
-  bubble.textContent = random;
-  bubble.classList.remove('hidden');
-  setTimeout(() => bubble.classList.add('hidden'), 2500);
-}
-function sendMessage() {
-  const input = document.getElementById("chatInput");
-  const messages = document.getElementById("chatMessages");
-  const userText = input.value.trim();
-  if (!userText) return;
-  const userMsg = document.createElement("div");
-  userMsg.textContent = "👤 " + userText;
-  userMsg.className = "text-right text-gray-800";
-  messages.appendChild(userMsg);
-  messageLog.push({ role: "user", content: userText });
-  const botMsg = document.createElement("div");
-  botMsg.textContent = "🤖 考え中...";
-  botMsg.className = "text-left text-blue-700";
-  messages.appendChild(botMsg);
-  messages.scrollTop = messages.scrollHeight;
-  input.value = "";
-  fetch("/api/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message: userText, history: messageLog, username: chatUsername })
-  })
-  .then(res => res.json())
-  .then(data => {
-    botMsg.textContent = "🤖 " + data.reply;
-    messageLog.push({ role: "assistant", content: data.reply });
-    messages.scrollTop = messages.scrollHeight;
-  })
-  .catch(() => {
-    botMsg.textContent = "🤖 エラーが発生しました。";
+  window.addEventListener("DOMContentLoaded", () => {
+    loadRanking("site");
   });
-}
 
-function loadRanking(type) {
-  fetch(`/api/rankings?type=${type}`)
-    .then(res => res.json())
-    .then(data => {
-      const tbody = document.getElementById("ranking-body");
-      tbody.innerHTML = "";
-      data.forEach((row, index) => {
-        const tr = document.createElement("tr");
-        tr.className = "border-b";
-        const rankIcon = index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : "#" + (index + 1);
-        tr.innerHTML = `
-          <td class="p-2 font-semibold">${rankIcon}</td>
-          <td class="p-2">${row.last_name} ${row.first_name}</td>
-          <td class="p-2 text-center">${row.site_count}</td>
-          <td class="p-2 text-center">${row.impressions}</td>
-          <td class="p-2 text-center">${row.clicks}</td>
-        `;
-        tbody.appendChild(tr);
-      });
+  function loadRanking(type) {
+    fetch(`/api/rankings?type=${type}`)
+      .then(res => res.json())
+      .then(data => {
+        const tbody = document.getElementById("ranking-body");
+        const valueLabel = document.getElementById("value-label");
+        valueLabel.textContent = labelMap[type];
+        tbody.innerHTML = "";
 
-      document.querySelectorAll(".ranking-tab").forEach(btn => {
-        btn.classList.remove("bg-blue-100", "text-blue-800");
-        btn.classList.add("bg-gray-100", "text-gray-800");
+        data.forEach((row, index) => {
+          const icon = index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : "#" + (index + 1);
+          const value = type === "site" ? row.site_count : type === "impressions" ? row.impressions : row.clicks;
+          const tr = document.createElement("tr");
+          tr.className = "border-b";
+          tr.innerHTML = `
+            <td class="p-2 font-semibold">${icon}</td>
+            <td class="p-2">${row.last_name} ${row.first_name}</td>
+            <td class="p-2 text-center">${value}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+
+        document.querySelectorAll(".ranking-tab").forEach(btn => {
+          btn.classList.remove("bg-blue-100", "text-blue-800");
+          btn.classList.add("bg-gray-100", "text-gray-800");
+        });
+        const activeBtn = document.querySelector(`.ranking-tab[onclick="loadRanking('${type}')"]`);
+        if (activeBtn) {
+          activeBtn.classList.remove("bg-gray-100", "text-gray-800");
+          activeBtn.classList.add("bg-blue-100", "text-blue-800");
+        }
+      })
+      .catch(err => {
+        console.error("ランキング読み込みエラー:", err);
       });
-      const activeBtn = document.querySelector(`.ranking-tab[onclick="loadRanking('${type}')"]`);
-      if (activeBtn) {
-        activeBtn.classList.remove("bg-gray-100", "text-gray-800");
-        activeBtn.classList.add("bg-blue-100", "text-blue-800");
-      }
-    });
-}
-window.addEventListener("DOMContentLoaded", () => {
-  loadRanking("site");
-});
+  }
+
+  // 🤖 ロボット関連
+  const chatUsername = "{{ current_user.username }}";
+  const messageLog = [];
+  const phrases = ["今日もがんばろう！", "SEO最適化中！", "記事作成順調！", "ロボットも休みたい..."];
+
+  function toggleChat() {
+    const chat = document.getElementById("chatWindow");
+    const messages = document.getElementById("chatMessages");
+    chat.classList.toggle("hidden");
+    if (!chat.dataset.initialized) {
+      const greeting = document.createElement("div");
+      greeting.textContent = `🤖 こんにちは、${chatUsername}さん！ご質問があればお気軽にどうぞ。`;
+      greeting.className = "text-left text-blue-700";
+      messages.appendChild(greeting);
+      chat.dataset.initialized = true;
+    }
+  }
+
+  function robotTalk() {
+    const robot = document.getElementById('robotImage');
+    const bubble = document.getElementById('speechBubble');
+    if (!robot || !bubble) return;
+    robot.classList.add('dance-animation');
+    setTimeout(() => robot.classList.remove('dance-animation'), 800);
+    const random = phrases[Math.floor(Math.random() * phrases.length)];
+    bubble.textContent = random;
+    bubble.classList.remove('hidden');
+    setTimeout(() => bubble.classList.add('hidden'), 2500);
+  }
+
+  function sendMessage() {
+    const input = document.getElementById("chatInput");
+    const messages = document.getElementById("chatMessages");
+    const userText = input.value.trim();
+    if (!userText) return;
+    const userMsg = document.createElement("div");
+    userMsg.textContent = "👤 " + userText;
+    userMsg.className = "text-right text-gray-800";
+    messages.appendChild(userMsg);
+    messageLog.push({ role: "user", content: userText });
+    const botMsg = document.createElement("div");
+    botMsg.textContent = "🤖 考え中...";
+    botMsg.className = "text-left text-blue-700";
+    messages.appendChild(botMsg);
+    messages.scrollTop = messages.scrollHeight;
+    input.value = "";
+    fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: userText, history: messageLog, username: chatUsername })
+    })
+      .then(res => res.json())
+      .then(data => {
+        botMsg.textContent = "🤖 " + data.reply;
+        messageLog.push({ role: "assistant", content: data.reply });
+        messages.scrollTop = messages.scrollHeight;
+      })
+      .catch(() => {
+        botMsg.textContent = "🤖 エラーが発生しました。";
+      });
+  }
 </script>
 
-<!-- 🎨 CSS -->
+<!-- 🎨 スタイル -->
 <style>
-@keyframes robot-dance {
-  0% { transform: rotate(0deg); }
-  25% { transform: rotate(3deg); }
-  50% { transform: rotate(-3deg); }
-  75% { transform: rotate(3deg); }
-  100% { transform: rotate(0deg); }
-}
-.dance-animation {
-  animation: robot-dance 0.8s ease-in-out;
-}
-.text-custom-brand {
-  color: #23185E;
-}
-thead.sticky {
-  position: sticky;
-  top: 0;
-  background-color: #f3f4f6;
-  z-index: 10;
-}
+  @keyframes robot-dance {
+    0% { transform: rotate(0deg); }
+    25% { transform: rotate(3deg); }
+    50% { transform: rotate(-3deg); }
+    75% { transform: rotate(3deg); }
+    100% { transform: rotate(0deg); }
+  }
+  .dance-animation {
+    animation: robot-dance 0.8s ease-in-out;
+  }
+  .text-custom-brand {
+    color: #23185E;
+  }
 </style>
+
 {% endblock %}
