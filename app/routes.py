@@ -1623,7 +1623,57 @@ def dashboard(username):
         plans=plans,
         rankings=rankings  # 🔥 新たにテンプレートへ渡す
     )
+@bp.route("/api/rankings")
+@login_required
+def api_rankings():
+    rank_type = request.args.get("type", "site")
 
+    subquery = (
+        db.session.query(
+            User.id.label("user_id"),
+            User.last_name,
+            User.first_name,
+            func.count(Site.id).label("site_count"),
+            func.coalesce(func.sum(Article.impressions), 0).label("impressions"),
+            func.coalesce(func.sum(Article.clicks), 0).label("clicks")
+        )
+        .outerjoin(Site, Site.user_id == User.id)
+        .outerjoin(Article, Article.site_id == Site.id)
+        .group_by(User.id)
+        .subquery()
+    )
+
+    order_column = {
+        "site": subquery.c.site_count,
+        "impressions": subquery.c.impressions,
+        "clicks": subquery.c.clicks
+    }.get(rank_type, subquery.c.site_count)
+
+    results = (
+        db.session.query(
+            subquery.c.last_name,
+            subquery.c.first_name,
+            subquery.c.site_count,
+            subquery.c.impressions,
+            subquery.c.clicks
+        )
+        .order_by(order_column.desc())
+        .limit(100)
+        .all()
+    )
+
+    data = [
+        {
+            "last_name": row.last_name,
+            "first_name": row.first_name,
+            "site_count": row.site_count,
+            "impressions": row.impressions,
+            "clicks": row.clicks
+        }
+        for row in results
+    ]
+
+    return jsonify(data)
 
 # ─────────── プロンプト CRUD（新規登録のみ）
 @bp.route("/<username>/prompts", methods=["GET", "POST"])
