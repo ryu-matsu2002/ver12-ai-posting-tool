@@ -1634,12 +1634,11 @@ def api_rankings():
             User.last_name,
             User.first_name,
             func.count(Site.id).label("site_count"),
-            func.coalesce(func.sum(Article.impressions), 0).label("impressions"),
-            func.coalesce(func.sum(Article.clicks), 0).label("clicks")
+            func.coalesce(func.sum(Site.impressions), 0).label("impressions"),
+            func.coalesce(func.sum(Site.clicks), 0).label("clicks")
         )
         .outerjoin(Site, Site.user_id == User.id)
-        .outerjoin(Article, Article.site_id == Site.id)
-        .group_by(User.id, User.last_name, User.first_name)  # ✅ ← 修正！
+        .group_by(User.id, User.last_name, User.first_name)
         .subquery()
     )
 
