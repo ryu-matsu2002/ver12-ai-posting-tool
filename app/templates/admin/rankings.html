@@ -2,45 +2,51 @@
 {% block title %}ランキング分析 | 管理者ページ{% endblock %}
 
 {% block content %}
-<h1 class="text-2xl font-bold mb-6">📊 ランキング分析</h1>
+<div class="px-6 py-6">
+  <div class="bg-white shadow-md rounded-lg p-6">
 
-<!-- ✅ タブ -->
-<div class="flex gap-4 mb-4">
-  <button class="tab-btn px-4 py-2 rounded bg-blue-100 text-blue-800 font-semibold" data-type="site">サイト数</button>
-  <button class="tab-btn px-4 py-2 rounded bg-gray-100 text-gray-800" data-type="impressions">表示回数</button>
-  <button class="tab-btn px-4 py-2 rounded bg-gray-100 text-gray-800" data-type="clicks">クリック数</button>
-  <button class="tab-btn px-4 py-2 rounded bg-gray-100 text-gray-800" data-type="posted_articles">投稿完了記事数</button>
+    <h1 class="text-2xl font-bold mb-6">📊 ランキング分析</h1>
+
+    <!-- ✅ タブ -->
+    <div class="flex gap-4 mb-4 flex-wrap">
+      <button class="tab-btn px-4 py-2 rounded bg-blue-100 text-blue-800 font-semibold" data-type="site">サイト数</button>
+      <button class="tab-btn px-4 py-2 rounded bg-gray-100 text-gray-800" data-type="impressions">表示回数</button>
+      <button class="tab-btn px-4 py-2 rounded bg-gray-100 text-gray-800" data-type="clicks">クリック数</button>
+      <button class="tab-btn px-4 py-2 rounded bg-gray-100 text-gray-800" data-type="posted_articles">投稿完了記事数</button>
+    </div>
+
+    <!-- ✅ 期間フィルター -->
+    <div class="flex gap-2 mb-4 flex-wrap">
+      <button class="period-btn px-3 py-1 rounded border" data-period="1d">24時間</button>
+      <button class="period-btn px-3 py-1 rounded border" data-period="7d">7日間</button>
+      <button class="period-btn px-3 py-1 rounded border" data-period="28d">28日間</button>
+      <button class="period-btn px-3 py-1 rounded border bg-blue-200 font-bold" data-period="3m">3か月</button>
+      <button class="period-btn px-3 py-1 rounded border" data-period="6m">6か月</button>
+      <button class="period-btn px-3 py-1 rounded border" data-period="12m">12か月</button>
+      <button class="period-btn px-3 py-1 rounded border" data-period="16m">16か月</button>
+      <button onclick="toggleCustomDate()" class="px-3 py-1 rounded border bg-gray-100">📅 カスタム</button>
+    </div>
+
+    <!-- ✅ カスタム期間 -->
+    <div id="custom-date-box" class="mb-4 hidden space-x-2">
+      <label>開始日: <input type="date" id="start_date" class="border rounded p-1 text-sm"></label>
+      <label>終了日: <input type="date" id="end_date" class="border rounded p-1 text-sm"></label>
+      <button onclick="reloadRanking()" class="px-3 py-1 bg-blue-600 text-white rounded">適用</button>
+    </div>
+
+    <!-- ✅ ランキング表 -->
+    <div class="border rounded shadow bg-white overflow-x-auto">
+      <table class="min-w-full text-sm text-left">
+        <thead class="bg-gray-100 text-gray-800 sticky top-0 z-10" id="ranking-thead"></thead>
+        <tbody id="ranking-body"></tbody>
+      </table>
+    </div>
+
+    <!-- ✅ ローディング表示 -->
+    <div id="loading" class="text-center mt-6 text-blue-600 font-semibold hidden">読み込み中...</div>
+  </div>
 </div>
 
-<!-- ✅ 期間フィルター -->
-<div class="flex gap-2 mb-4 flex-wrap">
-  <button class="period-btn px-3 py-1 rounded border" data-period="1d">24時間</button>
-  <button class="period-btn px-3 py-1 rounded border" data-period="7d">7日間</button>
-  <button class="period-btn px-3 py-1 rounded border" data-period="28d">28日間</button>
-  <button class="period-btn px-3 py-1 rounded border bg-blue-200 font-bold" data-period="3m">3か月</button>
-  <button class="period-btn px-3 py-1 rounded border" data-period="6m">6か月</button>
-  <button class="period-btn px-3 py-1 rounded border" data-period="12m">12か月</button>
-  <button class="period-btn px-3 py-1 rounded border" data-period="16m">16か月</button>
-  <button onclick="toggleCustomDate()" class="px-3 py-1 rounded border bg-gray-100">📅 カスタム</button>
-</div>
-
-<!-- ✅ カスタム期間 -->
-<div id="custom-date-box" class="mb-4 hidden space-x-2">
-  <label>開始日: <input type="date" id="start_date" class="border rounded p-1 text-sm"></label>
-  <label>終了日: <input type="date" id="end_date" class="border rounded p-1 text-sm"></label>
-  <button onclick="reloadRanking()" class="px-3 py-1 bg-blue-600 text-white rounded">適用</button>
-</div>
-
-<!-- ✅ ランキング表 -->
-<div class="border rounded shadow bg-white overflow-x-auto">
-  <table class="min-w-full text-sm text-left">
-    <thead class="bg-gray-100 text-gray-800 sticky top-0 z-10" id="ranking-thead"></thead>
-    <tbody id="ranking-body"></tbody>
-  </table>
-</div>
-
-<!-- ✅ ローディング表示 -->
-<div id="loading" class="text-center mt-6 text-blue-600 font-semibold hidden">読み込み中...</div>
 
 <script>
 let currentType = "site";
