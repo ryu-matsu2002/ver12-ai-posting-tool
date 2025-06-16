@@ -1255,8 +1255,6 @@ from datetime import datetime, timedelta
 from app import db
 from app.models import User, Site, Article
 
-admin_bp = Blueprint("admin", __name__)
-
 @admin_bp.route("/api/admin/rankings")
 @login_required
 def admin_rankings():
