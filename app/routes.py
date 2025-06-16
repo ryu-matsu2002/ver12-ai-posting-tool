@@ -1623,6 +1623,7 @@ def dashboard(username):
         plans=plans,
         rankings=rankings  # 🔥 新たにテンプレートへ渡す
     )
+
 @bp.route("/api/rankings")
 @login_required
 def api_rankings():
@@ -1649,7 +1650,7 @@ def api_rankings():
                 subquery.c.site_count
             )
             .order_by(subquery.c.site_count.desc())
-            .limit(100)
+            .limit(50)
             .all()
         )
 
@@ -1664,12 +1665,13 @@ def api_rankings():
         return jsonify(data)
 
     elif rank_type in ("impressions", "clicks"):
-        # ✅ サイト別：表示回数／クリック数 ランキング（ユーザー名付き）
+        # ✅ サイト別：表示回数／クリック数 ランキング（サイトURL付き）
         metric_column = Site.impressions if rank_type == "impressions" else Site.clicks
 
         results = (
             db.session.query(
                 Site.name.label("site_name"),
+                Site.url.label("site_url"),
                 User.last_name,
                 User.first_name,
                 metric_column.label("value")
@@ -1677,13 +1679,14 @@ def api_rankings():
             .join(User, Site.user_id == User.id)
             .filter(metric_column.isnot(None))
             .order_by(metric_column.desc())
-            .limit(100)
+            .limit(50)
             .all()
         )
 
         data = [
             {
                 "site_name": row.site_name,
+                "site_url": row.site_url,
                 "user_name": f"{row.last_name} {row.first_name}",
                 "value": row.value or 0
             }
@@ -1691,9 +1694,40 @@ def api_rankings():
         ]
         return jsonify(data)
 
+    elif rank_type == "posted_articles":
+        # ✅ サイト別：投稿完了記事数 ランキング（status = posted）
+        from app.models import Article  # 必要に応じて調整
+
+        results = (
+            db.session.query(
+                Site.name.label("site_name"),
+                Site.url.label("site_url"),
+                User.last_name,
+                User.first_name,
+                func.count(Article.id).label("value")
+            )
+            .join(User, Site.user_id == User.id)
+            .join(Article, Article.site_id == Site.id)
+            .filter(Article.status == "posted")
+            .group_by(Site.id, Site.name, Site.url, User.last_name, User.first_name)
+            .order_by(func.count(Article.id).desc())
+            .limit(50)
+            .all()
+        )
+
+        data = [
+            {
+                "site_name": row.site_name,
+                "site_url": row.site_url,
+                "user_name": f"{row.last_name} {row.first_name}",
+                "value": row.value
+            }
+            for row in results
+        ]
+        return jsonify(data)
+
     else:
-        # デフォルト（念のため site に戻す）
-        return redirect(url_for("main.api_rankings", type="site"))
+        return jsonify({"error": "Invalid ranking type"}), 400
 
 
 # ─────────── プロンプト CRUD（新規登録のみ）

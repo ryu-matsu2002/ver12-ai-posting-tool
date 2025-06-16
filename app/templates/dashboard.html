@@ -2,7 +2,6 @@
 {% block title %}Dashboard | SITE CRAFT{% endblock %}
 
 {% block content %}
-
 <!-- 🔷 ヘッダーロゴ -->
 <div class="flex flex-col items-center justify-center mt-10 mb-6">
   <div class="flex items-center space-x-6">
@@ -43,13 +42,15 @@
     <div id="speechBubble"
          class="absolute left-36 bottom-20 bg-yellow-100 text-black text-sm px-3 py-2 rounded shadow-lg border border-gray-300 hidden z-30">
     </div>
+
+    <!-- チャットウィンドウ（縦長） -->
     <div id="chatWindow"
-         class="absolute left-[12rem] bottom-0 w-[400px] bg-white border border-gray-300 shadow-lg rounded-md hidden z-30">
+         class="absolute left-[12rem] bottom-0 w-[400px] h-[500px] bg-white border border-gray-300 shadow-lg rounded-md hidden z-30 flex flex-col">
       <div class="bg-blue-700 text-white px-4 py-2 rounded-t-md flex justify-between items-center">
         🤖 site craft：チャットルーム
         <button onclick="toggleChat()" class="text-white">×</button>
       </div>
-      <div id="chatMessages" class="p-3 h-60 overflow-y-auto text-sm space-y-2 bg-gray-50"></div>
+      <div id="chatMessages" class="p-3 overflow-y-auto text-sm space-y-2 bg-gray-50 flex-1"></div>
       <div class="p-2 border-t flex">
         <input id="chatInput" type="text" class="flex-1 border rounded px-2 py-1 text-sm" placeholder="メッセージを入力..." />
         <button onclick="sendMessage()" class="ml-2 bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm">送信</button>
@@ -66,14 +67,13 @@
       <button onclick="loadRanking('site')" class="ranking-tab px-4 py-2 rounded bg-blue-100 text-blue-800 font-semibold">サイト数</button>
       <button onclick="loadRanking('impressions')" class="ranking-tab px-4 py-2 rounded bg-gray-100 text-gray-800">表示回数</button>
       <button onclick="loadRanking('clicks')" class="ranking-tab px-4 py-2 rounded bg-gray-100 text-gray-800">クリック数</button>
+      <button onclick="loadRanking('posted_articles')" class="ranking-tab px-4 py-2 rounded bg-gray-100 text-gray-800">完了記事</button>
     </div>
 
     <!-- ランキング表 -->
     <div id="ranking-container" class="overflow-y-auto max-h-[500px] border border-gray-200 rounded">
       <table class="w-full bg-white shadow text-sm">
-        <thead class="bg-gray-100 text-gray-700 sticky top-0 z-10" id="ranking-thead">
-          <!-- JSで動的に書き換え -->
-        </thead>
+        <thead class="bg-gray-100 text-gray-700 sticky top-0 z-10" id="ranking-thead"></thead>
         <tbody id="ranking-body"></tbody>
       </table>
     </div>
@@ -84,7 +84,8 @@
   const labelMap = {
     "site": "登録サイト数",
     "impressions": "表示回数",
-    "clicks": "クリック数"
+    "clicks": "クリック数",
+    "posted_articles": "投稿完了数"
   };
 
   window.addEventListener("DOMContentLoaded", () => {
@@ -101,7 +102,6 @@
         thead.innerHTML = "";
 
         if (type === "site") {
-          // ヘッダー（ユーザー別）
           thead.innerHTML = `
             <tr>
               <th class="p-2 text-left w-[50px]">順位</th>
@@ -109,8 +109,7 @@
               <th class="p-2 text-center w-[60px]">${labelMap[type]}</th>
             </tr>
           `;
-
-          data.forEach((row, index) => {
+          data.slice(0, 50).forEach((row, index) => {
             const icon = index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : "#" + (index + 1);
             const tr = document.createElement("tr");
             tr.className = "border-b";
@@ -121,25 +120,22 @@
             `;
             tbody.appendChild(tr);
           });
-
         } else {
-          // ヘッダー（サイト別）
           thead.innerHTML = `
             <tr>
               <th class="p-2 text-left w-[50px]">順位</th>
-              <th class="p-2 text-left w-[100px]">サイト名</th>
+              <th class="p-2 text-left w-[120px]">サイト名</th>
               <th class="p-2 text-left w-[80px]">ユーザー名</th>
               <th class="p-2 text-center w-[60px]">${labelMap[type]}</th>
             </tr>
           `;
-
-          data.forEach((row, index) => {
+          data.slice(0, 50).forEach((row, index) => {
             const icon = index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : "#" + (index + 1);
             const tr = document.createElement("tr");
             tr.className = "border-b";
             tr.innerHTML = `
               <td class="p-2 font-semibold">${icon}</td>
-              <td class="p-2 w-[100px]">${row.site_name}</td>
+              <td class="p-2 w-[120px]"><a href="${row.site_url}" target="_blank" class="text-blue-600 underline">${row.site_name}</a></td>
               <td class="p-2 w-[80px]">${row.user_name}</td>
               <td class="p-2 text-center w-[60px]">${row.value}</td>
             `;
@@ -239,5 +235,4 @@
     color: #23185E;
   }
 </style>
-
 {% endblock %}
