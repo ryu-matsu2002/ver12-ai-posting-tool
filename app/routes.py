@@ -1639,7 +1639,7 @@ def api_rankings():
         )
         .outerjoin(Site, Site.user_id == User.id)
         .outerjoin(Article, Article.site_id == Site.id)
-        .group_by(User.id)
+        .group_by(User.id, User.last_name, User.first_name)  # ✅ ← 修正！
         .subquery()
     )
 
