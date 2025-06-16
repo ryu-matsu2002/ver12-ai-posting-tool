@@ -1264,20 +1264,15 @@ def admin_rankings():
     if not current_user.is_admin:
         return jsonify({"error": "管理者のみアクセス可能です"}), 403
 
-    # クエリパラメータ取得
     rank_type = request.args.get("type", "site")
     order = request.args.get("order", "desc")
     period = request.args.get("period", "3m")
     start_date_str = request.args.get("start_date")
     end_date_str = request.args.get("end_date")
 
-    # 並び順指定
     sort_func = asc if order == "asc" else desc
 
-    # 現在時刻
     now = datetime.datetime.utcnow()
-
-    # 期間フィルタ処理
     predefined_periods = {
         "1d": now - timedelta(days=1),
         "7d": now - timedelta(days=7),
@@ -1299,7 +1294,6 @@ def admin_rankings():
         start_date = predefined_periods.get(period, now - timedelta(days=90))
         end_date = now
 
-    # ランキングタイプ処理
     if rank_type == "site":
         subquery = (
             db.session.query(
@@ -1342,10 +1336,10 @@ def admin_rankings():
                 Site.url.label("site_url"),
                 User.last_name,
                 User.first_name,
-                metric_column.label("value")
+                func.coalesce(metric_column, 0).label("value")
             )
             .join(User, Site.user_id == User.id)
-            .filter(metric_column.isnot(None))
+            # 🔻 フィルター削除 → すべてのサイトを対象にする
         )
 
         results = query.order_by(sort_func(metric_column)).all()
@@ -1368,20 +1362,20 @@ def admin_rankings():
                 Site.url.label("site_url"),
                 User.last_name,
                 User.first_name,
-                func.count(Article.id).label("value")
+                func.coalesce(func.count(Article.id), 0).label("value")
             )
             .join(User, Site.user_id == User.id)
-            .join(Article, Article.site_id == Site.id)
-            .filter(Article.status == "posted")
+            .outerjoin(Article, db.and_(
+                Article.site_id == Site.id,
+                Article.status == "posted",
+                Article.posted_at >= start_date if start_date else True,
+                Article.posted_at <= end_date if end_date else True
+            ))
+            .group_by(Site.id, Site.name, Site.url, User.last_name, User.first_name)
+            .order_by(sort_func(func.coalesce(func.count(Article.id), 0)))
         )
 
-        if start_date:
-            query = query.filter(Article.posted_at >= start_date)
-        if end_date:
-            query = query.filter(Article.posted_at <= end_date)
-
-        query = query.group_by(Site.id, Site.name, Site.url, User.last_name, User.first_name)
-        results = query.order_by(sort_func(func.count(Article.id))).all()
+        results = query.all()
 
         data = [
             {
@@ -1396,6 +1390,8 @@ def admin_rankings():
 
     else:
         return jsonify({"error": "不正なランキングタイプです"}), 400
+
+
 
 @admin_bp.route("/admin/ranking-page")
 @login_required
