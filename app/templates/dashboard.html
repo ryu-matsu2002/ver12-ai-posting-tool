@@ -30,7 +30,7 @@
   </div>
 </div>
 
-<!-- 🤖 ロボット + 🏅 ランキング -->
+<!-- 🤖 ロボット + 👑 ランキング -->
 <div class="flex flex-col lg:flex-row justify-center items-start gap-8 px-6 mb-20">
   <!-- 🤖 ロボット -->
   <div class="relative w-full lg:w-[30%] flex-shrink-0 ml-[-20px]">
@@ -43,7 +43,7 @@
          class="absolute left-36 bottom-20 bg-yellow-100 text-black text-sm px-3 py-2 rounded shadow-lg border border-gray-300 hidden z-30">
     </div>
 
-    <!-- チャットウィンドウ（縦長） -->
+    <!-- チャットウィンドウ -->
     <div id="chatWindow"
          class="absolute left-[12rem] bottom-0 w-[400px] h-[500px] bg-white border border-gray-300 shadow-lg rounded-md hidden z-30 flex flex-col">
       <div class="bg-blue-700 text-white px-4 py-2 rounded-t-md flex justify-between items-center">
@@ -58,19 +58,9 @@
     </div>
   </div>
 
-  <!-- 🏅 ランキング -->
+  <!-- 👑 ランキング -->
   <div class="w-full lg:w-[70%] pl-32">
-    <h2 class="text-2xl font-bold mb-4">👑 ランキング</h2>
-
-    <!-- タブ -->
-    <div class="mb-4 flex space-x-4">
-      <button onclick="loadRanking('site')" class="ranking-tab px-4 py-2 rounded bg-blue-100 text-blue-800 font-semibold">サイト数</button>
-      <button onclick="loadRanking('impressions')" class="ranking-tab px-4 py-2 rounded bg-gray-100 text-gray-800">表示回数</button>
-      <button onclick="loadRanking('clicks')" class="ranking-tab px-4 py-2 rounded bg-gray-100 text-gray-800">クリック数</button>
-      <button onclick="loadRanking('posted_articles')" class="ranking-tab px-4 py-2 rounded bg-gray-100 text-gray-800">投稿完了記事数</button>
-    </div>
-
-    <!-- ランキング表 -->
+    <h2 class="text-2xl font-bold mb-4">👑 登録サイト数ランキング</h2>
     <div id="ranking-container" class="overflow-y-auto max-h-[500px] border border-gray-200 rounded">
       <table class="w-full bg-white shadow text-sm">
         <thead class="bg-gray-100 text-gray-700 sticky top-0 z-10" id="ranking-thead"></thead>
@@ -81,77 +71,36 @@
 </div>
 
 <script>
-  const labelMap = {
-    "site": "登録サイト数",
-    "impressions": "表示回数",
-    "clicks": "クリック数",
-    "posted_articles": "投稿完了数"
-  };
-
   window.addEventListener("DOMContentLoaded", () => {
-    loadRanking("site");
+    loadRanking();
   });
 
-  function loadRanking(type) {
-    fetch(`/api/rankings?type=${type}`)
+  function loadRanking() {
+    fetch(`/api/rankings?type=site`)
       .then(res => res.json())
       .then(data => {
         const tbody = document.getElementById("ranking-body");
         const thead = document.getElementById("ranking-thead");
         tbody.innerHTML = "";
-        thead.innerHTML = "";
+        thead.innerHTML = `
+          <tr>
+            <th class="p-2 text-left w-[50px]">順位</th>
+            <th class="p-2 text-left w-[80px]">ユーザー名</th>
+            <th class="p-2 text-center w-[60px]">登録サイト数</th>
+          </tr>
+        `;
 
-        if (type === "site") {
-          thead.innerHTML = `
-            <tr>
-              <th class="p-2 text-left w-[50px]">順位</th>
-              <th class="p-2 text-left w-[80px]">ユーザー名</th>
-              <th class="p-2 text-center w-[60px]">${labelMap[type]}</th>
-            </tr>
+        data.slice(0, 50).forEach((row, index) => {
+          const icon = index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : "#" + (index + 1);
+          const tr = document.createElement("tr");
+          tr.className = "border-b";
+          tr.innerHTML = `
+            <td class="p-2 font-semibold">${icon}</td>
+            <td class="p-2 truncate w-[80px]">${row.last_name} ${row.first_name}</td>
+            <td class="p-2 text-center w-[60px]">${row.site_count}</td>
           `;
-          data.slice(0, 50).forEach((row, index) => {
-            const icon = index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : "#" + (index + 1);
-            const tr = document.createElement("tr");
-            tr.className = "border-b";
-            tr.innerHTML = `
-              <td class="p-2 font-semibold">${icon}</td>
-              <td class="p-2 truncate w-[80px]">${row.last_name} ${row.first_name}</td>
-              <td class="p-2 text-center w-[60px]">${row.site_count}</td>
-            `;
-            tbody.appendChild(tr);
-          });
-        } else {
-          thead.innerHTML = `
-            <tr>
-              <th class="p-2 text-left w-[50px]">順位</th>
-              <th class="p-2 text-left w-[120px]">サイト名</th>
-              <th class="p-2 text-left w-[80px]">ユーザー名</th>
-              <th class="p-2 text-center w-[60px]">${labelMap[type]}</th>
-            </tr>
-          `;
-          data.slice(0, 50).forEach((row, index) => {
-            const icon = index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : "#" + (index + 1);
-            const tr = document.createElement("tr");
-            tr.className = "border-b";
-            tr.innerHTML = `
-              <td class="p-2 font-semibold">${icon}</td>
-              <td class="p-2 w-[120px]"><a href="${row.site_url}" target="_blank" class="text-blue-600 underline">${row.site_name}</a></td>
-              <td class="p-2 w-[80px]">${row.user_name}</td>
-              <td class="p-2 text-center w-[60px]">${row.value}</td>
-            `;
-            tbody.appendChild(tr);
-          });
-        }
-
-        document.querySelectorAll(".ranking-tab").forEach(btn => {
-          btn.classList.remove("bg-blue-100", "text-blue-800");
-          btn.classList.add("bg-gray-100", "text-gray-800");
+          tbody.appendChild(tr);
         });
-        const activeBtn = document.querySelector(`.ranking-tab[onclick="loadRanking('${type}')"]`);
-        if (activeBtn) {
-          activeBtn.classList.remove("bg-gray-100", "text-gray-800");
-          activeBtn.classList.add("bg-blue-100", "text-blue-800");
-        }
       })
       .catch(err => {
         console.error("ランキング読み込みエラー:", err);

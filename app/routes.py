@@ -1248,6 +1248,160 @@ def regenerate_user_stuck_articles(uid):
     flash(f"{len(stuck_articles)} 件の途中停止記事を再生成キューに登録しました（バックグラウンド処理）", "success")
     return redirect(url_for("admin.user_articles", uid=uid))
 
+from flask import Blueprint, request, jsonify
+from flask_login import login_required, current_user
+from sqlalchemy import func, desc, asc
+from datetime import datetime, timedelta
+from app import db
+from app.models import User, Site, Article
+
+admin_bp = Blueprint("admin", __name__)
+
+@admin_bp.route("/api/admin/rankings")
+@login_required
+def admin_rankings():
+    if not current_user.is_admin:
+        return jsonify({"error": "管理者のみアクセス可能です"}), 403
+
+    # クエリパラメータ取得
+    rank_type = request.args.get("type", "site")
+    order = request.args.get("order", "desc")
+    period = request.args.get("period", "3m")
+    start_date_str = request.args.get("start_date")
+    end_date_str = request.args.get("end_date")
+
+    # 並び順指定
+    sort_func = asc if order == "asc" else desc
+
+    # 現在時刻
+    now = datetime.utcnow()
+
+    # 期間フィルタ処理
+    predefined_periods = {
+        "1d": now - timedelta(days=1),
+        "7d": now - timedelta(days=7),
+        "28d": now - timedelta(days=28),
+        "3m": now - timedelta(days=90),
+        "6m": now - timedelta(days=180),
+        "12m": now - timedelta(days=365),
+        "16m": now - timedelta(days=480),
+        "all": None
+    }
+
+    if period == "custom":
+        try:
+            start_date = datetime.strptime(start_date_str, "%Y-%m-%d") if start_date_str else None
+            end_date = datetime.strptime(end_date_str, "%Y-%m-%d") if end_date_str else now
+        except ValueError:
+            return jsonify({"error": "日付形式が不正です (YYYY-MM-DD)"}), 400
+    else:
+        start_date = predefined_periods.get(period, now - timedelta(days=90))
+        end_date = now
+
+    # ランキングタイプ処理
+    if rank_type == "site":
+        # ✅ サイト登録数（ユーザー単位、全期間）
+        subquery = (
+            db.session.query(
+                User.id.label("user_id"),
+                User.last_name,
+                User.first_name,
+                func.count(Site.id).label("site_count")
+            )
+            .outerjoin(Site, Site.user_id == User.id)
+            .group_by(User.id, User.last_name, User.first_name)
+            .subquery()
+        )
+
+        results = (
+            db.session.query(
+                subquery.c.last_name,
+                subquery.c.first_name,
+                subquery.c.site_count
+            )
+            .order_by(sort_func(subquery.c.site_count))
+            .all()
+        )
+
+        data = [
+            {
+                "last_name": row.last_name,
+                "first_name": row.first_name,
+                "site_count": row.site_count
+            }
+            for row in results
+        ]
+        return jsonify(data)
+
+    elif rank_type in ("impressions", "clicks"):
+        # ✅ 表示回数／クリック数（現状は累積なので期間での絞り込みはできないが、将来の拡張に備えて構成）
+        metric_column = Site.impressions if rank_type == "impressions" else Site.clicks
+
+        query = (
+            db.session.query(
+                Site.name.label("site_name"),
+                Site.url.label("site_url"),
+                User.last_name,
+                User.first_name,
+                metric_column.label("value")
+            )
+            .join(User, Site.user_id == User.id)
+            .filter(metric_column.isnot(None))
+        )
+
+        # 日付によるフィルターがない（Siteテーブルは累積のため）
+
+        results = query.order_by(sort_func(metric_column)).all()
+
+        data = [
+            {
+                "site_name": row.site_name,
+                "site_url": row.site_url,
+                "user_name": f"{row.last_name} {row.first_name}",
+                "value": row.value or 0
+            }
+            for row in results
+        ]
+        return jsonify(data)
+
+    elif rank_type == "posted_articles":
+        # ✅ 投稿完了記事数（期間フィルタあり）
+        query = (
+            db.session.query(
+                Site.name.label("site_name"),
+                Site.url.label("site_url"),
+                User.last_name,
+                User.first_name,
+                func.count(Article.id).label("value")
+            )
+            .join(User, Site.user_id == User.id)
+            .join(Article, Article.site_id == Site.id)
+            .filter(Article.status == "posted")
+        )
+
+        if start_date:
+            query = query.filter(Article.posted_at >= start_date)
+        if end_date:
+            query = query.filter(Article.posted_at <= end_date)
+
+        query = query.group_by(Site.id, Site.name, Site.url, User.last_name, User.first_name)
+        results = query.order_by(sort_func(func.count(Article.id))).all()
+
+        data = [
+            {
+                "site_name": row.site_name,
+                "site_url": row.site_url,
+                "user_name": f"{row.last_name} {row.first_name}",
+                "value": row.value
+            }
+            for row in results
+        ]
+        return jsonify(data)
+
+    else:
+        return jsonify({"error": "不正なランキングタイプです"}), 400
+
+
 
 # ────────────── キーワード ──────────────
 
@@ -1629,105 +1783,42 @@ def dashboard(username):
 def api_rankings():
     rank_type = request.args.get("type", "site")
 
-    if rank_type == "site":
-        # ✅ ユーザー別：登録サイト数ランキング
-        subquery = (
-            db.session.query(
-                User.id.label("user_id"),
-                User.last_name,
-                User.first_name,
-                func.count(Site.id).label("site_count")
-            )
-            .outerjoin(Site, Site.user_id == User.id)
-            .group_by(User.id, User.last_name, User.first_name)
-            .subquery()
+    if rank_type != "site":
+        return jsonify({"error": "This endpoint only supports site rankings."}), 400
+
+    # ✅ ユーザー別：登録サイト数ランキング（ダッシュボード用）
+    subquery = (
+        db.session.query(
+            User.id.label("user_id"),
+            User.last_name,
+            User.first_name,
+            func.count(Site.id).label("site_count")
         )
+        .outerjoin(Site, Site.user_id == User.id)
+        .group_by(User.id, User.last_name, User.first_name)
+        .subquery()
+    )
 
-        results = (
-            db.session.query(
-                subquery.c.last_name,
-                subquery.c.first_name,
-                subquery.c.site_count
-            )
-            .order_by(subquery.c.site_count.desc())
-            .limit(50)
-            .all()
+    results = (
+        db.session.query(
+            subquery.c.last_name,
+            subquery.c.first_name,
+            subquery.c.site_count
         )
+        .order_by(subquery.c.site_count.desc())
+        .limit(50)
+        .all()
+    )
 
-        data = [
-            {
-                "last_name": row.last_name,
-                "first_name": row.first_name,
-                "site_count": row.site_count
-            }
-            for row in results
-        ]
-        return jsonify(data)
-
-    elif rank_type in ("impressions", "clicks"):
-        # ✅ サイト別：表示回数／クリック数 ランキング（サイトURL付き）
-        metric_column = Site.impressions if rank_type == "impressions" else Site.clicks
-
-        results = (
-            db.session.query(
-                Site.name.label("site_name"),
-                Site.url.label("site_url"),
-                User.last_name,
-                User.first_name,
-                metric_column.label("value")
-            )
-            .join(User, Site.user_id == User.id)
-            .filter(metric_column.isnot(None))
-            .order_by(metric_column.desc())
-            .limit(50)
-            .all()
-        )
-
-        data = [
-            {
-                "site_name": row.site_name,
-                "site_url": row.site_url,
-                "user_name": f"{row.last_name} {row.first_name}",
-                "value": row.value or 0
-            }
-            for row in results
-        ]
-        return jsonify(data)
-
-    elif rank_type == "posted_articles":
-        # ✅ サイト別：投稿完了記事数 ランキング（status = posted）
-        from app.models import Article  # 必要に応じて調整
-
-        results = (
-            db.session.query(
-                Site.name.label("site_name"),
-                Site.url.label("site_url"),
-                User.last_name,
-                User.first_name,
-                func.count(Article.id).label("value")
-            )
-            .join(User, Site.user_id == User.id)
-            .join(Article, Article.site_id == Site.id)
-            .filter(Article.status == "posted")
-            .group_by(Site.id, Site.name, Site.url, User.last_name, User.first_name)
-            .order_by(func.count(Article.id).desc())
-            .limit(50)
-            .all()
-        )
-
-        data = [
-            {
-                "site_name": row.site_name,
-                "site_url": row.site_url,
-                "user_name": f"{row.last_name} {row.first_name}",
-                "value": row.value
-            }
-            for row in results
-        ]
-        return jsonify(data)
-
-    else:
-        return jsonify({"error": "Invalid ranking type"}), 400
+    data = [
+        {
+            "last_name": row.last_name,
+            "first_name": row.first_name,
+            "site_count": row.site_count
+        }
+        for row in results
+    ]
+    return jsonify(data)
 
 
 # ─────────── プロンプト CRUD（新規登録のみ）
