@@ -1248,12 +1248,8 @@ def regenerate_user_stuck_articles(uid):
     flash(f"{len(stuck_articles)} 件の途中停止記事を再生成キューに登録しました（バックグラウンド処理）", "success")
     return redirect(url_for("admin.user_articles", uid=uid))
 
-from flask import Blueprint, request, jsonify
-from flask_login import login_required, current_user
-from sqlalchemy import func, desc, asc
-from datetime import datetime, timedelta
-from app import db
-from app.models import User, Site, Article
+from sqlalchemy import func, asc, desc
+
 
 @admin_bp.route("/api/admin/rankings")
 @login_required
