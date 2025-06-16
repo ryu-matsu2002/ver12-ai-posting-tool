@@ -33,7 +33,7 @@
 <!-- 🤖 ロボット + 👑 ランキング -->
 <div class="flex flex-col lg:flex-row justify-center items-start gap-8 px-6 mb-20">
   <!-- 🤖 ロボット -->
-  <div class="relative w-full lg:w-[30%] flex-shrink-0 ml-[-20px] mt-10"> <!-- ← 上に余白追加 -->
+  <div class="relative w-full lg:w-[30%] flex-shrink-0 ml-[-20px] mt-10">
     <img id="robotImage"
          src="{{ url_for('static', filename='images/robot.png') }}"
          alt="ロボット"
@@ -43,7 +43,7 @@
          class="absolute left-36 bottom-20 bg-yellow-100 text-black text-sm px-3 py-2 rounded shadow-lg border border-gray-300 hidden z-30">
     </div>
 
-    <!-- チャットウィンドウ（スマホ風サイズに変更） -->
+    <!-- チャットウィンドウ -->
     <div id="chatWindow"
          class="absolute left-[12rem] bottom-[-80px] w-[300px] h-[500px] bg-white border border-gray-300 shadow-lg rounded-md hidden z-30 flex flex-col">
       <div class="bg-blue-700 text-white px-4 py-2 rounded-t-md flex justify-between items-center">
@@ -59,7 +59,7 @@
   </div>
 
   <!-- 👑 ランキング -->
-  <div class="w-full lg:w-[70%] pl-40"> <!-- ← ランキング全体を右寄せ -->
+  <div class="w-full lg:w-[70%] pl-40">
     <h2 class="text-2xl font-bold mb-4">👑 登録サイト数ランキング</h2>
     <div id="ranking-container" class="overflow-y-auto max-h-[500px] border border-gray-200 rounded">
       <table class="w-full bg-white shadow text-sm">
@@ -70,20 +70,28 @@
   </div>
 </div>
 
-<!-- ランキング表ヘッダ内のユーザー名列を拡張 -->
 <script>
+  window.addEventListener("DOMContentLoaded", () => {
+    console.log("✅ loadRanking実行");
+    loadRanking();
+  });
+
   function loadRanking() {
     fetch(`/api/rankings?type=site`)
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) throw new Error(`APIエラー: ${res.status}`);
+        return res.json();
+      })
       .then(data => {
+        console.log("✅ データ取得:", data);
         const tbody = document.getElementById("ranking-body");
         const thead = document.getElementById("ranking-thead");
         tbody.innerHTML = "";
         thead.innerHTML = `
           <tr>
-            <th class="p-2 text-left w-[50px]">順位</th>
-            <th class="p-2 text-left w-[180px]">ユーザー名</th> <!-- ← 幅を拡張 -->
-            <th class="p-2 text-center w-[60px]">登録サイト数</th>
+            <th class="p-2 text-left">順位</th>
+            <th class="p-2 text-left">ユーザー名</th>
+            <th class="p-2 text-center">登録サイト数</th>
           </tr>
         `;
 
@@ -94,17 +102,15 @@
           tr.innerHTML = `
             <td class="p-2 font-semibold">${icon}</td>
             <td class="p-2 truncate w-[180px]">${row.last_name} ${row.first_name}</td>
-            <td class="p-2 text-center w-[60px]">${row.site_count}</td>
+            <td class="p-2 text-center">${row.site_count}</td>
           `;
           tbody.appendChild(tr);
         });
       })
       .catch(err => {
-        console.error("ランキング読み込みエラー:", err);
+        console.error("❌ ランキング読み込み失敗:", err);
       });
   }
-
-
 
   const chatUsername = "{{ current_user.username }}";
   const messageLog = [];
