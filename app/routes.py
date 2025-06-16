@@ -1275,7 +1275,7 @@ def admin_rankings():
     sort_func = asc if order == "asc" else desc
 
     # 現在時刻
-    now = datetime.utcnow()
+    now = datetime.datetime.utcnow()
 
     # 期間フィルタ処理
     predefined_periods = {
