@@ -58,7 +58,7 @@
   </div>
 
   <!-- 🏅 ランキング -->
-  <div class="w-full lg:w-[50%] pl-32">
+  <div class="w-full lg:w-[70%] pl-32">
     <h2 class="text-2xl font-bold mb-4">👑 ランキング</h2>
 
     <!-- タブ -->
@@ -139,8 +139,8 @@
             tr.className = "border-b";
             tr.innerHTML = `
               <td class="p-2 font-semibold">${icon}</td>
-              <td class="p-2 truncate w-[100px]">${row.site_name}</td>
-              <td class="p-2 truncate w-[80px]">${row.user_name}</td>
+              <td class="p-2 w-[100px]">${row.site_name}</td>
+              <td class="p-2 w-[80px]">${row.user_name}</td>
               <td class="p-2 text-center w-[60px]">${row.value}</td>
             `;
             tbody.appendChild(tr);
