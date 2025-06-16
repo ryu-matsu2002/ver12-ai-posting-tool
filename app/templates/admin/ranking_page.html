@@ -4,37 +4,30 @@
 {% block content %}
 <div class="px-6 py-6">
   <div class="bg-white shadow-md rounded-lg p-6">
-
     <h1 class="text-2xl font-bold mb-6">📊 ランキング分析</h1>
 
-    <!-- 🔹 タブ -->
+    <!-- 🔹 2つのタブ -->
     <div class="flex gap-4 mb-4 flex-wrap">
-      <button class="tab-btn px-4 py-2 rounded bg-blue-100 text-blue-800 font-semibold" data-type="site">サイト数</button>
-      <button class="tab-btn px-4 py-2 rounded bg-gray-100 text-gray-800" data-type="impressions">表示回数</button>
-      <button class="tab-btn px-4 py-2 rounded bg-gray-100 text-gray-800" data-type="clicks">クリック数</button>
-      <button class="tab-btn px-4 py-2 rounded bg-gray-100 text-gray-800" data-type="posted_articles">投稿完了記事数</button>
+      <button class="tab-btn px-4 py-2 rounded bg-blue-100 text-blue-800 font-semibold" data-type="site">サイト登録数</button>
+      <button class="tab-btn px-4 py-2 rounded bg-gray-100 text-gray-800" data-type="access">アクセスランキング</button>
     </div>
 
-    <!-- 🔹 期間フィルター -->
+    <!-- 🔹 並び替え項目（アクセス系のみ有効） -->
+    <div id="access-sort-options" class="flex gap-4 mb-4 flex-wrap hidden">
+      <button class="metric-btn px-3 py-1 rounded border bg-purple-200 font-bold" data-metric="impressions">表示回数</button>
+      <button class="metric-btn px-3 py-1 rounded border" data-metric="clicks">クリック数</button>
+      <button class="metric-btn px-3 py-1 rounded border" data-metric="posted_articles">投稿完了</button>
+    </div>
+
+    <!-- 🔹 期間選択 -->
     <div class="flex gap-2 mb-4 flex-wrap">
       <button class="period-btn px-3 py-1 rounded border" data-period="1d">24時間</button>
       <button class="period-btn px-3 py-1 rounded border" data-period="7d">7日間</button>
       <button class="period-btn px-3 py-1 rounded border" data-period="28d">28日間</button>
       <button class="period-btn px-3 py-1 rounded border bg-blue-200 font-bold" data-period="3m">3か月</button>
-      <button class="period-btn px-3 py-1 rounded border" data-period="6m">6か月</button>
-      <button class="period-btn px-3 py-1 rounded border" data-period="12m">12か月</button>
-      <button class="period-btn px-3 py-1 rounded border" data-period="16m">16か月</button>
-      <button onclick="toggleCustomDate()" class="px-3 py-1 rounded border bg-gray-100">📅 カスタム</button>
     </div>
 
-    <!-- 🔹 カスタム期間 -->
-    <div id="custom-date-box" class="mb-4 hidden space-x-2">
-      <label>開始日: <input type="date" id="start_date" class="border rounded p-1 text-sm"></label>
-      <label>終了日: <input type="date" id="end_date" class="border rounded p-1 text-sm"></label>
-      <button onclick="reloadRanking()" class="px-3 py-1 bg-blue-600 text-white rounded">適用</button>
-    </div>
-
-    <!-- 🔹 ランキング表 -->
+    <!-- 🔹 ランキングテーブル -->
     <div class="border rounded shadow bg-white overflow-x-auto">
       <table class="min-w-full text-sm text-left">
         <thead class="bg-gray-100 text-gray-800 sticky top-0 z-10" id="ranking-thead"></thead>
@@ -42,19 +35,17 @@
       </table>
     </div>
 
-    <!-- 🔹 ローディング -->
     <div id="loading" class="text-center mt-6 text-blue-600 font-semibold hidden">読み込み中...</div>
   </div>
 </div>
 
 <script>
 let currentType = "site";
-let currentOrder = "asc";  // ⭐ デフォルト昇順
+let currentMetric = "impressions"; // アクセス系のデフォルト
+let currentOrder = "asc";
 let currentPeriod = "3m";
-let customStart = "";
-let customEnd = "";
 
-window.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", () => {
   loadRanking();
 
   document.querySelectorAll(".tab-btn").forEach(btn => {
@@ -62,7 +53,10 @@ window.addEventListener("DOMContentLoaded", () => {
       document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("bg-blue-100", "text-blue-800", "font-semibold"));
       btn.classList.add("bg-blue-100", "text-blue-800", "font-semibold");
       currentType = btn.dataset.type;
-      currentOrder = "asc";  // ⭐ 切り替え時は昇順初期化
+      currentOrder = "desc";
+
+      // アクセス系表示時のUI切替
+      document.getElementById("access-sort-options").classList.toggle("hidden", currentType !== "access");
       loadRanking();
     });
   });
@@ -72,26 +66,23 @@ window.addEventListener("DOMContentLoaded", () => {
       document.querySelectorAll(".period-btn").forEach(b => b.classList.remove("bg-blue-200", "font-bold"));
       btn.classList.add("bg-blue-200", "font-bold");
       currentPeriod = btn.dataset.period;
-      customStart = "";
-      customEnd = "";
+      loadRanking();
+    });
+  });
+
+  document.querySelectorAll(".metric-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".metric-btn").forEach(b => b.classList.remove("bg-purple-200", "font-bold"));
+      btn.classList.add("bg-purple-200", "font-bold");
+      currentMetric = btn.dataset.metric;
+      currentOrder = "desc";
       loadRanking();
     });
   });
 });
 
-function toggleCustomDate() {
-  document.getElementById("custom-date-box").classList.toggle("hidden");
-}
-
 function toggleSort() {
   currentOrder = currentOrder === "desc" ? "asc" : "desc";
-  loadRanking();
-}
-
-function reloadRanking() {
-  customStart = document.getElementById("start_date").value;
-  customEnd = document.getElementById("end_date").value;
-  currentPeriod = "custom";
   loadRanking();
 }
 
@@ -99,11 +90,8 @@ function loadRanking() {
   document.getElementById("ranking-body").innerHTML = "";
   document.getElementById("loading").classList.remove("hidden");
 
-  let url = `/api/admin/rankings?type=${currentType}&order=${currentOrder}&period=${currentPeriod}`;
-  if (currentPeriod === "custom") {
-    if (customStart) url += `&start_date=${customStart}`;
-    if (customEnd) url += `&end_date=${customEnd}`;
-  }
+  let typeParam = currentType === "access" ? currentMetric : "site";
+  let url = `/api/admin/rankings?type=${typeParam}&order=${currentOrder}&period=${currentPeriod}`;
 
   fetch(url)
     .then(res => res.json())
@@ -124,42 +112,68 @@ function loadRanking() {
         data.forEach((row, i) => {
           tbody.innerHTML += `
             <tr class="border-b">
-              <td class="p-2">${i < 3 ? ["🥇","🥈","🥉"][i] : `#${i + 1}`}</td>
+              <td class="p-2">${i < 3 ? ["🥇", "🥈", "🥉"][i] : `#${i + 1}`}</td>
               <td class="p-2">${row.last_name} ${row.first_name}</td>
               <td class="p-2 text-center">${row.site_count}</td>
             </tr>`;
         });
       } else {
-        let label = currentType === "impressions" ? "表示回数"
-                  : currentType === "clicks" ? "クリック数"
-                  : "投稿完了記事数";
-
+        // アクセス系：横並び形式で表示
         thead.innerHTML = `
           <tr>
             <th class="p-2 w-[60px]">順位</th>
             <th class="p-2">サイト名</th>
             <th class="p-2">ユーザー名</th>
-            <th class="p-2 cursor-pointer" onclick="toggleSort()">${label} ${currentOrder === "desc" ? "↓" : "↑"}</th>
+            <th class="p-2 cursor-pointer" onclick="setMetric('posted_articles')">投稿完了</th>
+            <th class="p-2 cursor-pointer" onclick="setMetric('clicks')">クリック数</th>
+            <th class="p-2 cursor-pointer" onclick="setMetric('impressions')">表示回数 ${currentOrder === "desc" ? "↓" : "↑"}</th>
           </tr>`;
-        data.forEach((row, i) => {
+
+        const grouped = {};
+        data.forEach(row => {
+          const key = row.site_url;
+          if (!grouped[key]) {
+            grouped[key] = {
+              site_name: row.site_name,
+              site_url: row.site_url,
+              user_name: row.user_name,
+              posted_articles: 0,
+              clicks: 0,
+              impressions: 0,
+            };
+          }
+          grouped[key][currentMetric] = row.value;
+        });
+
+        Object.values(grouped).forEach((row, i) => {
           tbody.innerHTML += `
-            <tr class="border-b">
-              <td class="p-2">${i < 3 ? ["🥇","🥈","🥉"][i] : `#${i + 1}`}</td>
+            <tr class="border-b ${i % 2 === 0 ? 'bg-blue-50' : ''}">
+              <td class="p-2">${i < 3 ? ["🥇", "🥈", "🥉"][i] : `#${i + 1}`}</td>
               <td class="p-2 text-blue-600 underline"><a href="${row.site_url}" target="_blank">${row.site_name}</a></td>
               <td class="p-2">${row.user_name}</td>
-              <td class="p-2 text-center">${row.value}</td>
+              <td class="p-2 text-blue-600 text-center">${row.posted_articles}</td>
+              <td class="p-2 text-red-500 text-center">${row.clicks}</td>
+              <td class="p-2 text-purple-600 text-center">${row.impressions}</td>
             </tr>`;
         });
-      }
-
-      if (data.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-gray-500">データが見つかりませんでした。</td></tr>`;
       }
     })
     .catch(err => {
       console.error(err);
-      document.getElementById("ranking-body").innerHTML = `<tr><td colspan="4" class="p-4 text-center text-red-600">読み込みに失敗しました</td></tr>`;
+      document.getElementById("ranking-body").innerHTML = `<tr><td colspan="6" class="p-4 text-center text-red-600">読み込みに失敗しました</td></tr>`;
     });
+}
+
+function setMetric(metric) {
+  currentMetric = metric;
+  currentOrder = "desc";
+  document.querySelectorAll(".metric-btn").forEach(btn => {
+    btn.classList.remove("bg-purple-200", "font-bold");
+    if (btn.dataset.metric === metric) {
+      btn.classList.add("bg-purple-200", "font-bold");
+    }
+  });
+  loadRanking();
 }
 </script>
 {% endblock %}
