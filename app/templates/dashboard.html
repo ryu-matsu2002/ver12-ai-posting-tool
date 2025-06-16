@@ -31,20 +31,21 @@
   </div>
 </div>
 
-<!-- 🤖 ロボット + 🏅 ランキング -->
-<div class="flex flex-col lg:flex-row justify-center items-start gap-8 px-6 mb-20">
+<!-- 🤖 ロボット ＋ 🏅 ランキング -->
+<div class="flex flex-col lg:flex-row justify-center items-start gap-12 px-6 mb-20">
+  
   <!-- 🤖 ロボット -->
-  <div class="relative w-full lg:w-[30%] flex-shrink-0 pl-2">
+  <div class="relative w-full lg:w-[25%] flex-shrink-0">
     <img id="robotImage"
          src="{{ url_for('static', filename='images/robot.png') }}"
          alt="ロボット"
-         class="w-56 h-auto cursor-pointer transition-transform duration-300"
+         class="w-52 h-auto cursor-pointer transition-transform duration-300 ml-auto"
          onclick="toggleChat(); robotTalk();" />
     <div id="speechBubble"
-         class="absolute left-36 bottom-20 bg-yellow-100 text-black text-sm px-3 py-2 rounded shadow-lg border border-gray-300 hidden z-30">
+         class="absolute left-28 bottom-24 bg-yellow-100 text-black text-sm px-3 py-2 rounded shadow-lg border border-gray-300 hidden z-30">
     </div>
     <div id="chatWindow"
-         class="absolute left-[10rem] bottom-0 w-[400px] bg-white border border-gray-300 shadow-lg rounded-md hidden z-30">
+         class="absolute left-0 bottom-[13rem] w-[320px] bg-white border border-gray-300 shadow-lg rounded-md hidden z-30">
       <div class="bg-blue-700 text-white px-4 py-2 rounded-t-md flex justify-between items-center">
         🤖 site craft：チャットルーム
         <button onclick="toggleChat()" class="text-white">×</button>
@@ -58,32 +59,33 @@
   </div>
 
   <!-- 🏅 ランキング -->
-  <div class="w-full lg:w-[45%] pl-4">
+  <div class="w-full lg:w-[55%] ml-auto">
     <h2 class="text-2xl font-bold mb-4">👑 ランキング</h2>
 
-    <!-- タブ -->
     <div class="mb-4 flex space-x-4">
       <button onclick="loadRanking('site')" class="ranking-tab px-4 py-2 rounded bg-blue-100 text-blue-800 font-semibold">サイト数</button>
       <button onclick="loadRanking('impressions')" class="ranking-tab px-4 py-2 rounded bg-gray-100 text-gray-800">表示回数</button>
       <button onclick="loadRanking('clicks')" class="ranking-tab px-4 py-2 rounded bg-gray-100 text-gray-800">クリック数</button>
     </div>
 
-    <!-- ランキング表 -->
     <div id="ranking-container" class="overflow-y-auto max-h-[500px] border border-gray-200 rounded">
       <table class="w-full bg-white shadow text-sm">
         <thead class="bg-gray-100 text-gray-700 sticky top-0 z-10">
           <tr>
-            <th class="p-2 text-left w-[60px]">順位</th>
-            <th class="p-2 text-left w-[120px]">ユーザー名</th>
-            <th id="value-label" class="p-2 text-center">登録サイト数</th>
+            <th class="p-2 text-left w-[50px]">順位</th>
+            <th class="p-2 text-left w-[100px]">ユーザー名</th>
+            <th id="value-label" class="p-2 text-center w-[90px]">登録サイト数</th>
           </tr>
         </thead>
-        <tbody id="ranking-body"></tbody>
+        <tbody id="ranking-body">
+          <!-- JavaScriptで描画 -->
+        </tbody>
       </table>
     </div>
   </div>
 </div>
 
+<!-- 📜 JavaScript -->
 <script>
   const labelMap = {
     "site": "登録サイト数",
@@ -107,10 +109,9 @@
         data.forEach((row, index) => {
           const icon = index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : "#" + (index + 1);
           const value = type === "site" ? row.site_count : type === "impressions" ? row.impressions : row.clicks;
-
           const tr = document.createElement("tr");
           tr.className = "border-b";
-          tr.innerHTML = `<td class="p-2 font-semibold">${icon}</td><td class="p-2 truncate w-[120px]">${row.last_name} ${row.first_name}</td><td class="p-2 text-center">${value}</td>`;
+          tr.innerHTML = `<td class="p-2 font-semibold">${icon}</td><td class="p-2 truncate w-[100px]">${row.last_name} ${row.first_name}</td><td class="p-2 text-center">${value}</td>`;
           tbody.appendChild(tr);
         });
 
@@ -129,6 +130,7 @@
       });
   }
 
+  // 🤖 ロボット関連
   const chatUsername = "{{ current_user.username }}";
   const messageLog = [];
   const phrases = ["今日もがんばろう！", "SEO最適化中！", "記事作成順調！", "ロボットも休みたい..."];
@@ -191,6 +193,7 @@
   }
 </script>
 
+<!-- 🎨 スタイル -->
 <style>
   @keyframes robot-dance {
     0% { transform: rotate(0deg); }
