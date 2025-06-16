@@ -47,7 +47,6 @@
   </div>
 </div>
 
-
 <script>
 let currentType = "site";
 let currentOrder = "desc";
@@ -55,7 +54,6 @@ let currentPeriod = "3m";
 let customStart = "";
 let customEnd = "";
 
-// 初期表示
 window.addEventListener("DOMContentLoaded", () => {
   loadRanking();
   document.querySelectorAll(".tab-btn").forEach(btn => {
@@ -78,18 +76,15 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 });
 
-// カスタム日付入力
 function toggleCustomDate() {
   document.getElementById("custom-date-box").classList.toggle("hidden");
 }
 
-// ソート切替
 function toggleSort() {
   currentOrder = currentOrder === "desc" ? "asc" : "desc";
   loadRanking();
 }
 
-// ランキング取得
 function loadRanking() {
   document.getElementById("ranking-body").innerHTML = "";
   document.getElementById("loading").classList.remove("hidden");

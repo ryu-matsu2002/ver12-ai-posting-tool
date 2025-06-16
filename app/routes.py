@@ -1397,6 +1397,12 @@ def admin_rankings():
     else:
         return jsonify({"error": "不正なランキングタイプです"}), 400
 
+@admin_bp.route("/admin/ranking-page")
+@login_required
+def admin_ranking_page():
+    if not current_user.is_admin:
+        return redirect(url_for("main.dashboard", username=current_user.username))
+    return render_template("admin/ranking_page.html")
 
 
 # ────────────── キーワード ──────────────
