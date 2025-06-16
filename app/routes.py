@@ -1250,12 +1250,13 @@ def regenerate_user_stuck_articles(uid):
 
 
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, Response
 from flask_login import login_required, current_user
 from sqlalchemy import func, desc, asc
 from datetime import datetime, timedelta
 from app import db
 from app.models import User, Site, Article
+import json  # ← 追加
 
 @admin_bp.route("/api/admin/rankings")
 @login_required
@@ -1274,7 +1275,7 @@ def admin_rankings():
     sort_func = asc if order == "asc" else desc
 
     # 現在時刻
-    now = datetime.datetime.utcnow()
+    now = datetime.utcnow()
 
     # 期間フィルタ処理
     predefined_periods = {
@@ -1300,7 +1301,6 @@ def admin_rankings():
 
     # ランキングタイプ処理
     if rank_type == "site":
-        # ✅ サイト登録数（ユーザー単位、全期間）
         subquery = (
             db.session.query(
                 User.id.label("user_id"),
@@ -1331,10 +1331,9 @@ def admin_rankings():
             }
             for row in results
         ]
-        return jsonify(data)
+        return Response(json.dumps(data, ensure_ascii=False), mimetype='application/json')
 
     elif rank_type in ("impressions", "clicks"):
-        # ✅ 表示回数／クリック数（現状は累積なので期間での絞り込みはできないが、将来の拡張に備えて構成）
         metric_column = Site.impressions if rank_type == "impressions" else Site.clicks
 
         query = (
@@ -1349,8 +1348,6 @@ def admin_rankings():
             .filter(metric_column.isnot(None))
         )
 
-        # 日付によるフィルターがない（Siteテーブルは累積のため）
-
         results = query.order_by(sort_func(metric_column)).all()
 
         data = [
@@ -1362,10 +1359,9 @@ def admin_rankings():
             }
             for row in results
         ]
-        return jsonify(data)
+        return Response(json.dumps(data, ensure_ascii=False), mimetype='application/json')
 
     elif rank_type == "posted_articles":
-        # ✅ 投稿完了記事数（期間フィルタあり）
         query = (
             db.session.query(
                 Site.name.label("site_name"),
@@ -1396,7 +1392,7 @@ def admin_rankings():
             }
             for row in results
         ]
-        return jsonify(data)
+        return Response(json.dumps(data, ensure_ascii=False), mimetype='application/json')
 
     else:
         return jsonify({"error": "不正なランキングタイプです"}), 400
