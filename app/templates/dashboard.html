@@ -58,29 +58,22 @@
   </div>
 
   <!-- 🏅 ランキング -->
-  <div class="w-full lg:w-[50%] pl-32">
-    <h2 class="text-2xl font-bold mb-4">👑 ランキング</h2>
+<div class="w-full lg:w-[50%] pl-32">
+  <h2 class="text-2xl font-bold mb-4">👑 ランキング</h2>
 
-    <!-- タブ -->
-    <div class="mb-4 flex space-x-4">
-      <button onclick="loadRanking('site')" class="ranking-tab px-4 py-2 rounded bg-blue-100 text-blue-800 font-semibold">サイト数</button>
-      <button onclick="loadRanking('impressions')" class="ranking-tab px-4 py-2 rounded bg-gray-100 text-gray-800">表示回数</button>
-      <button onclick="loadRanking('clicks')" class="ranking-tab px-4 py-2 rounded bg-gray-100 text-gray-800">クリック数</button>
-    </div>
+  <!-- タブ -->
+  <div class="mb-4 flex space-x-4">
+    <button onclick="loadRanking('site')" class="ranking-tab px-4 py-2 rounded bg-blue-100 text-blue-800 font-semibold">サイト数</button>
+    <button onclick="loadRanking('impressions')" class="ranking-tab px-4 py-2 rounded bg-gray-100 text-gray-800">表示回数</button>
+    <button onclick="loadRanking('clicks')" class="ranking-tab px-4 py-2 rounded bg-gray-100 text-gray-800">クリック数</button>
+  </div>
 
-    <!-- ランキング表 -->
-    <div id="ranking-container" class="overflow-y-auto max-h-[500px] border border-gray-200 rounded">
-      <table class="w-full bg-white shadow text-sm">
-        <thead class="bg-gray-100 text-gray-700 sticky top-0 z-10">
-          <tr>
-            <th class="p-2 text-left w-[50px]">順位</th>
-            <th class="p-2 text-left w-[50px]">ユーザー名</th>
-            <th id="value-label" class="p-2 text-center w-[60px]">登録サイト数</th>
-          </tr>
-        </thead>
-        <tbody id="ranking-body"></tbody>
-      </table>
-    </div>
+  <!-- ランキング表 -->
+  <div id="ranking-container" class="overflow-y-auto max-h-[500px] border border-gray-200 rounded">
+    <table class="w-full bg-white shadow text-sm">
+      <thead class="bg-gray-100 text-gray-700 sticky top-0 z-10" id="ranking-thead"></thead>
+      <tbody id="ranking-body"></tbody>
+    </table>
   </div>
 </div>
 
@@ -96,23 +89,66 @@
   });
 
   function loadRanking(type) {
+    const tbody = document.getElementById("ranking-body");
+    const thead = document.getElementById("ranking-thead");
+
+    // 🎯 アニメーション準備：初期化＆fadeクラス追加
+    tbody.classList.remove("fade-enter-active");
+    void tbody.offsetWidth; // 強制リフロー
+    tbody.classList.add("fade-enter");
+
     fetch(`/api/rankings?type=${type}`)
       .then(res => res.json())
       .then(data => {
-        const tbody = document.getElementById("ranking-body");
-        const valueLabel = document.getElementById("value-label");
-        valueLabel.textContent = labelMap[type];
         tbody.innerHTML = "";
+        thead.innerHTML = "";
 
-        data.forEach((row, index) => {
-          const icon = index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : "#" + (index + 1);
-          const value = type === "site" ? row.site_count : type === "impressions" ? row.impressions : row.clicks;
+        if (type === "site") {
+          thead.innerHTML = `
+            <tr>
+              <th class="p-2 text-left w-[50px]">順位</th>
+              <th class="p-2 text-left w-[80px]">ユーザー名</th>
+              <th class="p-2 text-center w-[60px]">${labelMap[type]}</th>
+            </tr>`;
 
-          const tr = document.createElement("tr");
-          tr.className = "border-b";
-          tr.innerHTML = `<td class="p-2 font-semibold">${icon}</td><td class="p-2 truncate w-[50px]">${row.last_name} ${row.first_name}</td><td class="p-2 text-center w-[60px]">${value}</td>`;
-          tbody.appendChild(tr);
-        });
+          data.forEach((row, index) => {
+            const icon = index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : "#" + (index + 1);
+            const tr = document.createElement("tr");
+            tr.className = "border-b";
+            tr.innerHTML = `
+              <td class="p-2 font-semibold">${icon}</td>
+              <td class="p-2 truncate w-[80px]">${row.last_name} ${row.first_name}</td>
+              <td class="p-2 text-center w-[60px]">${row.site_count}</td>`;
+            tbody.appendChild(tr);
+          });
+
+        } else {
+          thead.innerHTML = `
+            <tr>
+              <th class="p-2 text-left w-[50px]">順位</th>
+              <th class="p-2 text-left w-[100px]">サイト名</th>
+              <th class="p-2 text-left w-[80px]">ユーザー名</th>
+              <th class="p-2 text-center w-[60px]">${labelMap[type]}</th>
+            </tr>`;
+
+          data.forEach((row, index) => {
+            const icon = index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : "#" + (index + 1);
+            const tr = document.createElement("tr");
+            tr.className = "border-b";
+            tr.innerHTML = `
+              <td class="p-2 font-semibold">${icon}</td>
+              <td class="p-2 truncate w-[100px]">${row.site_name}</td>
+              <td class="p-2 truncate w-[80px]">${row.user_name}</td>
+              <td class="p-2 text-center w-[60px]">${row.value}</td>`;
+            tbody.appendChild(tr);
+          });
+        }
+
+        // ✅ アニメーション：0.3秒でfade-in
+        setTimeout(() => {
+          tbody.classList.remove("fade-enter");
+          tbody.classList.add("fade-enter-active");
+        }, 10);
 
         document.querySelectorAll(".ranking-tab").forEach(btn => {
           btn.classList.remove("bg-blue-100", "text-blue-800");
@@ -126,67 +162,6 @@
       })
       .catch(err => {
         console.error("ランキング読み込みエラー:", err);
-      });
-  }
-
-  const chatUsername = "{{ current_user.username }}";
-  const messageLog = [];
-  const phrases = ["今日もがんばろう！", "SEO最適化中！", "記事作成順調！", "ロボットも休みたい..."];
-
-  function toggleChat() {
-    const chat = document.getElementById("chatWindow");
-    const messages = document.getElementById("chatMessages");
-    chat.classList.toggle("hidden");
-    if (!chat.dataset.initialized) {
-      const greeting = document.createElement("div");
-      greeting.textContent = `🤖 こんにちは、${chatUsername}さん！ご質問があればお気軽にどうぞ。`;
-      greeting.className = "text-left text-blue-700";
-      messages.appendChild(greeting);
-      chat.dataset.initialized = true;
-    }
-  }
-
-  function robotTalk() {
-    const robot = document.getElementById('robotImage');
-    const bubble = document.getElementById('speechBubble');
-    if (!robot || !bubble) return;
-    robot.classList.add('dance-animation');
-    setTimeout(() => robot.classList.remove('dance-animation'), 800);
-    const random = phrases[Math.floor(Math.random() * phrases.length)];
-    bubble.textContent = random;
-    bubble.classList.remove('hidden');
-    setTimeout(() => bubble.classList.add('hidden'), 2500);
-  }
-
-  function sendMessage() {
-    const input = document.getElementById("chatInput");
-    const messages = document.getElementById("chatMessages");
-    const userText = input.value.trim();
-    if (!userText) return;
-    const userMsg = document.createElement("div");
-    userMsg.textContent = "👤 " + userText;
-    userMsg.className = "text-right text-gray-800";
-    messages.appendChild(userMsg);
-    messageLog.push({ role: "user", content: userText });
-    const botMsg = document.createElement("div");
-    botMsg.textContent = "🤖 考え中...";
-    botMsg.className = "text-left text-blue-700";
-    messages.appendChild(botMsg);
-    messages.scrollTop = messages.scrollHeight;
-    input.value = "";
-    fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: userText, history: messageLog, username: chatUsername })
-    })
-      .then(res => res.json())
-      .then(data => {
-        botMsg.textContent = "🤖 " + data.reply;
-        messageLog.push({ role: "assistant", content: data.reply });
-        messages.scrollTop = messages.scrollHeight;
-      })
-      .catch(() => {
-        botMsg.textContent = "🤖 エラーが発生しました。";
       });
   }
 </script>
@@ -204,6 +179,15 @@
   }
   .text-custom-brand {
     color: #23185E;
+  }
+
+  /* 🎨 ランキング切替フェードアニメーション */
+  #ranking-body.fade-enter {
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+  #ranking-body.fade-enter-active {
+    opacity: 1;
   }
 </style>
 

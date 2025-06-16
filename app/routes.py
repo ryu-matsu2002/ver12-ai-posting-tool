@@ -1628,51 +1628,73 @@ def dashboard(username):
 def api_rankings():
     rank_type = request.args.get("type", "site")
 
-    subquery = (
-        db.session.query(
-            User.id.label("user_id"),
-            User.last_name,
-            User.first_name,
-            func.count(Site.id).label("site_count"),
-            func.coalesce(func.sum(Site.impressions), 0).label("impressions"),
-            func.coalesce(func.sum(Site.clicks), 0).label("clicks")
+    if rank_type == "site":
+        # ✅ ユーザー別：登録サイト数ランキング
+        subquery = (
+            db.session.query(
+                User.id.label("user_id"),
+                User.last_name,
+                User.first_name,
+                func.count(Site.id).label("site_count")
+            )
+            .outerjoin(Site, Site.user_id == User.id)
+            .group_by(User.id, User.last_name, User.first_name)
+            .subquery()
         )
-        .outerjoin(Site, Site.user_id == User.id)
-        .group_by(User.id, User.last_name, User.first_name)
-        .subquery()
-    )
 
-    order_column = {
-        "site": subquery.c.site_count,
-        "impressions": subquery.c.impressions,
-        "clicks": subquery.c.clicks
-    }.get(rank_type, subquery.c.site_count)
-
-    results = (
-        db.session.query(
-            subquery.c.last_name,
-            subquery.c.first_name,
-            subquery.c.site_count,
-            subquery.c.impressions,
-            subquery.c.clicks
+        results = (
+            db.session.query(
+                subquery.c.last_name,
+                subquery.c.first_name,
+                subquery.c.site_count
+            )
+            .order_by(subquery.c.site_count.desc())
+            .limit(100)
+            .all()
         )
-        .order_by(order_column.desc())
-        .limit(100)
-        .all()
-    )
 
-    data = [
-        {
-            "last_name": row.last_name,
-            "first_name": row.first_name,
-            "site_count": row.site_count,
-            "impressions": row.impressions,
-            "clicks": row.clicks
-        }
-        for row in results
-    ]
+        data = [
+            {
+                "last_name": row.last_name,
+                "first_name": row.first_name,
+                "site_count": row.site_count
+            }
+            for row in results
+        ]
+        return jsonify(data)
 
-    return jsonify(data)
+    elif rank_type in ("impressions", "clicks"):
+        # ✅ サイト別：表示回数／クリック数 ランキング（ユーザー名付き）
+        metric_column = Site.impressions if rank_type == "impressions" else Site.clicks
+
+        results = (
+            db.session.query(
+                Site.name.label("site_name"),
+                User.last_name,
+                User.first_name,
+                metric_column.label("value")
+            )
+            .join(User, Site.user_id == User.id)
+            .filter(metric_column.isnot(None))
+            .order_by(metric_column.desc())
+            .limit(100)
+            .all()
+        )
+
+        data = [
+            {
+                "site_name": row.site_name,
+                "user_name": f"{row.last_name} {row.first_name}",
+                "value": row.value or 0
+            }
+            for row in results
+        ]
+        return jsonify(data)
+
+    else:
+        # デフォルト（念のため site に戻す）
+        return redirect(url_for("main.api_rankings", type="site"))
+
 
 # ─────────── プロンプト CRUD（新規登録のみ）
 @bp.route("/<username>/prompts", methods=["GET", "POST"])
