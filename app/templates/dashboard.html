@@ -74,8 +74,8 @@
         <thead class="bg-gray-100 text-gray-700 sticky top-0 z-10">
           <tr>
             <th class="p-2 text-left w-[50px]">順位</th>
-            <th class="p-2 text-left w-[100px]">ユーザー名</th>
-            <th id="value-label" class="p-2 text-center w-[90px]">登録サイト数</th>
+            <th class="p-2 text-left w-[80px]">ユーザー名</th>
+            <th id="value-label" class="p-2 text-center w-[60px]">登録サイト数</th>
           </tr>
         </thead>
         <tbody id="ranking-body"></tbody>
@@ -110,7 +110,7 @@
 
           const tr = document.createElement("tr");
           tr.className = "border-b";
-          tr.innerHTML = `<td class="p-2 font-semibold">${icon}</td><td class="p-2 truncate w-[100px]">${row.last_name} ${row.first_name}</td><td class="p-2 text-center w-[90px]">${value}</td>`;
+          tr.innerHTML = `<td class="p-2 font-semibold">${icon}</td><td class="p-2 truncate w-[80px]">${row.last_name} ${row.first_name}</td><td class="p-2 text-center w-[60px]">${value}</td>`;
           tbody.appendChild(tr);
         });
 
