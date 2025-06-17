@@ -359,7 +359,6 @@ def sync_stripe_payments():
         all_payments = []
         starting_after = None
 
-        # ✅ PaymentIntent をページネーションで全件取得
         while True:
             params = {"limit": 100}
             if starting_after:
@@ -378,45 +377,29 @@ def sync_stripe_payments():
                 break
 
         print(f"🔄 PaymentIntent 全件取得: {len(all_payments)} 件")
-
         new_logs = 0
 
         for pi in all_payments:
             payment_id = pi.id
 
-            # ✅ 重複チェック
-            existing = PaymentLog.query.filter_by(stripe_payment_id=payment_id).first()
-            if existing:
+            # 重複チェック
+            if PaymentLog.query.filter_by(stripe_payment_id=payment_id).first():
                 continue
 
-            # ✅ 少額テスト決済（1円未満など）はスキップ
-            if pi.amount < 100:
-                print(f"⏩ 少額決済スキップ: {payment_id} - ¥{pi.amount}")
-                continue
-
-            metadata = pi.metadata or {}
-            user_id = metadata.get("user_id")
-            plan_type = metadata.get("plan_type", "affiliate")
-
-            # ✅ チャージ情報取得
+            # チャージ確認
             charge_id = pi.latest_charge
             if not charge_id:
-                print(f"⏩ チャージ未確定: {payment_id}")
                 continue
 
             try:
                 charge = stripe.Charge.retrieve(charge_id)
-                balance_tx_id = charge.balance_transaction
-                balance_tx = stripe.BalanceTransaction.retrieve(balance_tx_id)
+                balance_tx = stripe.BalanceTransaction.retrieve(charge.balance_transaction)
             except Exception as e:
                 print(f"⚠️ チャージ取得失敗: {e}")
-                traceback.print_exc()
                 continue
 
-            # ✅ 金額（JPY：Stripeでは整数）
-            amount = pi.amount
-
-            # ✅ email 取得（複数候補から）
+            amount = pi.amount  # JPYなら整数（1円単位）
+            currency = pi.currency.upper() if hasattr(pi, "currency") else "JPY"
             email = (
                 pi.get("receipt_email")
                 or pi.get("customer_email")
@@ -424,16 +407,30 @@ def sync_stripe_payments():
                 or "unknown@example.com"
             )
 
-            # ✅ user_id がない場合は email から検索
-            if not user_id and email:
-                user = User.query.filter_by(email=email).first()
-                user_id = user.id if user else None
+            # プラン判定（amountで識別）
+            if amount == 1000:
+                plan_type = "tcc"
+                product_name = "TCC専用アフィリエイト用サイト"
+                is_subscription = False
+            elif amount == 3000:
+                plan_type = "affiliate"
+                product_name = "アフィリエイト用サイト"
+                is_subscription = False
+            elif amount == 20000:
+                plan_type = "business"
+                product_name = "事業用サイト"
+                is_subscription = True
+            else:
+                print(f"⏩ 未対応の金額: ¥{amount} - ID: {payment_id}")
+                continue
 
+            # user_id判定
+            user = User.query.filter_by(email=email).first()
+            user_id = user.id if user else None
             if not user_id:
                 print(f"⚠️ user_id不明: email={email}, payment_id={payment_id}")
                 continue
 
-            # ✅ ログ登録
             log = PaymentLog(
                 user_id=user_id,
                 email=email,
@@ -444,7 +441,11 @@ def sync_stripe_payments():
                 plan_type=plan_type,
                 stripe_payment_id=payment_id,
                 status=pi.status,
-                created_at=datetime.fromtimestamp(pi.created)
+                created_at=datetime.fromtimestamp(pi.created),
+                product_name=product_name,
+                is_subscription=is_subscription,
+                quantity=1,
+                currency=currency
             )
 
             db.session.add(log)

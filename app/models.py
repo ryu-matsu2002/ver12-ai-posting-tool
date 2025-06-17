@@ -181,6 +181,13 @@ class PaymentLog(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     status = db.Column(db.String(20), default="succeeded")  # ← これを追加
     manual_fee = db.Column(db.Integer, nullable=True)  
+
+    # ✅ 以下を追加（既存データはそのまま）
+    product_name = db.Column(db.String(100), nullable=True)
+    is_subscription = db.Column(db.Boolean, default=False)
+    quantity = db.Column(db.Integer, default=1)
+    currency = db.Column(db.String(10), default="JPY")
+
     def __repr__(self):
         return f"<PaymentLog {self.email} {self.amount}円 {self.created_at}>"
 
