@@ -988,55 +988,47 @@ def accounting():
     if not current_user.is_admin:
         abort(403)
 
-    # パラメータ取得
-    year = request.args.get("year", "all")
-    month = request.args.get("month", "all")
-
-    # TCC決済ページなしユーザー一覧
-    tcc_disabled_users = User.query.filter_by(has_purchased=False).all()
-    user_ids = [u.id for u in tcc_disabled_users]
-
-    # 対象サイト：アフィリエイト用 & 対象ユーザー
-    query = Site.query.filter(
-        Site.user_id.in_(user_ids),
-        Site.plan_type == "affiliate"
-    )
-
-    # 年月フィルタ
-    if year != "all" and month != "all":
-        year, month = int(year), int(month)
-        start = datetime(year, month, 1)
-        if month == 12:
-            end = datetime(year + 1, 1, 1)
-        else:
-            end = datetime(year, month + 1, 1)
-        query = query.filter(Site.created_at >= start, Site.created_at < end)
-
-    sites = query.all()
-
-    # 月別集計
     from collections import defaultdict
-    from calendar import month_name
 
-    monthly_data = defaultdict(int)
-    for s in sites:
-        ym = s.created_at.strftime("%Y-%m")
-        monthly_data[ym] += 1
+    # 対象：TCC決済ページを持たないユーザー（= has_purchased が False）
+    tcc_disabled_users = User.query.filter_by(has_purchased=False).all()
 
-    # 総計
-    total_sites = sum(monthly_data.values())
-    ryu_total = total_sites * 1000
-    take_total = total_sites * 2000
+    site_data_by_month = defaultdict(lambda: {
+        "site_count": 0,
+        "ryunosuke_income": 0,
+        "takeshi_income": 0
+    })
 
-    return render_template("admin/accounting.html",
-        monthly_data=monthly_data,
-        total_sites=total_sites,
-        ryu_total=ryu_total,
-        take_total=take_total,
-        selected_year=year,
-        selected_month=month
+    total_count = 0
+    total_ryunosuke = 0
+    total_takeshi = 0
+
+    for user in tcc_disabled_users:
+        for site in user.sites:
+            if site.plan_type != "affiliate":
+                continue
+            if not site.created_at:
+                continue  # created_atがNoneの場合はスキップ
+
+            ym = site.created_at.strftime("%Y-%m")
+            site_data_by_month[ym]["site_count"] += 1
+            site_data_by_month[ym]["ryunosuke_income"] += 1000
+            site_data_by_month[ym]["takeshi_income"] += 2000
+
+            total_count += 1
+            total_ryunosuke += 1000
+            total_takeshi += 2000
+
+    # 年月でソートして表示順を固定
+    sorted_data = dict(sorted(site_data_by_month.items()))
+
+    return render_template(
+        "admin/accounting.html",
+        site_data_by_month=sorted_data,
+        total_count=total_count,
+        total_ryunosuke=total_ryunosuke,
+        total_takeshi=total_takeshi
     )
-
 
 
 # --- 既存: ユーザー全記事表示 ---

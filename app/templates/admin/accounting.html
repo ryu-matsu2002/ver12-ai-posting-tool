@@ -5,24 +5,13 @@
 <div class="p-6">
   <h1 class="text-2xl font-bold mb-6">💼 経理ダッシュボード（TCC未購入ユーザー集計）</h1>
 
-  <!-- 📅 表示切替 -->
-  <form method="get" class="mb-6">
-    <label for="month" class="mr-2 font-semibold">📅 表示月：</label>
-    <select name="month" id="month" class="p-2 border rounded" onchange="this.form.submit()">
-      <option value="all" {% if selected_month == 'all' %}selected{% endif %}>全期間</option>
-      {% for month in all_months %}
-        <option value="{{ month }}" {% if selected_month == month %}selected{% endif %}>{{ month }}</option>
-      {% endfor %}
-    </select>
-  </form>
-
   <!-- 💰 集計表示 -->
   <div class="bg-white shadow rounded p-6 mb-6">
-    <h2 class="text-lg font-bold mb-4">📊 集計結果</h2>
+    <h2 class="text-lg font-bold mb-4">📊 総集計</h2>
     <ul class="list-disc list-inside space-y-1">
-      <li>対象サイト数（TCC未購入ユーザー）：<strong>{{ total_sites }}</strong> 件</li>
-      <li>松本龍之介への報酬：<strong>{{ total_ryunosuke | int | comma }} 円</strong>（@1000円）</li>
-      <li>松本毅への報酬：<strong>{{ total_takeshi | int | comma }} 円</strong>（@2000円）</li>
+      <li>対象サイト数（TCC未購入ユーザー）：<strong>{{ total_count }}</strong> 件</li>
+      <li>松本龍之介への報酬：<strong>{{ total_ryunosuke | comma }} 円</strong>（@1000円）</li>
+      <li>松本毅への報酬：<strong>{{ total_takeshi | comma }} 円</strong>（@2000円）</li>
     </ul>
   </div>
 
@@ -39,12 +28,12 @@
         </tr>
       </thead>
       <tbody>
-        {% for row in monthly_data %}
+        {% for month, data in site_data_by_month.items() %}
         <tr class="hover:bg-gray-50">
-          <td class="py-2 px-4 border">{{ row.month }}</td>
-          <td class="py-2 px-4 border">{{ row.count }}</td>
-          <td class="py-2 px-4 border">{{ row.ryunosuke | int | comma }}</td>
-          <td class="py-2 px-4 border">{{ row.takeshi | int | comma }}</td>
+          <td class="py-2 px-4 border">{{ month }}</td>
+          <td class="py-2 px-4 border">{{ data.site_count }}</td>
+          <td class="py-2 px-4 border">{{ data.ryunosuke_income | comma }}</td>
+          <td class="py-2 px-4 border">{{ data.takeshi_income | comma }}</td>
         </tr>
         {% endfor %}
       </tbody>
