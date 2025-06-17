@@ -989,13 +989,14 @@ def accounting():
         abort(403)
 
     from collections import defaultdict
-    from flask import request
 
-    # ✅ 表示対象の月を取得（例：2025-06）
-    selected_month = request.args.get("month", "all")
-
-    # ✅ TCC決済ページを持たないユーザーだけ対象にする
-    tcc_disabled_users = User.query.filter_by(is_special_access=False).all()
+    # ✅ TCC決済ページが無効なユーザーのうち、アフィリエイトプランのユーザーを対象
+    tcc_users = (
+        User.query.filter_by(is_special_access=False)
+        .join(User.site_quota)
+        .filter(UserSiteQuota.plan_type == "affiliate")
+        .all()
+    )
 
     site_data_by_month = defaultdict(lambda: {
         "site_count": 0,
@@ -1007,47 +1008,34 @@ def accounting():
     total_ryunosuke = 0
     total_takeshi = 0
 
-    for user in tcc_disabled_users:
-        for site in user.sites:
-            if site.plan_type != "affiliate":
-                continue
-            if not site.created_at:
-                continue  # ← created_atがNoneの場合は集計対象外
+    for user in tcc_users:
+        used = len(user.sites)
+        remaining = user.site_quota.remaining_sites if user.site_quota else 0
+        total_sites = used + remaining
 
-            ym = site.created_at.strftime("%Y-%m")
+        if not user.created_at:
+            continue
+        ym = user.created_at.strftime("%Y-%m")
 
-            site_data_by_month[ym]["site_count"] += 1
-            site_data_by_month[ym]["ryunosuke_income"] += 1000
-            site_data_by_month[ym]["takeshi_income"] += 2000
+        site_data_by_month[ym]["site_count"] += total_sites
+        site_data_by_month[ym]["ryunosuke_income"] += total_sites * 1000
+        site_data_by_month[ym]["takeshi_income"] += total_sites * 2000
 
-    # ✅ 表示月の絞り込み
-    if selected_month == "all":
-        filtered_data = site_data_by_month
-    else:
-        filtered_data = {selected_month: site_data_by_month.get(selected_month, {
-            "site_count": 0,
-            "ryunosuke_income": 0,
-            "takeshi_income": 0
-        })}
+        total_count += total_sites
+        total_ryunosuke += total_sites * 1000
+        total_takeshi += total_sites * 2000
 
-    # ✅ 総合計（絞り込み後の対象のみ）
-    for data in filtered_data.values():
-        total_count += data["site_count"]
-        total_ryunosuke += data["ryunosuke_income"]
-        total_takeshi += data["takeshi_income"]
-
-    # ✅ 月一覧（降順）
-    all_months = sorted(site_data_by_month.keys(), reverse=True)
+    # 年月でソート
+    sorted_data = dict(sorted(site_data_by_month.items()))
 
     return render_template(
         "admin/accounting.html",
-        site_data_by_month=dict(sorted(filtered_data.items())),
+        site_data_by_month=sorted_data,
         total_count=total_count,
         total_ryunosuke=total_ryunosuke,
-        total_takeshi=total_takeshi,
-        selected_month=selected_month,
-        all_months=all_months
+        total_takeshi=total_takeshi
     )
+
 
 
 
