@@ -352,21 +352,53 @@ import traceback
 @admin_bp.route("/admin/sync-stripe-payments", methods=["POST"])
 @login_required
 def sync_stripe_payments():
+    if not current_user.is_admin:
+        abort(403)
+
     try:
-        payments = stripe.PaymentIntent.list(limit=100)
+        all_payments = []
+        starting_after = None
+
+        # ✅ PaymentIntent をページネーションで全件取得
+        while True:
+            params = {"limit": 100}
+            if starting_after:
+                params["starting_after"] = starting_after
+
+            response = stripe.PaymentIntent.list(**params)
+            data = response.data
+
+            if not data:
+                break
+
+            all_payments.extend(data)
+            starting_after = data[-1].id
+
+            if len(data) < 100:
+                break
+
+        print(f"🔄 PaymentIntent 全件取得: {len(all_payments)} 件")
+
         new_logs = 0
 
-        for pi in payments.data:
+        for pi in all_payments:
             payment_id = pi.id
+
+            # ✅ 重複チェック
             existing = PaymentLog.query.filter_by(stripe_payment_id=payment_id).first()
             if existing:
-                continue  # すでに記録済み
+                continue
+
+            # ✅ 少額テスト決済（1円未満など）はスキップ
+            if pi.amount < 100:
+                print(f"⏩ 少額決済スキップ: {payment_id} - ¥{pi.amount}")
+                continue
 
             metadata = pi.metadata or {}
             user_id = metadata.get("user_id")
             plan_type = metadata.get("plan_type", "affiliate")
 
-            # チャージ情報取得
+            # ✅ チャージ情報取得
             charge_id = pi.latest_charge
             if not charge_id:
                 print(f"⏩ チャージ未確定: {payment_id}")
@@ -381,32 +413,30 @@ def sync_stripe_payments():
                 traceback.print_exc()
                 continue
 
-            # Stripe金額（円単位の整数）をそのまま保存
-            amount = pi.amount        # 円として扱う（StripeはJPNでは整数円）
-            fee = None               # 保存しない（後から manual_fee に手入力）
-            net = None               # fee不明なため純売上も後で計算
+            # ✅ 金額（JPY：Stripeでは整数）
+            amount = pi.amount
 
-            # ✅ email の取得（複数手段で探索）
+            # ✅ email 取得（複数候補から）
             email = (
                 pi.get("receipt_email")
                 or pi.get("customer_email")
                 or charge.get("billing_details", {}).get("email", "")
+                or "unknown@example.com"
             )
 
-            # user_id が未取得で email からユーザー検索
+            # ✅ user_id がない場合は email から検索
             if not user_id and email:
                 user = User.query.filter_by(email=email).first()
                 user_id = user.id if user else None
 
-            # user_id が不明ならスキップ
             if not user_id:
                 print(f"⚠️ user_id不明: email={email}, payment_id={payment_id}")
                 continue
 
-            # ✅ DBログ作成（feeとnet_incomeはNone）
+            # ✅ ログ登録
             log = PaymentLog(
                 user_id=user_id,
-                email=email or "unknown@example.com",
+                email=email,
                 amount=amount,
                 fee=None,
                 net_income=None,
@@ -429,6 +459,7 @@ def sync_stripe_payments():
         print("エラー内容:", e)
         traceback.print_exc()
         return jsonify({"error": "同期中にサーバーエラーが発生しました"}), 500
+
 
 @admin_bp.route("/admin/update-fee", methods=["POST"])
 @login_required
