@@ -1062,17 +1062,19 @@ def accounting():
         selected_year = year
         selected_month = month
 
-    # ✅ Stripeから取得済みの値をそのまま使用
+    # ✅ 集計値の計算
     total_amount = sum(log.amount or 0 for log in logs)
     total_fee = sum(log.fee or 0 for log in logs)
     total_net = sum(log.net_income or 0 for log in logs)
+    total_manual_fee = sum(log.manual_fee or 0 for log in logs)
 
     return render_template("admin/accounting.html",
         logs=logs,
         total_amount=total_amount,
         total_fee=total_fee,
         total_net=total_net,
-        ryu_total=0,         # ← 分配しない場合は0
+        total_manual_fee=total_manual_fee,  # ✅ 追加！
+        ryu_total=0,
         take_total=0,
         expense_total=0,
         selected_year=selected_year,
