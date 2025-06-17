@@ -381,9 +381,10 @@ def sync_stripe_payments():
                 traceback.print_exc()
                 continue
 
-            amount = pi.amount / 100
-            fee = balance_tx.fee / 100
-            net = balance_tx.net / 100
+            # セント単位で保存
+            amount = pi.amount        # セント単位
+            fee = balance_tx.fee      # セント単位
+            net = balance_tx.net      # セント単位
 
             # ✅ email の取得（複数手段で探索）
             email = (
@@ -397,17 +398,6 @@ def sync_stripe_payments():
                 user = User.query.filter_by(email=email).first()
                 user_id = user.id if user else None
 
-            # ✅ email が空で user_id がある場合 → ユーザーから取得
-            if not email and user_id:
-                user = User.query.get(user_id)
-                if user:
-                    email = user.email
-
-            # ✅ 最終手段：仮メールアドレスを設定（NULL回避）
-            if not email:
-                email = f"unknown_user_{payment_id}@example.com"
-                print(f"⚠️ email不明 → 仮メール設定: {email}")
-
             # user_id が不明ならスキップ
             if not user_id:
                 print(f"⚠️ user_id不明: email={email}, payment_id={payment_id}")
@@ -417,9 +407,9 @@ def sync_stripe_payments():
             log = PaymentLog(
                 user_id=user_id,
                 email=email,
-                amount=amount,
-                fee=fee,
-                net_income=net,
+                amount=amount,        # セント単位で保存
+                fee=fee,              # セント単位で保存
+                net_income=net,       # セント単位で保存
                 plan_type=plan_type,
                 stripe_payment_id=payment_id,
                 status=pi.status

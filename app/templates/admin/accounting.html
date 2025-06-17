@@ -48,15 +48,15 @@
           売上合計（{{ selected_year }}年{{ selected_month }}月）
         {% endif %}
       </div>
-      <div class="text-2xl font-bold text-green-600">¥{{ "%.2f"|format(total_amount) }}</div>
+      <div class="text-2xl font-bold text-green-600">¥{{ total_amount / 100 }}</div>  <!-- 円に換算 -->
     </div>
     <div class="bg-white rounded shadow p-4 text-center">
       <div class="text-sm text-gray-500 mb-1">Stripe手数料</div>
-      <div class="text-2xl font-bold text-red-500">¥{{ "%.2f"|format(total_fee) }}</div>
+      <div class="text-2xl font-bold text-red-500">¥{{ total_fee / 100 }}</div>  <!-- 円に換算 -->
     </div>
     <div class="bg-white rounded shadow p-4 text-center">
       <div class="text-sm text-gray-500 mb-1">運営者取り分</div>
-      <div class="text-2xl font-bold text-blue-600">¥{{ "%.2f"|format(total_net) }}</div>
+      <div class="text-2xl font-bold text-blue-600">¥{{ total_net / 100 }}</div>  <!-- 円に換算 -->
     </div>
   </div>
 
@@ -64,15 +64,15 @@
   <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
     <div class="bg-gray-100 rounded shadow p-4 text-center">
       <div class="text-sm text-gray-500 mb-1">経費</div>
-      <div class="text-2xl font-bold text-gray-800">¥{{ "%.2f"|format(expense_total) }}</div>
+      <div class="text-2xl font-bold text-gray-800">¥{{ expense_total / 100 }}</div>  <!-- 円に換算 -->
     </div>
     <div class="bg-gray-100 rounded shadow p-4 text-center">
       <div class="text-sm text-gray-500 mb-1">ryunosuke</div>
-      <div class="text-2xl font-bold text-green-700">¥{{ "%.2f"|format(ryu_total) }}</div>
+      <div class="text-2xl font-bold text-green-700">¥{{ ryu_total / 100 }}</div>  <!-- 円に換算 -->
     </div>
     <div class="bg-gray-100 rounded shadow p-4 text-center">
       <div class="text-sm text-gray-500 mb-1">takeshi</div>
-      <div class="text-2xl font-bold text-purple-700">¥{{ "%.2f"|format(take_total) }}</div>
+      <div class="text-2xl font-bold text-purple-700">¥{{ take_total / 100 }}</div>  <!-- 円に換算 -->
     </div>
   </div>
 
@@ -103,9 +103,9 @@
             {% endif %}
           </td>
 
-          <td class="px-3 py-2">¥{{ log.amount }}</td>
-          <td class="px-3 py-2">¥{{ log.fee or 0 }}</td>
-          <td class="px-3 py-2">¥{{ log.net_income or 0 }}
+          <td class="px-3 py-2">¥{{ log.amount / 100 }}</td>  <!-- 円に換算 -->
+          <td class="px-3 py-2">¥{{ log.fee / 100 or 0 }}</td>  <!-- 円に換算 -->
+          <td class="px-3 py-2">¥{{ log.net_income / 100 or 0 }}</td>  <!-- 円に換算 -->
           <td class="px-3 py-2">{{ log.plan_type or "-" }}</td>
         </tr>
         {% endfor %}
