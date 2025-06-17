@@ -1214,22 +1214,18 @@ def refresh_images(user_id):
 
 @admin_bp.get("/admin/user/<int:uid>/stuck-articles")
 @login_required
-def stuck_articles():
+def stuck_articles(uid):
     if not current_user.is_admin:
         abort(403)
 
-    users = User.query.all()
+    user = User.query.get_or_404(uid)
 
-    stuck_map = {
-        user.id: Article.query.filter(
-            Article.user_id == user.id,
-            Article.status.in_(["pending", "gen"])
-        ).count()
-        for user in users
-    }
+    stuck_articles = Article.query.filter(
+        Article.user_id == uid,
+        Article.status.in_(["pending", "gen"])
+    ).order_by(Article.created_at.desc()).all()
 
-    return render_template("admin/stuck_articles.html", users=users, stuck_map=stuck_map)
-
+    return render_template("admin/stuck_articles.html", user=user, articles=stuck_articles)
 
 
 @admin_bp.post("/admin/user/<int:uid>/regenerate-stuck")
@@ -1265,7 +1261,7 @@ def regenerate_user_stuck_articles(uid):
     threading.Thread(target=_background_regeneration, daemon=True).start()
 
     flash(f"{len(stuck_articles)} 件の途中停止記事を再生成キューに登録しました（バックグラウンド処理）", "success")
-    return redirect(url_for("admin.admin_user_stuck_articles", uid=uid))
+    return redirect(url_for("admin.stuck_articles", uid=uid))
 
 
 
