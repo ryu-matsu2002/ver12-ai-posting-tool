@@ -1,0 +1,40 @@
+{% extends "base_admin.html" %}
+{% block title %}生成途中の記事一覧 | 管理者{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-bold mb-6">🛠 生成途中記事の管理</h1>
+
+<table class="table-auto w-full bg-white shadow rounded">
+  <thead class="bg-gray-100 text-gray-700">
+    <tr>
+      <th class="px-4 py-2 text-left">ユーザー名</th>
+      <th class="px-4 py-2 text-left">メールアドレス</th>
+      <th class="px-4 py-2 text-center">途中記事数</th>
+      <th class="px-4 py-2 text-center">操作</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for user in users %}
+      {% set count = stuck_map[user.id] %}
+      <tr class="border-t">
+        <td class="px-4 py-2">{{ user.last_name }} {{ user.first_name }}</td>
+        <td class="px-4 py-2">{{ user.email }}</td>
+        <td class="px-4 py-2 text-center font-bold text-red-600">
+          {{ count }}
+        </td>
+        <td class="px-4 py-2 text-center">
+          {% if count > 0 %}
+          <form method="POST" action="{{ url_for('admin.regenerate_user_stuck_articles', uid=user.id) }}">
+            <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white py-1 px-4 rounded">
+              🔄 再生成キューに登録
+            </button>
+          </form>
+          {% else %}
+          <span class="text-gray-400">―</span>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

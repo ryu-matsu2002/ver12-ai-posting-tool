@@ -96,7 +96,8 @@
 
         <!-- 操作 -->
         <td class="px-2 py-2 space-x-2 whitespace-nowrap">
-          <a href="{{ url_for('admin.user_articles', uid=u.id) }}" class="text-blue-600 hover:underline">
+          <a href="{{ url_for('admin.user_articles', uid=u.id) }}"
+             class="px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-800 text-sm rounded">
             記事一覧
           </a>
           <form action="{{ url_for('admin.admin_login_as', user_id=u.id) }}" method="post" class="inline">
