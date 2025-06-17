@@ -982,62 +982,61 @@ def delete_stuck_articles():
     flash(f"{deleted_count} 件の途中停止記事を削除しました", "success")
     return redirect(url_for("admin.admin_dashboard"))
 
-@admin_bp.route("/admin/accounting", methods=["GET", "POST"])
+@admin_bp.route("/admin/accounting", methods=["GET"])
 @login_required
 def accounting():
     if not current_user.is_admin:
         abort(403)
 
-    from datetime import datetime
-    from app.models import PaymentLog
-
-    now = datetime.utcnow()
-    now_year = now.year
-
     # パラメータ取得
-    year_param = request.args.get("year", str(now.year))
-    month_param = request.args.get("month", str(now.month))
+    year = request.args.get("year", "all")
+    month = request.args.get("month", "all")
 
-    if year_param == "all":
-        logs = PaymentLog.query.order_by(PaymentLog.created_at.desc()).all()
-        selected_year = "all"
-        selected_month = None
-    else:
-        year = int(year_param)
-        month = int(month_param)
-        start_date = datetime(year, month, 1)
+    # TCC決済ページなしユーザー一覧
+    tcc_disabled_users = User.query.filter_by(has_tcc_access=False).all()
+    user_ids = [u.id for u in tcc_disabled_users]
+
+    # 対象サイト：アフィリエイト用 & 対象ユーザー
+    query = Site.query.filter(
+        Site.user_id.in_(user_ids),
+        Site.plan_type == "affiliate"
+    )
+
+    # 年月フィルタ
+    if year != "all" and month != "all":
+        year, month = int(year), int(month)
+        start = datetime(year, month, 1)
         if month == 12:
-            end_date = datetime(year + 1, 1, 1)
+            end = datetime(year + 1, 1, 1)
         else:
-            end_date = datetime(year, month + 1, 1)
+            end = datetime(year, month + 1, 1)
+        query = query.filter(Site.created_at >= start, Site.created_at < end)
 
-        logs = PaymentLog.query.filter(
-            PaymentLog.created_at >= start_date,
-            PaymentLog.created_at < end_date
-        ).order_by(PaymentLog.created_at.desc()).all()
+    sites = query.all()
 
-        selected_year = year
-        selected_month = month
+    # 月別集計
+    from collections import defaultdict
+    from calendar import month_name
 
-    # ✅ 集計値の計算
-    total_amount = sum(log.amount or 0 for log in logs)
-    total_fee = sum(log.fee or 0 for log in logs)
-    total_net = sum(log.net_income or 0 for log in logs)
-    total_manual_fee = sum(log.manual_fee or 0 for log in logs)
+    monthly_data = defaultdict(int)
+    for s in sites:
+        ym = s.created_at.strftime("%Y-%m")
+        monthly_data[ym] += 1
+
+    # 総計
+    total_sites = sum(monthly_data.values())
+    ryu_total = total_sites * 1000
+    take_total = total_sites * 2000
 
     return render_template("admin/accounting.html",
-        logs=logs,
-        total_amount=total_amount,
-        total_fee=total_fee,
-        total_net=total_net,
-        total_manual_fee=total_manual_fee,  # ✅ 追加！
-        ryu_total=0,
-        take_total=0,
-        expense_total=0,
-        selected_year=selected_year,
-        selected_month=selected_month,
-        now_year=now_year
+        monthly_data=monthly_data,
+        total_sites=total_sites,
+        ryu_total=ryu_total,
+        take_total=take_total,
+        selected_year=year,
+        selected_month=month
     )
+
 
 
 # --- 既存: ユーザー全記事表示 ---

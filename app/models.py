@@ -89,7 +89,7 @@ class Site(db.Model):
     clicks = db.Column(db.Integer, default=0)         # 総クリック数（GSC）
     impressions = db.Column(db.Integer, default=0)    # 表示回数（GSC）
     genre_id = db.Column(db.Integer, db.ForeignKey('genres.id'), nullable=True)  # ← 追加
-
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
     # リレーション
     articles = db.relationship("Article", backref="site", lazy='selectin')
     plan_type = db.Column(db.String(50), nullable=True)  # 'affiliate' または 'business'

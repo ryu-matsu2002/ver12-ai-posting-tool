@@ -1,191 +1,58 @@
 {% extends "base_admin.html" %}
-
 {% block title %}経理ダッシュボード{% endblock %}
 
 {% block content %}
 <div class="p-6">
-  <div class="flex justify-between items-center mb-6">
-    <h1 class="text-2xl font-bold">💼 Stripe経理ダッシュボード</h1>
-    <button id="sync-button" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm shadow">
-      🔄 Stripe支払いを同期
-    </button>
-  </div>
+  <h1 class="text-2xl font-bold mb-6">💼 経理ダッシュボード（TCC未購入ユーザー集計）</h1>
 
-  <div id="sync-message" class="mb-4 text-sm font-semibold text-blue-600"></div>
-
-  <form method="get" class="mb-6 flex flex-wrap items-center gap-3">
-    <label class="font-semibold">表示年月:</label>
-    <select name="year" class="border rounded px-2 py-1" onchange="this.form.submit()">
-      <option value="all" {% if selected_year == 'all' %}selected{% endif %}>全期間</option>
-      {% for y in range(2024, now_year + 1) %}
-        <option value="{{ y }}" {% if selected_year == y %}selected{% endif %}>{{ y }}年</option>
+  <!-- 📅 表示切替 -->
+  <form method="get" class="mb-6">
+    <label for="month" class="mr-2 font-semibold">📅 表示月：</label>
+    <select name="month" id="month" class="p-2 border rounded" onchange="this.form.submit()">
+      <option value="all" {% if selected_month == 'all' %}selected{% endif %}>全期間</option>
+      {% for month in all_months %}
+        <option value="{{ month }}" {% if selected_month == month %}selected{% endif %}>{{ month }}</option>
       {% endfor %}
     </select>
-    <select name="month" class="border rounded px-2 py-1" {% if selected_year == 'all' %}disabled{% endif %}>
-      {% for m in range(1, 13) %}
-        <option value="{{ m }}" {% if m == selected_month %}selected{% endif %}>{{ m }}月</option>
-      {% endfor %}
-    </select>
-    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1 rounded">表示</button>
   </form>
 
-  <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-    <div class="bg-white rounded shadow p-4 text-center">
-      <div class="text-sm text-gray-500 mb-1">
-        {% if selected_year == 'all' %}売上合計（全期間）{% else %}売上合計（{{ selected_year }}年{{ selected_month }}月）{% endif %}
-      </div>
-      <div class="text-2xl font-bold text-green-600">¥{{ total_amount // 100 }}</div>
-    </div>
-    <div class="bg-white rounded shadow p-4 text-center">
-      <div class="text-sm text-gray-500 mb-1">Stripe手数料</div>
-      <div class="text-2xl font-bold text-red-500">¥{{ total_manual_fee // 100 }}</div>
-    </div>
-    <div class="bg-white rounded shadow p-4 text-center">
-      <div class="text-sm text-gray-500 mb-1">運営者取り分（純売上）</div>
-      <div class="text-2xl font-bold text-blue-600">¥{{ (total_amount - total_manual_fee) // 100 }}</div>
-    </div>
+  <!-- 💰 集計表示 -->
+  <div class="bg-white shadow rounded p-6 mb-6">
+    <h2 class="text-lg font-bold mb-4">📊 集計結果</h2>
+    <ul class="list-disc list-inside space-y-1">
+      <li>対象サイト数（TCC未購入ユーザー）：<strong>{{ total_sites }}</strong> 件</li>
+      <li>松本龍之介への報酬：<strong>{{ total_ryunosuke | int | comma }} 円</strong>（@1000円）</li>
+      <li>松本毅への報酬：<strong>{{ total_takeshi | int | comma }} 円</strong>（@2000円）</li>
+    </ul>
   </div>
 
-  <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-    <div class="bg-gray-100 rounded shadow p-4 text-center">
-      <div class="text-sm text-gray-500 mb-1">経費</div>
-      <div class="text-2xl font-bold text-gray-800">¥{{ expense_total }}</div>
-    </div>
-    <div class="bg-gray-100 rounded shadow p-4 text-center">
-      <div class="text-sm text-gray-500 mb-1">ryunosuke</div>
-      <div class="text-2xl font-bold text-green-700">¥{{ ryu_total }}</div>
-    </div>
-    <div class="bg-gray-100 rounded shadow p-4 text-center">
-      <div class="text-sm text-gray-500 mb-1">takeshi</div>
-      <div class="text-2xl font-bold text-purple-700">¥{{ take_total }}</div>
-    </div>
-  </div>
-
-  <div class="overflow-x-auto">
-    <table class="w-full table-auto border border-gray-200 text-sm">
+  <!-- 📋 月別リスト -->
+  <div class="bg-gray-50 p-4 rounded shadow">
+    <h3 class="text-md font-bold mb-2">📅 月別内訳</h3>
+    <table class="min-w-full border border-gray-300 text-sm text-center bg-white">
       <thead class="bg-gray-100">
         <tr>
-          <th class="px-3 py-2">#</th>
-          <th class="px-3 py-2">日時</th>
-          <th class="px-3 py-2">ユーザー名</th>
-          <th class="px-3 py-2">金額</th>
-          <th class="px-3 py-2">手数料<br><span class="text-xs text-gray-500">(手入力)</span></th>
-          <th class="px-3 py-2">純売上</th>
-          <th class="px-3 py-2">ryunosuke</th>
-          <th class="px-3 py-2">takeshi</th>
-          <th class="px-3 py-2">経費</th>
-          <th class="px-3 py-2">プラン</th>
+          <th class="py-2 px-4 border">年月</th>
+          <th class="py-2 px-4 border">サイト数</th>
+          <th class="py-2 px-4 border">龍之介（@1000）</th>
+          <th class="py-2 px-4 border">毅（@2000）</th>
         </tr>
       </thead>
       <tbody>
-        {% for log in logs %}
-        {% set net = log.amount - (log.manual_fee or 0) %}
-        <tr class="border-t hover:bg-gray-50">
-          <td class="px-3 py-2 text-center">{{ loop.index }}</td>
-          <td class="px-3 py-2">{{ log.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
-          <td class="px-3 py-2">{% if log.user %}{{ log.user.last_name }} {{ log.user.first_name }}{% else %}（不明）{% endif %}</td>
-          <td class="px-3 py-2 text-right">¥{{ log.amount // 100 }}</td>
-          <td class="px-3 py-2 text-right">
-            <div class="flex items-center space-x-1">
-              <input type="number"
-                     value="{{ log.manual_fee or '' }}"
-                     min="0"
-                     class="w-20 p-1 border rounded text-right"
-                     id="fee_input_{{ log.id }}"
-                     data-log-id="{{ log.id }}"
-                     data-amount="{{ log.amount }}"
-                     oninput="handleInput(this)">
-              <button type="button"
-                      onclick="saveFee('{{ log.id }}')"
-                      class="bg-blue-500 text-white text-xs px-2 py-1 rounded hover:bg-blue-600">保存</button>
-            </div>
-            <div id="fee_message_{{ log.id }}" class="text-xs mt-1 text-green-700 font-semibold"></div>
-          </td>
-          <td class="px-3 py-2 text-right" id="net_income_{{ log.id }}">¥{{ net // 100 }}</td>
-          <td class="px-3 py-2 text-right" id="ryu_{{ log.id }}">¥{% if log.amount == 3000 %}{{ net // 3 // 100 }}{% elif log.amount == 20000 %}{{ (net * 0.8) // 100 }}{% else %}0{% endif %}</td>
-          <td class="px-3 py-2 text-right" id="take_{{ log.id }}">¥{% if log.amount == 3000 %}{{ net // 3 // 100 }}{% elif log.amount == 20000 %}{{ (net - (net * 0.8)) // 100 }}{% else %}0{% endif %}</td>
-          <td class="px-3 py-2 text-right" id="keihi_{{ log.id }}">¥{% if log.amount == 3000 %}{{ net // 3 // 100 }}{% else %}0{% endif %}</td>
-          <td class="px-3 py-2">{{ log.plan_type or "-" }}</td>
+        {% for row in monthly_data %}
+        <tr class="hover:bg-gray-50">
+          <td class="py-2 px-4 border">{{ row.month }}</td>
+          <td class="py-2 px-4 border">{{ row.count }}</td>
+          <td class="py-2 px-4 border">{{ row.ryunosuke | int | comma }}</td>
+          <td class="py-2 px-4 border">{{ row.takeshi | int | comma }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
-
-<script>
-function handleInput(inputEl) {
-  const logId = parseInt(inputEl.dataset.logId);
-  const amount = parseInt(inputEl.dataset.amount);
-  updateIncome(logId, amount);
-}
-
-function updateIncome(id, amount) {
-  const feeInput = document.getElementById(`fee_input_${id}`);
-  const fee = parseInt(feeInput.value) || 0;
-  const net = amount - fee;
-  document.getElementById(`net_income_${id}`).innerText = `¥${Math.floor(net / 100)}`;
-
-  let ryu = 0, take = 0, keihi = 0;
-  if (amount === 3000) {
-    ryu = take = keihi = Math.floor(net / 3 / 100);
-  } else if (amount === 20000) {
-    ryu = Math.floor((net * 0.8) / 100);
-    take = Math.floor((net - net * 0.8) / 100);
-  }
-
-  document.getElementById(`ryu_${id}`).innerText = `¥${ryu}`;
-  document.getElementById(`take_${id}`).innerText = `¥${take}`;
-  document.getElementById(`keihi_${id}`).innerText = `¥${keihi}`;
-}
-
-function saveFee(logId) {
-  const input = document.getElementById(`fee_input_${logId}`);
-  const fee = parseInt(input.value) || 0;
-  const msg = document.getElementById(`fee_message_${logId}`);
-
-  fetch("/admin/update-fee", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ log_id: logId, manual_fee: fee })
-  })
-  .then(res => res.json())
-  .then(data => {
-    if (data.message) {
-      msg.innerText = "✅ " + data.message;
-      msg.className = "text-xs mt-1 text-green-700 font-semibold";
-    } else {
-      msg.innerText = "⚠️ " + (data.error || "保存失敗");
-      msg.className = "text-xs mt-1 text-red-600 font-semibold";
-    }
-  })
-  .catch(err => {
-    msg.innerText = "❌ サーバーエラー";
-    msg.className = "text-xs mt-1 text-red-600 font-semibold";
-  });
-}
-
-document.getElementById("sync-button").addEventListener("click", function () {
-  if (!confirm("Stripeから最新の支払い履歴を取得して同期します。続行しますか？")) return;
-
-  fetch("/admin/sync-stripe-payments", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" }
-  })
-  .then(res => res.json())
-  .then(data => {
-    const msgBox = document.getElementById("sync-message");
-    if (data.message) {
-      msgBox.innerText = "✅ " + data.message;
-      msgBox.className = "mb-4 text-sm font-semibold text-green-700";
-    } else if (data.error) {
-      msgBox.innerText = "⚠️ " + data.error;
-      msgBox.className = "mb-4 text-sm font-semibold text-red-600";
-    }
-  })
-  .catch(err => {
-    document.getElementById("sync-message").innerText = "❌ 同期中にエラーが発生しました";
-  });
-});
-</script>
 {% endblock %}
+
+{% macro comma(value) %}
+{{ "{:,}".format(value) }}
+{% endmacro %}
