@@ -1,40 +1,90 @@
 {% extends "base_admin.html" %}
-{% block title %}生成途中の記事一覧 | 管理者{% endblock %}
+{% block title %}
+  {% if user %}
+    {{ user.last_name }} {{ user.first_name }} さんの生成途中記事一覧 | 管理者
+  {% else %}
+    生成途中の記事一覧 | 管理者
+  {% endif %}
+{% endblock %}
 
 {% block content %}
-<h1 class="text-2xl font-bold mb-6">🛠 生成途中記事の管理</h1>
 
-<table class="table-auto w-full bg-white shadow rounded">
-  <thead class="bg-gray-100 text-gray-700">
-    <tr>
-      <th class="px-4 py-2 text-left">ユーザー名</th>
-      <th class="px-4 py-2 text-left">メールアドレス</th>
-      <th class="px-4 py-2 text-center">途中記事数</th>
-      <th class="px-4 py-2 text-center">操作</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for user in users %}
-      {% set count = stuck_map[user.id] %}
-      <tr class="border-t">
-        <td class="px-4 py-2">{{ user.last_name }} {{ user.first_name }}</td>
-        <td class="px-4 py-2">{{ user.email }}</td>
-        <td class="px-4 py-2 text-center font-bold text-red-600">
-          {{ count }}
-        </td>
-        <td class="px-4 py-2 text-center">
-          {% if count > 0 %}
-          <form method="POST" action="{{ url_for('admin.regenerate_user_stuck_articles', uid=user.id) }}">
-            <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white py-1 px-4 rounded">
-              🔄 再生成キューに登録
-            </button>
-          </form>
-          {% else %}
-          <span class="text-gray-400">―</span>
-          {% endif %}
-        </td>
+{% if user %}
+  <h1 class="text-2xl font-bold mb-6">
+    🛠 {{ user.last_name }} {{ user.first_name }} さんの生成途中記事一覧
+  </h1>
+
+  {% if articles %}
+    <table class="table-auto w-full bg-white shadow rounded">
+      <thead class="bg-gray-100 text-gray-700">
+        <tr>
+          <th class="px-4 py-2 text-left">記事ID</th>
+          <th class="px-4 py-2 text-left">タイトル</th>
+          <th class="px-4 py-2 text-center">ステータス</th>
+          <th class="px-4 py-2 text-center">作成日時</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for art in articles %}
+        <tr class="border-t">
+          <td class="px-4 py-2">{{ art.id }}</td>
+          <td class="px-4 py-2">{{ art.title or "（タイトル未設定）" }}</td>
+          <td class="px-4 py-2 text-center text-yellow-600 font-semibold">{{ art.status }}</td>
+          <td class="px-4 py-2 text-center">{{ art.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="text-gray-600">現在、生成途中の記事はありません。</p>
+  {% endif %}
+
+  <div class="mt-6">
+    <a href="{{ url_for('admin.stuck_articles') }}"
+       class="inline-block bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600">
+      ← 一覧に戻る
+    </a>
+  </div>
+
+{% else %}
+  <h1 class="text-2xl font-bold mb-6">🛠 生成途中記事の管理</h1>
+
+  <table class="table-auto w-full bg-white shadow rounded">
+    <thead class="bg-gray-100 text-gray-700">
+      <tr>
+        <th class="px-4 py-2 text-left">ユーザー名</th>
+        <th class="px-4 py-2 text-left">メールアドレス</th>
+        <th class="px-4 py-2 text-center">途中記事数</th>
+        <th class="px-4 py-2 text-center">操作</th>
       </tr>
-    {% endfor %}
-  </tbody>
-</table>
+    </thead>
+    <tbody>
+      {% for user in users %}
+        {% set count = stuck_map[user.id] %}
+        <tr class="border-t">
+          <td class="px-4 py-2">{{ user.last_name }} {{ user.first_name }}</td>
+          <td class="px-4 py-2">{{ user.email }}</td>
+          <td class="px-4 py-2 text-center font-bold text-red-600">{{ count }}</td>
+          <td class="px-4 py-2 text-center space-x-2">
+            {% if count > 0 %}
+              <form method="POST" action="{{ url_for('admin.regenerate_user_stuck_articles', uid=user.id) }}" class="inline">
+                <button type="submit"
+                        class="bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded">
+                  🔄 再生成キューに登録
+                </button>
+              </form>
+              <a href="{{ url_for('admin.admin_user_stuck_articles', uid=user.id) }}"
+                 class="inline-block bg-gray-300 hover:bg-gray-400 text-gray-800 py-1 px-3 rounded">
+                👁 一覧表示
+              </a>
+            {% else %}
+              <span class="text-gray-400">―</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+
 {% endblock %}
