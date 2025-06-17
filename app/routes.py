@@ -385,15 +385,35 @@ def sync_stripe_payments():
             fee = balance_tx.fee // 100
             net = balance_tx.net // 100
 
-            email = pi.get("receipt_email") or pi.get("customer_email") or charge.get("billing_details", {}).get("email", "")
-            if not user_id:
+            # ✅ email の取得（複数手段で探索）
+            email = (
+                pi.get("receipt_email")
+                or pi.get("customer_email")
+                or charge.get("billing_details", {}).get("email", "")
+            )
+
+            # user_id が未取得で email からユーザー検索
+            if not user_id and email:
                 user = User.query.filter_by(email=email).first()
                 user_id = user.id if user else None
 
+            # ✅ email が空で user_id がある場合 → ユーザーから取得
+            if not email and user_id:
+                user = User.query.get(user_id)
+                if user:
+                    email = user.email
+
+            # ✅ 最終手段：仮メールアドレスを設定（NULL回避）
+            if not email:
+                email = f"unknown_user_{payment_id}@example.com"
+                print(f"⚠️ email不明 → 仮メール設定: {email}")
+
+            # user_id が不明ならスキップ
             if not user_id:
                 print(f"⚠️ user_id不明: email={email}, payment_id={payment_id}")
                 continue
 
+            # ✅ DBログ作成
             log = PaymentLog(
                 user_id=user_id,
                 email=email,
@@ -416,7 +436,6 @@ def sync_stripe_payments():
         print("エラー内容:", e)
         traceback.print_exc()
         return jsonify({"error": "同期中にサーバーエラーが発生しました"}), 500
-
 
 
 # ────────────── 管理者ダッシュボード（セクション） ──────────────
