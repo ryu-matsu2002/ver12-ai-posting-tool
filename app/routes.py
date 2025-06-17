@@ -990,13 +990,7 @@ def accounting():
 
     from collections import defaultdict
 
-    # ✅ TCC決済ページが無効なユーザーのうち、アフィリエイトプランのユーザーを対象
-    tcc_users = (
-        User.query.filter_by(is_special_access=False)
-        .join(User.site_quota)
-        .filter(UserSiteQuota.plan_type == "affiliate")
-        .all()
-    )
+    tcc_disabled_users = User.query.filter_by(is_special_access=False).all()
 
     site_data_by_month = defaultdict(lambda: {
         "site_count": 0,
@@ -1008,26 +1002,38 @@ def accounting():
     total_ryunosuke = 0
     total_takeshi = 0
 
-    for user in tcc_users:
-        used = len(user.sites)
-        total = user.site_quota.total_sites if user.site_quota else 0
-        remaining = max(total - used, 0)
-        total_sites = used + remaining
+    for user in tcc_disabled_users:
+        # ✅ ユーザーに紐づく登録済サイト
+        for site in user.sites:
+            if site.plan_type != "affiliate":
+                continue
+            if not site.created_at:
+                continue
 
+            ym = site.created_at.strftime("%Y-%m")
+            site_data_by_month[ym]["site_count"] += 1
+            site_data_by_month[ym]["ryunosuke_income"] += 1000
+            site_data_by_month[ym]["takeshi_income"] += 2000
 
-        if not user.created_at:
-            continue
-        ym = user.created_at.strftime("%Y-%m")
+            total_count += 1
+            total_ryunosuke += 1000
+            total_takeshi += 2000
 
-        site_data_by_month[ym]["site_count"] += total_sites
-        site_data_by_month[ym]["ryunosuke_income"] += total_sites * 1000
-        site_data_by_month[ym]["takeshi_income"] += total_sites * 2000
+        # ✅ 登録されていない残枠分も加算
+        if user.site_quota:
+            remaining = user.site_quota.remaining  # 登録残数（登録可能上限 - 登録済）
+            total = user.site_quota.total_sites or 0  # 登録枠合計
 
-        total_count += total_sites
-        total_ryunosuke += total_sites * 1000
-        total_takeshi += total_sites * 2000
+            if remaining and remaining > 0:
+                ym = datetime.utcnow().strftime("%Y-%m")  # 現在月に加算
+                site_data_by_month[ym]["site_count"] += remaining
+                site_data_by_month[ym]["ryunosuke_income"] += remaining * 1000
+                site_data_by_month[ym]["takeshi_income"] += remaining * 2000
 
-    # 年月でソート
+                total_count += remaining
+                total_ryunosuke += remaining * 1000
+                total_takeshi += remaining * 2000
+
     sorted_data = dict(sorted(site_data_by_month.items()))
 
     return render_template(
@@ -1037,8 +1043,6 @@ def accounting():
         total_ryunosuke=total_ryunosuke,
         total_takeshi=total_takeshi
     )
-
-
 
 
 # --- 既存: ユーザー全記事表示 ---
