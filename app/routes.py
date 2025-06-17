@@ -386,7 +386,6 @@ def sync_stripe_payments():
             if PaymentLog.query.filter_by(stripe_payment_id=payment_id).first():
                 continue
 
-            # チャージ確認
             charge_id = pi.latest_charge
             if not charge_id:
                 continue
@@ -398,7 +397,7 @@ def sync_stripe_payments():
                 print(f"⚠️ チャージ取得失敗: {e}")
                 continue
 
-            amount = pi.amount  # JPYなら整数（1円単位）
+            amount = pi.amount  # 単位：円
             currency = pi.currency.upper() if hasattr(pi, "currency") else "JPY"
             email = (
                 pi.get("receipt_email")
@@ -406,25 +405,30 @@ def sync_stripe_payments():
                 or charge.get("billing_details", {}).get("email", "")
                 or "unknown@example.com"
             )
+            fee = balance_tx.fee  # Stripeから取得した実際の手数料（セントまたは円）
 
-            # プラン判定（amountで識別）
-            if amount == 1000:
+            # ▼ 金額に応じたプラン分類（近似判定）
+            if 950 <= amount <= 1050 or (amount % 1000 == 0 and amount // 1000 <= 10):
+                unit_price = 1000
                 plan_type = "tcc"
                 product_name = "TCC専用アフィリエイト用サイト"
                 is_subscription = False
-            elif amount == 3000:
+            elif 2900 <= amount <= 3100 or (amount % 3000 == 0 and amount // 3000 <= 10):
+                unit_price = 3000
                 plan_type = "affiliate"
                 product_name = "アフィリエイト用サイト"
                 is_subscription = False
-            elif amount == 20000:
+            elif 19000 <= amount <= 21000:
+                unit_price = 20000
                 plan_type = "business"
                 product_name = "事業用サイト"
                 is_subscription = True
             else:
-                print(f"⏩ 未対応の金額: ¥{amount} - ID: {payment_id}")
+                print(f"⏩ 未分類の金額: ¥{amount} - ID: {payment_id}")
                 continue
 
-            # user_id判定
+            quantity = amount // unit_price
+
             user = User.query.filter_by(email=email).first()
             user_id = user.id if user else None
             if not user_id:
@@ -435,7 +439,7 @@ def sync_stripe_payments():
                 user_id=user_id,
                 email=email,
                 amount=amount,
-                fee=None,
+                fee=fee,
                 net_income=None,
                 manual_fee=None,
                 plan_type=plan_type,
@@ -444,7 +448,7 @@ def sync_stripe_payments():
                 created_at=datetime.fromtimestamp(pi.created),
                 product_name=product_name,
                 is_subscription=is_subscription,
-                quantity=1,
+                quantity=quantity,
                 currency=currency
             )
 
@@ -460,7 +464,6 @@ def sync_stripe_payments():
         print("エラー内容:", e)
         traceback.print_exc()
         return jsonify({"error": "同期中にサーバーエラーが発生しました"}), 500
-
 
 @admin_bp.route("/admin/update-fee", methods=["POST"])
 @login_required
