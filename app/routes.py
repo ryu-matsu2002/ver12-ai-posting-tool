@@ -408,24 +408,26 @@ def sync_stripe_payments():
             fee = balance_tx.fee  # Stripeから取得した実際の手数料（セントまたは円）
 
             # ▼ 金額に応じたプラン分類（近似判定）
-            if 950 <= amount <= 1050 or (amount % 1000 == 0 and amount // 1000 <= 10):
-                unit_price = 1000
-                plan_type = "tcc"
-                product_name = "TCC専用アフィリエイト用サイト"
-                is_subscription = False
-            elif 2900 <= amount <= 3100 or (amount % 3000 == 0 and amount // 3000 <= 10):
-                unit_price = 3000
-                plan_type = "affiliate"
-                product_name = "アフィリエイト用サイト"
-                is_subscription = False
+            # ▼ 金額に応じたプラン分類（近似判定）
+            if 900 <= amount <= 1100 or (amount % 1000 == 0 and amount // 1000 <= 20):
+                 unit_price = 1000
+                 plan_type = "tcc"
+                 product_name = "TCC専用アフィリエイト用サイト"
+                 is_subscription = False
+            elif 2900 <= amount <= 3100 or (amount % 3000 == 0 and amount // 3000 <= 20):
+                 unit_price = 3000
+                 plan_type = "affiliate"
+                 product_name = "アフィリエイト用サイト"
+                 is_subscription = False
             elif 19000 <= amount <= 21000:
-                unit_price = 20000
-                plan_type = "business"
-                product_name = "事業用サイト"
-                is_subscription = True
+                 unit_price = 20000
+                 plan_type = "business"
+                 product_name = "事業用サイト"
+                 is_subscription = True
             else:
-                print(f"⏩ 未分類の金額: ¥{amount} - ID: {payment_id}")
-                continue
+                 print(f"⏩ [分類失敗] 金額: ¥{amount} - Stripe ID: {payment_id}")
+                 continue
+
 
             quantity = amount // unit_price
 
