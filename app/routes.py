@@ -382,10 +382,6 @@ def sync_stripe_payments():
         for pi in all_payments:
             payment_id = pi.id
 
-            # 重複チェック
-            if PaymentLog.query.filter_by(stripe_payment_id=payment_id).first():
-                continue
-
             charge_id = pi.latest_charge
             if not charge_id:
                 continue
@@ -397,7 +393,7 @@ def sync_stripe_payments():
                 print(f"⚠️ チャージ取得失敗: {e}")
                 continue
 
-            amount = pi.amount  # 単位：円
+            amount = pi.amount  # 円単位
             currency = pi.currency.upper() if hasattr(pi, "currency") else "JPY"
             email = (
                 pi.get("receipt_email")
@@ -405,29 +401,27 @@ def sync_stripe_payments():
                 or charge.get("billing_details", {}).get("email", "")
                 or "unknown@example.com"
             )
-            fee = balance_tx.fee  # Stripeから取得した実際の手数料（セントまたは円）
+            fee = balance_tx.fee
 
-            # ▼ 金額に応じたプラン分類（近似判定）
             # ▼ 金額に応じたプラン分類（近似判定）
             if 900 <= amount <= 1100 or (amount % 1000 == 0 and amount // 1000 <= 20):
-                 unit_price = 1000
-                 plan_type = "tcc"
-                 product_name = "TCC専用アフィリエイト用サイト"
-                 is_subscription = False
+                unit_price = 1000
+                plan_type = "tcc"
+                product_name = "TCC専用アフィリエイト用サイト"
+                is_subscription = False
             elif 2900 <= amount <= 3100 or (amount % 3000 == 0 and amount // 3000 <= 20):
-                 unit_price = 3000
-                 plan_type = "affiliate"
-                 product_name = "アフィリエイト用サイト"
-                 is_subscription = False
+                unit_price = 3000
+                plan_type = "affiliate"
+                product_name = "アフィリエイト用サイト"
+                is_subscription = False
             elif 19000 <= amount <= 21000:
-                 unit_price = 20000
-                 plan_type = "business"
-                 product_name = "事業用サイト"
-                 is_subscription = True
+                unit_price = 20000
+                plan_type = "business"
+                product_name = "事業用サイト"
+                is_subscription = True
             else:
-                 print(f"⏩ [分類失敗] 金額: ¥{amount} - Stripe ID: {payment_id}")
-                 continue
-
+                print(f"⏩ [分類失敗] 金額: ¥{amount} - Stripe ID: {payment_id}")
+                continue
 
             quantity = amount // unit_price
 
@@ -437,6 +431,34 @@ def sync_stripe_payments():
                 print(f"⚠️ user_id不明: email={email}, payment_id={payment_id}")
                 continue
 
+            # ✅ 既存レコードの有無をチェック
+            existing_log = PaymentLog.query.filter_by(stripe_payment_id=payment_id).first()
+            if existing_log:
+                updated = False
+                if not existing_log.product_name:
+                    existing_log.product_name = product_name
+                    updated = True
+                if not existing_log.plan_type:
+                    existing_log.plan_type = plan_type
+                    updated = True
+                if not existing_log.quantity:
+                    existing_log.quantity = quantity
+                    updated = True
+                if not existing_log.currency:
+                    existing_log.currency = currency
+                    updated = True
+                if not existing_log.fee:
+                    existing_log.fee = fee
+                    updated = True
+                if not existing_log.is_subscription:
+                    existing_log.is_subscription = is_subscription
+                    updated = True
+                if updated:
+                    db.session.add(existing_log)
+                    new_logs += 1
+                continue  # 更新済みなので次へ
+
+            # ✅ 新規ログとして登録
             log = PaymentLog(
                 user_id=user_id,
                 email=email,
@@ -458,14 +480,15 @@ def sync_stripe_payments():
             new_logs += 1
 
         db.session.commit()
-        print(f"✅ {new_logs} 件の支払いを同期しました")
-        return jsonify({"message": f"{new_logs} 件の支払いを同期しました"})
+        print(f"✅ {new_logs} 件の支払いを同期/更新しました")
+        return jsonify({"message": f"{new_logs} 件の支払いを同期/更新しました"})
 
     except Exception as e:
         print("❌ Stripe同期中にエラーが発生しました")
         print("エラー内容:", e)
         traceback.print_exc()
         return jsonify({"error": "同期中にサーバーエラーが発生しました"}), 500
+
 
 @admin_bp.route("/admin/update-fee", methods=["POST"])
 @login_required
