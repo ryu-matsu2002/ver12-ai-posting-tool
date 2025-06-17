@@ -2,46 +2,72 @@
 {% block title %}経理ダッシュボード{% endblock %}
 
 {% block content %}
-<div class="p-6">
-  <h1 class="text-2xl font-bold mb-6">💼 経理ダッシュボード（TCC未購入ユーザー集計）</h1>
+<div class="p-8">
 
-  <!-- 💰 集計表示 -->
-  <div class="bg-white shadow rounded p-6 mb-6">
-    <h2 class="text-lg font-bold mb-4">📊 総集計</h2>
-    <ul class="list-disc list-inside space-y-1">
-      <li>対象サイト数（TCC未購入ユーザー）：<strong>{{ total_count }}</strong> 件</li>
-      <li>松本龍之介への報酬：<strong>{{ total_ryunosuke | comma }} 円</strong>（@1000円）</li>
-      <li>松本毅への報酬：<strong>{{ total_takeshi | comma }} 円</strong>（@2000円）</li>
-    </ul>
+  <h1 class="text-3xl font-extrabold mb-8 text-gray-800">💼 経理ダッシュボード <span class="text-sm font-normal text-gray-500">(TCC未購入ユーザー集計)</span></h1>
+
+  <!-- 📅 月別フィルター -->
+  <form method="get" class="mb-6">
+    <label for="month" class="font-semibold text-gray-700 mr-2">📅 表示月：</label>
+    <select name="month" id="month" onchange="this.form.submit()" class="border border-gray-300 rounded px-3 py-2 text-sm">
+      <option value="all" {% if selected_month == 'all' %}selected{% endif %}>全期間</option>
+      {% for month in all_months %}
+        <option value="{{ month }}" {% if selected_month == month %}selected{% endif %}>{{ month }}</option>
+      {% endfor %}
+    </select>
+  </form>
+
+  <!-- 💰 総集計エリア -->
+  <div class="bg-gray-100 border border-gray-300 rounded-lg p-6 mb-10 shadow-md">
+    <h2 class="text-xl font-bold mb-4 text-gray-800">📊 総集計</h2>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-gray-700">
+      <div class="bg-white p-4 rounded shadow text-center">
+        <p class="text-sm text-gray-500">対象サイト数</p>
+        <p class="text-xl font-bold text-blue-700">{{ total_count }} 件</p>
+      </div>
+      <div class="bg-white p-4 rounded shadow text-center">
+        <p class="text-sm text-gray-500">松本龍之介（@1000）</p>
+        <p class="text-xl font-bold text-green-700">{{ total_ryunosuke | comma }} 円</p>
+      </div>
+      <div class="bg-white p-4 rounded shadow text-center">
+        <p class="text-sm text-gray-500">松本毅（@2000）</p>
+        <p class="text-xl font-bold text-purple-700">{{ total_takeshi | comma }} 円</p>
+      </div>
+    </div>
   </div>
 
-  <!-- 📋 月別リスト -->
-  <div class="bg-gray-50 p-4 rounded shadow">
-    <h3 class="text-md font-bold mb-2">📅 月別内訳</h3>
-    <table class="min-w-full border border-gray-300 text-sm text-center bg-white">
-      <thead class="bg-gray-100">
-        <tr>
-          <th class="py-2 px-4 border">年月</th>
-          <th class="py-2 px-4 border">サイト数</th>
-          <th class="py-2 px-4 border">龍之介（@1000）</th>
-          <th class="py-2 px-4 border">毅（@2000）</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for month, data in site_data_by_month.items() %}
-        <tr class="hover:bg-gray-50">
-          <td class="py-2 px-4 border">{{ month }}</td>
-          <td class="py-2 px-4 border">{{ data.site_count }}</td>
-          <td class="py-2 px-4 border">{{ data.ryunosuke_income | comma }}</td>
-          <td class="py-2 px-4 border">{{ data.takeshi_income | comma }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <!-- 📋 月別内訳 -->
+  <div class="bg-white border rounded-lg shadow-md">
+    <div class="p-4 border-b bg-gray-50 rounded-t">
+      <h3 class="text-lg font-bold text-gray-700">📅 月別内訳</h3>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm text-center">
+        <thead class="bg-gray-100 text-gray-700">
+          <tr>
+            <th class="py-2 px-4 border-b">年月</th>
+            <th class="py-2 px-4 border-b">サイト数</th>
+            <th class="py-2 px-4 border-b">龍之介（@1000）</th>
+            <th class="py-2 px-4 border-b">毅（@2000）</th>
+          </tr>
+        </thead>
+        <tbody class="text-gray-800">
+          {% for month, data in site_data_by_month.items() %}
+          <tr class="hover:bg-gray-50">
+            <td class="py-2 px-4 border-b">{{ month }}</td>
+            <td class="py-2 px-4 border-b">{{ data.site_count }}</td>
+            <td class="py-2 px-4 border-b text-green-700">{{ data.ryunosuke_income | comma }}</td>
+            <td class="py-2 px-4 border-b text-purple-700">{{ data.takeshi_income | comma }}</td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="4" class="py-4 text-gray-500 italic">データがありません</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
+
 </div>
 {% endblock %}
-
-{% macro comma(value) %}
-{{ "{:,}".format(value) }}
-{% endmacro %}

@@ -989,9 +989,13 @@ def accounting():
         abort(403)
 
     from collections import defaultdict
+    from flask import request
 
-    # 対象：TCC決済ページを持たないユーザー（= has_purchased が False）
-    tcc_disabled_users = User.query.filter_by(has_purchased=False).all()
+    # ✅ 表示対象の月を取得（例：2025-06）
+    selected_month = request.args.get("month", "all")
+
+    # ✅ TCC決済ページを持たないユーザーだけ対象にする
+    tcc_disabled_users = User.query.filter_by(is_special_access=False).all()
 
     site_data_by_month = defaultdict(lambda: {
         "site_count": 0,
@@ -1008,27 +1012,43 @@ def accounting():
             if site.plan_type != "affiliate":
                 continue
             if not site.created_at:
-                continue  # created_atがNoneの場合はスキップ
+                continue  # ← created_atがNoneの場合は集計対象外
 
             ym = site.created_at.strftime("%Y-%m")
+
             site_data_by_month[ym]["site_count"] += 1
             site_data_by_month[ym]["ryunosuke_income"] += 1000
             site_data_by_month[ym]["takeshi_income"] += 2000
 
-            total_count += 1
-            total_ryunosuke += 1000
-            total_takeshi += 2000
+    # ✅ 表示月の絞り込み
+    if selected_month == "all":
+        filtered_data = site_data_by_month
+    else:
+        filtered_data = {selected_month: site_data_by_month.get(selected_month, {
+            "site_count": 0,
+            "ryunosuke_income": 0,
+            "takeshi_income": 0
+        })}
 
-    # 年月でソートして表示順を固定
-    sorted_data = dict(sorted(site_data_by_month.items()))
+    # ✅ 総合計（絞り込み後の対象のみ）
+    for data in filtered_data.values():
+        total_count += data["site_count"]
+        total_ryunosuke += data["ryunosuke_income"]
+        total_takeshi += data["takeshi_income"]
+
+    # ✅ 月一覧（降順）
+    all_months = sorted(site_data_by_month.keys(), reverse=True)
 
     return render_template(
         "admin/accounting.html",
-        site_data_by_month=sorted_data,
+        site_data_by_month=dict(sorted(filtered_data.items())),
         total_count=total_count,
         total_ryunosuke=total_ryunosuke,
-        total_takeshi=total_takeshi
+        total_takeshi=total_takeshi,
+        selected_month=selected_month,
+        all_months=all_months
     )
+
 
 
 # --- 既存: ユーザー全記事表示 ---
