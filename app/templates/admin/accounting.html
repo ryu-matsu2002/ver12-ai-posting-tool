@@ -3,9 +3,19 @@
 
 {% block content %}
 <div class="p-6">
-  <h1 class="text-2xl font-bold mb-6">💼 Stripe経理ダッシュボード</h1>
+  <div class="flex justify-between items-center mb-6">
+    <h1 class="text-2xl font-bold">💼 Stripe経理ダッシュボード</h1>
 
-  <!-- ✅ 年月選択 + 全期間オプション付き -->
+    <!-- ✅ Stripe支払い同期ボタン（AJAX対応） -->
+    <button id="sync-button" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm shadow">
+      🔄 Stripe支払いを同期
+    </button>
+  </div>
+
+  <!-- ✅ メッセージ表示枠 -->
+  <div id="sync-message" class="mb-4 text-sm font-semibold text-blue-600"></div>
+
+  <!-- ✅ 年月選択 -->
   <form method="get" class="mb-6 flex flex-wrap items-center gap-3">
     <label class="font-semibold">表示年月:</label>
 
@@ -27,7 +37,7 @@
     </button>
   </form>
 
-  <!-- ✅ 集計カード（売上・手数料・運営者取り分） -->
+  <!-- ✅ 集計カード -->
   <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
     <div class="bg-white rounded shadow p-4 text-center">
       <div class="text-sm text-gray-500 mb-1">
@@ -49,7 +59,7 @@
     </div>
   </div>
 
-  <!-- ✅ 分配カード（経費・ryu・take） -->
+  <!-- ✅ 分配カード -->
   <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
     <div class="bg-gray-100 rounded shadow p-4 text-center">
       <div class="text-sm text-gray-500 mb-1">経費</div>
@@ -93,4 +103,32 @@
     </table>
   </div>
 </div>
+
+<!-- ✅ AJAX Script -->
+<script>
+document.getElementById("sync-button").addEventListener("click", function () {
+  if (!confirm("Stripeから最新の支払い履歴を取得して同期します。続行しますか？")) return;
+
+  fetch("/admin/sync-stripe-payments", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    }
+  })
+  .then(res => res.json())
+  .then(data => {
+    const msgBox = document.getElementById("sync-message");
+    if (data.message) {
+      msgBox.innerText = "✅ " + data.message;
+      msgBox.className = "mb-4 text-sm font-semibold text-green-700";
+    } else if (data.error) {
+      msgBox.innerText = "⚠️ " + data.error;
+      msgBox.className = "mb-4 text-sm font-semibold text-red-600";
+    }
+  })
+  .catch(err => {
+    document.getElementById("sync-message").innerText = "❌ 同期中にエラーが発生しました";
+  });
+});
+</script>
 {% endblock %}

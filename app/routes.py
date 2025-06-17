@@ -345,6 +345,69 @@ def special_purchase(username):
         username=username
     )
 
+
+@admin_bp.route("/admin/sync-stripe-payments")
+def sync_stripe_payments():
+    try:
+        payments = stripe.PaymentIntent.list(limit=100)
+        new_logs = 0
+
+        for pi in payments.data:
+            payment_id = pi.id
+            existing = PaymentLog.query.filter_by(stripe_payment_id=payment_id).first()
+            if existing:
+                continue  # すでに記録済み
+
+            metadata = pi.metadata or {}
+            user_id = metadata.get("user_id")
+            plan_type = metadata.get("plan_type", "affiliate")
+
+            # charge情報と手数料
+            charge_id = pi.latest_charge
+            if not charge_id:
+                continue  # チャージ未処理のもの
+
+            try:
+                charge = stripe.Charge.retrieve(charge_id)
+                balance_tx_id = charge.balance_transaction
+                balance_tx = stripe.BalanceTransaction.retrieve(balance_tx_id)
+            except Exception as e:
+                current_app.logger.warning(f"⚠️ チャージ取得失敗: {e}")
+                continue
+
+            amount = pi.amount // 100
+            fee = balance_tx.fee // 100
+            net = balance_tx.net // 100
+            email = pi.get("receipt_email") or pi.get("customer_email") or charge.get("billing_details", {}).get("email", "")
+            if not user_id:
+                user = User.query.filter_by(email=email).first()
+                user_id = user.id if user else None
+
+            if not user_id:
+                current_app.logger.warning(f"⚠️ user_id不明: {email}")
+                continue
+
+            log = PaymentLog(
+                user_id=user_id,
+                email=email,
+                amount=amount,
+                fee=fee,
+                net_income=net,
+                plan_type=plan_type,
+                stripe_payment_id=payment_id,
+                status=pi.status
+            )
+            db.session.add(log)
+            new_logs += 1
+
+        db.session.commit()
+        return jsonify({"message": f"✅ 新たに {new_logs} 件の支払いを同期しました"})
+
+    except Exception as e:
+        current_app.logger.error(f"❌ Stripe同期中にエラー: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 # ────────────── 管理者ダッシュボード（セクション） ──────────────
 
 from app.models import Article, User, PromptTemplate, Site
