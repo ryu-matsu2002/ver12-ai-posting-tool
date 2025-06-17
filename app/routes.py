@@ -692,6 +692,18 @@ def admin_users():
 
         user_quota_summary[user.id] = summary
 
+    # ✅ 追加: 各ユーザーごとの途中記事数（status: pending または gen）
+    from sqlalchemy import func
+    stuck_counts = dict(
+        db.session.query(
+            Article.user_id,
+            func.count(Article.id)
+        )
+        .filter(Article.status.in_(["pending", "gen"]))
+        .group_by(Article.user_id)
+        .all()
+    )    
+
     return render_template(
         "admin/users.html",
         users=users,
@@ -699,7 +711,8 @@ def admin_users():
         prompt_count=prompt_count,
         article_count=article_count,
         site_quota_summary=user_quota_summary,  # ✅ 新規追加
-        user_count=len(users)
+        user_count=len(users),
+        stuck_counts=stuck_counts  # ✅ 追加
     )
 
 
