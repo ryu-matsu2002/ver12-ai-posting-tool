@@ -363,7 +363,7 @@ def sync_stripe_payments():
         for pi in data:
             payment_id = pi.id
             amount = pi.amount
-            created_at = datetime.fromtimestamp(pi.created).strftime("%Y-%m-%d %H:%M")
+            created_at = datetime.datetime.fromtimestamp(pi.created).strftime("%Y-%m-%d %H:%M")
             charge_id = pi.latest_charge
 
             email = (
