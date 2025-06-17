@@ -1212,20 +1212,24 @@ def refresh_images(user_id):
     flash(f"✅ 復元完了: {restored} 件 / ❌ 失敗: {failed} 件", "info")
     return redirect(url_for("admin.admin_dashboard"))
 
-@admin_bp.get("/admin/user/<int:uid>/stuck-articles", endpoint="admin_user_stuck_articles")
+@admin_bp.get("/admin/stuck-articles", endpoint="stuck_articles")
 @login_required
-def admin_user_stuck_articles(uid):
+def stuck_articles():
     if not current_user.is_admin:
         abort(403)
 
-    user = User.query.get_or_404(uid)
+    users = User.query.all()
 
-    stuck_articles = Article.query.filter(
-        Article.user_id == uid,
-        Article.status.in_(["pending", "gen"])
-    ).order_by(Article.created_at.desc()).all()
+    stuck_map = {
+        user.id: Article.query.filter(
+            Article.user_id == user.id,
+            Article.status.in_(["pending", "gen"])
+        ).count()
+        for user in users
+    }
 
-    return render_template("admin/stuck_articles.html", user=user, articles=stuck_articles)
+    return render_template("admin/stuck_articles.html", users=users, stuck_map=stuck_map)
+
 
 
 @admin_bp.post("/admin/user/<int:uid>/regenerate-stuck")
