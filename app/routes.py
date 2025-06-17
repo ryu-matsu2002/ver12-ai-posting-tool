@@ -993,7 +993,7 @@ def accounting():
     month = request.args.get("month", "all")
 
     # TCC決済ページなしユーザー一覧
-    tcc_disabled_users = User.query.filter_by(has_tcc_access=False).all()
+    tcc_disabled_users = User.query.filter_by(has_purchased=False).all()
     user_ids = [u.id for u in tcc_disabled_users]
 
     # 対象サイト：アフィリエイト用 & 対象ユーザー
