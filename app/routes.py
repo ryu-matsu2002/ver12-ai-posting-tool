@@ -1212,7 +1212,7 @@ def refresh_images(user_id):
     flash(f"✅ 復元完了: {restored} 件 / ❌ 失敗: {failed} 件", "info")
     return redirect(url_for("admin.admin_dashboard"))
 
-@admin_bp.get("/admin/stuck-articles", endpoint="stuck_articles")
+@admin_bp.get("/admin/user/<int:uid>/stuck-articles")
 @login_required
 def stuck_articles():
     if not current_user.is_admin:
