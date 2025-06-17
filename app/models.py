@@ -173,14 +173,14 @@ class PaymentLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)  # 紐付けが不明な場合はnull
     email = db.Column(db.String(255), nullable=False)
-    amount = db.Column(db.Integer, nullable=False)        # ✅ セント単位（int）
-    fee = db.Column(db.Integer, nullable=True)            # ✅ セント単位（int）
-    net_income = db.Column(db.Integer, nullable=True)     # ✅ セント単位（int）
+    amount = db.Column(db.Integer, nullable=False) 
+    fee = db.Column(db.Integer, nullable=True) 
+    net_income = db.Column(db.Integer, nullable=True) 
     plan_type = db.Column(db.String(50), nullable=True)  # "affiliate" or "business"
     stripe_payment_id = db.Column(db.String(100), nullable=False, unique=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     status = db.Column(db.String(20), default="succeeded")  # ← これを追加
-
+    manual_fee = db.Column(db.Integer, nullable=True)  
     def __repr__(self):
         return f"<PaymentLog {self.email} {self.amount}円 {self.created_at}>"
 

@@ -381,10 +381,10 @@ def sync_stripe_payments():
                 traceback.print_exc()
                 continue
 
-            # セント単位で保存
-            amount = pi.amount        # セント単位
-            fee = balance_tx.fee      # セント単位
-            net = balance_tx.net      # セント単位
+            # Stripe金額（円単位の整数）をそのまま保存
+            amount = pi.amount        # 円として扱う（StripeはJPNでは整数円）
+            fee = None               # 保存しない（後から manual_fee に手入力）
+            net = None               # fee不明なため純売上も後で計算
 
             # ✅ email の取得（複数手段で探索）
             email = (
@@ -403,17 +403,20 @@ def sync_stripe_payments():
                 print(f"⚠️ user_id不明: email={email}, payment_id={payment_id}")
                 continue
 
-            # ✅ DBログ作成
+            # ✅ DBログ作成（feeとnet_incomeはNone）
             log = PaymentLog(
                 user_id=user_id,
-                email=email,
-                amount=amount,        # セント単位で保存
-                fee=fee,              # セント単位で保存
-                net_income=net,       # セント単位で保存
+                email=email or "unknown@example.com",
+                amount=amount,
+                fee=None,
+                net_income=None,
+                manual_fee=None,
                 plan_type=plan_type,
                 stripe_payment_id=payment_id,
-                status=pi.status
+                status=pi.status,
+                created_at=datetime.fromtimestamp(pi.created)
             )
+
             db.session.add(log)
             new_logs += 1
 
@@ -426,6 +429,29 @@ def sync_stripe_payments():
         print("エラー内容:", e)
         traceback.print_exc()
         return jsonify({"error": "同期中にサーバーエラーが発生しました"}), 500
+
+@admin_bp.route("/admin/update-fee", methods=["POST"])
+@login_required
+def update_manual_fee():
+    try:
+        data = request.get_json()
+        log_id = data.get("log_id")
+        fee = data.get("manual_fee")
+
+        if log_id is None or fee is None:
+            return jsonify({"error": "不正なリクエスト"}), 400
+
+        log = PaymentLog.query.get(log_id)
+        if not log:
+            return jsonify({"error": "該当するログが見つかりません"}), 404
+
+        log.manual_fee = int(fee)
+        db.session.commit()
+
+        return jsonify({"message": "手数料を保存しました"})
+    except Exception as e:
+        print("❌ 手数料保存中にエラー:", e)
+        return jsonify({"error": "サーバーエラー"}), 500
 
 
 # ────────────── 管理者ダッシュボード（セクション） ──────────────
