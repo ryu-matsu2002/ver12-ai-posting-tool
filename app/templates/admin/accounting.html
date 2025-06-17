@@ -81,7 +81,7 @@
       <thead class="bg-gray-100">
         <tr>
           <th class="px-3 py-2">日時</th>
-          <th class="px-3 py-2">メールアドレス</th>
+          <th class="px-3 py-2">ユーザー名</th> <!-- ← ここ変更 -->
           <th class="px-3 py-2">金額</th>
           <th class="px-3 py-2">手数料</th>
           <th class="px-3 py-2">取り分</th>
@@ -92,7 +92,16 @@
         {% for log in logs %}
         <tr class="border-t hover:bg-gray-50">
           <td class="px-3 py-2">{{ log.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
-          <td class="px-3 py-2">{{ log.email }}</td>
+
+          <!-- ✅ 姓＋名表示、安全対策あり -->
+          <td class="px-3 py-2">
+            {% if log.user %}
+              {{ log.user.last_name }} {{ log.user.first_name }}
+            {% else %}
+              （不明）
+            {% endif %}
+          </td>
+
           <td class="px-3 py-2">¥{{ log.amount }}</td>
           <td class="px-3 py-2">¥{{ log.fee }}</td>
           <td class="px-3 py-2">¥{{ log.net_income }}</td>
