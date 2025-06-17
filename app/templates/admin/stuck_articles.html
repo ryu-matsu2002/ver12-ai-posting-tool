@@ -35,11 +35,20 @@
         {% endfor %}
       </tbody>
     </table>
+
+    <!-- 🔄 再生成キューボタン -->
+    <div class="mt-6">
+      <form method="POST" action="{{ url_for('admin.regenerate_user_stuck_articles', uid=user.id) }}">
+        <button type="submit"
+                class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">
+          🔄 すべての生成途中記事を再生成キューに登録
+        </button>
+      </form>
+    </div>
+
   {% else %}
     <p class="text-gray-600">現在、生成途中の記事はありません。</p>
   {% endif %}
-
-
 
 {% else %}
   <h1 class="text-2xl font-bold mb-6">🛠 生成途中記事の管理</h1>
@@ -72,7 +81,6 @@
                  class="inline-block bg-gray-300 hover:bg-gray-400 text-gray-800 py-1 px-3 rounded">
                 👁 一覧表示
               </a>
-
             {% else %}
               <span class="text-gray-400">―</span>
             {% endif %}
