@@ -445,13 +445,17 @@ def update_manual_fee():
         if not log:
             return jsonify({"error": "該当するログが見つかりません"}), 404
 
-        log.manual_fee = int(fee)
+        fee_int = int(fee)
+        log.manual_fee = fee_int
+        log.net_income = log.amount - fee_int  # ✅ 純利益を更新
+
         db.session.commit()
 
         return jsonify({"message": "手数料を保存しました"})
     except Exception as e:
         print("❌ 手数料保存中にエラー:", e)
         return jsonify({"error": "サーバーエラー"}), 500
+
 
 
 # ────────────── 管理者ダッシュボード（セクション） ──────────────
