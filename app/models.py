@@ -173,9 +173,9 @@ class PaymentLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)  # 紐付けが不明な場合はnull
     email = db.Column(db.String(255), nullable=False)
-    amount = db.Column(db.Integer, nullable=False)  # 単位：円
-    fee = db.Column(db.Integer, nullable=True)      # Stripe手数料（運営計算）
-    net_income = db.Column(db.Integer, nullable=True)  # 運営の取り分
+    amount = db.Column(db.Float, nullable=False)    # 単位：円
+    fee = db.Column(db.Float, nullable=True)      # Stripe手数料（運営計算）
+    net_income = db.Column(db.Float, nullable=True)  # 運営の取り分
     plan_type = db.Column(db.String(50), nullable=True)  # "affiliate" or "business"
     stripe_payment_id = db.Column(db.String(100), nullable=False, unique=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

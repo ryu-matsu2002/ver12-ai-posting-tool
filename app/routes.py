@@ -191,7 +191,7 @@ def stripe_webhook():
         db.session.commit()
 
         # PaymentLog保存処理
-        amount = intent.get("amount") // 100
+        amount = intent.get("amount") / 100  # ✅ 正確な小数で保持
         email = intent.get("receipt_email") or intent.get("customer_email")
 
         charge_id = intent.get("latest_charge")
@@ -202,8 +202,8 @@ def stripe_webhook():
         if not email:
             email = user.email
 
-        fee = balance_tx.fee // 100
-        net = balance_tx.net // 100
+        fee = balance_tx.fee / 100  # ✅ 小数で保持
+        net = balance_tx.net / 100
 
         log = PaymentLog(
             user_id=user.id,
@@ -381,9 +381,9 @@ def sync_stripe_payments():
                 traceback.print_exc()
                 continue
 
-            amount = pi.amount // 100
-            fee = balance_tx.fee // 100
-            net = balance_tx.net // 100
+            amount = pi.amount / 100
+            fee = balance_tx.fee / 100
+            net = balance_tx.net / 100
 
             # ✅ email の取得（複数手段で探索）
             email = (
