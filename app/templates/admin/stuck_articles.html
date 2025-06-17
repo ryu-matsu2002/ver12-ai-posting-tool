@@ -10,12 +10,27 @@
 {% block content %}
 
 {% if user %}
-  <h1 class="text-2xl font-bold mb-6">
+  <h1 class="text-2xl font-bold mb-4">
     🛠 {{ user.last_name }} {{ user.first_name }} さんの生成途中記事一覧
   </h1>
 
+  <!-- 🔄 上部 再生成キューボタン＋件数 -->
+  <div class="mb-6 flex items-center justify-between">
+    <div>
+      <form method="POST" action="{{ url_for('admin.regenerate_user_stuck_articles', uid=user.id) }}">
+        <button type="submit"
+                class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">
+          🔄 すべての生成途中記事を再生成キューに登録
+        </button>
+      </form>
+    </div>
+    <div class="text-sm text-gray-700">
+      🔢 該当件数：<span id="pending-count">{{ articles|length }}</span> 件
+    </div>
+  </div>
+
   {% if articles %}
-    <table class="table-auto w-full bg-white shadow rounded">
+    <table class="table-auto w-full bg-white shadow rounded" id="article-table">
       <thead class="bg-gray-100 text-gray-700">
         <tr>
           <th class="px-4 py-2 text-left">記事ID</th>
@@ -26,29 +41,36 @@
       </thead>
       <tbody>
         {% for art in articles %}
-        <tr class="border-t">
+        <tr class="border-t" data-status="{{ art.status }}">
           <td class="px-4 py-2">{{ art.id }}</td>
           <td class="px-4 py-2">{{ art.title or "（タイトル未設定）" }}</td>
-          <td class="px-4 py-2 text-center text-yellow-600 font-semibold">{{ art.status }}</td>
+          <td class="px-4 py-2 text-center text-yellow-600 font-semibold status-cell">{{ art.status }}</td>
           <td class="px-4 py-2 text-center">{{ art.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
-
-    <!-- 🔄 再生成キューボタン -->
-    <div class="mt-6">
-      <form method="POST" action="{{ url_for('admin.regenerate_user_stuck_articles', uid=user.id) }}">
-        <button type="submit"
-                class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">
-          🔄 すべての生成途中記事を再生成キューに登録
-        </button>
-      </form>
-    </div>
-
   {% else %}
     <p class="text-gray-600">現在、生成途中の記事はありません。</p>
   {% endif %}
+
+  <!-- 🔄 件数リアルタイム更新スクリプト -->
+  <script>
+    function updatePendingCount() {
+      const rows = document.querySelectorAll('#article-table tbody tr');
+      let count = 0;
+      rows.forEach(row => {
+        const status = row.querySelector('.status-cell')?.innerText?.trim();
+        if (status === "pending" || status === "gen") {
+          count++;
+        }
+      });
+      document.getElementById('pending-count').textContent = count;
+    }
+
+    // 定期的に更新（5秒ごと）
+    setInterval(updatePendingCount, 5000);
+  </script>
 
 {% else %}
   <h1 class="text-2xl font-bold mb-6">🛠 生成途中記事の管理</h1>
