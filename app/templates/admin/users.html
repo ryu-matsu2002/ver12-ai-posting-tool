@@ -96,10 +96,11 @@
 
         <!-- 操作 -->
         <td class="px-2 py-2 space-x-2 whitespace-nowrap">
-          <a href="{{ url_for('admin.admin_user_stuck_articles', uid=u.id) }}"
+          <a href="{{ url_for('admin.stuck_articles', uid=u.id) }}"
              class="px-2 py-1 bg-yellow-100 hover:bg-yellow-200 text-yellow-800 text-sm rounded">
             ⏳ 途中記事
           </a>
+
           <form action="{{ url_for('admin.admin_login_as', user_id=u.id) }}" method="post" class="inline">
             <button type="submit" class="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white text-sm rounded">
               ログイン

@@ -74,10 +74,11 @@
                   🔄 再生成キューに登録
                 </button>
               </form>
-              <a href="{{ url_for('admin.admin_user_stuck_articles', uid=user.id) }}"
+              <a href="{{ url_for('admin.stuck_articles', uid=user.id) }}"
                  class="inline-block bg-gray-300 hover:bg-gray-400 text-gray-800 py-1 px-3 rounded">
                 👁 一覧表示
               </a>
+
             {% else %}
               <span class="text-gray-400">―</span>
             {% endif %}
