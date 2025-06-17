@@ -29,25 +29,23 @@
     <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1 rounded">表示</button>
   </form>
 
-  <!-- 集計カード -->
   <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
     <div class="bg-white rounded shadow p-4 text-center">
       <div class="text-sm text-gray-500 mb-1">
         {% if selected_year == 'all' %}売上合計（全期間）{% else %}売上合計（{{ selected_year }}年{{ selected_month }}月）{% endif %}
       </div>
-      <div class="text-2xl font-bold text-green-600">¥{{ total_amount }}</div>
+      <div class="text-2xl font-bold text-green-600">¥{{ total_amount // 100 }}</div>
     </div>
     <div class="bg-white rounded shadow p-4 text-center">
       <div class="text-sm text-gray-500 mb-1">Stripe手数料</div>
-      <div class="text-2xl font-bold text-red-500">¥{{ total_manual_fee }}</div>
+      <div class="text-2xl font-bold text-red-500">¥{{ total_manual_fee // 100 }}</div>
     </div>
     <div class="bg-white rounded shadow p-4 text-center">
       <div class="text-sm text-gray-500 mb-1">運営者取り分（純売上）</div>
-      <div class="text-2xl font-bold text-blue-600">¥{{ total_amount - total_manual_fee }}</div>
+      <div class="text-2xl font-bold text-blue-600">¥{{ (total_amount - total_manual_fee) // 100 }}</div>
     </div>
   </div>
 
-  <!-- 分配カード -->
   <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
     <div class="bg-gray-100 rounded shadow p-4 text-center">
       <div class="text-sm text-gray-500 mb-1">経費</div>
@@ -63,11 +61,11 @@
     </div>
   </div>
 
-  <!-- 支払い履歴テーブル -->
   <div class="overflow-x-auto">
     <table class="w-full table-auto border border-gray-200 text-sm">
       <thead class="bg-gray-100">
         <tr>
+          <th class="px-3 py-2">#</th>
           <th class="px-3 py-2">日時</th>
           <th class="px-3 py-2">ユーザー名</th>
           <th class="px-3 py-2">金額</th>
@@ -83,20 +81,30 @@
         {% for log in logs %}
         {% set net = log.amount - (log.manual_fee or 0) %}
         <tr class="border-t hover:bg-gray-50">
+          <td class="px-3 py-2 text-center">{{ loop.index }}</td>
           <td class="px-3 py-2">{{ log.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
           <td class="px-3 py-2">{% if log.user %}{{ log.user.last_name }} {{ log.user.first_name }}{% else %}（不明）{% endif %}</td>
-          <td class="px-3 py-2 text-right">¥{{ log.amount }}</td>
+          <td class="px-3 py-2 text-right">¥{{ log.amount // 100 }}</td>
           <td class="px-3 py-2 text-right">
             <div class="flex items-center space-x-1">
-              <input type="number" value="324" min="0" id="fee_input_18" oninput="updateIncome(18, 9000)">
-              <button type="button" onclick="saveFee(18)">保存</button> 
-           </div>
+              <input type="number"
+                     value="{{ log.manual_fee or '' }}"
+                     min="0"
+                     class="w-20 p-1 border rounded text-right"
+                     id="fee_input_{{ log.id }}"
+                     data-log-id="{{ log.id }}"
+                     data-amount="{{ log.amount }}"
+                     oninput="handleInput(this)">
+              <button type="button"
+                      onclick="saveFee('{{ log.id }}')"
+                      class="bg-blue-500 text-white text-xs px-2 py-1 rounded hover:bg-blue-600">保存</button>
+            </div>
             <div id="fee_message_{{ log.id }}" class="text-xs mt-1 text-green-700 font-semibold"></div>
           </td>
-          <td class="px-3 py-2 text-right" id="net_income_{{ log.id }}">¥{{ net }}</td>
-          <td class="px-3 py-2 text-right" id="ryu_{{ log.id }}">¥{% if log.amount == 3000 %}{{ net // 3 }}{% elif log.amount == 20000 %}{{ (net * 0.8) | round | int }}{% else %}0{% endif %}</td>
-          <td class="px-3 py-2 text-right" id="take_{{ log.id }}">¥{% if log.amount == 3000 %}{{ net // 3 }}{% elif log.amount == 20000 %}{{ net - (net * 0.8) | round | int }}{% else %}0{% endif %}</td>
-          <td class="px-3 py-2 text-right" id="keihi_{{ log.id }}">¥{% if log.amount == 3000 %}{{ net // 3 }}{% else %}0{% endif %}</td>
+          <td class="px-3 py-2 text-right" id="net_income_{{ log.id }}">¥{{ net // 100 }}</td>
+          <td class="px-3 py-2 text-right" id="ryu_{{ log.id }}">¥{% if log.amount == 3000 %}{{ net // 3 // 100 }}{% elif log.amount == 20000 %}{{ (net * 0.8) // 100 }}{% else %}0{% endif %}</td>
+          <td class="px-3 py-2 text-right" id="take_{{ log.id }}">¥{% if log.amount == 3000 %}{{ net // 3 // 100 }}{% elif log.amount == 20000 %}{{ (net - (net * 0.8)) // 100 }}{% else %}0{% endif %}</td>
+          <td class="px-3 py-2 text-right" id="keihi_{{ log.id }}">¥{% if log.amount == 3000 %}{{ net // 3 // 100 }}{% else %}0{% endif %}</td>
           <td class="px-3 py-2">{{ log.plan_type or "-" }}</td>
         </tr>
         {% endfor %}
@@ -106,19 +114,24 @@
 </div>
 
 <script>
+function handleInput(inputEl) {
+  const logId = parseInt(inputEl.dataset.logId);
+  const amount = parseInt(inputEl.dataset.amount);
+  updateIncome(logId, amount);
+}
+
 function updateIncome(id, amount) {
   const feeInput = document.getElementById(`fee_input_${id}`);
   const fee = parseInt(feeInput.value) || 0;
   const net = amount - fee;
-
-  document.getElementById(`net_income_${id}`).innerText = `¥${net}`;
+  document.getElementById(`net_income_${id}`).innerText = `¥${Math.floor(net / 100)}`;
 
   let ryu = 0, take = 0, keihi = 0;
   if (amount === 3000) {
-    ryu = take = keihi = Math.floor(net / 3);
+    ryu = take = keihi = Math.floor(net / 3 / 100);
   } else if (amount === 20000) {
-    ryu = Math.floor(net * 0.8);
-    take = net - ryu;
+    ryu = Math.floor((net * 0.8) / 100);
+    take = Math.floor((net - net * 0.8) / 100);
   }
 
   document.getElementById(`ryu_${id}`).innerText = `¥${ryu}`;
