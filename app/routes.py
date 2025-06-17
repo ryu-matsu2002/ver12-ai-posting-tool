@@ -1246,7 +1246,7 @@ def regenerate_user_stuck_articles(uid):
     threading.Thread(target=_background_regeneration, daemon=True).start()
 
     flash(f"{len(stuck_articles)} 件の途中停止記事を再生成キューに登録しました（バックグラウンド処理）", "success")
-    return redirect(url_for("admin.user_articles", uid=uid))
+    return redirect(url_for("admin.admin_user_stuck_articles", uid=uid))
 
 
 
