@@ -1010,8 +1010,10 @@ def accounting():
 
     for user in tcc_users:
         used = len(user.sites)
-        remaining = user.site_quota.remaining_sites if user.site_quota else 0
+        total = user.site_quota.total_sites if user.site_quota else 0
+        remaining = max(total - used, 0)
         total_sites = used + remaining
+
 
         if not user.created_at:
             continue
