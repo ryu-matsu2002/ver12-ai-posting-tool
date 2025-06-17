@@ -24,6 +24,10 @@ migrate       = Migrate()
 # --------------------------------------------------
 # 1) Flask App Factory
 # --------------------------------------------------
+def comma_filter(value):
+    return "{:,}".format(value)
+
+
 def create_app() -> Flask:
     """Flask application factory."""
     app = Flask(
@@ -75,7 +79,7 @@ def create_app() -> Flask:
         app.register_blueprint(main_bp)
         app.register_blueprint(admin_bp)
         app.register_blueprint(stripe_webhook_bp)
-
+        app.jinja_env.filters["comma"] = comma_filter
         from . import models
 
         # Flask-Login: user_loader

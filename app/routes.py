@@ -2874,7 +2874,3 @@ def delete_genre(username, genre_id):
     flash("ジャンルを削除しました。", "info")
     return redirect(url_for("main.manage_genres", username=username))
 
-# Jinja2 カスタムフィルター登録（カンマ区切り）
-@bp.template_filter("comma")
-def comma_filter(value):
-    return "{:,}".format(value)
