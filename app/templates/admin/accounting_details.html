@@ -1,0 +1,51 @@
+{% extends "base_admin.html" %}
+{% block title %}購入履歴一覧{% endblock %}
+
+{% block content %}
+<div class="p-8">
+
+  <h1 class="text-3xl font-extrabold mb-8 text-gray-800">📄 ユーザー別 購入履歴一覧</h1>
+
+  <!-- 📅 月別フィルター -->
+  <form method="get" class="mb-6">
+    <label for="month" class="font-semibold text-gray-700 mr-2">📅 表示月：</label>
+    <select name="month" id="month" onchange="this.form.submit()" class="border border-gray-300 rounded px-3 py-2 text-sm">
+      <option value="all" {% if selected_month == 'all' %}selected{% endif %}>全期間</option>
+      {% for month in all_months %}
+        <option value="{{ month }}" {% if selected_month == month %}selected{% endif %}>{{ month }}</option>
+      {% endfor %}
+    </select>
+  </form>
+
+  <!-- 購入履歴テーブル -->
+  <div class="bg-white border rounded-lg shadow-md overflow-x-auto">
+    <table class="min-w-full text-sm text-center">
+      <thead class="bg-gray-100 text-gray-700">
+        <tr>
+          <th class="py-2 px-4 border-b">購入日</th>
+          <th class="py-2 px-4 border-b">ユーザー名</th>
+          <th class="py-2 px-4 border-b">サイト数</th>
+          <th class="py-2 px-4 border-b text-green-700">龍之介（@1000）</th>
+          <th class="py-2 px-4 border-b text-purple-700">毅（@2000）</th>
+        </tr>
+      </thead>
+      <tbody class="text-gray-800">
+        {% for log in logs %}
+        <tr class="hover:bg-gray-50">
+          <td class="py-2 px-4 border-b">{{ log.created_at.strftime('%Y-%m-%d') }}</td>
+          <td class="py-2 px-4 border-b">{{ log.user.last_name }} {{ log.user.first_name }}</td>
+          <td class="py-2 px-4 border-b">{{ log.site_count }}</td>
+          <td class="py-2 px-4 border-b text-green-700">{{ (log.site_count * 1000) | comma }}</td>
+          <td class="py-2 px-4 border-b text-purple-700">{{ (log.site_count * 2000) | comma }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="5" class="py-4 text-gray-500 italic">購入履歴が見つかりませんでした。</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+</div>
+{% endblock %}

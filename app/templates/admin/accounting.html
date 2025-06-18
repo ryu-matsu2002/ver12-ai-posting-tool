@@ -4,7 +4,10 @@
 {% block content %}
 <div class="p-8">
 
-  <h1 class="text-3xl font-extrabold mb-8 text-gray-800">💼 経理ダッシュボード <span class="text-sm font-normal text-gray-500">(TCC未購入ユーザーによるサイト枠購入集計)</span></h1>
+  <h1 class="text-3xl font-extrabold mb-8 text-gray-800">
+    💼 経理ダッシュボード
+    <span class="text-sm font-normal text-gray-500">(TCC未購入ユーザーによるサイト枠購入集計)</span>
+  </h1>
 
   <!-- 📅 月別フィルター -->
   <form method="get" class="mb-6">
@@ -18,7 +21,7 @@
   </form>
 
   <!-- 💰 総集計エリア -->
-  <div class="bg-gray-100 border border-gray-300 rounded-lg p-6 mb-10 shadow-md">
+  <div class="bg-gray-100 border border-gray-300 rounded-lg p-6 mb-6 shadow-md">
     <h2 class="text-xl font-bold mb-4 text-gray-800">📊 総集計</h2>
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-gray-700">
       <div class="bg-white p-4 rounded shadow text-center">
@@ -34,6 +37,13 @@
         <p class="text-xl font-bold text-purple-700">{{ total_takeshi | comma }} 円</p>
       </div>
     </div>
+  </div>
+
+  <!-- 🔗 ユーザー別購入履歴へのリンク -->
+  <div class="mb-10 text-right">
+    <a href="{{ url_for('admin.accounting_details') }}" class="inline-block bg-blue-600 text-white text-sm font-semibold px-4 py-2 rounded hover:bg-blue-700 shadow">
+      🧾 ユーザー別の購入履歴を見る
+    </a>
   </div>
 
   <!-- 📋 月別内訳 -->
