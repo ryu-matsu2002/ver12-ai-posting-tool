@@ -8,17 +8,6 @@
     <span class="text-sm font-normal text-gray-500">(各サイトプランの集計)</span>
   </h1>
 
-  <!-- 📅 月別フィルター -->
-  <form method="get" class="mb-6">
-    <label for="month" class="font-semibold text-gray-700 mr-2">📅 表示月：</label>
-    <select name="month" id="month" onchange="this.form.submit()" class="border border-gray-300 rounded px-3 py-2 text-sm">
-      <option value="all" {% if selected_month == 'all' %}selected{% endif %}>全期間</option>
-      {% for month in all_months %}
-        <option value="{{ month }}" {% if selected_month == month %}selected{% endif %}>{{ month }}</option>
-      {% endfor %}
-    </select>
-  </form>
-
   <!-- ✅ サイト枠購入の内訳（テーブル形式） -->
   <div class="bg-white border border-gray-300 rounded-lg shadow-md mb-10">
     <div class="p-4 border-b bg-gray-50 rounded-t">
@@ -102,7 +91,7 @@
     </a>
   </div>
 
-  <!-- 📅 月別内訳 -->
+  <!-- 📅 月別内訳（フォーム削除済） -->
   <div class="bg-white border rounded-lg shadow-md mb-10">
     <div class="p-4 border-b bg-gray-50 rounded-t">
       <h3 class="text-lg font-bold text-gray-700">📅 月別内訳</h3>
