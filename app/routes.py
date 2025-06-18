@@ -1019,8 +1019,9 @@ def accounting():
     # ✅ breakdown 表用関数（TCC未購入・購入済・事業用プラン）
     def calculate_financials():
         users = User.query.all()
-        tcc_unpurchased = []
-        tcc_purchased = []
+
+        unpurchased_total = 0
+        purchased_total = 0
         business_sites = Site.query.filter_by(plan_type="business").all()
 
         for user in users:
@@ -1029,12 +1030,12 @@ def accounting():
                 continue
 
             if user.has_purchased:
-                tcc_purchased.append(total_quota)
+                purchased_total += total_quota
             else:
-                tcc_unpurchased.append(total_quota)
+                unpurchased_total += total_quota
 
-        a = sum(tcc_unpurchased)
-        b = sum(tcc_purchased)
+        a = unpurchased_total
+        b = purchased_total
         c = len(business_sites)
 
         return {
@@ -1060,20 +1061,26 @@ def accounting():
 
     for user in tcc_disabled_users:
         total_quota = user.site_quota.total_quota if user.site_quota else 0
+        if total_quota == 0:
+            continue
         month_key = "all" if selected_month == "all" else selected_month
         site_data_by_month[month_key]["site_count"] += total_quota
         site_data_by_month[month_key]["ryunosuke_income"] += total_quota * 1000
         site_data_by_month[month_key]["takeshi_income"] += total_quota * 2000
 
-    filtered_data = {
-        selected_month: site_data_by_month.get(selected_month, {
-            "site_count": 0,
-            "ryunosuke_income": 0,
-            "takeshi_income": 0
-        })
-    } if selected_month != "all" else site_data_by_month
+    if selected_month == "all":
+        filtered_data = site_data_by_month
+    else:
+        filtered_data = {
+            selected_month: site_data_by_month.get(selected_month, {
+                "site_count": 0,
+                "ryunosuke_income": 0,
+                "takeshi_income": 0
+            })
+        }
 
-    total_count = breakdown["unpurchased"]["count"]  # ← TCC未購入分のみ
+    # ✅ 下段 summary 表は TCC未購入ユーザー分のみ使用
+    total_count = breakdown["unpurchased"]["count"]
     total_ryunosuke = breakdown["unpurchased"]["ryu"]
     total_takeshi = breakdown["unpurchased"]["take"]
 
@@ -1094,6 +1101,7 @@ def accounting():
         deposit_logs=deposit_logs,
         breakdown=breakdown
     )
+
 
 
 @admin_bp.route("/admin/accounting/details", methods=["GET"])
