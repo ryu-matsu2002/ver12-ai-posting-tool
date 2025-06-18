@@ -1016,30 +1016,27 @@ def accounting():
         db.func.coalesce(db.func.sum(RyunosukeDeposit.amount), 0)
     ).scalar()
 
-    # ✅ breakdown 表ロジック（正しく is_special_access を @1000 としてカウント）
+    # ✅ breakdown 表ロジック（全ユーザーの site_quota を精密集計）
     def calculate_financials():
         users = User.query.all()
 
         tcc_1000_total = 0     # TCC決済ページあり（¥1,000）
         tcc_3000_total = 0     # TCC決済ページなし（¥3,000）
-        business_total = 0     # 事業用プラン：登録＋未登録の合計
+        business_total = 0     # 事業用プラン（¥20,000/月）
 
         for user in users:
-            quota = user.site_quota.total_quota if user.site_quota else 0
-            if quota == 0:
+            site_quota = user.site_quota
+            total_quota = site_quota.total_quota if site_quota else 0
+
+            if total_quota == 0:
                 continue
 
-            # ✅ plan_type が 'business' は必ず事業用として扱う
-            if user.site_quota.plan_type == "business":
-                business_total += quota
-
-            # ✅ TCC決済ページがあるユーザーは @1,000 としてカウント（plan_type は問わない）
+            if site_quota and site_quota.plan_type == "business":
+                business_total += total_quota
             elif user.is_special_access:
-                tcc_1000_total += quota
-
-            # ✅ それ以外は @3,000 の TCC未購入ユーザー
+                tcc_1000_total += total_quota
             else:
-                tcc_3000_total += quota
+                tcc_3000_total += total_quota
 
         return {
             "unpurchased": {
@@ -1066,7 +1063,7 @@ def accounting():
 
     breakdown = calculate_financials()
 
-    # ✅ 月別内訳（TCC未購入ユーザーの登録＋未登録枠のみ表示）
+    # ✅ 月別内訳 → TCC未購入ユーザー（is_special_access=False）限定
     tcc_disabled_users = User.query.filter_by(is_special_access=False).all()
     site_data_by_month = defaultdict(lambda: {
         "site_count": 0,
@@ -1094,16 +1091,15 @@ def accounting():
         }
     )
 
-    # ✅ 入金履歴
     deposit_logs = RyunosukeDeposit.query.order_by(RyunosukeDeposit.deposit_date.desc()).all()
     all_months = sorted(site_data_by_month.keys(), reverse=True)
 
     return render_template(
         "admin/accounting.html",
         site_data_by_month=dict(sorted(filtered_data.items())),
-        total_count=breakdown["unpurchased"]["count"],      # ← 使用されていないが残してOK
-        total_ryunosuke=breakdown["unpurchased"]["ryu"],    # ← 使用されていないが残してOK
-        total_takeshi=breakdown["unpurchased"]["take"],     # ← 使用されていないが残してOK
+        total_count=breakdown["unpurchased"]["count"],      # ← TCC未購入分のみ
+        total_ryunosuke=breakdown["unpurchased"]["ryu"],
+        total_takeshi=breakdown["unpurchased"]["take"],
         selected_month=selected_month,
         all_months=all_months,
         form=form,
@@ -1112,8 +1108,6 @@ def accounting():
         deposit_logs=deposit_logs,
         breakdown=breakdown
     )
-
-
 
 
 @admin_bp.route("/admin/accounting/details", methods=["GET"])
