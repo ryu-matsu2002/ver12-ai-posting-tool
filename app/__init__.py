@@ -46,9 +46,10 @@ def create_app() -> Flask:
 
     # ─── SQLAlchemy 接続プール設定 ──────────────
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
-        "pool_size": int(os.getenv("POOL_SIZE", 10)),
-        "max_overflow": int(os.getenv("MAX_OVERFLOW", 20)),
-        "pool_timeout": int(os.getenv("POOL_TIMEOUT", 30)),
+        "pool_size": int(os.getenv("POOL_SIZE", 50)),
+        "max_overflow": int(os.getenv("MAX_OVERFLOW", 100)),
+        "pool_timeout": int(os.getenv("POOL_TIMEOUT", 60)),
+        "pool_recycle": 1800,  # ✅ 追加（切断予防）
     }
 
     # ─── 拡張をバインド ───────────────────────
