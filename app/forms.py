@@ -199,3 +199,13 @@ class GenreForm(FlaskForm):
     name = StringField("ジャンル名", validators=[DataRequired(), Length(max=100)])
     description = TextAreaField("説明", validators=[Length(max=300)])
     submit = SubmitField("保存")
+
+# app/forms.py の適切な場所に追加
+
+from wtforms import DateField
+
+class RyunosukeDepositForm(FlaskForm):
+    deposit_date = DateField("入金日", validators=[DataRequired()])
+    amount = IntegerField("入金金額", validators=[DataRequired(), NumberRange(min=1)])
+    memo = StringField("備考（任意）")
+    submit = SubmitField("保存する")

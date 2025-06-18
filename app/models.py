@@ -259,3 +259,13 @@ class ChatLog(db.Model):
     role = db.Column(db.String(10))  # "user" or "assistant"
     content = db.Column(db.Text)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+
+class RyunosukeDeposit(db.Model):
+    __tablename__ = "ryunosuke_deposits"
+
+    id = db.Column(db.Integer, primary_key=True)
+    deposit_date = db.Column(db.Date, nullable=False)
+    amount = db.Column(db.Integer, nullable=False)
+    memo = db.Column(db.String(255), nullable=True)  # 任意：備考
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)

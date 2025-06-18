@@ -20,7 +20,7 @@
     </select>
   </form>
 
-  <!-- 💰 総集計エリア -->
+  <!-- 💰 総集計 -->
   <div class="bg-gray-100 border border-gray-300 rounded-lg p-6 mb-6 shadow-md">
     <h2 class="text-xl font-bold mb-4 text-gray-800">📊 総集計</h2>
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-gray-700">
@@ -36,6 +36,39 @@
         <p class="text-sm text-gray-500">松本毅（@2000）</p>
         <p class="text-xl font-bold text-purple-700">{{ total_takeshi | comma }} 円</p>
       </div>
+    </div>
+  </div>
+
+  <!-- 🏦 入金情報と残高表示 -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
+    <!-- 🔢 入金済み/残高 -->
+    <div class="bg-white border rounded-lg shadow-md p-6">
+      <h3 class="text-lg font-bold text-gray-700 mb-4">💰 龍之介の入金状況</h3>
+      <p class="mb-2 text-gray-600">✅ 入金済み金額：<span class="font-bold text-green-700">{{ paid_total | comma }} 円</span></p>
+      <p class="mb-2 text-gray-600">💸 残り受取額：<span class="font-bold text-red-600">{{ remaining | comma }} 円</span></p>
+    </div>
+
+    <!-- 📥 入金登録フォーム -->
+    <div class="bg-white border rounded-lg shadow-md p-6">
+      <h3 class="text-lg font-bold text-gray-700 mb-4">📝 龍之介の入金を記録</h3>
+      <form method="POST">
+        {{ form.hidden_tag() }}
+        <div class="mb-4">
+          {{ form.deposit_date.label(class="block text-sm font-semibold text-gray-600 mb-1") }}
+          {{ form.deposit_date(class="w-full border px-3 py-2 rounded text-sm") }}
+        </div>
+        <div class="mb-4">
+          {{ form.amount.label(class="block text-sm font-semibold text-gray-600 mb-1") }}
+          {{ form.amount(class="w-full border px-3 py-2 rounded text-sm") }}
+        </div>
+        <div class="mb-4">
+          {{ form.memo.label(class="block text-sm font-semibold text-gray-600 mb-1") }}
+          {{ form.memo(class="w-full border px-3 py-2 rounded text-sm") }}
+        </div>
+        <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm shadow">
+          💾 入金を登録する
+        </button>
+      </form>
     </div>
   </div>
 
