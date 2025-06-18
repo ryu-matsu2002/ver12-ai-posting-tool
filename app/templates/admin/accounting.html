@@ -5,7 +5,7 @@
 <div class="p-8">
   <h1 class="text-3xl font-extrabold mb-8 text-gray-800">
     💼 経理ダッシュボード
-    <span class="text-sm font-normal text-gray-500">(TCC未購入・購入済み・事業用プランの集計)</span>
+    <span class="text-sm font-normal text-gray-500">(各サイトプランの集計)</span>
   </h1>
 
   <!-- 📅 月別フィルター -->
@@ -36,13 +36,13 @@
         </thead>
         <tbody class="text-gray-800 text-lg">
           <tr class="hover:bg-gray-50">
-            <td class="py-3 px-4 font-semibold">TCC未購入ユーザー（@3,000）</td>
+            <td class="py-3 px-4 font-semibold">TCC研究生（@3,000）</td>
             <td class="py-3 px-4 text-blue-700 font-bold">{{ breakdown.unpurchased.count }} 件</td>
             <td class="py-3 px-4 text-green-700 font-bold">¥{{ breakdown.unpurchased.ryu | comma }}</td>
             <td class="py-3 px-4 text-purple-700 font-bold">¥{{ breakdown.unpurchased.take | comma }}</td>
           </tr>
           <tr class="hover:bg-gray-50">
-            <td class="py-3 px-4 font-semibold">TCC購入済みユーザー（@1,000）</td>
+            <td class="py-3 px-4 font-semibold">TCCメンバー（@1,000）</td>
             <td class="py-3 px-4 text-blue-700 font-bold">{{ breakdown.purchased.count }} 件</td>
             <td class="py-3 px-4 text-green-700 font-bold">¥{{ breakdown.purchased.ryu | comma }}</td>
             <td class="py-3 px-4 text-purple-700 font-bold">¥{{ breakdown.purchased.take | comma }}</td>
