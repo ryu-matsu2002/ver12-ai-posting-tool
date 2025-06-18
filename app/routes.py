@@ -983,8 +983,10 @@ def delete_stuck_articles():
     return redirect(url_for("admin.admin_dashboard"))
 
 
+from flask import render_template, request, redirect, url_for, flash, abort
+from flask_login import login_required, current_user
 from app.forms import RyunosukeDepositForm
-from app.models import User, RyunosukeDeposit
+from app.models import User, RyunosukeDeposit, db
 from collections import defaultdict
 
 @admin_bp.route("/admin/accounting", methods=["GET", "POST"])
@@ -993,10 +995,10 @@ def accounting():
     if not current_user.is_admin:
         abort(403)
 
-    # ✅ 月セレクトは維持（今は "all" のみ使う）
+    # ✅ 表示対象の月（今は "all" のみ使用）
     selected_month = request.args.get("month", "all")
 
-    # ✅ TCC決済ページを持たないユーザーのみ対象
+    # ✅ TCC未購入ユーザー（is_special_access=False）を取得
     tcc_disabled_users = User.query.filter_by(is_special_access=False).all()
 
     # ✅ 月別データ格納用
@@ -1006,7 +1008,7 @@ def accounting():
         "takeshi_income": 0
     })
 
-    # ✅ 集計カウンタ
+    # ✅ 総合計
     total_count = 0
     total_ryunosuke = 0
     total_takeshi = 0
@@ -1014,7 +1016,6 @@ def accounting():
     for user in tcc_disabled_users:
         if not user.site_quota:
             continue
-
         total_quota = user.site_quota.total_quota or 0
         month_key = "all" if selected_month == "all" else selected_month
 
@@ -1022,7 +1023,7 @@ def accounting():
         site_data_by_month[month_key]["ryunosuke_income"] += total_quota * 1000
         site_data_by_month[month_key]["takeshi_income"] += total_quota * 2000
 
-    # ✅ 表示対象をフィルター
+    # ✅ 表示データを絞る
     if selected_month == "all":
         filtered_data = site_data_by_month
     else:
@@ -1039,7 +1040,7 @@ def accounting():
         total_ryunosuke += data["ryunosuke_income"]
         total_takeshi += data["takeshi_income"]
 
-    # ✅ 入金フォーム
+    # ✅ 入金フォーム処理
     form = RyunosukeDepositForm()
     if form.validate_on_submit():
         new_deposit = RyunosukeDeposit(
@@ -1052,13 +1053,16 @@ def accounting():
         flash("龍之介の入金記録を保存しました", "success")
         return redirect(url_for("admin.accounting"))
 
-    # ✅ 入金済み合計、残高の計算
+    # ✅ 入金合計と残高
     paid_total = db.session.query(
         db.func.coalesce(db.func.sum(RyunosukeDeposit.amount), 0)
     ).scalar()
     remaining = total_ryunosuke - paid_total
 
-    # ✅ 表示月一覧
+    # ✅ 入金履歴一覧（降順）
+    deposit_logs = RyunosukeDeposit.query.order_by(RyunosukeDeposit.deposit_date.desc()).all()
+
+    # ✅ 月一覧
     all_months = sorted(site_data_by_month.keys(), reverse=True)
 
     return render_template(
@@ -1071,8 +1075,10 @@ def accounting():
         all_months=all_months,
         form=form,
         paid_total=paid_total,
-        remaining=remaining
+        remaining=remaining,
+        deposit_logs=deposit_logs  # ✅ テンプレートに渡す
     )
+
 
 
 @admin_bp.route("/admin/accounting/details", methods=["GET"])

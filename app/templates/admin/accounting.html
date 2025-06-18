@@ -80,7 +80,7 @@
   </div>
 
   <!-- 📋 月別内訳 -->
-  <div class="bg-white border rounded-lg shadow-md">
+  <div class="bg-white border rounded-lg shadow-md mb-10">
     <div class="p-4 border-b bg-gray-50 rounded-t">
       <h3 class="text-lg font-bold text-gray-700">📅 月別内訳</h3>
     </div>
@@ -105,6 +105,37 @@
           {% else %}
           <tr>
             <td colspan="4" class="py-4 text-gray-500 italic">データがありません</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 📜 入金履歴一覧 -->
+  <div class="bg-white border rounded-lg shadow-md">
+    <div class="p-4 border-b bg-gray-50 rounded-t">
+      <h3 class="text-lg font-bold text-gray-700">📜 龍之介の入金履歴</h3>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm text-left">
+        <thead class="bg-gray-100 text-gray-700">
+          <tr>
+            <th class="py-2 px-4 border-b">入金日</th>
+            <th class="py-2 px-4 border-b">金額</th>
+            <th class="py-2 px-4 border-b">備考</th>
+          </tr>
+        </thead>
+        <tbody class="text-gray-800">
+          {% for log in deposit_logs %}
+          <tr class="hover:bg-gray-50">
+            <td class="py-2 px-4 border-b">{{ log.deposit_date.strftime("%Y-%m-%d") }}</td>
+            <td class="py-2 px-4 border-b text-green-700">{{ log.amount | comma }} 円</td>
+            <td class="py-2 px-4 border-b">{{ log.memo or '-' }}</td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="3" class="py-4 text-gray-500 italic text-center">まだ入金記録がありません</td>
           </tr>
           {% endfor %}
         </tbody>
