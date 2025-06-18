@@ -1016,25 +1016,25 @@ def accounting():
         db.func.coalesce(db.func.sum(RyunosukeDeposit.amount), 0)
     ).scalar()
 
-    # ✅ breakdown 表ロジック（is_special_access を正しく使用）
+    # ✅ breakdown 表ロジック（is_special_access と plan_type に基づく正確な集計）
     def calculate_financials():
         users = User.query.all()
 
         tcc_1000_total = 0  # 特別アクセスあり（¥1000）
         tcc_3000_total = 0  # 特別アクセスなし（¥3000）
-        business_sites = Site.query.filter_by(plan_type="business").all()
+        business_total = 0  # 事業用：登録＋未登録の合計（UserSiteQuota）
 
         for user in users:
             quota = user.site_quota.total_quota if user.site_quota else 0
             if quota == 0:
                 continue
 
-            if user.is_special_access:
+            if user.site_quota.plan_type == "business":
+                business_total += quota
+            elif user.is_special_access:
                 tcc_1000_total += quota
             else:
                 tcc_3000_total += quota
-
-        business_count = len(business_sites)
 
         return {
             "unpurchased": {
@@ -1048,14 +1048,14 @@ def accounting():
                 "take": tcc_1000_total * 1000,
             },
             "business": {
-                "count": business_count,
-                "ryu": business_count * 16000,
-                "take": business_count * 4000,
+                "count": business_total,
+                "ryu": business_total * 16000,
+                "take": business_total * 4000,
             },
             "total": {
-                "count": tcc_3000_total + tcc_1000_total + business_count,
-                "ryu": tcc_3000_total * 1000 + business_count * 16000,
-                "take": tcc_3000_total * 2000 + tcc_1000_total * 1000 + business_count * 4000,
+                "count": tcc_3000_total + tcc_1000_total + business_total,
+                "ryu": tcc_3000_total * 1000 + business_total * 16000,
+                "take": tcc_3000_total * 2000 + tcc_1000_total * 1000 + business_total * 4000,
             },
         }
 
@@ -1111,6 +1111,7 @@ def accounting():
         deposit_logs=deposit_logs,
         breakdown=breakdown
     )
+
 
 
 @admin_bp.route("/admin/accounting/details", methods=["GET"])

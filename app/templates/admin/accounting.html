@@ -20,65 +20,35 @@
     </select>
   </form>
 
-  <!-- 📊 詳細内訳表（追加） -->
-  <div class="bg-white border border-gray-300 rounded-lg p-6 mb-8 shadow-md">
+  <!-- ✅ サイト枠購入の内訳（新デザイン） -->
+  <div class="bg-gray-100 border border-gray-300 rounded-lg p-6 mb-8 shadow-md">
     <h2 class="text-xl font-bold mb-4 text-gray-800">📊 サイト枠購入の内訳</h2>
-    <div class="overflow-x-auto">
-      <table class="min-w-full text-sm text-center">
-        <thead class="bg-gray-100 text-gray-700">
-          <tr>
-            <th class="py-2 px-4">ユーザー種別</th>
-            <th class="py-2 px-4">購入サイト数</th>
-            <th class="py-2 px-4 text-green-700">松本龍之介取り分</th>
-            <th class="py-2 px-4 text-purple-700">松本毅取り分</th>
-          </tr>
-        </thead>
-        <tbody class="text-gray-800 bg-white">
-          <tr>
-            <td class="py-2 px-4">TCC未購入ユーザー（¥3,000）</td>
-            <td>{{ breakdown.unpurchased.count }} 件</td>
-            <td>¥{{ breakdown.unpurchased.ryu | comma }}</td>
-            <td>¥{{ breakdown.unpurchased.take | comma }}</td>
-          </tr>
-          <tr>
-            <td class="py-2 px-4">TCC購入済みユーザー（¥1,000）</td>
-            <td>{{ breakdown.purchased.count }} 件</td>
-            <td>¥{{ breakdown.purchased.ryu | comma }}</td>
-            <td>¥{{ breakdown.purchased.take | comma }}</td>
-          </tr>
-          <tr>
-            <td class="py-2 px-4">事業用プラン（¥20,000/月）</td>
-            <td>{{ breakdown.business.count }} 件</td>
-            <td>¥{{ breakdown.business.ryu | comma }}</td>
-            <td>¥{{ breakdown.business.take | comma }}</td>
-          </tr>
-          <tr class="bg-gray-50 font-bold">
-            <td class="py-2 px-4">合計</td>
-            <td>{{ breakdown.total.count }} 件</td>
-            <td class="text-green-800">¥{{ breakdown.total.ryu | comma }}</td>
-            <td class="text-purple-800">¥{{ breakdown.total.take | comma }}</td>
-          </tr>
-        </tbody>
-      </table>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-gray-700 text-center">
+      <div class="bg-white p-6 rounded shadow">
+        <p class="text-sm text-gray-500 mb-2">TCC未購入ユーザー（@3,000）</p>
+        <p class="text-xl font-bold text-blue-700">{{ breakdown.unpurchased.count }} 件</p>
+        <p class="text-sm mt-2 text-green-700">龍之介：¥{{ breakdown.unpurchased.ryu | comma }}</p>
+        <p class="text-sm text-purple-700">毅：¥{{ breakdown.unpurchased.take | comma }}</p>
+      </div>
+      <div class="bg-white p-6 rounded shadow">
+        <p class="text-sm text-gray-500 mb-2">TCC購入済みユーザー（@1,000）</p>
+        <p class="text-xl font-bold text-blue-700">{{ breakdown.purchased.count }} 件</p>
+        <p class="text-sm mt-2 text-green-700">龍之介：¥{{ breakdown.purchased.ryu | comma }}</p>
+        <p class="text-sm text-purple-700">毅：¥{{ breakdown.purchased.take | comma }}</p>
+      </div>
+      <div class="bg-white p-6 rounded shadow">
+        <p class="text-sm text-gray-500 mb-2">事業用プラン（@20,000/月）</p>
+        <p class="text-xl font-bold text-blue-700">{{ breakdown.business.count }} 件</p>
+        <p class="text-sm mt-2 text-green-700">龍之介：¥{{ breakdown.business.ryu | comma }}</p>
+        <p class="text-sm text-purple-700">毅：¥{{ breakdown.business.take | comma }}</p>
+      </div>
     </div>
-  </div>
 
-  <!-- 💰 総集計 -->
-  <div class="bg-gray-100 border border-gray-300 rounded-lg p-6 mb-6 shadow-md">
-    <h2 class="text-xl font-bold mb-4 text-gray-800">📊 総集計</h2>
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-gray-700">
-      <div class="bg-white p-4 rounded shadow text-center">
-        <p class="text-sm text-gray-500">購入済みサイト枠数（登録済み＋未登録）</p>
-        <p class="text-xl font-bold text-blue-700">{{ total_count }} 件</p>
-      </div>
-      <div class="bg-white p-4 rounded shadow text-center">
-        <p class="text-sm text-gray-500">松本龍之介（@1000）</p>
-        <p class="text-xl font-bold text-green-700">{{ total_ryunosuke | comma }} 円</p>
-      </div>
-      <div class="bg-white p-4 rounded shadow text-center">
-        <p class="text-sm text-gray-500">松本毅（@2000）</p>
-        <p class="text-xl font-bold text-purple-700">{{ total_takeshi | comma }} 円</p>
-      </div>
+    <!-- ✅ 合計 -->
+    <div class="mt-6 text-center font-semibold text-gray-800">
+      合計：<span class="text-blue-700">{{ breakdown.total.count }} 件</span>　
+      龍之介：<span class="text-green-700">¥{{ breakdown.total.ryu | comma }}</span>　
+      毅：<span class="text-purple-700">¥{{ breakdown.total.take | comma }}</span>
     </div>
   </div>
 
