@@ -1,9 +1,8 @@
 {% extends "base_admin.html" %}
-{% block title %}ユーザー別 購入履歴一覧{% endblock %}
+{% block title %}購入履歴一覧{% endblock %}
 
 {% block content %}
 <div class="p-8">
-
   <h1 class="text-3xl font-extrabold mb-8 text-gray-800">📄 ユーザー別 購入履歴一覧</h1>
 
   <!-- 📅 月別フィルター -->
@@ -17,47 +16,42 @@
     </select>
   </form>
 
-  <!-- ✅ ユーザー別履歴 表示（リアルタイムでサイト枠追加ログを1件ずつ表示） -->
-  {% for user_id, logs in grouped_logs.items() %}
-    <details class="mb-4 bg-white border rounded shadow-sm">
-      <summary class="px-4 py-3 cursor-pointer bg-blue-50 hover:bg-blue-100 text-blue-800 font-semibold text-lg border-b">
-        👤 {{ user_info_dict[user_id].name }}
-        {% if user_info_dict[user_id].company %}
-          <span class="text-sm text-gray-600 ml-2">（{{ user_info_dict[user_id].company }}）</span>
-        {% endif %}
-      </summary>
-      <div class="overflow-x-auto">
-        <table class="min-w-full text-sm text-center">
-          <thead class="bg-gray-100 text-gray-700">
-            <tr>
-              <th class="py-2 px-4 border-b">追加日</th>
-              <th class="py-2 px-4 border-b">サイト数</th>
-              <th class="py-2 px-4 border-b">プラン</th>
-            </tr>
-          </thead>
-          <tbody class="text-gray-800">
-            {% for log in logs %}
-            <tr class="hover:bg-gray-50">
-              <td class="py-2 px-4 border-b">{{ log.created_at.strftime('%Y-%m-%d') }}</td>
-              <td class="py-2 px-4 border-b">{{ log.site_count }}</td>
-              <td class="py-2 px-4 border-b">
-                {% if log.plan_type == 'affiliate' %}
-                  アフィリエイト
-                {% elif log.plan_type == 'business' %}
-                  事業用
-                {% else %}
-                  -
-                {% endif %}
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </details>
-  {% else %}
-    <p class="text-gray-500 italic text-center mt-10">表示可能な履歴がありません。</p>
-  {% endfor %}
-
+  <!-- 購入履歴テーブル（全ログ最新順表示） -->
+  <div class="bg-white border rounded-lg shadow-md overflow-x-auto">
+    <table class="min-w-full text-sm text-center">
+      <thead class="bg-gray-100 text-gray-700">
+        <tr>
+          <th class="py-2 px-4 border-b">購入日</th>
+          <th class="py-2 px-4 border-b">ユーザー名</th>
+          <th class="py-2 px-4 border-b">サイト数</th>
+          <th class="py-2 px-4 border-b">プラン</th>
+        </tr>
+      </thead>
+      <tbody class="text-gray-800">
+        {% for log in logs %}
+        <tr class="hover:bg-gray-50">
+          <td class="py-2 px-4 border-b">{{ log.created_at.strftime('%Y-%m-%d') }}</td>
+          <td class="py-2 px-4 border-b">
+            {{ log.user.last_name }} {{ log.user.first_name }}
+          </td>
+          <td class="py-2 px-4 border-b">{{ log.site_count }}</td>
+          <td class="py-2 px-4 border-b">
+            {% if log.plan_type == 'affiliate' %}
+              アフィリエイト
+            {% elif log.plan_type == 'business' %}
+              事業用
+            {% else %}
+              不明
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="4" class="py-4 text-gray-500 italic text-center">履歴が見つかりませんでした。</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endblock %}

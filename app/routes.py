@@ -1129,22 +1129,13 @@ def accounting_details():
 
     from flask import request
     from sqlalchemy import extract
-    from collections import defaultdict
 
     selected_month = request.args.get("month", "all")
 
-    # すべてのユーザー（管理者も含む）
-    all_users = User.query.all()
-    user_info_dict = {
-        user.id: {
-            "name": f"{user.last_name} {user.first_name}",
-            "id": user.id
-        } for user in all_users
-    }
-
-    # ベースクエリ：すべてのSiteQuotaLog（手動＋Stripe支払い含む）
+    # ✅ 全 SiteQuotaLog を対象に（管理者も含む）
     logs_query = SiteQuotaLog.query
 
+    # ✅ 月別フィルタ（例：2025-06）
     if selected_month != "all":
         year, month = selected_month.split("-")
         logs_query = logs_query.filter(
@@ -1152,9 +1143,10 @@ def accounting_details():
             extract("month", SiteQuotaLog.created_at) == int(month)
         )
 
+    # ✅ 購入日が新しい順に並べ替え
     logs = logs_query.order_by(SiteQuotaLog.created_at.desc()).all()
 
-    # 月一覧生成用（降順）
+    # ✅ 月フィルター選択用：全ログから年月を抽出（降順）
     all_months = sorted(
         {
             log.created_at.strftime("%Y-%m")
@@ -1164,21 +1156,12 @@ def accounting_details():
         reverse=True
     )
 
-    # ✅ ユーザー単位でグループ化
-    grouped_logs = defaultdict(list)
-    for log in logs:
-        if log.user_id:
-            grouped_logs[log.user_id].append(log)
-
     return render_template(
         "admin/accounting_details.html",
-        grouped_logs=grouped_logs,
-        user_info_dict=user_info_dict,
+        logs=logs,
         selected_month=selected_month,
         all_months=all_months
     )
-
-
 
 
 # --- 既存: ユーザー全記事表示 ---
