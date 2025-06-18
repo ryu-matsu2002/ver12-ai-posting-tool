@@ -1017,9 +1017,9 @@ def accounting():
         site_data_by_month[ym]["ryunosuke_income"] += log.site_count * 1000
         site_data_by_month[ym]["takeshi_income"] += log.site_count * 2000
 
-    # ✅ 表示月でフィルタ
+    # ✅ 表示月でフィルタ（全期間の場合はすべて使用）
     if selected_month == "all":
-        filtered_data = site_data_by_month
+        filtered_data = dict(site_data_by_month)
     else:
         filtered_data = {
             selected_month: site_data_by_month.get(selected_month, {
@@ -1046,6 +1046,7 @@ def accounting():
         selected_month=selected_month,
         all_months=all_months
     )
+
 
 @admin_bp.route("/admin/accounting/details", methods=["GET"])
 @login_required
