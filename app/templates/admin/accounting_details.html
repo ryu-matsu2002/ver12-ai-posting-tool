@@ -17,7 +17,7 @@
     </select>
   </form>
 
-  <!-- ✅ ユーザー別 購入履歴表示（折りたたみ） -->
+  <!-- ✅ ユーザー別履歴 表示（リアルタイムでサイト枠追加ログを1件ずつ表示） -->
   {% for user_id, logs in grouped_logs.items() %}
     <details class="mb-4 bg-white border rounded shadow-sm">
       <summary class="px-4 py-3 cursor-pointer bg-blue-50 hover:bg-blue-100 text-blue-800 font-semibold text-lg border-b">
@@ -30,10 +30,9 @@
         <table class="min-w-full text-sm text-center">
           <thead class="bg-gray-100 text-gray-700">
             <tr>
-              <th class="py-2 px-4 border-b">購入日</th>
+              <th class="py-2 px-4 border-b">追加日</th>
               <th class="py-2 px-4 border-b">サイト数</th>
-              <th class="py-2 px-4 border-b text-green-700">龍之介（@1000）</th>
-              <th class="py-2 px-4 border-b text-purple-700">毅（@2000）</th>
+              <th class="py-2 px-4 border-b">プラン</th>
             </tr>
           </thead>
           <tbody class="text-gray-800">
@@ -41,8 +40,15 @@
             <tr class="hover:bg-gray-50">
               <td class="py-2 px-4 border-b">{{ log.created_at.strftime('%Y-%m-%d') }}</td>
               <td class="py-2 px-4 border-b">{{ log.site_count }}</td>
-              <td class="py-2 px-4 border-b text-green-700">{{ (log.site_count * 1000) | comma }}</td>
-              <td class="py-2 px-4 border-b text-purple-700">{{ (log.site_count * 2000) | comma }}</td>
+              <td class="py-2 px-4 border-b">
+                {% if log.plan_type == 'affiliate' %}
+                  アフィリエイト
+                {% elif log.plan_type == 'business' %}
+                  事業用
+                {% else %}
+                  -
+                {% endif %}
+              </td>
             </tr>
             {% endfor %}
           </tbody>
@@ -50,7 +56,7 @@
       </div>
     </details>
   {% else %}
-    <p class="text-gray-500 italic text-center mt-10">表示可能な購入履歴がありません。</p>
+    <p class="text-gray-500 italic text-center mt-10">表示可能な履歴がありません。</p>
   {% endfor %}
 
 </div>

@@ -1121,36 +1121,30 @@ def accounting():
     )
 
 
-from app.models import User, SiteQuotaLog, db
-from collections import defaultdict
-from sqlalchemy import extract
-
-
 @admin_bp.route("/admin/accounting/details", methods=["GET"])
 @login_required
 def accounting_details():
     if not current_user.is_admin:
         abort(403)
 
+    from flask import request
+    from sqlalchemy import extract
+    from collections import defaultdict
+
     selected_month = request.args.get("month", "all")
 
-    # 全ユーザー（管理者含む）を対象
+    # すべてのユーザー（管理者も含む）
     all_users = User.query.all()
-    user_info_dict = {u.id: {
-        "name": f"{u.last_name} {u.first_name}",
-        "company": u.company_name or "",
-        "is_admin": u.is_admin
-    } for u in all_users}
+    user_info_dict = {
+        user.id: {
+            "name": f"{user.last_name} {user.first_name}",
+            "id": user.id
+        } for user in all_users
+    }
 
-    user_ids = list(user_info_dict.keys())
+    # ベースクエリ：すべてのSiteQuotaLog（手動＋Stripe支払い含む）
+    logs_query = SiteQuotaLog.query
 
-    # ベースクエリ
-    logs_query = SiteQuotaLog.query.filter(
-        SiteQuotaLog.user_id.in_(user_ids),
-        SiteQuotaLog.plan_type == "affiliate"
-    )
-
-    # 月フィルタ適用
     if selected_month != "all":
         year, month = selected_month.split("-")
         logs_query = logs_query.filter(
@@ -1160,27 +1154,30 @@ def accounting_details():
 
     logs = logs_query.order_by(SiteQuotaLog.created_at.desc()).all()
 
-    # ✅ ユーザー単位でログをグループ化
+    # 月一覧生成用（降順）
+    all_months = sorted(
+        {
+            log.created_at.strftime("%Y-%m")
+            for log in SiteQuotaLog.query.all()
+            if log.created_at
+        },
+        reverse=True
+    )
+
+    # ✅ ユーザー単位でグループ化
     grouped_logs = defaultdict(list)
     for log in logs:
-        grouped_logs[log.user_id].append(log)
-
-    # ✅ 月フィルター一覧作成（降順）
-    all_logs = SiteQuotaLog.query.filter(
-        SiteQuotaLog.user_id.in_(user_ids),
-        SiteQuotaLog.plan_type == "affiliate"
-    ).all()
-
-    month_set = set(log.created_at.strftime("%Y-%m") for log in all_logs if log.created_at)
-    all_months = sorted(month_set, reverse=True)
+        if log.user_id:
+            grouped_logs[log.user_id].append(log)
 
     return render_template(
         "admin/accounting_details.html",
-        grouped_logs=grouped_logs,       # ← {user_id: [log, log, ...]}
-        user_info_dict=user_info_dict,   # ← {user_id: {name, company, is_admin}}
+        grouped_logs=grouped_logs,
+        user_info_dict=user_info_dict,
         selected_month=selected_month,
         all_months=all_months
     )
+
 
 
 
