@@ -992,43 +992,44 @@ def accounting():
     from flask import request
     from sqlalchemy import extract
 
-    # ✅ 選択された月（"all" or "YYYY-MM"）
+    # ✅ 選択された月（"all" または "2025-06" のような形式）
     selected_month = request.args.get("month", "all")
 
-    # ✅ TCC未使用ユーザーのIDを抽出
+    # ✅ TCC未購入ユーザーのIDを取得
     tcc_user_ids = [
         u.id for u in User.query.filter_by(is_special_access=False).all()
     ]
 
-    # ✅ ログをすべて取得（TCCユーザーかつアフィリエイトのみ）
-    logs_query = SiteQuotaLog.query.filter(
+    # ✅ 対象のSiteQuotaLogを取得（TCC未購入ユーザー＋アフィリエイトプランのみ）
+    logs = SiteQuotaLog.query.filter(
         SiteQuotaLog.user_id.in_(tcc_user_ids),
         SiteQuotaLog.plan_type == "affiliate"
-    )
+    ).all()
 
-    logs = logs_query.all()
-
-    # ✅ 月別に集計する辞書
+    # ✅ 月別集計用辞書
     site_data_by_month = defaultdict(lambda: {
         "site_count": 0,
         "ryunosuke_income": 0,
         "takeshi_income": 0
     })
 
+    # ✅ ログを月別に集計
     for log in logs:
         if not log.created_at:
-            continue
-        ym = log.created_at.strftime("%Y-%m")
+            continue  # 日付がないログはスキップ
+        ym = log.created_at.strftime("%Y-%m")  # "2025-06" の形式
         count = log.site_count or 0
 
         site_data_by_month[ym]["site_count"] += count
         site_data_by_month[ym]["ryunosuke_income"] += count * 1000
         site_data_by_month[ym]["takeshi_income"] += count * 2000
 
-    # ✅ 表示対象をフィルタリング
+    # ✅ 月フィルターによる絞り込み
     if selected_month == "all":
+        # 全月分をそのまま渡す
         filtered_data = dict(site_data_by_month)
     else:
+        # 選択された月のみ取り出す（なければ0で初期化）
         filtered_data = {
             selected_month: site_data_by_month.get(selected_month, {
                 "site_count": 0,
@@ -1037,17 +1038,18 @@ def accounting():
             })
         }
 
-    # ✅ 合計を算出
+    # ✅ 合計値の算出（フィルター後のデータに対して）
     total_count = sum(d["site_count"] for d in filtered_data.values())
     total_ryunosuke = sum(d["ryunosuke_income"] for d in filtered_data.values())
     total_takeshi = sum(d["takeshi_income"] for d in filtered_data.values())
 
-    # ✅ 表示可能な月一覧（降順）
+    # ✅ 表示可能な月の一覧（降順）
     all_months = sorted(site_data_by_month.keys(), reverse=True)
 
+    # ✅ テンプレートへ渡す
     return render_template(
         "admin/accounting.html",
-        site_data_by_month=dict(sorted(filtered_data.items())),
+        site_data_by_month=dict(sorted(filtered_data.items())),  # 月別データ
         total_count=total_count,
         total_ryunosuke=total_ryunosuke,
         total_takeshi=total_takeshi,
