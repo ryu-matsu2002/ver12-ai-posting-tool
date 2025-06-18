@@ -1016,7 +1016,7 @@ def accounting():
         db.func.coalesce(db.func.sum(RyunosukeDeposit.amount), 0)
     ).scalar()
 
-    # ✅ breakdown 表ロジック（全ユーザーの site_quota を精密集計）
+    # ✅ breakdown 表ロジック（全ユーザーを集計・管理者除外）
     def calculate_financials():
         users = User.query.all()
 
@@ -1025,6 +1025,9 @@ def accounting():
         business_total = 0     # 事業用プラン（¥20,000/月）
 
         for user in users:
+            if user.is_admin:
+                continue  # 管理者は除外
+
             site_quota = user.site_quota
             total_quota = site_quota.total_quota if site_quota else 0
 
@@ -1063,7 +1066,7 @@ def accounting():
 
     breakdown = calculate_financials()
 
-    # ✅ 月別内訳 → TCC未購入ユーザー（is_special_access=False）限定
+    # ✅ 月別内訳（TCC未購入者、かつ管理者を除外）
     tcc_disabled_users = User.query.filter_by(is_special_access=False).all()
     site_data_by_month = defaultdict(lambda: {
         "site_count": 0,
@@ -1072,9 +1075,13 @@ def accounting():
     })
 
     for user in tcc_disabled_users:
+        if user.is_admin:
+            continue  # 管理者除外
+
         total_quota = user.site_quota.total_quota if user.site_quota else 0
         if total_quota == 0:
             continue
+
         month_key = "all" if selected_month == "all" else selected_month
         site_data_by_month[month_key]["site_count"] += total_quota
         site_data_by_month[month_key]["ryunosuke_income"] += total_quota * 1000
@@ -1108,6 +1115,7 @@ def accounting():
         deposit_logs=deposit_logs,
         breakdown=breakdown
     )
+
 
 
 @admin_bp.route("/admin/accounting/details", methods=["GET"])
