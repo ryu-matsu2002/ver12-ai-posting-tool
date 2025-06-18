@@ -1016,23 +1016,28 @@ def accounting():
         db.func.coalesce(db.func.sum(RyunosukeDeposit.amount), 0)
     ).scalar()
 
-    # ✅ breakdown 表ロジック（is_special_access と plan_type に基づく正確な集計）
+    # ✅ breakdown 表ロジック（正しく is_special_access を @1000 としてカウント）
     def calculate_financials():
         users = User.query.all()
 
-        tcc_1000_total = 0  # 特別アクセスあり（¥1000）
-        tcc_3000_total = 0  # 特別アクセスなし（¥3000）
-        business_total = 0  # 事業用：登録＋未登録の合計（UserSiteQuota）
+        tcc_1000_total = 0     # TCC決済ページあり（¥1,000）
+        tcc_3000_total = 0     # TCC決済ページなし（¥3,000）
+        business_total = 0     # 事業用プラン：登録＋未登録の合計
 
         for user in users:
             quota = user.site_quota.total_quota if user.site_quota else 0
             if quota == 0:
                 continue
 
+            # ✅ plan_type が 'business' は必ず事業用として扱う
             if user.site_quota.plan_type == "business":
                 business_total += quota
+
+            # ✅ TCC決済ページがあるユーザーは @1,000 としてカウント（plan_type は問わない）
             elif user.is_special_access:
                 tcc_1000_total += quota
+
+            # ✅ それ以外は @3,000 の TCC未購入ユーザー
             else:
                 tcc_3000_total += quota
 
@@ -1061,7 +1066,7 @@ def accounting():
 
     breakdown = calculate_financials()
 
-    # ✅ 総集計（月別内訳）→ TCC未購入者（is_special_access=False）のみ
+    # ✅ 月別内訳（TCC未購入ユーザーの登録＋未登録枠のみ表示）
     tcc_disabled_users = User.query.filter_by(is_special_access=False).all()
     site_data_by_month = defaultdict(lambda: {
         "site_count": 0,
@@ -1078,39 +1083,36 @@ def accounting():
         site_data_by_month[month_key]["ryunosuke_income"] += total_quota * 1000
         site_data_by_month[month_key]["takeshi_income"] += total_quota * 2000
 
-    if selected_month == "all":
-        filtered_data = site_data_by_month
-    else:
-        filtered_data = {
+    filtered_data = (
+        site_data_by_month if selected_month == "all"
+        else {
             selected_month: site_data_by_month.get(selected_month, {
                 "site_count": 0,
                 "ryunosuke_income": 0,
                 "takeshi_income": 0
             })
         }
+    )
 
-    # ✅ 下部 summary（TCC未購入者の分だけ表示）
-    total_count = breakdown["unpurchased"]["count"]
-    total_ryunosuke = breakdown["unpurchased"]["ryu"]
-    total_takeshi = breakdown["unpurchased"]["take"]
-
+    # ✅ 入金履歴
     deposit_logs = RyunosukeDeposit.query.order_by(RyunosukeDeposit.deposit_date.desc()).all()
     all_months = sorted(site_data_by_month.keys(), reverse=True)
 
     return render_template(
         "admin/accounting.html",
         site_data_by_month=dict(sorted(filtered_data.items())),
-        total_count=total_count,
-        total_ryunosuke=total_ryunosuke,
-        total_takeshi=total_takeshi,
+        total_count=breakdown["unpurchased"]["count"],      # ← 使用されていないが残してOK
+        total_ryunosuke=breakdown["unpurchased"]["ryu"],    # ← 使用されていないが残してOK
+        total_takeshi=breakdown["unpurchased"]["take"],     # ← 使用されていないが残してOK
         selected_month=selected_month,
         all_months=all_months,
         form=form,
         paid_total=paid_total,
-        remaining=total_ryunosuke - paid_total,
+        remaining=breakdown["unpurchased"]["ryu"] - paid_total,
         deposit_logs=deposit_logs,
         breakdown=breakdown
     )
+
 
 
 
