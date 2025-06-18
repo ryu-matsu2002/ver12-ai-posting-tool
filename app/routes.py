@@ -988,6 +988,7 @@ from flask_login import login_required, current_user
 from app.forms import RyunosukeDepositForm
 from app.models import User, RyunosukeDeposit, Site, db
 from collections import defaultdict
+from datetime import datetime
 
 
 @admin_bp.route("/admin/accounting", methods=["GET", "POST"])
@@ -1020,9 +1021,9 @@ def accounting():
     def calculate_financials():
         users = User.query.all()
 
-        tcc_1000_total = 0     # TCC決済ページあり（¥1,000）
-        tcc_3000_total = 0     # TCC決済ページなし（¥3,000）
-        business_total = 0     # 事業用プラン（¥20,000/月）
+        tcc_1000_total = 0     # TCC決済ページあり（\u00a51,000）
+        tcc_3000_total = 0     # TCC決済ページなし（\u00a53,000）
+        business_total = 0     # 事業用プラン（\u00a520,000/月）
 
         for user in users:
             if user.is_admin:
@@ -1066,27 +1067,30 @@ def accounting():
 
     breakdown = calculate_financials()
 
-    # ✅ 月別内訳（TCC未購入者、かつ管理者を除外）
+    # ✅ 月別内訳（TCC未購入者、かつ管理者を除外）＋created_atによる分類を追加
     tcc_disabled_users = User.query.filter_by(is_special_access=False).all()
     site_data_by_month = defaultdict(lambda: {
         "site_count": 0,
         "ryunosuke_income": 0,
         "takeshi_income": 0
     })
+    all_months_set = set()
 
     for user in tcc_disabled_users:
         if user.is_admin:
-            continue  # 管理者除外
-
-        total_quota = user.site_quota.total_quota if user.site_quota else 0
-        if total_quota == 0:
             continue
 
-        month_key = "all" if selected_month == "all" else selected_month
-        site_data_by_month[month_key]["site_count"] += total_quota
-        site_data_by_month[month_key]["ryunosuke_income"] += total_quota * 1000
-        site_data_by_month[month_key]["takeshi_income"] += total_quota * 2000
+        for site in user.sites:  # ✅ 各ユーザーのサイトごとに処理
+            if not site.created_at:
+                continue
+            month_key = site.created_at.strftime("%Y-%m")
+            all_months_set.add(month_key)
+            if selected_month == "all" or selected_month == month_key:
+                site_data_by_month[month_key]["site_count"] += 1
+                site_data_by_month[month_key]["ryunosuke_income"] += 1000
+                site_data_by_month[month_key]["takeshi_income"] += 2000
 
+    # ✅ 月選択と表示データ分岐
     filtered_data = (
         site_data_by_month if selected_month == "all"
         else {
@@ -1099,12 +1103,12 @@ def accounting():
     )
 
     deposit_logs = RyunosukeDeposit.query.order_by(RyunosukeDeposit.deposit_date.desc()).all()
-    all_months = sorted(site_data_by_month.keys(), reverse=True)
+    all_months = sorted(all_months_set, reverse=True)
 
     return render_template(
         "admin/accounting.html",
         site_data_by_month=dict(sorted(filtered_data.items())),
-        total_count=breakdown["unpurchased"]["count"],      # ← TCC未購入分のみ
+        total_count=breakdown["unpurchased"]["count"],
         total_ryunosuke=breakdown["unpurchased"]["ryu"],
         total_takeshi=breakdown["unpurchased"]["take"],
         selected_month=selected_month,
@@ -1115,6 +1119,7 @@ def accounting():
         deposit_logs=deposit_logs,
         breakdown=breakdown
     )
+
 
 
 
