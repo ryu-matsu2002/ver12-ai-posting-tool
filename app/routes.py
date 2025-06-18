@@ -990,41 +990,44 @@ def accounting():
 
     from collections import defaultdict
     from flask import request
+    from sqlalchemy import extract
 
-    # ✅ 表示対象の月を取得（例："2025-06" or "all"）
+    # ✅ 選択された月（"all" or "YYYY-MM"）
     selected_month = request.args.get("month", "all")
 
-    # ✅ TCC決済ページを持たないユーザーだけ対象にする
-    tcc_disabled_users = User.query.filter_by(is_special_access=False).all()
+    # ✅ TCC未使用ユーザーのIDを抽出
+    tcc_user_ids = [
+        u.id for u in User.query.filter_by(is_special_access=False).all()
+    ]
 
-    # ✅ 月別データの初期化
+    # ✅ ログをすべて取得（TCCユーザーかつアフィリエイトのみ）
+    logs_query = SiteQuotaLog.query.filter(
+        SiteQuotaLog.user_id.in_(tcc_user_ids),
+        SiteQuotaLog.plan_type == "affiliate"
+    )
+
+    logs = logs_query.all()
+
+    # ✅ 月別に集計する辞書
     site_data_by_month = defaultdict(lambda: {
         "site_count": 0,
         "ryunosuke_income": 0,
         "takeshi_income": 0
     })
 
-    # ✅ 総合計用カウンター
-    total_count = 0
-    total_ryunosuke = 0
-    total_takeshi = 0
-
-    for user in tcc_disabled_users:
-        if not user.site_quota:
+    for log in logs:
+        if not log.created_at:
             continue
+        ym = log.created_at.strftime("%Y-%m")
+        count = log.site_count or 0
 
-        total_quota = user.site_quota.total_quota or 0
+        site_data_by_month[ym]["site_count"] += count
+        site_data_by_month[ym]["ryunosuke_income"] += count * 1000
+        site_data_by_month[ym]["takeshi_income"] += count * 2000
 
-        # 今回は全体合計で扱うため、ダミー月として "all" を使う（または固定年月でもOK）
-        month_key = "all" if selected_month == "all" else selected_month
-
-        site_data_by_month[month_key]["site_count"] += total_quota
-        site_data_by_month[month_key]["ryunosuke_income"] += total_quota * 1000
-        site_data_by_month[month_key]["takeshi_income"] += total_quota * 2000
-
-    # ✅ 表示月の絞り込み（"all" の場合はすべて表示）
+    # ✅ 表示対象をフィルタリング
     if selected_month == "all":
-        filtered_data = site_data_by_month
+        filtered_data = dict(site_data_by_month)
     else:
         filtered_data = {
             selected_month: site_data_by_month.get(selected_month, {
@@ -1034,13 +1037,12 @@ def accounting():
             })
         }
 
-    # ✅ 総合計の集計
-    for data in filtered_data.values():
-        total_count += data["site_count"]
-        total_ryunosuke += data["ryunosuke_income"]
-        total_takeshi += data["takeshi_income"]
+    # ✅ 合計を算出
+    total_count = sum(d["site_count"] for d in filtered_data.values())
+    total_ryunosuke = sum(d["ryunosuke_income"] for d in filtered_data.values())
+    total_takeshi = sum(d["takeshi_income"] for d in filtered_data.values())
 
-    # ✅ 月一覧（今回は "all" のみで実装される前提）
+    # ✅ 表示可能な月一覧（降順）
     all_months = sorted(site_data_by_month.keys(), reverse=True)
 
     return render_template(
@@ -1052,6 +1054,7 @@ def accounting():
         selected_month=selected_month,
         all_months=all_months
     )
+
 
 
 @admin_bp.route("/admin/accounting/details", methods=["GET"])
