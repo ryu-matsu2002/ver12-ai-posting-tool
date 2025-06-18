@@ -6,7 +6,7 @@
 
   <h1 class="text-3xl font-extrabold mb-8 text-gray-800">
     💼 経理ダッシュボード
-    <span class="text-sm font-normal text-gray-500">(TCC未購入ユーザーによるサイト枠購入集計)</span>
+    <span class="text-sm font-normal text-gray-500">(TCC未購入・購入済み・事業用プランの集計)</span>
   </h1>
 
   <!-- 📅 月別フィルター -->
@@ -19,6 +19,49 @@
       {% endfor %}
     </select>
   </form>
+
+  <!-- 📊 詳細内訳表（追加） -->
+  <div class="bg-white border border-gray-300 rounded-lg p-6 mb-8 shadow-md">
+    <h2 class="text-xl font-bold mb-4 text-gray-800">📊 サイト枠購入の内訳</h2>
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm text-center">
+        <thead class="bg-gray-100 text-gray-700">
+          <tr>
+            <th class="py-2 px-4">ユーザー種別</th>
+            <th class="py-2 px-4">購入サイト数</th>
+            <th class="py-2 px-4 text-green-700">松本龍之介取り分</th>
+            <th class="py-2 px-4 text-purple-700">松本毅取り分</th>
+          </tr>
+        </thead>
+        <tbody class="text-gray-800 bg-white">
+          <tr>
+            <td class="py-2 px-4">TCC未購入ユーザー（¥3,000）</td>
+            <td>{{ breakdown.unpurchased.count }} 件</td>
+            <td>¥{{ breakdown.unpurchased.ryu | comma }}</td>
+            <td>¥{{ breakdown.unpurchased.take | comma }}</td>
+          </tr>
+          <tr>
+            <td class="py-2 px-4">TCC購入済みユーザー（¥1,000）</td>
+            <td>{{ breakdown.purchased.count }} 件</td>
+            <td>¥{{ breakdown.purchased.ryu | comma }}</td>
+            <td>¥{{ breakdown.purchased.take | comma }}</td>
+          </tr>
+          <tr>
+            <td class="py-2 px-4">事業用プラン（¥20,000/月）</td>
+            <td>{{ breakdown.business.count }} 件</td>
+            <td>¥{{ breakdown.business.ryu | comma }}</td>
+            <td>¥{{ breakdown.business.take | comma }}</td>
+          </tr>
+          <tr class="bg-gray-50 font-bold">
+            <td class="py-2 px-4">合計</td>
+            <td>{{ breakdown.total.count }} 件</td>
+            <td class="text-green-800">¥{{ breakdown.total.ryu | comma }}</td>
+            <td class="text-purple-800">¥{{ breakdown.total.take | comma }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
 
   <!-- 💰 総集計 -->
   <div class="bg-gray-100 border border-gray-300 rounded-lg p-6 mb-6 shadow-md">
@@ -41,14 +84,12 @@
 
   <!-- 🏦 入金情報と残高表示 -->
   <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
-    <!-- 🔢 入金済み/残高 -->
     <div class="bg-white border rounded-lg shadow-md p-6">
       <h3 class="text-lg font-bold text-gray-700 mb-4">💰 龍之介の入金状況</h3>
       <p class="mb-2 text-gray-600">✅ 入金済み金額：<span class="font-bold text-green-700">{{ paid_total | comma }} 円</span></p>
       <p class="mb-2 text-gray-600">💸 残り受取額：<span class="font-bold text-red-600">{{ remaining | comma }} 円</span></p>
     </div>
 
-    <!-- 📥 入金登録フォーム -->
     <div class="bg-white border rounded-lg shadow-md p-6">
       <h3 class="text-lg font-bold text-gray-700 mb-4">📝 龍之介の入金を記録</h3>
       <form method="POST">
@@ -72,14 +113,13 @@
     </div>
   </div>
 
-  <!-- 🔗 ユーザー別購入履歴へのリンク -->
   <div class="mb-10 text-right">
     <a href="{{ url_for('admin.accounting_details') }}" class="inline-block bg-blue-600 text-white text-sm font-semibold px-4 py-2 rounded hover:bg-blue-700 shadow">
       🧾 ユーザー別の購入履歴を見る
     </a>
   </div>
 
-  <!-- 📋 月別内訳 -->
+  <!-- 📅 月別内訳 -->
   <div class="bg-white border rounded-lg shadow-md mb-10">
     <div class="p-4 border-b bg-gray-50 rounded-t">
       <h3 class="text-lg font-bold text-gray-700">📅 月別内訳</h3>

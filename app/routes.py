@@ -986,8 +986,9 @@ def delete_stuck_articles():
 from flask import render_template, request, redirect, url_for, flash, abort
 from flask_login import login_required, current_user
 from app.forms import RyunosukeDepositForm
-from app.models import User, RyunosukeDeposit, db
+from app.models import User, RyunosukeDeposit, Site, db
 from collections import defaultdict
+
 
 @admin_bp.route("/admin/accounting", methods=["GET", "POST"])
 @login_required
@@ -995,20 +996,16 @@ def accounting():
     if not current_user.is_admin:
         abort(403)
 
-    # ✅ 表示対象の月（今は "all" のみ使用）
     selected_month = request.args.get("month", "all")
 
-    # ✅ TCC未購入ユーザー（is_special_access=False）を取得
+    # ✅ 月別データ格納用（TCC未購入ユーザー用）
     tcc_disabled_users = User.query.filter_by(is_special_access=False).all()
-
-    # ✅ 月別データ格納用
     site_data_by_month = defaultdict(lambda: {
         "site_count": 0,
         "ryunosuke_income": 0,
         "takeshi_income": 0
     })
 
-    # ✅ 総合計
     total_count = 0
     total_ryunosuke = 0
     total_takeshi = 0
@@ -1065,6 +1062,39 @@ def accounting():
     # ✅ 月一覧
     all_months = sorted(site_data_by_month.keys(), reverse=True)
 
+    # ✅ サイト枠全体の構成を取得（テンプレートの breakdown 用）
+    def calculate_financials():
+        all_sites = Site.query.all()
+        tcc_unpurchased = []
+        tcc_purchased = []
+        business_sites = []
+
+        for site in all_sites:
+            user = site.user
+            if site.plan_type == "business":
+                business_sites.append(site)
+            elif user.has_purchased:
+                tcc_purchased.append(site)
+            else:
+                tcc_unpurchased.append(site)
+
+        a = len(tcc_unpurchased)
+        b = len(tcc_purchased)
+        c = len(business_sites)
+
+        return {
+            "unpurchased": {"count": a, "ryu": a * 1000, "take": a * 2000},
+            "purchased": {"count": b, "ryu": 0, "take": b * 1000},
+            "business": {"count": c, "ryu": c * 16000, "take": c * 4000},
+            "total": {
+                "count": a + b + c,
+                "ryu": a * 1000 + c * 16000,
+                "take": a * 2000 + b * 1000 + c * 4000,
+            },
+        }
+
+    breakdown = calculate_financials()
+
     return render_template(
         "admin/accounting.html",
         site_data_by_month=dict(sorted(filtered_data.items())),
@@ -1076,9 +1106,9 @@ def accounting():
         form=form,
         paid_total=paid_total,
         remaining=remaining,
-        deposit_logs=deposit_logs  # ✅ テンプレートに渡す
+        deposit_logs=deposit_logs,
+        breakdown=breakdown  # ✅ これが内訳表のデータ元
     )
-
 
 
 @admin_bp.route("/admin/accounting/details", methods=["GET"])
