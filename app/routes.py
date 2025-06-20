@@ -2689,83 +2689,74 @@ def log_sites(username):
         abort(403)
 
     from sqlalchemy import func, case
-    from app.models import Genre  # ✅ ジャンルモデルをインポート
+    from app.models import Genre
 
-    # GETパラメータ取得
+    # GETパラメータ
     status_filter = request.args.get("plan_type", "all")
     search_query = request.args.get("query", "").strip().lower()
-    sort_key = request.args.get("sort", "created")  # ✅ デフォルト: 登録日時（古い順）
-    sort_order = request.args.get("order", "asc")   # ✅ デフォルト: 昇順＝古い順
-    genre_id = request.args.get("genre_id", "0")    # ✅ デフォルトは0（未選択）
-
+    sort_key = request.args.get("sort", "created")
+    sort_order = request.args.get("order", "asc")
+    genre_id = request.args.get("genre_id", "0")
     try:
         genre_id = int(genre_id)
     except ValueError:
         genre_id = 0
 
-    # サブクエリ：記事数に関する集計
-    query = db.session.query(
-        Site.id,
-        Site.name,
-        Site.url,
-        Site.plan_type,
-        Site.clicks,
-        Site.impressions,
-        Site.gsc_connected,
-        Site.created_at,
-        func.count(Article.id).label("total"),
-        func.sum(case((Article.status == "done", 1), else_=0)).label("done"),
-        func.sum(case((Article.status == "posted", 1), else_=0)).label("posted"),
-        func.sum(case((Article.status == "error", 1), else_=0)).label("error"),
-    ).outerjoin(Article, Site.id == Article.site_id)
+    # ---------- サブクエリ（集計） ----------
+    subquery = (
+        db.session.query(
+            Site.id.label("id"),
+            Site.name.label("name"),
+            Site.url.label("url"),
+            Site.plan_type.label("plan_type"),
+            Site.clicks.label("clicks"),
+            Site.impressions.label("impressions"),
+            Site.gsc_connected.label("gsc_connected"),
+            Site.created_at.label("created_at"),
+            func.count(Article.id).label("total"),
+            func.sum(case((Article.status == "done", 1), else_=0)).label("done"),
+            func.sum(case((Article.status == "posted", 1), else_=0)).label("posted"),
+            func.sum(case((Article.status == "error", 1), else_=0)).label("error"),
+        )
+        .outerjoin(Article, Site.id == Article.site_id)
+        .filter(Site.user_id == current_user.id)
+        .group_by(Site.id)
+    ).subquery()
 
-    # ユーザー別
-    query = query.filter(Site.user_id == current_user.id)
+    # ---------- メインクエリ（フィルター＆並び替え） ----------
+    query = db.session.query(subquery)
 
-    # プランタイプのフィルター
     if status_filter in ["affiliate", "business"]:
-        query = query.filter(Site.plan_type == status_filter)
+        query = query.filter(subquery.c.plan_type == status_filter)
 
-    # ジャンルフィルター
     if genre_id > 0:
-        query = query.filter(Site.genre_id == genre_id)
+        query = query.join(Site, Site.id == subquery.c.id).filter(Site.genre_id == genre_id)
 
-    # サイト名・URLの検索フィルター
     if search_query:
         query = query.filter(
-            func.lower(Site.name).like(f"%{search_query}%") |
-            func.lower(Site.url).like(f"%{search_query}%")
+            func.lower(subquery.c.name).like(f"%{search_query}%") |
+            func.lower(subquery.c.url).like(f"%{search_query}%")
         )
 
-    # ✅ 修正: 並び順のカラム定義に備えて、デフォルトで created_at をセット
-    order_column = Site.created_at
-
-    if sort_key == "total":
-        order_column = func.count(Article.id)
-    elif sort_key == "done":
-        order_column = func.sum(case((Article.status == "done", 1), else_=0))
-    elif sort_key == "posted":
-        order_column = func.sum(case((Article.status == "posted", 1), else_=0))
-    elif sort_key == "clicks":
-        order_column = Site.clicks
-    elif sort_key == "impressions":
-        order_column = Site.impressions
-    # ✅ それ以外（または created）はデフォルトの Site.created_at をそのまま使う
-
-    # ✅ 修正: グループ化 → 並び順適用 → 取得（順番を明確化）
-    result = query.group_by(
-        Site.id, Site.name, Site.url, Site.plan_type,
-        Site.clicks, Site.impressions, Site.gsc_connected, Site.created_at
-    )
+    # 並び順カラム設定
+    sort_columns = {
+        "created": subquery.c.created_at,
+        "total": subquery.c.total,
+        "done": subquery.c.done,
+        "posted": subquery.c.posted,
+        "clicks": subquery.c.clicks,
+        "impressions": subquery.c.impressions
+    }
+    order_column = sort_columns.get(sort_key, subquery.c.created_at)
 
     if sort_order == "desc":
-        result = result.order_by(order_column.desc())
+        query = query.order_by(order_column.desc())
     else:
-        result = result.order_by(order_column.asc())
+        query = query.order_by(order_column.asc())
 
-    result = result.all()
+    result = query.all()
 
-    # ジャンル一覧を取得（ドロップダウン用）
+    # ジャンル一覧
     genre_list = Genre.query.filter_by(user_id=current_user.id).order_by(Genre.name).all()
     genre_choices = [(0, "すべてのジャンル")] + [(g.id, g.name) for g in genre_list]
 
