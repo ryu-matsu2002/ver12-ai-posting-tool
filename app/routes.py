@@ -2577,8 +2577,20 @@ from app.models import Site, db
 def gsc_connect():
     filter_status = request.args.get("status")  # "connected", "unconnected", "all"
     search_query = request.args.get("query", "").strip().lower()
+    order = request.args.get("order")  # "recent", "most_views", "least_views"
 
-    sites = Site.query.filter_by(user_id=current_user.id).all()
+    # ✅ クエリ構築（全件ベースで始める）
+    sites_query = Site.query.filter_by(user_id=current_user.id)
+
+    # ✅ 並び替え条件
+    if order == "most_views":
+        sites_query = sites_query.order_by(Site.impressions.desc())
+    elif order == "least_views":
+        sites_query = sites_query.order_by(Site.impressions.asc())
+    else:
+        sites_query = sites_query.order_by(Site.created_at.desc())  # デフォルト：新しい順
+
+    sites = sites_query.all()
 
     # トークン取得
     from app.models import GSCAuthToken
@@ -2588,7 +2600,7 @@ def gsc_connect():
     for site in sites:
         site.is_token_connected = site.id in tokens
 
-    # ✅ フィルタ処理
+    # ✅ ステータスフィルター（Python側で処理）
     if filter_status == "connected":
         sites = [s for s in sites if s.gsc_connected]
     elif filter_status == "unconnected":
@@ -2598,7 +2610,14 @@ def gsc_connect():
     if search_query:
         sites = [s for s in sites if search_query in s.name.lower() or search_query in s.url.lower()]
 
-    return render_template("gsc_connect.html", sites=sites, filter_status=filter_status, search_query=search_query)
+    return render_template(
+        "gsc_connect.html",
+        sites=sites,
+        filter_status=filter_status,
+        search_query=search_query,
+        order=order,
+    )
+
 
 
 @bp.route("/connect_gsc/<int:site_id>", methods=["POST"])
