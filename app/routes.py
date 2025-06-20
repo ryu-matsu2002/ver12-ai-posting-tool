@@ -977,7 +977,7 @@ def delete_site(site_id):
     db.session.commit()
 
     flash('サイトと関連データ（記事・キーワード・GSC情報）を削除しました。', 'success')
-    return redirect(url_for('admin.manage_sites'))  # 必要に応じて関数名変更
+    return redirect(url_for('admin.admin_sites'))  # ✅ 修正済み
 
 
 
