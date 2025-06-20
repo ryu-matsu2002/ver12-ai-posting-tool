@@ -24,7 +24,7 @@
   <button type="submit" class="px-3 py-2 bg-blue-500 text-white rounded">絞り込む</button>
 </form>
 
-<!-- ✅ 並び順フォーム（修正済み） -->
+<!-- ✅ 並び順フォーム（完全修正版） -->
 <form method="get" class="mb-6 flex items-center gap-2" id="sort-form">
   <label for="sort-select" class="font-medium">並び順:</label>
   <select id="sort-select" class="p-2 border rounded">
@@ -32,7 +32,7 @@
     <option value="created-desc" {% if sort_key == 'created' and sort_order == 'desc' %}selected{% endif %}>登録が新しい順</option>
   </select>
 
-  <!-- 🔁 実際に送信する値は hidden input に設定 -->
+  <!-- 🔁 実際に送信される値 -->
   <input type="hidden" name="sort" value="created">
   <input type="hidden" name="order" id="order-input" value="{{ sort_order }}">
   <input type="hidden" name="query" value="{{ search_query }}">
@@ -40,17 +40,18 @@
   <button type="submit" class="px-3 py-2 bg-blue-500 text-white rounded">並び替え</button>
 </form>
 
+<!-- ✅ JS：submit時に order を更新 -->
 <script>
+  const form = document.getElementById('sort-form');
   const select = document.getElementById('sort-select');
   const orderInput = document.getElementById('order-input');
 
-  select.addEventListener('change', function () {
+  form.addEventListener('submit', function () {
     const selectedValue = select.value;  // "created-asc" or "created-desc"
     const parts = selectedValue.split('-');
     orderInput.value = parts[1];  // "asc" or "desc"
   });
 </script>
-
 
 
 {% if sites %}
