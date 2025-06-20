@@ -56,7 +56,7 @@ def robots_txt():
 
 # routes.py または api.py 内
 
-from app.models import User, ChatLog
+from app.models import User, ChatLog, GSCConfig
 from datetime import datetime
 
 @bp.route("/api/chat", methods=["POST"])
@@ -947,6 +947,39 @@ def admin_sites():
 
     # 🔹 テンプレートに渡す
     return render_template("admin/sites.html", sites_by_user=sites_by_user)
+
+@admin_bp.route('/admin/delete_site/<int:site_id>', methods=['POST'])
+@login_required
+def delete_site(site_id):
+    if not current_user.is_admin:
+        abort(403)
+
+    site = Site.query.get_or_404(site_id)
+
+    # ✅ 関連記事削除
+    Article.query.filter_by(site_id=site.id).delete()
+
+    # ✅ 関連キーワード削除
+    Keyword.query.filter_by(site_id=site.id).delete()
+
+    # ✅ GSC 認証トークン削除
+    GSCAuthToken.query.filter_by(site_id=site.id).delete()
+
+    # ✅ GSC 設定データ削除
+    GSCConfig.query.filter_by(site_id=site.id).delete()
+
+    # ❌ アイキャッチ画像ファイルは残す（/static/images/...）
+
+    # ❌ StripeやTokenログ等は削除しない（監査用）
+
+    # ✅ 最後にサイト本体を削除
+    db.session.delete(site)
+    db.session.commit()
+
+    flash('サイトと関連データ（記事・キーワード・GSC情報）を削除しました。', 'success')
+    return redirect(url_for('admin.manage_sites'))  # 必要に応じて関数名変更
+
+
 
 @admin_bp.route("/admin/user/<int:uid>/bulk-delete", methods=["POST"])
 @login_required

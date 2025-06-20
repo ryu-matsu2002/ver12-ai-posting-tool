@@ -33,6 +33,7 @@
         <thead class="bg-blue-100 text-blue-800 font-semibold">
           <tr>
             <th class="py-2 px-4">サイト名</th>
+            <th class="py-2 px-4">URL</th>  
             <th class="py-2 px-2 text-green-700">投稿完了</th>
             <th class="py-2 px-2 text-blue-700">記事生成済み</th>
             <th class="py-2 px-2">総記事数</th>
@@ -54,6 +55,12 @@
                 <a href="{{ s['url'] }}" target="_blank" class="underline">{{ s['name'] }}</a>
               </div>
             </td>
+            <!-- ✅ 新しく追加したURL列 -->
+            <td class="py-2 px-4 text-blue-700 break-all">
+              <a href="{{ s['url'] }}" target="_blank" class="text-sm underline">
+                {{ s['url'] }}
+              </a>
+            </td>
             <td class="py-2 px-2 text-green-700 text-center">{{ s['posted'] or 0 }}</td>
             <td class="py-2 px-2 text-blue-700 text-center">{{ s['done'] or 0 }}</td>
             <td class="py-2 px-2 text-center">{{ s['total'] or 0 }}</td>
@@ -69,6 +76,17 @@
                  class="inline-block bg-purple-700 hover:bg-purple-800 text-white text-xs font-bold px-2 py-1 rounded">
                 WP管理
               </a>
+              <!-- 🔴 削除ボタン -->
+              <form method="POST"
+                    action="{{ url_for('admin.delete_site', site_id=s.get('id')) }}"
+                    style="display:inline;"
+                    onsubmit="return confirm('本当にこのサイトを削除しますか？');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit"
+                        class="inline-block bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-2 py-1 rounded">
+                  削除
+                </button>
+              </form>
             </td>
           </tr>
           {% endfor %}
