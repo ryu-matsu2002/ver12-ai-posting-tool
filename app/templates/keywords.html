@@ -29,9 +29,14 @@
   <!-- 右：登録済みキーワード -->
   <div class="w-full lg:w-1/2">
     <h2 class="text-2xl font-bold mb-2">登録済みキーワード</h2>
-    <p class="text-sm text-gray-600 mb-4">
+    <p class="text-sm text-gray-600 mb-2">
       ※<strong>生成済み／未生成</strong>でフィルター可能です。<span class="text-blue-600">▼マークをクリック</span>するとキーワード一覧が表示されます。
     </p>
+
+    <!-- 🔍 検索フォーム -->
+    <div class="mb-4">
+      <input type="text" id="keyword-search" placeholder="キーワードを検索..." class="w-full border p-2 rounded" />
+    </div>
 
     {% if grouped_keywords %}
       {% for site_id, group in grouped_keywords.items() %}
@@ -71,7 +76,7 @@
                   </thead>
                   <tbody>
                     {% for kw in group.keywords %}
-                      <tr class="border-b dark:border-gray-700 bg-white dark:bg-gray-800">
+                      <tr class="border-b dark:border-gray-700 bg-white dark:bg-gray-800 keyword-row" data-keyword="{{ kw.keyword }}">
                         <td class="p-2 text-center">
                           <input type="checkbox" class="kw-checkbox-{{ site_id }}" name="keyword_ids" value="{{ kw.id }}">
                         </td>
@@ -82,9 +87,11 @@
                           {% endif %}
                         </td>
                         <td class="p-2 text-center">{{ "生成済み" if kw.used else "未生成" }}</td>
-                        <td class="p-2 text-center space-x-2">
-                          <a href="{{ url_for('main.edit_keyword', username=current_user.username, keyword_id=kw.id) }}" class="bg-green-600 hover:bg-green-700 text-white text-xs px-2 py-1 rounded">編集</a>
-                          <a href="{{ url_for('main.delete_keyword', username=current_user.username, keyword_id=kw.id) }}" class="bg-red-600 hover:bg-red-700 text-white text-xs px-2 py-1 rounded" onclick="return confirm('本当に削除しますか？')">削除</a>
+                        <td class="p-2 text-center">
+                          <div class="flex flex-col items-center gap-2">
+                            <a href="{{ url_for('main.edit_keyword', username=current_user.username, keyword_id=kw.id) }}" class="bg-green-600 hover:bg-green-700 text-white text-xs px-2 py-1 rounded">編集</a>
+                            <a href="{{ url_for('main.delete_keyword', username=current_user.username, keyword_id=kw.id) }}" class="bg-red-600 hover:bg-red-700 text-white text-xs px-2 py-1 rounded" onclick="return confirm('本当に削除しますか？')">削除</a>
+                          </div>
                         </td>
                       </tr>
                     {% endfor %}
@@ -126,7 +133,18 @@
     window.location.href = window.location.pathname + "?" + params.toString();
   }
 
-  window.addEventListener("DOMContentLoaded", () => {
+  // ✅ キーワード検索
+  document.addEventListener("DOMContentLoaded", function () {
+    const searchInput = document.getElementById("keyword-search");
+    searchInput?.addEventListener("input", function () {
+      const query = this.value.toLowerCase();
+      document.querySelectorAll(".keyword-row").forEach(row => {
+        const keyword = row.dataset.keyword.toLowerCase();
+        row.style.display = keyword.includes(query) ? "" : "none";
+      });
+    });
+
+    // 展開保持
     const openId = localStorage.getItem("open_kw_block");
     if (openId) {
       const el = document.getElementById(openId);
