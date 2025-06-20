@@ -2753,17 +2753,19 @@ def log_sites(username):
     else:
         order_column = Site.created_at  # fallback
 
-    # 並び順の昇順・降順
-    if sort_order == "desc":
-        query = query.order_by(order_column.desc())
-    else:
-        query = query.order_by(order_column.asc())
-
-    # グループ化して取得
+        # グループ化 → 並び順適用 → 取得（順番重要）
     result = query.group_by(
         Site.id, Site.name, Site.url, Site.plan_type,
         Site.clicks, Site.impressions, Site.gsc_connected, Site.created_at
-    ).all()
+    )
+
+    if sort_order == "desc":
+        result = result.order_by(order_column.desc())
+    else:
+        result = result.order_by(order_column.asc())
+
+    result = result.all()
+
 
     # ジャンル一覧を取得（ドロップダウン用）
     genre_list = Genre.query.filter_by(user_id=current_user.id).order_by(Genre.name).all()
