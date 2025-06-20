@@ -35,12 +35,12 @@
 
     <!-- 🔍 検索フォーム -->
     <div class="mb-4">
-      <input type="text" id="keyword-search" placeholder="キーワードを検索..." class="w-full border p-2 rounded" />
+      <input type="text" id="keyword-search" placeholder="サイト名で検索..." class="w-full border p-2 rounded" />
     </div>
 
     {% if grouped_keywords %}
       {% for site_id, group in grouped_keywords.items() %}
-        <div class="mb-6 border rounded">
+        <div class="mb-6 border rounded site-block" data-site-name="{{ group.site_name|lower }}">
           <button type="button" class="w-full px-4 py-2 bg-gray-100 dark:bg-gray-700 text-left font-bold text-black text-lg flex justify-between items-center" onclick="toggleAccordion('kw-site-{{ site_id }}')">
             <span>{{ group.site_name }}（{{ group.keywords|length }} 件）</span>
             <span>▼</span>
@@ -76,7 +76,7 @@
                   </thead>
                   <tbody>
                     {% for kw in group.keywords %}
-                      <tr class="border-b dark:border-gray-700 bg-white dark:bg-gray-800 keyword-row" data-keyword="{{ kw.keyword }}">
+                      <tr class="border-b dark:border-gray-700 bg-white dark:bg-gray-800 keyword-row" data-keyword="{{ kw.keyword|lower }}">
                         <td class="p-2 text-center">
                           <input type="checkbox" class="kw-checkbox-{{ site_id }}" name="keyword_ids" value="{{ kw.id }}">
                         </td>
@@ -133,18 +133,18 @@
     window.location.href = window.location.pathname + "?" + params.toString();
   }
 
-  // ✅ キーワード検索
   document.addEventListener("DOMContentLoaded", function () {
     const searchInput = document.getElementById("keyword-search");
-    searchInput?.addEventListener("input", function () {
-      const query = this.value.toLowerCase();
-      document.querySelectorAll(".keyword-row").forEach(row => {
-        const keyword = row.dataset.keyword.toLowerCase();
-        row.style.display = keyword.includes(query) ? "" : "none";
+    if (searchInput) {
+      searchInput.addEventListener("input", function () {
+        const query = this.value.toLowerCase();
+        document.querySelectorAll(".site-block").forEach(block => {
+          const siteName = block.dataset.siteName || "";
+          block.style.display = siteName.includes(query) ? "" : "none";
+        });
       });
-    });
+    }
 
-    // 展開保持
     const openId = localStorage.getItem("open_kw_block");
     if (openId) {
       const el = document.getElementById(openId);
