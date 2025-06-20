@@ -37,18 +37,6 @@
   <button type="submit" class="px-3 py-2 bg-blue-500 text-white rounded">並び替え</button>
 </form>
 
-<script>
-  const form = document.getElementById('sort-form');
-  const select = document.getElementById('sort-select');
-  const orderInput = document.getElementById('order-input');
-
-  form.addEventListener('submit', function () {
-    const selectedIndex = select.selectedIndex;
-    const selectedText = select.options[selectedIndex].text;
-    orderInput.value = selectedText.includes("新しい") ? "desc" : "asc";
-  });
-</script>
-
 
 {% if sites %}
 <div class="overflow-x-auto">
