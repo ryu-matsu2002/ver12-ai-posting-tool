@@ -2696,14 +2696,14 @@ def log_sites(username):
     search_query = request.args.get("query", "").strip().lower()
     sort_key = request.args.get("sort", "created")  # ✅ デフォルト: 登録日時（古い順）
     sort_order = request.args.get("order", "asc")   # ✅ デフォルト: 昇順＝古い順
-    genre_id = request.args.get("genre_id", "0")  # ✅ デフォルトは0（未選択）
+    genre_id = request.args.get("genre_id", "0")    # ✅ デフォルトは0（未選択）
 
     try:
         genre_id = int(genre_id)
     except ValueError:
         genre_id = 0
 
-    # サブクエリ：記事数に関する集計（total, done, posted, error）
+    # サブクエリ：記事数に関する集計
     query = db.session.query(
         Site.id,
         Site.name,
@@ -2712,7 +2712,7 @@ def log_sites(username):
         Site.clicks,
         Site.impressions,
         Site.gsc_connected,
-        Site.created_at,  # ✅ 追加：登録日時
+        Site.created_at,
         func.count(Article.id).label("total"),
         func.sum(case((Article.status == "done", 1), else_=0)).label("done"),
         func.sum(case((Article.status == "posted", 1), else_=0)).label("posted"),
@@ -2726,52 +2726,60 @@ def log_sites(username):
     if status_filter in ["affiliate", "business"]:
         query = query.filter(Site.plan_type == status_filter)
 
-    # 🔸 ジャンルフィルター
+    # ジャンルフィルター
     if genre_id > 0:
-        query = query.filter(Site.genre_id == genre_id)    
+        query = query.filter(Site.genre_id == genre_id)
 
-    # サイト名・URL 検索フィルター（部分一致、lower化で対応）
+    # サイト名・URLの検索フィルター
     if search_query:
         query = query.filter(
             func.lower(Site.name).like(f"%{search_query}%") |
             func.lower(Site.url).like(f"%{search_query}%")
         )
 
-    # グループ化・取得
-    # 🔁 修正すべき1行（group_by拡張）
+    # 並び順のキーに応じたカラム定義
+    if sort_key == "created":
+        order_column = Site.created_at
+    elif sort_key == "total":
+        order_column = func.count(Article.id)
+    elif sort_key == "done":
+        order_column = func.sum(case((Article.status == "done", 1), else_=0))
+    elif sort_key == "posted":
+        order_column = func.sum(case((Article.status == "posted", 1), else_=0))
+    elif sort_key == "clicks":
+        order_column = Site.clicks
+    elif sort_key == "impressions":
+        order_column = Site.impressions
+    else:
+        order_column = Site.created_at  # fallback
+
+    # 並び順の昇順・降順
+    if sort_order == "desc":
+        query = query.order_by(order_column.desc())
+    else:
+        query = query.order_by(order_column.asc())
+
+    # グループ化して取得
     result = query.group_by(
-        Site.id, Site.name, Site.url, Site.plan_type, Site.clicks, Site.impressions, Site.gsc_connected, Site.created_at  # ✅ 追加：グループ化にも必要
+        Site.id, Site.name, Site.url, Site.plan_type,
+        Site.clicks, Site.impressions, Site.gsc_connected, Site.created_at
     ).all()
 
-
-    # 並び替えキー定義（total, done, posted, clicks, impressions）
-    sort_options = {
-        "total": lambda x: x.total or 0,
-        "done": lambda x: x.done or 0,
-        "posted": lambda x: x.posted or 0,
-        "clicks": lambda x: x.clicks or 0,
-        "impressions": lambda x: x.impressions or 0,
-        "created": lambda x: x.created_at or datetime.min  # ✅ 登録日時
-    }
-
-    if sort_key in sort_options:
-        reverse = (sort_order == "desc")
-        result.sort(key=sort_options[sort_key], reverse=reverse)
-
-    # ✅ ジャンル一覧を取得（ドロップダウン表示用）
+    # ジャンル一覧を取得（ドロップダウン用）
     genre_list = Genre.query.filter_by(user_id=current_user.id).order_by(Genre.name).all()
-    genre_choices = [(0, "すべてのジャンル")] + [(g.id, g.name) for g in genre_list]    
+    genre_choices = [(0, "すべてのジャンル")] + [(g.id, g.name) for g in genre_list]
 
     return render_template(
         "log_sites.html",
         sites=result,
         selected_status=status_filter,
-        selected_genre_id=genre_id,        # ✅ 選択中ジャンルを渡す
-        genre_choices=genre_choices,       # ✅ 選択肢リストを渡す
+        selected_genre_id=genre_id,
+        genre_choices=genre_choices,
         search_query=search_query,
         sort_key=sort_key,
         sort_order=sort_order
     )
+
 
 
 # ─────────── プレビュー
