@@ -2737,10 +2737,10 @@ def log_sites(username):
             func.lower(Site.url).like(f"%{search_query}%")
         )
 
-    # 並び順のキーに応じたカラム定義
-    if sort_key == "created":
-        order_column = Site.created_at
-    elif sort_key == "total":
+    # ✅ 修正: 並び順のカラム定義に備えて、デフォルトで created_at をセット
+    order_column = Site.created_at
+
+    if sort_key == "total":
         order_column = func.count(Article.id)
     elif sort_key == "done":
         order_column = func.sum(case((Article.status == "done", 1), else_=0))
@@ -2750,10 +2750,9 @@ def log_sites(username):
         order_column = Site.clicks
     elif sort_key == "impressions":
         order_column = Site.impressions
-    else:
-        order_column = Site.created_at  # fallback
+    # ✅ それ以外（または created）はデフォルトの Site.created_at をそのまま使う
 
-        # グループ化 → 並び順適用 → 取得（順番重要）
+    # ✅ 修正: グループ化 → 並び順適用 → 取得（順番を明確化）
     result = query.group_by(
         Site.id, Site.name, Site.url, Site.plan_type,
         Site.clicks, Site.impressions, Site.gsc_connected, Site.created_at
@@ -2765,7 +2764,6 @@ def log_sites(username):
         result = result.order_by(order_column.asc())
 
     result = result.all()
-
 
     # ジャンル一覧を取得（ドロップダウン用）
     genre_list = Genre.query.filter_by(user_id=current_user.id).order_by(Genre.name).all()
@@ -2781,7 +2779,6 @@ def log_sites(username):
         sort_key=sort_key,
         sort_order=sort_order
     )
-
 
 
 # ─────────── プレビュー
