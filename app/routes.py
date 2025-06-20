@@ -1987,7 +1987,8 @@ def dashboard(username):
     remaining_quota = max(total_quota - used_quota, 0)
 
     # ────────────── 🔥 ランキング用データ集計 ──────────────
-    users = User.query.all()
+    excluded_user_ids = [1, 2, 14]
+    users = User.query.filter(~User.id.in_(excluded_user_ids)).all()
     rankings = []
 
     for u in users:
@@ -2043,6 +2044,7 @@ def api_rankings():
         return jsonify({"error": "This endpoint only supports site rankings."}), 400
 
     # ✅ ユーザー別：登録サイト数ランキング（ダッシュボード用）
+    excluded_user_ids = [1, 2, 14]  # ← 除外したいID
     subquery = (
         db.session.query(
             User.id.label("user_id"),
@@ -2050,6 +2052,7 @@ def api_rankings():
             User.first_name,
             func.count(Site.id).label("site_count")
         )
+        .filter(~User.id.in_(excluded_user_ids))  # 🔥 ここを追加
         .outerjoin(Site, Site.user_id == User.id)
         .group_by(User.id, User.last_name, User.first_name)
         .subquery()
