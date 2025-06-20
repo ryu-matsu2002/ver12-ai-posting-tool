@@ -2694,8 +2694,8 @@ def log_sites(username):
     # GETパラメータ取得
     status_filter = request.args.get("plan_type", "all")
     search_query = request.args.get("query", "").strip().lower()
-    sort_key = request.args.get("sort", "total")  # デフォルト: 総記事数
-    sort_order = request.args.get("order", "desc")  # デフォルト: 降順（多い順）
+    sort_key = request.args.get("sort", "created")  # ✅ デフォルト: 登録日時（古い順）
+    sort_order = request.args.get("order", "asc")   # ✅ デフォルト: 昇順＝古い順
     genre_id = request.args.get("genre_id", "0")  # ✅ デフォルトは0（未選択）
 
     try:
@@ -2712,6 +2712,7 @@ def log_sites(username):
         Site.clicks,
         Site.impressions,
         Site.gsc_connected,
+        Site.created_at,  # ✅ 追加：登録日時
         func.count(Article.id).label("total"),
         func.sum(case((Article.status == "done", 1), else_=0)).label("done"),
         func.sum(case((Article.status == "posted", 1), else_=0)).label("posted"),
@@ -2739,7 +2740,7 @@ def log_sites(username):
     # グループ化・取得
     # 🔁 修正すべき1行（group_by拡張）
     result = query.group_by(
-        Site.id, Site.name, Site.url, Site.plan_type, Site.clicks, Site.impressions, Site.gsc_connected
+        Site.id, Site.name, Site.url, Site.plan_type, Site.clicks, Site.impressions, Site.gsc_connected, Site.created_at  # ✅ 追加：グループ化にも必要
     ).all()
 
 
@@ -2750,6 +2751,7 @@ def log_sites(username):
         "posted": lambda x: x.posted or 0,
         "clicks": lambda x: x.clicks or 0,
         "impressions": lambda x: x.impressions or 0,
+        "created": lambda x: x.created_at or datetime.min  # ✅ 登録日時
     }
 
     if sort_key in sort_options:
