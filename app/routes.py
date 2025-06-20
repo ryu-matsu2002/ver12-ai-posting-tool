@@ -2354,6 +2354,11 @@ def generate(username):
     selected_site = None
     site_name = None
 
+    # ▼ 件数カウント用の変数を初期化（デフォルトは0）
+    total_count = 0
+    used_count = 0
+    unused_count = 0
+
     if form.site_select.data:
         selected_site_id = form.site_select.data
         selected_site = Site.query.get(selected_site_id)
@@ -2363,6 +2368,12 @@ def generate(username):
             user_id=current_user.id,
             site_id=selected_site_id
         )
+
+        # ▼ 件数カウント（フィルタなしで取得）
+        all_keywords = keyword_query.all()
+        total_count = len(all_keywords)
+        used_count = sum(1 for kw in all_keywords if kw.used)
+        unused_count = total_count - used_count
 
         if status_filter == "used":
             keyword_query = keyword_query.filter_by(used=True)
@@ -2377,7 +2388,10 @@ def generate(username):
         keyword_choices=keyword_choices,
         selected_site=selected_site,
         site_name=site_name,
-        status_filter=status_filter
+        status_filter=status_filter,
+        total_count=total_count,      # ← 全体件数
+        used_count=used_count,        # ← 生成済み件数
+        unused_count=unused_count     # ← 未生成件数
     )
 
 # ─────────── GSCルートコード
