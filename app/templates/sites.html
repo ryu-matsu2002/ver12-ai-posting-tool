@@ -2,6 +2,19 @@
 {% block title %}サイト登録 | TCC autowize{% endblock %}
 
 {% block content %}
+
+<!-- ✅✅✅ [追加] 支払い完了メッセージ表示（成功時） ✅✅✅ -->
+{% if request.args.get("success") %}
+  <div class="mb-6 p-4 bg-green-100 text-green-800 rounded shadow text-center">
+    ✅ 支払いが完了しました！サイト登録が可能になりました。
+  </div>
+  <script>
+    alert("✅ 支払いが完了しました！\n新しいサイトを登録できます。");
+  </script>
+{% endif %}
+<!-- ✅✅✅ ここまで追加 ✅✅✅ -->
+
+
 <h2 class="text-3xl font-bold mb-8">WordPress サイト管理</h2>
 
 <div class="grid md:grid-cols-2 gap-10">
