@@ -24,18 +24,33 @@
   <button type="submit" class="px-3 py-2 bg-blue-500 text-white rounded">絞り込む</button>
 </form>
 
-<!-- ✅ 並び順フォーム -->
-<form method="get" class="mb-6 flex items-center gap-2">
-  <label for="sort" class="font-medium">並び順:</label>
-  <select id="sort" name="sort" class="p-2 border rounded">
-    <option value="created" {% if sort_key == 'created' and sort_order == 'asc' %}selected{% endif %}>登録が古い順</option>
-    <option value="created" {% if sort_key == 'created' and sort_order == 'desc' %}selected{% endif %}>登録が新しい順</option>
+<!-- ✅ 並び順フォーム（修正済み） -->
+<form method="get" class="mb-6 flex items-center gap-2" id="sort-form">
+  <label for="sort-select" class="font-medium">並び順:</label>
+  <select id="sort-select" class="p-2 border rounded">
+    <option value="created-asc" {% if sort_key == 'created' and sort_order == 'asc' %}selected{% endif %}>登録が古い順</option>
+    <option value="created-desc" {% if sort_key == 'created' and sort_order == 'desc' %}selected{% endif %}>登録が新しい順</option>
   </select>
-  <input type="hidden" name="order" value="{{ 'desc' if sort_order == 'desc' else 'asc' }}">
+
+  <!-- 🔁 実際に送信する値は hidden input に設定 -->
+  <input type="hidden" name="sort" value="created">
+  <input type="hidden" name="order" id="order-input" value="{{ sort_order }}">
   <input type="hidden" name="query" value="{{ search_query }}">
   <input type="hidden" name="genre_id" value="{{ selected_genre_id }}">
   <button type="submit" class="px-3 py-2 bg-blue-500 text-white rounded">並び替え</button>
 </form>
+
+<script>
+  const select = document.getElementById('sort-select');
+  const orderInput = document.getElementById('order-input');
+
+  select.addEventListener('change', function () {
+    const selectedValue = select.value;  // "created-asc" or "created-desc"
+    const parts = selectedValue.split('-');
+    orderInput.value = parts[1];  // "asc" or "desc"
+  });
+</script>
+
 
 
 {% if sites %}
