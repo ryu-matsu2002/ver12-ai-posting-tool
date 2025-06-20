@@ -2575,19 +2575,31 @@ from app.models import Site, db
 @bp.route("/gsc-connect")
 @login_required
 def gsc_connect():
+    filter_status = request.args.get("status")  # "connected", "unconnected", "all"
+    search_query = request.args.get("query", "").strip().lower()
+
     sites = Site.query.filter_by(user_id=current_user.id).all()
 
     # トークン取得
     from app.models import GSCAuthToken
-    tokens = {
-        token.site_id: token for token in GSCAuthToken.query.filter_by(user_id=current_user.id).all()
-    }
+    tokens = {token.site_id: token for token in GSCAuthToken.query.filter_by(user_id=current_user.id).all()}
 
-    # 各サイトごとに is_token_connected フラグを付ける
+    # ステータスフラグ付与
     for site in sites:
         site.is_token_connected = site.id in tokens
 
-    return render_template("gsc_connect.html", sites=sites)
+    # ✅ フィルタ処理
+    if filter_status == "connected":
+        sites = [s for s in sites if s.gsc_connected]
+    elif filter_status == "unconnected":
+        sites = [s for s in sites if not s.gsc_connected]
+
+    # ✅ 検索フィルター
+    if search_query:
+        sites = [s for s in sites if search_query in s.name.lower() or search_query in s.url.lower()]
+
+    return render_template("gsc_connect.html", sites=sites, filter_status=filter_status, search_query=search_query)
+
 
 @bp.route("/connect_gsc/<int:site_id>", methods=["POST"])
 @login_required
