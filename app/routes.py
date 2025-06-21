@@ -2718,9 +2718,9 @@ def gsc_analysis(username, site_id):
     if current_user.username != username:
         abort(403)
     site = Site.query.get_or_404(site_id)
-    # 仮のメトリクス（今後データ取得と統合予定）
-    metrics = []  # 例： [{'date': '2025-06-01', 'clicks': 10, 'impressions': 100}, ...]
+    metrics = []  # 仮のデータでもOK
     return render_template("gsc_analysis.html", username=username, site=site, metrics=metrics)
+
 
 
 
