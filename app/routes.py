@@ -2714,14 +2714,12 @@ def gsc_analysis(site_id):
 
 @bp.route("/<username>/gsc-analysis/<int:site_id>")
 @login_required
-def gsc_analysis(username, site_id):
+def gsc_analysis_page(username, site_id):  # ← ★名前をユニークに変更
     if current_user.username != username:
         abort(403)
     site = Site.query.get_or_404(site_id)
-    metrics = []  # 仮のデータでもOK
+    metrics = []
     return render_template("gsc_analysis.html", username=username, site=site, metrics=metrics)
-
-
 
 
 # ─────────── 生成ログ
