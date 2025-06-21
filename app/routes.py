@@ -2712,14 +2712,16 @@ def gsc_analysis(site_id):
         selected_range=range_param
     )
 
-@bp.route("/<username>/gsc-analysis")
+@bp.route("/<username>/gsc-analysis/<int:site_id>")
 @login_required
-def gsc_analysis_selector(username):
+def gsc_analysis(username, site_id):
     if current_user.username != username:
         abort(403)
-    # サイト一覧を取得
-    user_sites = Site.query.filter_by(user_id=current_user.id).all()
-    return render_template("gsc_analysis.html", username=username, sites=user_sites)
+    site = Site.query.get_or_404(site_id)
+    # 仮のメトリクス（今後データ取得と統合予定）
+    metrics = []  # 例： [{'date': '2025-06-01', 'clicks': 10, 'impressions': 100}, ...]
+    return render_template("gsc_analysis.html", username=username, site=site, metrics=metrics)
+
 
 
 # ─────────── 生成ログ
