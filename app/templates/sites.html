@@ -319,5 +319,41 @@ function saveGenre() {
   });
 }
 </script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const urlInput = document.querySelector('input[name="url"]');
+  if (!urlInput) return;
+
+  const errorMessage = document.createElement('div');
+  errorMessage.style.color = 'red';
+  errorMessage.style.fontSize = '0.85rem';
+  errorMessage.style.marginTop = '0.4rem';
+  urlInput.parentNode.appendChild(errorMessage);
+
+  // 🔍 許可ルール：
+  // - httpsで始まる
+  // - /adminを含まない
+  // - ドメイン形式が正しい
+  const urlPattern = /^https:\/\/([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(\/(?!admin)[^\s]*)?$/;
+
+  urlInput.addEventListener('input', function () {
+    const value = urlInput.value.trim();
+
+    if (!value) {
+      errorMessage.textContent = '';
+      urlInput.style.borderColor = '';
+      return;
+    }
+
+    if (!urlPattern.test(value)) {
+      errorMessage.textContent = "❌ 有効なURLを入力してください（https://〜で始まり、/admin を含まない形式）";
+      urlInput.style.borderColor = 'red';
+    } else {
+      errorMessage.textContent = '';
+      urlInput.style.borderColor = '';
+    }
+  });
+});
+</script>
 
 {% endblock %}

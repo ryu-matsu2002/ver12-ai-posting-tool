@@ -119,11 +119,11 @@ class ArticleForm(FlaskForm):
 
 class SiteForm(FlaskForm):
     name     = StringField("サイト名",          validators=[DataRequired()])
-    url      = StringField("サイトURL", validators=[
+    url = StringField("サイトURL", validators=[
         DataRequired(),
         Regexp(
-            r'^https:\/\/[a-zA-Z0-9\-]+\.[a-zA-Z]{2,}(\/)?$',
-            message='正しいURL形式（例：https://example.com）で入力してください'
+            r'^https:\/\/[\w\.\-]+\.[a-zA-Z]{2,}(\/(?!admin).*)?$',
+            message='正しいURL形式（例：https://example.com）で、かつ /admin を含まない形式で入力してください'
         )
     ])
     username = StringField("ユーザー名",        validators=[DataRequired()])
