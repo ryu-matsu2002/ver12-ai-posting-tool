@@ -227,6 +227,26 @@ class GSCAuthToken(db.Model):
             return True
         return datetime.utcnow() >= self.token_expiry - timedelta(minutes=5)
 
+# ──── GSC キーワード単位のパフォーマンス記録 ────
+class GSCMetric(db.Model):
+    __tablename__ = "gsc_metrics"
+
+    id = db.Column(db.Integer, primary_key=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("site.id"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+
+    date = db.Column(db.Date, nullable=False)  # 日付
+    query = db.Column(db.String(255), nullable=False)  # 検索クエリ
+
+    impressions = db.Column(db.Integer, default=0)
+    clicks = db.Column(db.Integer, default=0)
+    ctr = db.Column(db.Float, default=0.0)
+    position = db.Column(db.Float, default=0.0)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship("User", backref="gsc_metrics")
+    site = db.relationship("Site", backref="gsc_metrics")
 
 
 class SiteQuotaLog(db.Model):

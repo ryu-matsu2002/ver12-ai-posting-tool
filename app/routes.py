@@ -2649,6 +2649,68 @@ def connect_gsc(site_id):
     flash(f"✅ サイト「{site.name}」とGoogleサーチコンソールの接続が完了しました。", "success")
     return redirect(url_for("main.gsc_connect"))
 
+# app/routes.py（末尾に追加）
+
+from flask import request, render_template
+from app.models import GSCMetric, Site
+from flask_login import login_required, current_user
+from datetime import datetime, timedelta
+
+@bp.route("/gsc/<int:site_id>")
+@login_required
+def gsc_analysis(site_id):
+    site = Site.query.filter_by(id=site_id, user_id=current_user.id).first_or_404()
+
+    # ✅ 未連携サイトなら警告表示
+    if not site.gsc_connected:
+        return render_template("gsc_analysis.html", site=site, error="このサイトはGSCと未連携です")
+
+    # 🔍 パラメータ取得（range or start/end）
+    range_param = request.args.get("range", "28d")
+    start_param = request.args.get("start")
+    end_param = request.args.get("end")
+
+    today = datetime.utcnow().date()
+
+    # ✅ 日付範囲決定ロジック
+    if range_param == "1d":
+        start_date = today - timedelta(days=1)
+    elif range_param == "7d":
+        start_date = today - timedelta(days=7)
+    elif range_param == "28d":
+        start_date = today - timedelta(days=28)
+    elif range_param == "3m":
+        start_date = today - timedelta(days=90)
+    elif range_param == "6m":
+        start_date = today - timedelta(days=180)
+    elif range_param == "12m":
+        start_date = today - timedelta(days=365)
+    elif range_param == "16m":
+        start_date = today - timedelta(days=480)
+    elif range_param == "custom" and start_param and end_param:
+        try:
+            start_date = datetime.strptime(start_param, "%Y-%m-%d").date()
+            today = datetime.strptime(end_param, "%Y-%m-%d").date()
+        except ValueError:
+            return render_template("gsc_analysis.html", site=site, error="日付形式が不正です")
+    else:
+        start_date = today - timedelta(days=28)
+
+    # ✅ DBから該当期間のGSCMetricを取得
+    metrics = GSCMetric.query.filter(
+        GSCMetric.site_id == site_id,
+        GSCMetric.date >= start_date,
+        GSCMetric.date <= today
+    ).order_by(GSCMetric.date.asc()).all()
+
+    return render_template(
+        "gsc_analysis.html",
+        site=site,
+        metrics=metrics,
+        start_date=start_date,
+        end_date=today,
+        selected_range=range_param
+    )
 
 
 # ─────────── 生成ログ

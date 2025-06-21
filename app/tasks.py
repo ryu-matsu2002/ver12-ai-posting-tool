@@ -100,7 +100,7 @@ def gsc_loop_generate(site):
 
     # ✅ GSCからクエリ取得
     try:
-        queries = fetch_search_queries_for_site(site.url)
+        queries = fetch_search_queries_for_site(site, days=28)
     except Exception as e:
         current_app.logger.warning(f"[GSC LOOP] クエリ取得失敗 - {site.url}: {e}")
         return

@@ -6,7 +6,7 @@ from datetime import datetime, date, timedelta
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from flask import current_app
-from app.models import Site
+from app.models import Site, GSCMetric  # ✅ 追加
 from app import db
 
 # ────── Service Account 認証情報の読み込み ──────
@@ -21,14 +21,38 @@ def get_search_console_service():
     service = build("searchconsole", "v1", credentials=credentials)
     return service
 
+# ────── ✅✅✅ 追加: GSCMetricとして保存する処理 ──────
+def store_metrics_from_gsc_rows(rows, site, metric_date: date):
+    for row in rows:
+        query = row["keys"][0]
+        impressions = row.get("impressions", 0)
+        clicks = row.get("clicks", 0)
+        ctr = row.get("ctr", 0.0)
+        position = row.get("position", 0.0)
+
+        metric = GSCMetric(
+            site_id=site.id,
+            user_id=site.user_id,
+            date=metric_date,
+            query=query,
+            impressions=impressions,
+            clicks=clicks,
+            ctr=ctr,
+            position=position,
+        )
+        db.session.add(metric)
+    db.session.commit()
+    logging.info(f"[GSCMetric] ✅ 保存完了: {site.name} ({len(rows)} 件)")
+
 # ────── 🔍 Search Console からキーワード取得 ──────
-def fetch_search_queries_for_site(site_url: str, days: int = 28, row_limit: int = 1000) -> list[str]:
+def fetch_search_queries_for_site(site: Site, days: int = 28, row_limit: int = 1000) -> list[str]:
     try:
         # ✅ 修正: URL末尾に / を補完（GSC APIは完全一致が必須）
+        site_url = site.url
         if not site_url.endswith("/"):
             site_url += "/"
 
-        # ✅ 追加: クエリ取得ログ（事前）
+        # ✅ クエリ取得ログ（事前）
         logging.info(f"[GSC] クエリ取得開始: {site_url}")
 
         service = get_search_console_service()
@@ -50,10 +74,14 @@ def fetch_search_queries_for_site(site_url: str, days: int = 28, row_limit: int 
         if not rows:
             logging.warning(f"[GSC] クエリが0件（空）で返却されました: {site_url}")
 
+        # ✅✅✅ GSCMetricに保存（今回の新機能）
+        store_metrics_from_gsc_rows(rows, site, end_date)
+
+        # ✅ 既存機能: 検索キーワードのリストを返す（記事生成用）
         return [row["keys"][0] for row in rows]
 
     except Exception as e:
-        logging.error(f"[GSC取得失敗] site: {site_url} → {e}")
+        logging.error(f"[GSC取得失敗] site: {site.url} → {e}")
         return []
 
 # ────── 🔄 メトリクス取得（クリック数・表示回数） ──────

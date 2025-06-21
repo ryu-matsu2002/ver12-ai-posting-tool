@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}GSC分析 - {{ site.name }}{% endblock %}
+
+{% block content %}
+<div class="p-6">
+  <h1 class="text-2xl font-bold mb-4">🔍 GSC分析：{{ site.name }}</h1>
+
+  {% if error %}
+    <div class="bg-red-100 text-red-700 p-4 rounded mb-6">{{ error }}</div>
+  {% endif %}
+
+  <!-- ✅ 期間選択タブ -->
+  <div class="flex flex-wrap gap-2 mb-6">
+    {% set options = [("1d", "24時間"), ("7d", "7日間"), ("28d", "28日間"),
+                      ("3m", "3か月"), ("6m", "6か月"), ("12m", "12か月"), ("16m", "16か月")] %}
+    {% for code, label in options %}
+      <a href="{{ url_for('main.gsc_analysis', site_id=site.id, range=code) }}"
+         class="px-4 py-2 rounded border
+         {{ 'bg-blue-600 text-white' if selected_range == code else 'bg-white hover:bg-gray-100 text-gray-700' }}">
+        {{ label }}
+      </a>
+    {% endfor %}
+
+    <!-- ✅ カスタム -->
+    <form method="get" action="{{ url_for('main.gsc_analysis', site_id=site.id) }}" class="flex items-center gap-2">
+      <input type="hidden" name="range" value="custom">
+      <input type="date" name="start" value="{{ start_date }}" class="border rounded p-1 text-sm">
+      <span class="text-gray-500">～</span>
+      <input type="date" name="end" value="{{ end_date }}" class="border rounded p-1 text-sm">
+      <button type="submit" class="bg-gray-700 text-white text-sm px-3 py-1 rounded">適用</button>
+    </form>
+  </div>
+
+  <!-- ✅ グラフ表示 -->
+  <div class="bg-white rounded shadow p-6 mb-8">
+    <canvas id="gscChart" height="100"></canvas>
+  </div>
+
+  <!-- ✅ テーブル表示 -->
+  <div class="overflow-x-auto">
+    <table class="min-w-full table-auto border border-gray-300">
+      <thead class="bg-gray-100 text-gray-800">
+        <tr>
+          <th class="p-2 border">日付</th>
+          <th class="p-2 border">検索クエリ</th>
+          <th class="p-2 border">クリック数</th>
+          <th class="p-2 border">表示回数</th>
+          <th class="p-2 border">CTR</th>
+          <th class="p-2 border">掲載順位</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in metrics %}
+        <tr class="text-center">
+          <td class="p-2 border">{{ m.date }}</td>
+          <td class="p-2 border">{{ m.query }}</td>
+          <td class="p-2 border">{{ m.clicks }}</td>
+          <td class="p-2 border">{{ m.impressions }}</td>
+          <td class="p-2 border">{{ "%.1f"|format(m.ctr * 100) }}%</td>
+          <td class="p-2 border">{{ "%.2f"|format(m.position) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ✅ Chart.js -->
+<script>
+  const metricsData = JSON.parse('{{ metrics | tojson | safe }}');
+  const impressions = {};
+  const clicks = {};
+
+  for (const m of metricsData) {
+    const d = m.date;
+    impressions[d] = (impressions[d] || 0) + m.impressions;
+    clicks[d] = (clicks[d] || 0) + m.clicks;
+  }
+
+  const labels = Object.keys(impressions).sort();
+  const data = {
+    labels: labels,
+    datasets: [
+      {
+        label: '表示回数',
+        data: labels.map(d => impressions[d]),
+        borderColor: 'rgba(54, 162, 235, 1)',
+        backgroundColor: 'rgba(54, 162, 235, 0.1)',
+        tension: 0.3,
+        fill: false
+      },
+      {
+        label: 'クリック数',
+        data: labels.map(d => clicks[d]),
+        borderColor: 'rgba(255, 99, 132, 1)',
+        backgroundColor: 'rgba(255, 99, 132, 0.1)',
+        tension: 0.3,
+        fill: false
+      }
+    ]
+  };
+
+  new Chart(document.getElementById('gscChart'), {
+    type: 'line',
+    data: data,
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'top' },
+        title: {
+          display: true,
+          text: 'クリック数 / 表示回数（日別）'
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: { precision: 0 }
+        }
+      }
+    }
+  });
+</script>
+{% endblock %}
