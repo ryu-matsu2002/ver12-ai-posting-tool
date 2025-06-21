@@ -2712,6 +2712,15 @@ def gsc_analysis(site_id):
         selected_range=range_param
     )
 
+@bp.route("/<username>/gsc-analysis")
+@login_required
+def gsc_analysis_selector(username):
+    if current_user.username != username:
+        abort(403)
+    # サイト一覧を取得
+    user_sites = Site.query.filter_by(user_id=current_user.id).all()
+    return render_template("gsc_analysis_selector.html", username=username, sites=user_sites)
+
 
 # ─────────── 生成ログ
 @bp.route("/<username>/log/site/<int:site_id>")
