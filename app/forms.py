@@ -133,7 +133,12 @@ class SiteForm(FlaskForm):
         choices=[("affiliate", "アフィリエイト用プラン"), ("business", "事業用プラン")],
         validators=[DataRequired()]
     )
-    genre_id = SelectField("ジャンル", coerce=int, choices=[])  # ✅ 追加
+    genre_id = SelectField(
+    "ジャンル", 
+    coerce=int, 
+    choices=[], 
+    validators=[Optional()]  # ✅ これがポイント
+    )
     submit   = SubmitField("保存")
 
 # ✅ 新バージョンの KeywordForm（サイト選択＋一括保存対応）
