@@ -2309,6 +2309,21 @@ def edit_site(username, sid: int):
 
     return render_template("site_edit.html", form=form, site=site)
 
+@bp.route('/add_genre', methods=['POST'])
+@login_required
+def add_genre():
+    data = request.get_json()
+    name = data.get('name')
+    description = data.get('description', '')
+
+    if not name:
+        return jsonify(success=False, error='Name required'), 400
+
+    new_genre = Genre(name=name, description=description, user_id=current_user.id)
+    db.session.add(new_genre)
+    db.session.commit()
+
+    return jsonify(success=True, genre_id=new_genre.id, genre_name=new_genre.name)
 
 
 # ─────────── 記事生成（ユーザー別）

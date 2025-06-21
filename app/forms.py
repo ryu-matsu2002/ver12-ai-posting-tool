@@ -11,7 +11,7 @@ from wtforms import (
     IntegerField,   
     HiddenField,            # ← 新規追加
 )
-from wtforms.validators import DataRequired, Email, Length, EqualTo, URL, Optional, NumberRange, ValidationError
+from wtforms.validators import DataRequired, Email, Length, EqualTo, URL, Optional, NumberRange, ValidationError, Regexp
 
 class LoginForm(FlaskForm):
     identifier = StringField("メールアドレスまたはユーザー名", validators=[DataRequired()])
@@ -119,7 +119,13 @@ class ArticleForm(FlaskForm):
 
 class SiteForm(FlaskForm):
     name     = StringField("サイト名",          validators=[DataRequired()])
-    url      = StringField("サイトURL",        validators=[DataRequired(), URL()])
+    url      = StringField("サイトURL", validators=[
+        DataRequired(),
+        Regexp(
+            r'^https:\/\/[a-zA-Z0-9\-]+\.[a-zA-Z]{2,}(\/)?$',
+            message='正しいURL形式（例：https://example.com）で入力してください'
+        )
+    ])
     username = StringField("ユーザー名",        validators=[DataRequired()])
     app_pass = StringField("アプリケーションパスワード",  validators=[DataRequired()])
     plan_type = SelectField(

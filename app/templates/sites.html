@@ -57,13 +57,17 @@
         {{ form.plan_type.label(class="block mb-1 text-lg font-medium") }}
         {{ form.plan_type(class="w-full p-3 text-base rounded border dark:bg-gray-700 dark:border-gray-600", disabled=(remaining_quota <= 0)) }}
       </div>
+      <!-- ✅ ジャンルセレクト＋追加ボタン -->
       <div>
-        <label for="genre_id" class="block mb-1 text-lg font-medium">ジャンル（任意）</label>
-        <select name="genre_id" id="genre_id" class="w-full p-3 text-base rounded border dark:bg-gray-700 dark:border-gray-600" {% if remaining_quota <= 0 %}disabled{% endif %}>
-          {% for gid, gname in form.genre_id.choices %}
-            <option value="{{ gid }}" {% if form.genre_id.data == gid %}selected{% endif %}>{{ gname }}</option>
-          {% endfor %}
-        </select>
+        <label class="block mb-1 text-lg font-medium">ジャンル（任意）</label>
+        <div class="flex gap-2 items-center">
+          <select name="genre_id" id="genre_select" class="w-full p-3 rounded border" {% if remaining_quota <= 0 %}disabled{% endif %}>
+            {% for gid, gname in form.genre_id.choices %}
+              <option value="{{ gid }}" {% if form.genre_id.data == gid %}selected{% endif %}>{{ gname }}</option>
+            {% endfor %}
+          </select>
+          <button type="button" onclick="openGenreModal()" class="px-3 py-1 bg-blue-600 text-white rounded text-sm">ジャンル追加</button>
+        </div>
       </div>
       {% if remaining_quota > 0 %}
         {{ form.submit(class="py-3 px-6 bg-blue-600 hover:bg-blue-700 text-white text-lg rounded shadow") }}
@@ -158,6 +162,21 @@
     </form>
   </div>
 </div>
+
+<!-- ✅ ジャンル追加モーダル -->
+<div id="genreModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
+  <div class="bg-white p-6 rounded shadow-md w-96">
+    <h2 class="text-lg font-bold mb-4">新しいジャンルを追加</h2>
+    <input type="text" id="newGenreName" placeholder="ジャンル名" class="w-full border p-2 mb-2">
+    <textarea id="newGenreDesc" placeholder="説明（任意）" class="w-full border p-2 mb-4"></textarea>
+    <div class="flex justify-end gap-2">
+      <button onclick="closeGenreModal()" class="px-4 py-2 bg-gray-300 rounded">キャンセル</button>
+      <button onclick="saveGenre()" class="px-4 py-2 bg-blue-600 text-white rounded">保存</button>
+    </div>
+  </div>
+</div>
+
+
 
 <!-- CSS -->
 <style>
@@ -260,4 +279,45 @@
     }
   });
 </script>
+
+<script>
+function openGenreModal() {
+  document.getElementById('genreModal').classList.remove('hidden');
+}
+
+function closeGenreModal() {
+  document.getElementById('genreModal').classList.add('hidden');
+}
+
+function saveGenre() {
+  const name = document.getElementById('newGenreName').value;
+  const desc = document.getElementById('newGenreDesc').value;
+
+  if (!name.trim()) {
+    alert("ジャンル名を入力してください");
+    return;
+  }
+
+  fetch("/add_genre", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: name.trim(), description: desc.trim() })
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.success) {
+      const select = document.getElementById("genre_select");
+      const option = document.createElement("option");
+      option.value = data.genre_id;
+      option.text = data.genre_name;
+      option.selected = true;
+      select.appendChild(option);
+      closeGenreModal();
+    } else {
+      alert("ジャンルの追加に失敗しました");
+    }
+  });
+}
+</script>
+
 {% endblock %}
