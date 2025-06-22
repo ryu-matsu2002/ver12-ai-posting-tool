@@ -83,9 +83,11 @@ def gsc_loop_generate(site):
     """
     🔁 GSCからのクエリで1000記事未満なら記事生成をループ継続
     """
+    from app import db
     from app.google_client import fetch_search_queries_for_site
     from app.models import Keyword
     from app.article_generator import enqueue_generation
+    from flask import current_app
 
     # ✅ GSC接続されていないサイトはスキップ
     if not site.gsc_connected:
@@ -105,26 +107,46 @@ def gsc_loop_generate(site):
         current_app.logger.warning(f"[GSC LOOP] クエリ取得失敗 - {site.url}: {e}")
         return
 
-    # ✅ 重複キーワード排除
-    existing = set(k.keyword for k in Keyword.query.filter_by(site_id=site.id).all())
-    new_keywords = [q for q in queries if q not in existing]
+    # ✅ 🔽 既存キーワードを status="done" 以外含めて重複排除対象とする
+    existing_keywords = set(
+        k.keyword for k in Keyword.query.filter_by(site_id=site.id).all()
+    )
+
+    # ✅ 新しいキーワードのみ抽出（DBにまだ存在しないもの）
+    new_keywords = [q for q in queries if q not in existing_keywords]
 
     if not new_keywords:
         current_app.logger.info(f"[GSC LOOP] {site.name} に新規キーワードなし")
         return
 
-    # ✅ DB保存（source='gsc'）＋記事生成キュー追加
+    # ✅ DB保存（source='gsc', status='unprocessed'）＋記事生成キュー追加
     for kw in new_keywords:
         db.session.add(Keyword(
             keyword=kw,
             site_id=site.id,
             user_id=site.user_id,
-            source='gsc'
+            source='gsc',
+            status='unprocessed'  # ✅🔧 ステータス初期化を明示
         ))
 
     db.session.commit()
-    enqueue_generation(site.user_id, site.id, new_keywords)
-    current_app.logger.info(f"[GSC LOOP] {site.name} に {len(new_keywords)} 件生成キュー投入")
+
+    # ✅ 🔽 enqueue_generation に unprocessed キーワードのみ渡す
+    unprocessed_keywords = [k.keyword for k in Keyword.query.filter_by(
+        site_id=site.id,
+        user_id=site.user_id,
+        source='gsc',
+        status='unprocessed'  # ✅🔧 未処理分のみ生成対象
+    ).all()]
+
+    if not unprocessed_keywords:
+        current_app.logger.info(f"[GSC LOOP] {site.name} に未処理キーワードなし")
+        return
+
+    enqueue_generation(site.user_id, site.id, unprocessed_keywords)
+
+    current_app.logger.info(f"[GSC LOOP] {site.name} に {len(unprocessed_keywords)} 件生成キュー投入")
+
 
 def _gsc_generation_job(app):
     """

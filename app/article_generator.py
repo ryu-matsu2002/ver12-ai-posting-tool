@@ -416,6 +416,10 @@ def enqueue_generation(
                 kobj.used = True
                 kobj.used_at = datetime.utcnow()
 
+                # ✅✅✅ [追加] GSCキーワードなら status="done" に更新
+                if kobj.source == "gsc":
+                    kobj.status = "done"
+
             db.session.commit()
 
             # ▼ 並列生成処理（本文などを非同期で）

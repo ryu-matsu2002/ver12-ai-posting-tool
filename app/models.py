@@ -154,6 +154,7 @@ class Keyword(db.Model):
     times_used = db.Column(db.Integer, default=0)
 
     genre = db.Column(db.String(100), nullable=True)  # 任意（将来的な分類にも使える）
+    status = db.Column(db.String(20), default="unprocessed")  # "unprocessed", "generating", "done", "error"
     created_at = db.Column(db.DateTime, default=datetime.utcnow)  # 任意だが有用
     source = db.Column(db.String(20), default='manual')  # 'manual' または 'gsc'
     # リレーション

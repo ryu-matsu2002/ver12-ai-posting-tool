@@ -2538,7 +2538,12 @@ def gsc_generate():
             return redirect(url_for("main.log_sites", username=current_user.username))
 
         # 重複排除
-        existing = set(k.keyword for k in Keyword.query.filter_by(site_id=site.id).all())
+        # ✅ 既存キーワードのうち、status="done" のものは再利用不可として除外
+        existing = set(
+            k.keyword
+            for k in Keyword.query.filter_by(site_id=site.id, source="gsc")
+            if k.status == "done"
+        )
         new_keywords = [q for q in queries if q not in existing]
 
         # 🔧 追加: 空 or 全重複の分岐で別メッセージ
@@ -2590,7 +2595,32 @@ def gsc_generate():
     if not site.gsc_connected:
         flash("このサイトはまだGSCと接続されていません。", "danger")
         return redirect(url_for("main.gsc_connect"))
+    
+    # ✅ 追加: ステータスでフィルタリング
+    status_filter = request.args.get("status")
+    query = Keyword.query.filter_by(site_id=site.id, source="gsc")
 
+    if status_filter in ["done", "unprocessed"]:
+        query = query.filter(Keyword.status == status_filter)
+
+    from sqlalchemy import or_
+
+    # ✅ GSCで生成済み記事数
+    gsc_done = Keyword.query.filter_by(site_id=site.id, source="gsc", status="done").count()
+
+    # ✅ 通常（手動）生成済み記事数（source=None または 'manual' など GSC以外）
+    manual_done = Keyword.query.filter(
+        Keyword.site_id == site.id,
+        Keyword.status == "done",
+        or_(Keyword.source == None, Keyword.source != "gsc")
+    ).count()
+
+    # ✅ 合計と残り件数（最大1000件）
+    total_done = gsc_done + manual_done
+    remaining = max(1000 - total_done, 0)
+
+    
+    
     # GSCキーワード一覧（参考表示用）
     gsc_keywords = Keyword.query.filter_by(site_id=site.id, source="gsc").order_by(Keyword.created_at.desc()).all()
 
@@ -2604,6 +2634,11 @@ def gsc_generate():
         saved_prompts=saved_prompts,
         title_prompt="",  # 初期値
         body_prompt="",   # 初期値
+        request=request,   # ✅ テンプレートでセレクトボックス選択保持に使う
+        gsc_done=gsc_done,
+        manual_done=manual_done,
+        total_done=total_done,
+        remaining=remaining
     )
 
 

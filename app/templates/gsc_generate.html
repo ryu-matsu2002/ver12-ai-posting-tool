@@ -4,6 +4,16 @@
 {% block content %}
 <h2 class="text-3xl font-bold mb-8">🔍 GSC記事生成</h2>
 
+<!-- ✅✅✅ 追加：進捗状況表示ボックス ✅✅✅ -->
+<div class="mb-8 p-4 bg-blue-50 border-l-4 border-blue-400 text-blue-800 rounded shadow">
+  <p class="text-sm">
+    🗂️ <strong>GSC記事数：</strong>{{ gsc_done }} 件 ／
+    <strong>通常記事数：</strong>{{ manual_done }} 件 ／
+    <strong>合計：</strong>{{ total_done }} 件 ／
+    <strong>残り：</strong>{{ remaining }} 件（上限：1000 件）
+  </p>
+</div>
+
 <div class="grid md:grid-cols-2 gap-10 items-start">
 
   <!-- 左カラム：プロンプト選択 + GSC生成開始 -->
@@ -11,7 +21,7 @@
     <form method="POST" action="{{ url_for('main.gsc_generate') }}">
       <input type="hidden" name="site_id" value="{{ selected_site.id if selected_site else '' }}">
 
-      <!-- 🔸 対象サイト（固定表示） -->
+      <!-- 🔸 対象サイト -->
       <div class="mb-4">
         <label class="block font-semibold mb-1 text-gray-800 dark:text-white">対象サイト</label>
         <div class="p-2 bg-gray-100 rounded">
@@ -34,7 +44,7 @@
         </select>
       </div>
 
-      <!-- 🔸 詳細プロンプトエリア（トグル表示） -->
+      <!-- 🔸 詳細プロンプト（トグル） -->
       <div class="mb-4">
         <button type="button" onclick="toggleDetailPrompt()" class="text-blue-600 hover:underline text-sm">
           ＋ 詳細プロンプトを表示
@@ -52,23 +62,45 @@
         </div>
       </div>
 
-      <button type="submit"
-              class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded">
+      <button type="submit" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded">
         🔁 GSCデータから記事生成を開始
       </button>
     </form>
   </div>
 
-  <!-- 右カラム：現在のGSCキーワード一覧 -->
+  <!-- 右カラム：キーワード一覧 -->
   <div>
-    <h3 class="text-xl font-semibold mb-4">🔖 現在のGSCキーワード一覧</h3>
+    <div class="flex items-center justify-between mb-2">
+      <h3 class="text-xl font-semibold">🔖 GSCキーワード一覧</h3>
+      <form method="get" class="flex items-center space-x-2">
+        <input type="hidden" name="site_id" value="{{ selected_site.id }}">
+        <label for="status" class="text-sm text-gray-700">表示：</label>
+        <select name="status" id="status" onchange="this.form.submit()" class="p-1 border rounded text-sm">
+          <option value="">すべて</option>
+          <option value="done" {{ 'selected' if request.args.get('status') == 'done' else '' }}>生成済み</option>
+          <option value="unprocessed" {{ 'selected' if request.args.get('status') == 'unprocessed' else '' }}>未生成</option>
+        </select>
+      </form>
+    </div>
+
+    <p class="text-sm text-gray-500 mb-3">🔹 件数: {{ gsc_keywords|length }} 件</p>
+
     {% if gsc_keywords %}
       <ul class="bg-white dark:bg-gray-800 border rounded shadow divide-y max-h-[400px] overflow-y-auto">
         {% for kw in gsc_keywords %}
           <li class="p-3 flex justify-between items-center">
-            <span>{{ kw.keyword }}</span>
+            <div>
+              <span>{{ kw.keyword }}</span>
+              {% if kw.source == "gsc" %}
+                <span class="ml-2 px-2 py-0.5 text-xs bg-green-100 text-green-800 rounded-full">GSC</span>
+              {% endif %}
+            </div>
             <span class="text-sm text-gray-500">
-              {{ "生成済み" if kw.used else "未生成" }}
+              {% if kw.status == 'done' %}
+                ✅ 生成済み
+              {% else %}
+                ⏳ 未生成
+              {% endif %}
             </span>
           </li>
         {% endfor %}
@@ -79,7 +111,7 @@
   </div>
 </div>
 
-<!-- 🔧 詳細プロンプトトグルスクリプト + 選択反映JS -->
+<!-- 🔧 スクリプト -->
 <script>
 document.addEventListener("DOMContentLoaded", function () {
   const select = document.getElementById("prompt_select");
