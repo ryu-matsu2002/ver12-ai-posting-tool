@@ -1940,7 +1940,7 @@ def root_redirect():
 
 # ─────────── Dashboard
 from app.models import UserSiteQuota, Article, SiteQuotaLog, Site, User  # ← User を追加
-from sqlalchemy import func
+from sqlalchemy import func, case
 from flask import g
 from collections import defaultdict
 
@@ -1951,14 +1951,19 @@ def dashboard(username):
         abort(403)
 
     # 記事統計
-    g.total_articles = Article.query.filter_by(user_id=current_user.id).count()
-    g.generating     = Article.query.filter(
-        Article.user_id == current_user.id,
-        Article.status.in_(["pending", "gen"])
-    ).count()
-    g.done   = Article.query.filter_by(user_id=current_user.id, status="done").count()
-    g.posted = Article.query.filter_by(user_id=current_user.id, status="posted").count()
-    g.error  = Article.query.filter_by(user_id=current_user.id, status="error").count()
+    article_stats = db.session.query(
+        func.count(Article.id).label("total"),
+        func.sum(case((Article.status == "done", 1), else_=0)).label("done"),
+        func.sum(case((Article.status == "posted", 1), else_=0)).label("posted"),
+        func.sum(case((Article.status == "error", 1), else_=0)).label("error"),
+        func.sum(case((Article.status.in_(["pending", "gen"]), 1), else_=0)).label("generating")
+    ).filter(Article.user_id == current_user.id).first()
+
+    g.total_articles = article_stats.total
+    g.done           = article_stats.done
+    g.posted         = article_stats.posted
+    g.error          = article_stats.error
+    g.generating     = article_stats.generating
 
     # ユーザー情報
     user = current_user
