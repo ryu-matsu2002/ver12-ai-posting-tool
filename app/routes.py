@@ -728,38 +728,60 @@ def admin_users():
     if not current_user.is_admin:
         abort(403)
 
+    # 🔷 ユーザー一覧を一括取得
     users = User.query.order_by(User.id).all()
 
-    # サイト / プロンプト / 記事 の全体統計
+    # 🔷 サイト / プロンプト / 記事 の全体統計
     site_count    = Site.query.count()
     prompt_count  = PromptTemplate.query.count()
     article_count = Article.query.count()
 
-    # 🔶 各ユーザーのサイト使用状況（plan別に辞書化）
+    from sqlalchemy import func
+
+    # ✅【高速化】UserSiteQuota を一括取得（クエリ1回）
+    quota_rows = db.session.query(
+        UserSiteQuota.user_id,
+        UserSiteQuota.plan_type,
+        UserSiteQuota.total_quota
+    ).all()
+
+    # ✅【高速化】Site 使用数を user_id × plan_type で一括取得（クエリ1回）
+    site_counts = db.session.query(
+        Site.user_id,
+        Site.plan_type,
+        func.count(Site.id)
+    ).group_by(Site.user_id, Site.plan_type).all()
+
+    # ✅【高速化】辞書化してすぐアクセスできるように整形
     from collections import defaultdict
 
+    # user_id → plan_type → total_quota
+    user_quota_map = defaultdict(dict)
+    for user_id, plan_type, total_quota in quota_rows:
+        user_quota_map[user_id][plan_type] = total_quota or 0
+
+    # user_id → plan_type → used_count
+    used_site_map = defaultdict(dict)
+    for user_id, plan_type, count in site_counts:
+        used_site_map[user_id][plan_type] = count
+
+    # ✅【高速化】ユーザーごとの quota サマリを構築（SQLなし）
     user_quota_summary = {}
 
     for user in users:
-        quotas = UserSiteQuota.query.filter_by(user_id=user.id).all()
         summary = {}
-
-        for quota in quotas:
-            plan_type = quota.plan_type
-            total = quota.total_quota or 0
-            used  = Site.query.filter_by(user_id=user.id, plan_type=plan_type).count()
+        plans = user_quota_map.get(user.id, {})
+        for plan_type, total in plans.items():
+            used = used_site_map.get(user.id, {}).get(plan_type, 0)
             remaining = max(total - used, 0)
-
             summary[plan_type] = {
                 "used": used,
                 "total": total,
                 "remaining": remaining
             }
-
         user_quota_summary[user.id] = summary
 
-    # ✅ 追加: 各ユーザーごとの途中記事数（status: pending または gen）
-    from sqlalchemy import func
+    # ✅ 追加: 各ユーザーごとの途中記事数（status: pending または gen）を一括取得
     stuck_counts = dict(
         db.session.query(
             Article.user_id,
@@ -768,19 +790,19 @@ def admin_users():
         .filter(Article.status.in_(["pending", "gen"]))
         .group_by(Article.user_id)
         .all()
-    )    
+    )
 
+    # ✅ テンプレートへ渡す
     return render_template(
         "admin/users.html",
         users=users,
         site_count=site_count,
         prompt_count=prompt_count,
         article_count=article_count,
-        site_quota_summary=user_quota_summary,  # ✅ 新規追加
+        site_quota_summary=user_quota_summary,
         user_count=len(users),
-        stuck_counts=stuck_counts  # ✅ 追加
+        stuck_counts=stuck_counts
     )
-
 
 
 @admin_bp.route("/admin/user/<int:uid>")
