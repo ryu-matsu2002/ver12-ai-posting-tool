@@ -2678,28 +2678,31 @@ def connect_gsc(site_id):
 
 # app/routes.py（末尾に追加）
 
-from flask import request, render_template
-from app.models import GSCMetric, Site
+# ✅ 必要なインポート
+from flask import request, render_template  # ← Flaskの標準関数
+from app.models import GSCMetric, Site      # ← GSCMetricを使ってDBから集計
 from flask_login import login_required, current_user
 from datetime import datetime, timedelta
 
-@bp.route("/gsc/<int:site_id>")
+# ✅ GSCアクセス分析ルート（ユーザー名不要に統一）
+@bp.route("/gsc/<int:site_id>")  # ← ✅ ここを使用ルートに統一
 @login_required
 def gsc_analysis(site_id):
+    # ✅ 対象ユーザーのサイトか確認
     site = Site.query.filter_by(id=site_id, user_id=current_user.id).first_or_404()
 
-    # ✅ 未連携サイトなら警告表示
+    # ✅ 未連携サイトは警告表示
     if not site.gsc_connected:
         return render_template("gsc_analysis.html", site=site, error="このサイトはGSCと未連携です")
 
-    # 🔍 パラメータ取得（range or start/end）
+    # ✅ GETパラメータ取得（range または start/end）
     range_param = request.args.get("range", "28d")
     start_param = request.args.get("start")
     end_param = request.args.get("end")
 
     today = datetime.utcnow().date()
 
-    # ✅ 日付範囲決定ロジック
+    # ✅ 日付範囲の決定ロジック
     if range_param == "1d":
         start_date = today - timedelta(days=1)
     elif range_param == "7d":
@@ -2719,17 +2722,23 @@ def gsc_analysis(site_id):
             start_date = datetime.strptime(start_param, "%Y-%m-%d").date()
             today = datetime.strptime(end_param, "%Y-%m-%d").date()
         except ValueError:
-            return render_template("gsc_analysis.html", site=site, error="日付形式が不正です")
+            return render_template(
+                "gsc_analysis.html",
+                site=site,
+                error="日付形式が不正です"
+            )
     else:
+        # ✅ デフォルト28日
         start_date = today - timedelta(days=28)
 
-    # ✅ DBから該当期間のGSCMetricを取得
+    # ✅ データベースから該当期間のGSCメトリクスを取得
     metrics = GSCMetric.query.filter(
         GSCMetric.site_id == site_id,
         GSCMetric.date >= start_date,
         GSCMetric.date <= today
     ).order_by(GSCMetric.date.asc()).all()
 
+    # ✅ テンプレートへデータ送信
     return render_template(
         "gsc_analysis.html",
         site=site,
@@ -2738,15 +2747,6 @@ def gsc_analysis(site_id):
         end_date=today,
         selected_range=range_param
     )
-
-@bp.route("/<username>/gsc-analysis/<int:site_id>")
-@login_required
-def gsc_analysis_page(username, site_id):  # ← ★名前をユニークに変更
-    if current_user.username != username:
-        abort(403)
-    site = Site.query.get_or_404(site_id)
-    metrics = []
-    return render_template("gsc_analysis.html", username=username, site=site, metrics=metrics)
 
 
 # ─────────── 生成ログ
