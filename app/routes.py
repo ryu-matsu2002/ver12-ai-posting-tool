@@ -2622,7 +2622,7 @@ def gsc_generate():
     
     
     # GSCキーワード一覧（参考表示用）
-    gsc_keywords = Keyword.query.filter_by(site_id=site.id, source="gsc").order_by(Keyword.created_at.desc()).all()
+    gsc_keywords = query.order_by(Keyword.created_at.desc()).all()
 
     # 保存済みプロンプト
     saved_prompts = PromptTemplate.query.filter_by(user_id=current_user.id).order_by(PromptTemplate.genre).all()
