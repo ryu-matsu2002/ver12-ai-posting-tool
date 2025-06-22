@@ -76,6 +76,7 @@
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/chatgpt') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">smart_toy</span>ChatGPT
       </a>
+      {% if gsc_sites and gsc_sites[0] %}
       <a href="{{ url_for('main.gsc_analysis', site_id=gsc_sites[0].id) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/gsc') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">insights</span>アクセス分析
