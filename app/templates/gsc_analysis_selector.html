@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}アクセス分析 - サイト選択{% endblock %}
+
+{% block content %}
+<div class="p-8">
+  <h1 class="text-2xl font-bold mb-6">📊 アクセス分析 - サイトを選択してください</h1>
+
+  <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+    {% for site in sites %}
+      <a href="{{ url_for('main.gsc_analysis_page', username=username, site_id=site.id) }}"
+         class="block border rounded-lg p-4 shadow hover:shadow-md hover:bg-gray-100 transition">
+        <h2 class="text-lg font-semibold mb-1">{{ site.name }}</h2>
+        <p class="text-sm text-gray-600 truncate">{{ site.url }}</p>
+      </a>
+    {% endfor %}
+  </div>
+
+  {% if sites|length == 0 %}
+    <p class="text-gray-500 mt-4">まだ登録されたサイトがありません。</p>
+  {% endif %}
+</div>
+{% endblock %}
