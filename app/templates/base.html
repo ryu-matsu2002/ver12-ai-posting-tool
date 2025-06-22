@@ -81,6 +81,7 @@
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/gsc') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">insights</span>アクセス分析
       </a>
+      {% endif %}
       <a href="{{ url_for('main.gsc_connect') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/gsc-connect') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">link</span>Search Console連携
