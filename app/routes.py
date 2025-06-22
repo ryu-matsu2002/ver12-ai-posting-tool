@@ -2528,7 +2528,7 @@ def gsc_generate():
 
         # GSCクエリ取得
         try:
-            queries = fetch_search_queries_for_site(site.url, days=28, row_limit=1000)
+            queries = fetch_search_queries_for_site(site, days=28, row_limit=1000)
 
             # 🔧 追加: 取得件数ログ
             current_app.logger.info(f"[GSC] {len(queries)} 件のクエリを取得 - {site.url}")
