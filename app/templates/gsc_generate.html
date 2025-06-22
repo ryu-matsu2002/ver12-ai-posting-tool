@@ -83,7 +83,14 @@
       </form>
     </div>
 
-    <p class="text-sm text-gray-500 mb-3">🔹 件数: {{ gsc_keywords|length }} 件</p>
+    <!-- ✅✅✅ 修正：キーワード数内訳表示（全体・生成済み・未生成） ✅✅✅ -->
+    <p class="text-sm text-gray-500 mb-3">
+      🧮 キーワード数：
+      <strong>全体 {{ gsc_keywords|length }} 件</strong> ／
+      <span class="text-green-600 font-semibold">生成済み {{ gsc_done_keywords }} 件</span> ／
+      <span class="text-red-600 font-semibold">未生成 {{ gsc_pending_keywords }} 件</span>
+    </p>
+
 
     {% if gsc_keywords %}
       <ul class="bg-white dark:bg-gray-800 border rounded shadow divide-y max-h-[400px] overflow-y-auto">

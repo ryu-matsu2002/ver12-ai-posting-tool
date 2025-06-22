@@ -2603,18 +2603,17 @@ def gsc_generate():
     if status_filter in ["done", "unprocessed"]:
         query = query.filter(Keyword.status == status_filter)
 
-    from sqlalchemy import or_
+    from sqlalchemy import not_
 
     # ✅ GSCで生成済み記事数
     gsc_done = Keyword.query.filter_by(site_id=site.id, source="gsc", status="done").count()
 
-    # ✅ 通常（手動）生成済み記事数（source=None または 'manual' など GSC以外）
+    # 通常（手動）記事数（source != 'gsc'）
     manual_done = Keyword.query.filter(
         Keyword.site_id == site.id,
         Keyword.status == "done",
-        or_(Keyword.source == None, Keyword.source != "gsc")
+        not_(Keyword.source == "gsc")
     ).count()
-
     # ✅ 合計と残り件数（最大1000件）
     total_done = gsc_done + manual_done
     remaining = max(1000 - total_done, 0)
@@ -2623,6 +2622,9 @@ def gsc_generate():
     
     # GSCキーワード一覧（参考表示用）
     gsc_keywords = query.order_by(Keyword.created_at.desc()).all()
+    # ✅✅✅ 追加：GSCキーワードのステータス内訳カウント
+    gsc_done_keywords = sum(1 for k in gsc_keywords if k.status == "done")
+    gsc_pending_keywords = sum(1 for k in gsc_keywords if k.status != "done")
 
     # 保存済みプロンプト
     saved_prompts = PromptTemplate.query.filter_by(user_id=current_user.id).order_by(PromptTemplate.genre).all()
@@ -2638,7 +2640,9 @@ def gsc_generate():
         gsc_done=gsc_done,
         manual_done=manual_done,
         total_done=total_done,
-        remaining=remaining
+        remaining=remaining,
+        gsc_done_keywords=gsc_done_keywords,         # ✅ 追加
+        gsc_pending_keywords=gsc_pending_keywords    # ✅ 追加
     )
 
 
