@@ -6,44 +6,71 @@
   <h1 class="text-2xl font-bold mb-6">📊 GSCサイト状況一覧</h1>
 
   {% for group in user_site_data %}
-    <div class="mb-10 border rounded shadow p-4 bg-white">
-      <h2 class="text-xl font-semibold text-blue-700 mb-4">
-        👤 ユーザー：{{ group.user.username }}（{{ group.user.email }}）
-      </h2>
+    <div class="mb-6 border rounded shadow bg-white">
+      <button type="button"
+              class="w-full text-left px-4 py-3 bg-blue-100 hover:bg-blue-200 font-semibold text-blue-800 flex justify-between items-center"
+              onclick="toggleSection('section-{{ loop.index }}')">
+        👤 {{ group.user.full_name }}
+        <span class="text-sm text-gray-600">▼</span>
+      </button>
 
-      <div class="space-y-4">
-        {% for info in group.sites %}
-          <div class="border rounded p-4 bg-gray-50 shadow-sm">
-            <div class="flex justify-between items-center mb-2">
-              <div>
-                <h3 class="text-lg font-bold">
-                  🔗 <a href="{{ info.site.url }}" target="_blank" class="text-blue-600 hover:underline">{{ info.site.name }}</a>
-                </h3>
-                <p class="text-sm text-gray-500">{{ info.site.url }}</p>
+      <div id="section-{{ loop.index }}" class="hidden px-4 pb-4 pt-2">
+        <div class="space-y-4">
+          {% for info in group.sites %}
+            <div class="border rounded p-4 bg-gray-50 shadow-sm">
+              <div class="flex justify-between items-center mb-2">
+                <div>
+                  <h3 class="text-lg font-bold">
+                    🔗 <a href="{{ info.site.url }}" target="_blank" class="text-blue-600 hover:underline">{{ info.site.name }}</a>
+                  </h3>
+                  <p class="text-sm text-gray-500">{{ info.site.url }}</p>
+                </div>
+                <div>
+                  {% if info.site.gsc_connected %}
+                    <span class="px-2 py-1 text-sm bg-green-100 text-green-800 rounded">GSC接続済み</span>
+                  {% else %}
+                    <span class="px-2 py-1 text-sm bg-red-100 text-red-800 rounded">未接続</span>
+                  {% endif %}
+                </div>
               </div>
-              <div>
-                {% if info.site.gsc_connected %}
-                  <span class="px-2 py-1 text-sm bg-green-100 text-green-800 rounded">GSC接続済み</span>
-                {% else %}
-                  <span class="px-2 py-1 text-sm bg-red-100 text-red-800 rounded">未接続</span>
-                {% endif %}
+
+              <!-- ✅ 進捗バー -->
+              {% set total = info.total or 1 %}
+              {% set done_pct = (info.done / total) * 100 %}
+              {% set gen_pct = (info.generating / total) * 100 %}
+              {% set unprocessed_pct = (info.unprocessed / total) * 100 %}
+
+              <div class="w-full bg-gray-200 rounded h-5 overflow-hidden mb-2">
+                <div class="bar-segment bg-green-400" style="--bar-width: {{ done_pct }}%"></div>
+                <div class="bar-segment bg-yellow-400" style="--bar-width: {{ gen_pct }}%"></div>
+                <div class="bar-segment bg-gray-400" style="--bar-width: {{ unprocessed_pct }}%"></div>
+              </div>
+
+              <p class="text-sm text-gray-600">
+                ✅ 完了：{{ info.done }} ／ 🔄 生成中：{{ info.generating }} ／ ⏳ 未生成：{{ info.unprocessed }} ／ 合計：{{ info.total }}
+              </p>
+
+              <div class="text-sm text-gray-500 mt-2">
+                🧠 最終キーワード取得：{{ info.latest_keyword_date.strftime('%Y-%m-%d %H:%M') if info.latest_keyword_date else '―' }} /
+                📝 最終記事生成：{{ info.latest_article_date.strftime('%Y-%m-%d %H:%M') if info.latest_article_date else '―' }}
               </div>
             </div>
-
-            <!-- ✅ キーワード進捗バー（CSS変数でエラー完全回避） -->
-{% set total = info.total or 1 %}
-{% set done_pct = (info.done / total) * 100 %}
-{% set gen_pct = (info.generating / total) * 100 %}
-{% set unprocessed_pct = (info.unprocessed / total) * 100 %}
-
-<div class="w-full bg-gray-200 rounded h-5 overflow-hidden mb-2">
-
-  <div class="bar-segment bg-green-400" style="--bar-width: {{ done_pct }}%"></div>
-  <div class="bar-segment bg-yellow-400" style="--bar-width: {{ gen_pct }}%"></div>
-  <div class="bar-segment bg-gray-400" style="--bar-width: {{ unprocessed_pct }}%"></div>
-
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  {% endfor %}
 </div>
 
+<!-- ✅ JavaScriptで開閉制御 -->
+<script>
+  function toggleSection(id) {
+    const section = document.getElementById(id);
+    section.classList.toggle('hidden');
+  }
+</script>
+
+<!-- ✅ 進捗バー用CSS -->
 <style>
   .bar-segment {
     float: left;
@@ -51,21 +78,4 @@
     width: var(--bar-width);
   }
 </style>
-
-
-
-            <p class="text-sm text-gray-600">
-              ✅ 完了：{{ info.done }} ／ 🔄 生成中：{{ info.generating }} ／ ⏳ 未生成：{{ info.unprocessed }} ／ 合計：{{ info.total }}
-            </p>
-
-            <div class="text-sm text-gray-500 mt-2">
-              🧠 最終キーワード取得：{{ info.latest_keyword_date.strftime('%Y-%m-%d %H:%M') if info.latest_keyword_date else '―' }} /
-              📝 最終記事生成：{{ info.latest_article_date.strftime('%Y-%m-%d %H:%M') if info.latest_article_date else '―' }}
-            </div>
-          </div>
-        {% endfor %}
-      </div>
-    </div>
-  {% endfor %}
-</div>
 {% endblock %}
