@@ -2628,9 +2628,9 @@ def gsc_generate():
     
     
     # ✅ フィルター前に全GSCキーワードを取得（件数用）
-    all_gsc_keywords = Keyword.query.filter_by(site_id=site.id, source="gsc").all()
-    gsc_done_keywords = Article.query.filter_by(site_id=site.id, source="gsc").count()
-    gsc_pending_keywords = len(all_gsc_keywords) - gsc_done_keywords
+    gsc_done_keywords = Keyword.query.filter_by(site_id=site.id, source="gsc", status="done").count()
+    gsc_pending_keywords = Keyword.query.filter_by(site_id=site.id, source="gsc", status="unprocessed").count()
+    gsc_total_keywords = gsc_done_keywords + gsc_pending_keywords  # 🔧 合計を追加
 
     # ✅ 表示リスト用に再フィルタリング
     query = Keyword.query.filter_by(site_id=site.id, source="gsc")
@@ -2657,7 +2657,8 @@ def gsc_generate():
         total_done=total_done,
         remaining=remaining,
         gsc_done_keywords=gsc_done_keywords,         # ✅ 追加
-        gsc_pending_keywords=gsc_pending_keywords    # ✅ 追加
+        gsc_pending_keywords=gsc_pending_keywords,    # ✅ 追加
+        gsc_total_keywords=gsc_total_keywords  # 🔧 追加
     )
 
 
