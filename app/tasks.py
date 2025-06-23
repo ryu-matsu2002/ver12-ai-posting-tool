@@ -126,7 +126,8 @@ def gsc_loop_generate(site):
             site_id=site.id,
             user_id=site.user_id,
             source='gsc',
-            status='unprocessed'  # ✅🔧 ステータス初期化を明示
+            status='unprocessed',  # ✅🔧 ステータス初期化を明示
+            used=False  # ✅✅✅ この1行を追加！
         ))
 
     db.session.commit()
