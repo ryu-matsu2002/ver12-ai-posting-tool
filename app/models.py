@@ -86,6 +86,7 @@ class Site(db.Model):
     app_pass = db.Column(db.String(200), nullable=False)
     user_id  = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     gsc_connected = db.Column(db.Boolean, default=False)  # ✅ 追加
+    gsc_generation_started = db.Column(db.Boolean, default=False)  # ✅ GSC記事生成ボタンの実行フラグ
     clicks = db.Column(db.Integer, default=0)         # 総クリック数（GSC）
     impressions = db.Column(db.Integer, default=0)    # 表示回数（GSC）
     genre_id = db.Column(db.Integer, db.ForeignKey('genres.id'), nullable=True)  # ← 追加

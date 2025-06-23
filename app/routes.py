@@ -2510,32 +2510,28 @@ def gsc_generate():
     # --- POST（記事生成処理） ---
     if request.method == "POST":
         site_id = request.form.get("site_id", type=int)
-        # ✅✅✅ ここを追加：既にGSC生成中なら処理中止
-        from sqlalchemy import or_
-        existing_active = Keyword.query.filter(
-            Keyword.site_id == site_id,
-            Keyword.source == "gsc",
-            Keyword.status.in_(["done", "generating"])
-        ).first()
+        site = Site.query.get_or_404(site_id)
 
-        if existing_active:
-            flash("⚠️ このサイトではすでにGSCキーワードによる記事生成が開始されています。", "warning")
-            return redirect(url_for("main.log_sites", username=current_user.username))
+        if site.user_id != current_user.id:
+            abort(403)
+
+        # ✅ 追加：すでにGSC生成が始まっている場合は中止
+        if site.gsc_generation_started:
+            flash("⚠️ このサイトではすでにGSC記事生成が開始されています。", "warning")
+            return redirect(url_for("main.gsc_generate", site_id=site_id))
+
+        # ✅ 初回生成フラグをTrueにする（1回限りの起動）
+        site.gsc_generation_started = True
+        db.session.commit()
+
         prompt_id = request.form.get("prompt_id", type=int)
         title_prompt = request.form.get("title_prompt", "").strip()
         body_prompt = request.form.get("body_prompt", "").strip()
 
-        if not site_id:
-            flash("サイトIDが指定されていません。", "danger")
-            return redirect(url_for("main.log_sites", username=current_user.username))
-
-        site = Site.query.get_or_404(site_id)
-        if site.user_id != current_user.id:
-            abort(403)
-
         if not site.gsc_connected:
             flash("このサイトはまだGSCと接続されていません。", "danger")
             return redirect(url_for("main.gsc_connect"))
+
 
         # GSCクエリ取得
         try:
@@ -2631,11 +2627,19 @@ def gsc_generate():
     remaining = max(1000 - total_done, 0)
     
     
-    # GSCキーワード一覧（参考表示用）
+    # ✅ フィルター前に全GSCキーワードを取得（件数用）
+    all_gsc_keywords = Keyword.query.filter_by(site_id=site.id, source="gsc").all()
+    gsc_done_keywords = Article.query.filter_by(site_id=site.id, source="gsc").count()
+    gsc_pending_keywords = len(all_gsc_keywords) - gsc_done_keywords
+
+    # ✅ 表示リスト用に再フィルタリング
+    query = Keyword.query.filter_by(site_id=site.id, source="gsc")
+    if status_filter == "done":
+        query = query.filter(Keyword.status == "done")
+    elif status_filter == "unprocessed":
+        query = query.filter(Keyword.status != "done")
     gsc_keywords = query.order_by(Keyword.created_at.desc()).all()
-    # ✅✅✅ 追加：GSCキーワードのステータス内訳カウント
-    gsc_done_keywords = sum(1 for k in gsc_keywords if k.status == "done")
-    gsc_pending_keywords = sum(1 for k in gsc_keywords if k.status != "done")
+
 
     # 保存済みプロンプト
     saved_prompts = PromptTemplate.query.filter_by(user_id=current_user.id).order_by(PromptTemplate.genre).all()
