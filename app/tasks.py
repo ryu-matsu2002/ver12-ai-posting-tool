@@ -81,7 +81,7 @@ def _gsc_metrics_job(app):
 
 def gsc_loop_generate(site):
     """
-    🔁 GSCからのクエリで1000記事未満なら記事生成をループ継続
+    🔁 GSCからのクエリで1000記事未満なら通常記事フローで生成する
     """
     from app import db
     from app.google_client import fetch_search_queries_for_site
@@ -89,72 +89,46 @@ def gsc_loop_generate(site):
     from app.article_generator import enqueue_generation
     from flask import current_app
 
-    # ✅ GSC接続されていないサイトはスキップ
     if not site.gsc_connected:
         current_app.logger.info(f"[GSC LOOP] スキップ：未接続サイト {site.name}")
         return
 
-    # ✅ すでに1000記事以上生成済みならスキップ
     total_keywords = Keyword.query.filter_by(site_id=site.id).count()
     if total_keywords >= 1000:
         current_app.logger.info(f"[GSC LOOP] {site.name} は既に1000記事に到達済み")
         return
 
-    # ✅ GSCからクエリ取得
     try:
         queries = fetch_search_queries_for_site(site, days=28)
     except Exception as e:
         current_app.logger.warning(f"[GSC LOOP] クエリ取得失敗 - {site.url}: {e}")
         return
 
-    # ✅ 🔽 既存キーワードを status="done" 以外含めて重複排除対象とする
     existing_keywords = set(
         k.keyword for k in Keyword.query.filter_by(site_id=site.id).all()
     )
-
-    # ✅ 新しいキーワードのみ抽出（DBにまだ存在しないもの）
     new_keywords = [q for q in queries if q not in existing_keywords]
 
     if not new_keywords:
         current_app.logger.info(f"[GSC LOOP] {site.name} に新規キーワードなし")
         return
 
-    # ✅ DB保存（source='gsc', status='unprocessed'）＋記事生成キュー追加
     for kw in new_keywords:
         db.session.add(Keyword(
             keyword=kw,
             site_id=site.id,
             user_id=site.user_id,
             source='gsc',
-            status='unprocessed',  # ✅🔧 ステータス初期化を明示
-            used=False  # ✅✅✅ この1行を追加！
+            status='pending',   # ← 通常記事と同じ
+            used=False
         ))
 
     db.session.commit()
 
-    # ✅ 🔽 最大40件の未処理キーワードを "generating" にロック
-    targets = Keyword.query.filter_by(
-        site_id=site.id,
-        user_id=site.user_id,
-        source='gsc',
-        status='unprocessed'
-    ).limit(40).all()
+    # ✅ 通常記事生成と同じフローで処理（統合！）
+    enqueue_generation(site)
+    current_app.logger.info(f"[GSC LOOP] {site.name} に {len(new_keywords)} 件のキーワードを追加し生成キュー投入")
 
-    if not targets:
-        current_app.logger.info(f"[GSC LOOP] {site.name} に未処理キーワードなし")
-        return
-
-    for kw in targets:
-        kw.status = 'generating'
-    db.session.commit()
-
-    # ✅ 修正箇所：キーワードIDで渡すように変更
-    keyword_ids = [k.id for k in targets]
-    from app.article_generator import submit_article_job
-    submit_article_job(site.id, keyword_ids)
-
-
-    current_app.logger.info(f"[GSC LOOP] {site.name} に {len(keyword_ids)} 件生成キュー投入")
 
 def _gsc_generation_job(app):
     """
