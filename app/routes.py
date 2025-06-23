@@ -2614,20 +2614,24 @@ def gsc_generate():
     if status_filter in ["done", "unprocessed"]:
         query = query.filter(Keyword.status == status_filter)
 
-    from sqlalchemy import not_
+    from app.models import Article, Keyword
 
-    # ✅ GSCで生成済み記事数
-    gsc_done = Keyword.query.filter_by(site_id=site.id, source="gsc", status="done").count()
+# ✅ GSC由来の記事数（Keyword.source="gsc" に紐づく Article）
+    gsc_done = Article.query.join(Keyword).filter(
+        Article.site_id == site.id,
+        Keyword.source == "gsc",
+        Keyword.status.in_(["done", "posted"])
+    ).count()
 
-    # ✅ 全記事（done）
-    all_done = Keyword.query.filter_by(site_id=site.id, status="done").count()
+# ✅ 全記事数（すべての Article）
+    all_done = Article.query.filter_by(site_id=site.id).count()
 
-    # ✅ 通常記事 = 全体 - GSC
+# ✅ 通常記事数 = 全体 - GSC
     manual_done = all_done - gsc_done
-    # ✅ 合計と残り件数（最大1000件）
+
+# ✅ 合計・残り（上限：1000）
     total_done = gsc_done + manual_done
     remaining = max(1000 - total_done, 0)
-
     
     
     # GSCキーワード一覧（参考表示用）
