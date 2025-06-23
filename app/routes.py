@@ -2617,7 +2617,10 @@ def gsc_generate():
     from app.models import Article, Keyword
 
 # ✅ GSC由来の記事数（Keyword.source="gsc" に紐づく Article）
-    gsc_done = Article.query.join(Keyword).filter(
+    # ✅ GSC記事数（JOIN ON 条件を明示）
+    gsc_done = db.session.query(Article).join(
+        Keyword, Article.keyword_id == Keyword.id  # ← 明示的な結合条件（※重要）
+    ).filter(
         Article.site_id == site.id,
         Keyword.source == "gsc",
         Keyword.status.in_(["done", "posted"])
