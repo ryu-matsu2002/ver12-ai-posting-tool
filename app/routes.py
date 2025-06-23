@@ -2614,7 +2614,7 @@ def gsc_generate():
     if status_filter in ["done", "unprocessed"]:
         query = query.filter(Keyword.status == status_filter)
 
-    from sqlalchemy import not_
+    from sqlalchemy import or_
 
     # ✅ GSCで生成済み記事数
     gsc_done = Keyword.query.filter_by(site_id=site.id, source="gsc", status="done").count()
@@ -2623,7 +2623,7 @@ def gsc_generate():
     manual_done = Keyword.query.filter(
         Keyword.site_id == site.id,
         Keyword.status == "done",
-        not_(Keyword.source == "gsc")
+        or_(Keyword.source == None, Keyword.source == "manual")
     ).count()
     # ✅ 合計と残り件数（最大1000件）
     total_done = gsc_done + manual_done
