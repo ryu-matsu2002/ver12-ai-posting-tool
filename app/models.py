@@ -153,6 +153,7 @@ class Keyword(db.Model):
     used = db.Column(db.Boolean, default=False)
     used_at = db.Column(db.DateTime, nullable=True)
     times_used = db.Column(db.Integer, default=0)
+    status = db.Column(db.String(20), default="unprocessed", nullable=False)
 
     genre = db.Column(db.String(100), nullable=True)  # 任意（将来的な分類にも使える）
     status = db.Column(db.String(20), default="unprocessed")  # "unprocessed", "generating", "done", "error"

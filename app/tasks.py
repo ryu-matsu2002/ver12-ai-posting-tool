@@ -147,10 +147,13 @@ def gsc_loop_generate(site):
         kw.status = 'generating'
     db.session.commit()
 
-    keywords = [k.keyword for k in targets]
-    enqueue_generation(site.user_id, site.id, keywords)
+    # ✅ 修正箇所：キーワードIDで渡すように変更
+    keyword_ids = [k.id for k in targets]
+    from app.article_generator import submit_article_job
+    submit_article_job(site.id, keyword_ids)
 
-    current_app.logger.info(f"[GSC LOOP] {site.name} に {len(keywords)} 件生成キュー投入")
+
+    current_app.logger.info(f"[GSC LOOP] {site.name} に {len(keyword_ids)} 件生成キュー投入")
 
 def _gsc_generation_job(app):
     """

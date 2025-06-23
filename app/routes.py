@@ -1419,6 +1419,58 @@ def delete_user(user_id):
     return redirect(url_for("admin.admin_users"))
 
 
+# ──────────────── GSCサイト状況一覧（管理者）────────────────
+@admin_bp.route("/admin/gsc_sites")
+@login_required
+def admin_gsc_sites():
+    if not current_user.is_admin:
+        abort(403)
+
+    from sqlalchemy.orm import selectinload
+    from collections import defaultdict
+    from app.models import Site, User, Keyword, Article
+
+    # 全サイトをユーザー単位で取得（リレーション付きで最適化）
+    users = User.query.options(selectinload(User.sites)).all()
+
+    user_site_data = []
+
+    for user in users:
+        site_infos = []
+        for site in user.sites:
+            if not site.gsc_connected:
+                continue  # GSC未接続サイトは除外
+
+            # GSCキーワード全件
+            keywords = Keyword.query.filter_by(site_id=site.id, source="gsc").all()
+            done        = sum(1 for k in keywords if k.status == "done")
+            generating  = sum(1 for k in keywords if k.status == "generating")
+            unprocessed = sum(1 for k in keywords if k.status == "unprocessed")
+
+            # 最新取得・生成日
+            latest_keyword_date = max([k.created_at for k in keywords], default=None)
+
+            # GSC記事の最新生成日（Article参照）
+            latest_article = Article.query.filter_by(site_id=site.id, source="gsc").order_by(Article.created_at.desc()).first()
+            latest_article_date = latest_article.created_at if latest_article else None
+
+            site_infos.append({
+                "site": site,
+                "done": done,
+                "generating": generating,
+                "unprocessed": unprocessed,
+                "total": done + generating + unprocessed,
+                "latest_keyword_date": latest_keyword_date,
+                "latest_article_date": latest_article_date
+            })
+
+        if site_infos:
+            user_site_data.append({
+                "user": user,
+                "sites": site_infos
+            })
+
+    return render_template("admin/gsc_sites.html", user_site_data=user_site_data)
 
 
 # ─────────── 管理者専用：アイキャッチ一括復元（ユーザー単位）
