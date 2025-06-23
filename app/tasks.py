@@ -131,22 +131,26 @@ def gsc_loop_generate(site):
 
     db.session.commit()
 
-    # ✅ 🔽 enqueue_generation に unprocessed キーワードのみ渡す
-    unprocessed_keywords = [k.keyword for k in Keyword.query.filter_by(
+    # ✅ 🔽 最大40件の未処理キーワードを "generating" にロック
+    targets = Keyword.query.filter_by(
         site_id=site.id,
         user_id=site.user_id,
         source='gsc',
-        status='unprocessed'  # ✅🔧 未処理分のみ生成対象
-    ).all()]
+        status='unprocessed'
+    ).limit(40).all()
 
-    if not unprocessed_keywords:
+    if not targets:
         current_app.logger.info(f"[GSC LOOP] {site.name} に未処理キーワードなし")
         return
 
-    enqueue_generation(site.user_id, site.id, unprocessed_keywords)
+    for kw in targets:
+        kw.status = 'generating'
+    db.session.commit()
 
-    current_app.logger.info(f"[GSC LOOP] {site.name} に {len(unprocessed_keywords)} 件生成キュー投入")
+    keywords = [k.keyword for k in targets]
+    enqueue_generation(site.user_id, site.id, keywords)
 
+    current_app.logger.info(f"[GSC LOOP] {site.name} に {len(keywords)} 件生成キュー投入")
 
 def _gsc_generation_job(app):
     """
@@ -172,6 +176,7 @@ def init_scheduler(app):
     Flask アプリ起動時に呼び出して:
       1) APScheduler に自動投稿ジョブを登録
       2) 3分間隔で _auto_post_job を実行するようスケジュール
+      - GSC記事生成ジョブ：10分間隔（←ここ修正）
     """
     scheduler.add_job(
         func=_auto_post_job,
@@ -198,9 +203,8 @@ def init_scheduler(app):
     # ✅ GSC記事生成ジョブ
     scheduler.add_job(
         func=_gsc_generation_job,
-        trigger="cron",
-        hour=1,
-        minute=0,
+        trigger="interval",
+        minutes=10,
         args=[app],
         id="gsc_generation_job",
         replace_existing=True,
@@ -211,4 +215,4 @@ def init_scheduler(app):
     scheduler.start()
     app.logger.info("Scheduler started: auto_post_job every 3 minutes")
     app.logger.info("Scheduler started: gsc_metrics_job daily at 0:00")
-    app.logger.info("Scheduler started: gsc_generation_job daily at 1:00")
+    app.logger.info("Scheduler started: gsc_generation_job every 10 minutes")

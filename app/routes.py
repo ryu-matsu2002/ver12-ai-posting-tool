@@ -2510,6 +2510,17 @@ def gsc_generate():
     # --- POST（記事生成処理） ---
     if request.method == "POST":
         site_id = request.form.get("site_id", type=int)
+        # ✅✅✅ ここを追加：既にGSC生成中なら処理中止
+        from sqlalchemy import or_
+        existing_active = Keyword.query.filter(
+            Keyword.site_id == site_id,
+            Keyword.source == "gsc",
+            Keyword.status.in_(["done", "generating"])
+        ).first()
+
+        if existing_active:
+            flash("⚠️ このサイトではすでにGSCキーワードによる記事生成が開始されています。", "warning")
+            return redirect(url_for("main.log_sites", username=current_user.username))
         prompt_id = request.form.get("prompt_id", type=int)
         title_prompt = request.form.get("title_prompt", "").strip()
         body_prompt = request.form.get("body_prompt", "").strip()
@@ -2603,7 +2614,7 @@ def gsc_generate():
     if status_filter in ["done", "unprocessed"]:
         query = query.filter(Keyword.status == status_filter)
 
-    from sqlalchemy import not_
+    from sqlalchemy import or_
 
     # ✅ GSCで生成済み記事数
     gsc_done = Keyword.query.filter_by(site_id=site.id, source="gsc", status="done").count()
@@ -2612,7 +2623,7 @@ def gsc_generate():
     manual_done = Keyword.query.filter(
         Keyword.site_id == site.id,
         Keyword.status == "done",
-        not_(Keyword.source == "gsc")
+        or_(Keyword.source == None, Keyword.source != "gsc")  # ✅ 修正ポイント
     ).count()
     # ✅ 合計と残り件数（最大1000件）
     total_done = gsc_done + manual_done

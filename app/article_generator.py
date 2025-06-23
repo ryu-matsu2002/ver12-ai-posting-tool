@@ -410,17 +410,26 @@ def enqueue_generation(
                     except Exception as e:
                         db.session.rollback()
                         logging.exception(f"[登録失敗] keyword='{kw}': {e}")
-
+                        
             # ▼ 使用済みにマーク（used = True, used_at = 現在時刻）
             for kobj in kw_map.values():
                 kobj.used = True
                 kobj.used_at = datetime.utcnow()
 
-                # ✅✅✅ [追加] GSCキーワードなら status="done" に更新
+                # ✅✅✅ GSCキーワードなら status="done" に更新
                 if kobj.source == "gsc":
                     kobj.status = "done"
 
             db.session.commit()
+
+            # ▼ 並列生成処理（本文などを非同期で）
+            def generate_and_update_status(aid):
+                try:
+                    _generate(app, aid, title_prompt, body_prompt, format, self_review, user_id=user_id)
+                except Exception as e:
+                    logging.exception(f"[並列生成中の例外] Article ID={aid} エラー: {e}")
+                    # ▼ 該当記事のキーワードが特定できれば error にしてもよい（オプション）
+                    # pass
 
             # ▼ 並列生成処理（本文などを非同期で）
             with ThreadPoolExecutor(max_workers=4) as executor:

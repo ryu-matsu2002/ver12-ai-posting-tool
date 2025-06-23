@@ -62,9 +62,20 @@
         </div>
       </div>
 
-      <button type="submit" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded">
-        🔁 GSCデータから記事生成を開始
-      </button>
+      <!-- ✅✅✅ [ステップ4対応済]：生成中の場合はボタン無効化 + 警告表示 -->
+      {% set is_generating = gsc_pending_keywords > 0 %}
+      {% if is_generating %}
+        <div class="p-4 mb-4 bg-yellow-100 text-yellow-800 border-l-4 border-yellow-500 rounded shadow">
+          ⚠️ 現在このサイトではGSC由来のキーワードによる記事生成が進行中です。完了するまで新たに開始できません。
+        </div>
+        <button type="submit" class="bg-gray-400 text-white px-6 py-2 rounded cursor-not-allowed" disabled>
+          ⏳ 記事生成中（完了までお待ちください）
+        </button>
+      {% else %}
+        <button type="submit" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded">
+          🔁 GSCデータから記事生成を開始
+        </button>
+      {% endif %}
     </form>
   </div>
 
