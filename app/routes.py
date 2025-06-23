@@ -2619,12 +2619,11 @@ def gsc_generate():
     # ✅ GSCで生成済み記事数
     gsc_done = Keyword.query.filter_by(site_id=site.id, source="gsc", status="done").count()
 
-    # 通常（手動）記事数（source != 'gsc'）
-    manual_done = Keyword.query.filter(
-        Keyword.site_id == site.id,
-        Keyword.status == "done",
-        not_(Keyword.source == "gsc")
-    ).count()
+    # ✅ 全記事（done）
+    all_done = Keyword.query.filter_by(site_id=site.id, status="done").count()
+
+    # ✅ 通常記事 = 全体 - GSC
+    manual_done = all_done - gsc_done
     # ✅ 合計と残り件数（最大1000件）
     total_done = gsc_done + manual_done
     remaining = max(1000 - total_done, 0)
