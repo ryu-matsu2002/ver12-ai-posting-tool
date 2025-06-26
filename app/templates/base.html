@@ -77,18 +77,19 @@
         <span class="material-icons align-middle mr-2">smart_toy</span>ChatGPT
       </a>
       {% if gsc_sites|length > 0 %}
-      {# 1 件以上あれば先頭サイトの分析ページへ #}
+      {# 1 件以上 → 先頭サイトの分析ページへ #}
       <a href="{{ url_for('main.gsc_analysis', site_id=gsc_sites[0].id) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/gsc') and 'font-semibold bg-[#0f2fa6]' }}">
-        <span class="material-icons align-middle mr-2">insights</span>アクセス分析
+      <span class="material-icons align-middle mr-2">insights</span>アクセス分析
       </a>
       {% else %}
-      {# 0 件ならサイト状況一覧へ（エンドポイントは環境に合わせて変更） #}
-      <a href="{{ url_for('main.gsc_sites_status', username=username) }}"
+      {# 0 件 → GSC 連携ページへ #}
+      <a href="{{ url_for('main.gsc_connect') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full text-gray-400">
       <span class="material-icons align-middle mr-2">insights</span>アクセス分析
       </a>
       {% endif %}
+
 
       <a href="{{ url_for('main.gsc_connect') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/gsc-connect') and 'font-semibold bg-[#0f2fa6]' }}">
