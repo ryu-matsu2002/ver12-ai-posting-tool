@@ -229,7 +229,7 @@ def init_scheduler(app):
     scheduler.add_job(
         func=_gsc_generation_job,
         trigger="interval",
-        minutes=1,
+        minutes=20,
         args=[app],
         id="gsc_generation_job",
         replace_existing=True,
@@ -240,4 +240,4 @@ def init_scheduler(app):
     scheduler.start()
     app.logger.info("Scheduler started: auto_post_job every 3 minutes")
     app.logger.info("Scheduler started: gsc_metrics_job daily at 0:00")
-    app.logger.info("Scheduler started: gsc_generation_job every 1 minutes")
+    app.logger.info("Scheduler started: gsc_generation_job every 20 minutes")
