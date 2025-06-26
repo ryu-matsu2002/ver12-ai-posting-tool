@@ -124,11 +124,37 @@ def gsc_loop_generate(site):
         ))
 
     db.session.commit()
+    
+    from app.models import PromptTemplate
+    prompt = PromptTemplate.query.filter_by(user_id=site.user_id).order_by(PromptTemplate.id.desc()).first()
+    if prompt:
+        title_prompt = prompt.title_pt   # ★ 修正：正しいカラム名 title_pt
+        body_prompt  = prompt.body_pt    # ★ 修正：正しいカラム名 body_pt
+    else:
+        title_prompt = ""
+        body_prompt  = ""
 
-    # ✅ 通常記事生成と同じフローで処理（統合！）
-    enqueue_generation(site)
-    current_app.logger.info(f"[GSC LOOP] {site.name} に {len(new_keywords)} 件のキーワードを追加し生成キュー投入")
+    # 🔧★修正②：enqueue_generation に format/self_review も渡す（デフォルトでOKなら省略可能）
+    from app.article_generator import enqueue_generation
 
+    BATCH = 40  # ★ 1バッチあたりの上限
+    for i in range(0, len(new_keywords), BATCH):
+        kw_batch = new_keywords[i : i + BATCH]     # ★ スライスで40件ずつ取り出す
+
+        enqueue_generation(                        # ★ ここをループ内へ
+            user_id      = site.user_id,
+            site_id      = site.id,
+            keywords     = kw_batch,
+            title_prompt = title_prompt,
+            body_prompt  = body_prompt,
+            format       = "html",
+            self_review  = False,
+        )
+
+
+        current_app.logger.info(                   # ★ バッチごとのログ
+            f"[GSC LOOP] {site.name} → batch {i//BATCH+1}: {len(kw_batch)} 件キュー投入"
+        )
 
 def _gsc_generation_job(app):
     """

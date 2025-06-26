@@ -345,6 +345,17 @@ def _generate(app, aid: int, tpt: str, bpt: str, format: str = "html", self_revi
             art.updated_at = datetime.utcnow()
             db.session.commit()
 
+            # ★★★★★ ここから追加 ★★★★★
+            from app.models import Keyword
+            kw = Keyword.query.filter_by(
+                site_id = art.site_id,
+                keyword = art.keyword
+            ).first()
+            if kw and kw.status != "done":
+                kw.status = "done"
+                db.session.commit()
+            # ★★★★★ ここまで追加 ★★★★★
+
         except Exception as e:
             logging.exception(f"Error generating article ID {aid}: {e}")
             art.status = "error"
