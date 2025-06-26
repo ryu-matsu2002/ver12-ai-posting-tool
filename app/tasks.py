@@ -81,11 +81,13 @@ def _gsc_metrics_job(app):
 
 def gsc_loop_generate(site):
     """
-    🔁 GSCからのクエリで1000記事未満なら通常記事フローで生成する
+    🔁 GSCからのクエリで1000記事未満なら通常記事フローで生成する（修正済）
+    - 新規クエリを登録
+    - 既存の未生成（pending/error）キーワードもすべて enqueue
     """
     from app import db
     from app.google_client import fetch_search_queries_for_site
-    from app.models import Keyword
+    from app.models import Keyword, PromptTemplate
     from app.article_generator import enqueue_generation
     from flask import current_app
 
@@ -98,20 +100,18 @@ def gsc_loop_generate(site):
         current_app.logger.info(f"[GSC LOOP] {site.name} は既に1000記事に到達済み")
         return
 
+    # ✅ GSCクエリを取得
     try:
         queries = fetch_search_queries_for_site(site, days=28)
     except Exception as e:
         current_app.logger.warning(f"[GSC LOOP] クエリ取得失敗 - {site.url}: {e}")
         return
 
+    # ✅ 新規キーワードを抽出して追加
     existing_keywords = set(
         k.keyword for k in Keyword.query.filter_by(site_id=site.id).all()
     )
     new_keywords = [q for q in queries if q not in existing_keywords]
-
-    if not new_keywords:
-        current_app.logger.info(f"[GSC LOOP] {site.name} に新規キーワードなし")
-        return
 
     for kw in new_keywords:
         db.session.add(Keyword(
@@ -119,42 +119,63 @@ def gsc_loop_generate(site):
             site_id=site.id,
             user_id=site.user_id,
             source='gsc',
-            status='pending',   # ← 通常記事と同じ
+            status='pending',
             used=False
         ))
 
+    if new_keywords:
+        current_app.logger.info(f"[GSC LOOP] {site.name} に新規キーワード {len(new_keywords)} 件登録")
+
     db.session.commit()
-    
-    from app.models import PromptTemplate
+
+    # ✅ プロンプトを取得（なければ空）
     prompt = PromptTemplate.query.filter_by(user_id=site.user_id).order_by(PromptTemplate.id.desc()).first()
-    if prompt:
-        title_prompt = prompt.title_pt   # ★ 修正：正しいカラム名 title_pt
-        body_prompt  = prompt.body_pt    # ★ 修正：正しいカラム名 body_pt
-    else:
-        title_prompt = ""
-        body_prompt  = ""
+    title_prompt = prompt.title_pt if prompt else ""
+    body_prompt  = prompt.body_pt  if prompt else ""
 
-    # 🔧★修正②：enqueue_generation に format/self_review も渡す（デフォルトでOKなら省略可能）
-    from app.article_generator import enqueue_generation
+    # ✅ 修正：未生成（pending または error）をすべてキューに流す
+    from sqlalchemy import or_
 
-    BATCH = 40  # ★ 1バッチあたりの上限
-    for i in range(0, len(new_keywords), BATCH):
-        kw_batch = new_keywords[i : i + BATCH]     # ★ スライスで40件ずつ取り出す
+    ungenerated_keywords = (
+        Keyword.query
+        .filter(
+            Keyword.site_id == site.id,
+            Keyword.source == "gsc",
+            Keyword.status.in_(["pending", "error"])
+        )
+        .order_by(Keyword.id.asc())
+        .all()
+    )
 
-        enqueue_generation(                        # ★ ここをループ内へ
+    if not ungenerated_keywords:
+        current_app.logger.info(f"[GSC LOOP] {site.name} に生成待ちキーワードなし")
+        return
+
+    BATCH = 40
+    for i in range(0, len(ungenerated_keywords), BATCH):
+        batch_keywords = ungenerated_keywords[i:i+BATCH]
+        keyword_strings = [k.keyword for k in batch_keywords]
+
+        enqueue_generation(
             user_id      = site.user_id,
             site_id      = site.id,
-            keywords     = kw_batch,
+            keywords     = keyword_strings,
             title_prompt = title_prompt,
             body_prompt  = body_prompt,
             format       = "html",
             self_review  = False,
         )
 
+        # ✅ 修正：キュー投入済みとして status を更新
+        for k in batch_keywords:
+            k.status = "queued"
 
-        current_app.logger.info(                   # ★ バッチごとのログ
-            f"[GSC LOOP] {site.name} → batch {i//BATCH+1}: {len(kw_batch)} 件キュー投入"
+        db.session.commit()
+
+        current_app.logger.info(
+            f"[GSC LOOP] {site.name} → batch {i//BATCH+1}: {len(batch_keywords)} 件キュー投入"
         )
+
 
 def _gsc_generation_job(app):
     """
