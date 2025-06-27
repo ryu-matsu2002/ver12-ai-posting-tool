@@ -1,15 +1,13 @@
 # app/controllers/external_seo.py
-
-from flask import Blueprint, render_template, redirect, url_for, flash, jsonify
+from flask import Blueprint, render_template, jsonify
 from flask_login import login_required, current_user
 
-# ✅ Blueprint定義はそのまま
 external_bp = Blueprint("external", __name__, url_prefix="/external")
 
 @external_bp.route("/sites")
 @login_required
 def external_sites():
-    # ✅ 修正②: 循環インポート防止のため関数内で import
+    # 【★変更】循環インポートを避けるため関数内 import
     from app.models import Site
 
     sites = (Site.query.filter_by(user_id=current_user.id)
@@ -19,7 +17,7 @@ def external_sites():
 @external_bp.route("/start/<int:site_id>", methods=["POST"])
 @login_required
 def start_external(site_id):
-    # ✅ 修正②: enqueue_external_seo の import も遅延
+    # 【★変更】同様に遅延 import
     from app.tasks import enqueue_external_seo
     enqueue_external_seo.delay(site_id)
     return jsonify({"status": "queued"})
