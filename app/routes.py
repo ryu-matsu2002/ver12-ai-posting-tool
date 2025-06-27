@@ -3308,26 +3308,32 @@ def delete_genre(username, genre_id):
     flash("ジャンルを削除しました。", "info")
     return redirect(url_for("main.manage_genres", username=username))
 
-# app/routes.py  抜粋（コメント ★ が今回追加部分）
 
-# --- 既存 import ここは触らない ---
 
-# ▼▼▼▼▼▼▼▼▼▼▼ ここから追加 ▼▼▼▼▼▼▼▼▼▼▼
+# ────────── 外部SEO関連ルート ──────────
 @bp.route("/external/sites")
 @login_required
 def external_seo_sites():
-    # ★ Site をここで import して循環を防ぐ
+    # ★ 遅延インポート（循環回避）
     from app.models import Site
 
-    sites = (Site.query.filter_by(user_id=current_user.id)
-             if not current_user.is_admin else Site.query.all())
+    # ★ 修正: 管理者でも “自分のサイトのみ” 取得
+    sites = (
+        Site.query
+            .filter_by(user_id=current_user.id)      # 自ユーザーに限定
+            .order_by(Site.id.desc())                # 任意: 新しい順
+            .all()
+    )
     return render_template("external_sites.html", sites=sites)
+
 
 @bp.route("/external/start/<int:site_id>", methods=["POST"])
 @login_required
 def start_external_seo(site_id):
-    # ★ 同様に遅延 import
+    # ★ 同様に遅延インポート
     from app.tasks import enqueue_external_seo
+
     enqueue_external_seo.delay(site_id)
     return jsonify({"status": "queued"})
-# ▲▲▲▲▲▲▲▲▲▲▲ ここまで追加 ▲▲▲▲▲▲▲▲▲▲▲
+# ───────────────────────────────
+
