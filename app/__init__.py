@@ -91,8 +91,8 @@ def create_app() -> Flask:
             return User.query.get(int(user_id))
         
         # ✅ 修正①: external_bp の import & 登録は app context 内で最後に行う
-        from .controllers.external_seo import external_bp
-        app.register_blueprint(external_bp)
+        #from .controllers.external_seo import external_bp
+        #app.register_blueprint(external_bp)
 
     # ✅ スケジューラー起動（--preload により1回のみ呼ばれる）
     if os.getenv("SCHEDULER_ENABLED") == "1":

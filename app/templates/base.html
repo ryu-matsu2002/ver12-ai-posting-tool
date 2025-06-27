@@ -29,10 +29,10 @@
   </script>
 </head>
 
-<body class="h-screen flex overflow-hidden bg-primary text-white">
+<body class="min-h-screen flex overflow-x-hidden bg-primary text-white">
 
   <!-- ===== SIDEBAR ===== -->
-  <aside class="w-60 shrink-0 h-full bg-primaryDark border-r border-gray-700 shadow-md flex flex-col">
+  <aside class="w-60 shrink-0 min-h-screen bg-primaryDark border-r border-gray-700 shadow-md flex flex-col">
     <a href="{{ url_for('main.dashboard', username=username) }}"
        class="flex items-center justify-start bg-primaryDark border-b border-white/20 h-[72px] px-4 hover:opacity-90 transition">
       <img src="{{ url_for('static', filename='images/tcc_logo.png') }}"
@@ -42,7 +42,7 @@
       </div>
     </a>
 
-    <nav class="flex-1 py-4 space-y-1 overflow-y-auto">
+    <nav class="flex-1 py-4 space-y-1">
       <a href="{{ url_for('main.dashboard', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/dashboard') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">dashboard</span>ダッシュボード
@@ -75,6 +75,12 @@
       <a href="{{ url_for('main.chatgpt', username=username) }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/chatgpt') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">smart_toy</span>ChatGPT
+      </a>
+      <!-- ChatGPT の下あたりに追加する例 ★-->
+      <a href="{{ url_for('main.external_seo_sites') }}"
+         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
+                {{ request.path.startswith('/external') and 'font-semibold bg-[#0f2fa6]' }}">
+      <span class="material-icons align-middle mr-2">rocket_launch</span>外部SEO
       </a>
       {% if gsc_sites|length > 0 %}
       {# 1 件以上 → 先頭サイトの分析ページへ #}
