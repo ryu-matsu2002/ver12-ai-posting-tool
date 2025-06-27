@@ -15,7 +15,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_migrate import Migrate
 from celery import Celery
-from .controllers.external_seo import external_bp    # ← 追加
+
 
 # ── Flask-拡張の“空”インスタンスを先に作成 ───────────
 db            = SQLAlchemy()
@@ -89,6 +89,10 @@ def create_app() -> Flask:
         @login_manager.user_loader
         def load_user(user_id: str) -> User | None:  # type: ignore[name-defined]
             return User.query.get(int(user_id))
+        
+        # ✅ 修正①: external_bp の import & 登録は app context 内で最後に行う
+        from .controllers.external_seo import external_bp
+        app.register_blueprint(external_bp)
 
     # ✅ スケジューラー起動（--preload により1回のみ呼ばれる）
     if os.getenv("SCHEDULER_ENABLED") == "1":
