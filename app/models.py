@@ -292,3 +292,51 @@ class RyunosukeDeposit(db.Model):
     memo = db.Column(db.String(255), nullable=True)  # 任意：備考
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+# ──── 🔸 NEW: 外部ブログ自動投稿機能 ────
+from enum import Enum
+
+class BlogType(str, Enum):
+    NOTE     = "note"
+    HATENA   = "hatena"
+    AMEBA    = "ameba"
+    LIVEDOOR = "livedoor"
+    SEESAA   = "seesaa"
+    EXCITE   = "excite"
+
+class ExternalBlogAccount(db.Model):
+    __tablename__ = "external_blog_account"
+
+    id          = db.Column(db.Integer, primary_key=True)
+    site_id     = db.Column(db.Integer, db.ForeignKey("site.id"), nullable=False, index=True)
+    blog_type   = db.Column(db.Enum(BlogType), nullable=False)
+    email       = db.Column(db.String(120), nullable=False, unique=True)
+    username    = db.Column(db.String(100), nullable=False)
+    password    = db.Column(db.String(255), nullable=False)          # 🔐 salted-hash 予定
+    status      = db.Column(db.String(30), default="active")         # active / done / error
+    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+
+    site        = db.relationship("Site", backref="external_accounts")
+    schedules   = db.relationship("ExternalArticleSchedule", backref="blog_account", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<ExtBlogAccount {self.blog_type}:{self.username}>"
+
+class ExternalArticleSchedule(db.Model):
+    __tablename__ = "external_article_schedule"
+
+    id               = db.Column(db.Integer, primary_key=True)
+    blog_account_id  = db.Column(db.Integer, db.ForeignKey("external_blog_account.id"), nullable=False, index=True)
+    keyword_id = db.Column(db.Integer, db.ForeignKey("keywords.id"), nullable=False, index=True)
+    scheduled_date   = db.Column(db.DateTime, nullable=False)
+    status           = db.Column(db.String(30), default="pending")   # pending / posted / error
+    created_at       = db.Column(db.DateTime, default=datetime.utcnow)
+
+    keyword          = db.relationship("Keyword")
+
+    __table_args__ = (
+        db.UniqueConstraint("blog_account_id", "keyword_id", name="uq_blog_kw"),  # 同記事重複防止
+    )
+
+    def __repr__(self):
+        return f"<ExtArticleSched {self.blog_account_id}:{self.keyword_id}>"

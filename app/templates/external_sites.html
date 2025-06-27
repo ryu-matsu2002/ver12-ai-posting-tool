@@ -1,0 +1,20 @@
+{% extends "base_admin.html" %}
+{% block title %}外部SEO - サイト一覧{% endblock %}
+
+{% block content %}
+<h2 class="text-2xl font-bold mb-6">🚀 外部SEO | サイト一覧</h2>
+
+{% for s in sites %}
+<div class="border rounded p-4 flex justify-between items-center mb-4">
+  <div>
+    <div class="font-semibold">{{ s.name }}</div>
+    <a href="{{ s.url }}" class="text-blue-600 text-sm" target="_blank">{{ s.url }}</a>
+  </div>
+  <button class="px-4 py-2 bg-blue-600 text-white rounded"
+          hx-post="{{ url_for('external.start_external', site_id=s.id) }}"
+          hx-swap="none">
+    外部SEO開始
+  </button>
+</div>
+{% endfor %}
+{% endblock %}

@@ -15,6 +15,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_migrate import Migrate
 from celery import Celery
+from .controllers.external_seo import external_bp    # ← 追加
 
 # ── Flask-拡張の“空”インスタンスを先に作成 ───────────
 db            = SQLAlchemy()
