@@ -3388,3 +3388,59 @@ def external_schedules(site_id):
     return render_template("external_schedules.html",
                            schedules=schedules,
                            site_id=site_id)
+
+from flask import send_file, make_response
+from .services.blog_signup.crypto_utils import decrypt
+from app.models import ExternalBlogAccount, BlogType
+import asyncio, json, time
+
+# -----------------------------------------------------------
+# ユーザー向け: 自分の外部ブログアカウント一覧
+# -----------------------------------------------------------
+@bp.route("/external/accounts")
+@login_required
+def my_blog_accounts():
+    accts = ExternalBlogAccount.query.filter_by(site_id=None, user_id=current_user.id).all()
+    return render_template("my_blog_accounts.html", accts=accts, decrypt=decrypt)
+
+# -----------------------------------------------------------
+# 管理者向け: 全ユーザーの外部ブログアカウント一覧
+# -----------------------------------------------------------
+@bp.route("/admin/blog_accounts")
+@login_required
+def admin_blog_accounts():
+    if not current_user.is_admin:
+        abort(403)
+    accts = ExternalBlogAccount.query.order_by(ExternalBlogAccount.created_at.desc()).all()
+    return render_template("admin_blog_accounts.html", accts=accts, decrypt=decrypt)
+
+# -----------------------------------------------------------
+# ワンクリックログイン (Note)
+# -----------------------------------------------------------
+@bp.route("/external/login/<int:acct_id>")
+@login_required
+def blog_one_click_login(acct_id):
+    acct = ExternalBlogAccount.query.get_or_404(acct_id)
+    if not (current_user.is_admin or acct.site.user_id == current_user.id):
+        abort(403)
+
+    if acct.blog_type != BlogType.NOTE:
+        abort(400, "Login not supported yet")
+
+    # Playwright で Note にログイン → cookie を取得
+    from app.services.blog_signup.note_login import get_note_cookies
+    cookies = asyncio.run(get_note_cookies(decrypt(acct.email), decrypt(acct.password)))
+
+    resp = make_response(redirect("https://note.com"))
+    for c in cookies:
+        resp.set_cookie(
+            key=c["name"],
+            value=c["value"],
+            domain=".note.com",
+            path="/",
+            secure=True,
+            httponly=True,
+            samesite="Lax",
+            expires=int(time.time()) + 60*60
+        )
+    return resp

@@ -1,29 +1,27 @@
 {% extends "base.html" %}
-{% block title %}外部SEO - サイト一覧{% endblock %}
+{% block title %}外部SEO | サイト一覧{% endblock %}
 
 {% block content %}
-<h2 class="text-2xl font-bold mb-6">🚀 外部SEO | サイト一覧</h2>
+<h2 class="text-2xl font-bold mb-6 flex items-center justify-between">
+  🚀 外部SEO | サイト一覧
+  <!-- ⭐ 新規追加：自分のブログアカウント一覧 -->
+  <a href="{{ url_for('main.my_blog_accounts') }}"
+     class="text-sm px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded">
+    外部ブログアカウント一覧
+  </a>
+</h2>
 
 {% for s in sites %}
-  {# ── 最新ジョブを取得 ── #}
+  {# ---------- 進捗パネル or ボタン ---------- #}
   {% set latest = job_map.get(s.id) %}
-
-  {# ジョブが存在し running / success の場合はパネル表示 #}
-  {% if latest and latest.status in ['running', 'success'] %}
-    {% with site_id=s.id, job=latest %}
-      {% include "_job_progress.html" %}
-    {% endwith %}
-
+  {% if latest and latest.status in ['running','success'] %}
+    {% include "_job_progress.html" with context %}
   {% else %}
-    {# ── 開始ボタン付きの通常カード #}
     <div id="site-card-{{ s.id }}" class="border rounded p-4 flex justify-between items-center mb-4">
       <div class="overflow-hidden">
         <div class="font-semibold truncate max-w-xs">{{ s.name }}</div>
-        <a href="{{ s.url }}"
-           class="text-blue-600 text-sm break-all"
-           target="_blank">{{ s.url }}</a>
+        <a href="{{ s.url }}" class="text-blue-600 text-sm break-all" target="_blank">{{ s.url }}</a>
       </div>
-
       <button
         class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
         hx-post="{{ url_for('main.start_external_seo', site_id=s.id) }}"
@@ -33,7 +31,5 @@
       </button>
     </div>
   {% endif %}
-{% else %}
-  <p class="text-gray-600">登録されたサイトがありません。</p>
 {% endfor %}
 {% endblock %}

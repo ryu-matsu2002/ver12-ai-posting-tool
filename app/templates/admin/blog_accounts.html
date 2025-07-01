@@ -1,0 +1,26 @@
+{% extends "base_admin.html" %}
+{% block title %}すべての外部ブログアカウント{% endblock %}
+{% block content %}
+<h2 class="text-2xl font-bold mb-6">全ユーザーの外部ブログアカウント</h2>
+
+<table class="w-full text-sm">
+  <thead class="bg-gray-100">
+    <tr><th class="px-2 py-2">ユーザー</th><th class="px-2 py-2">ブログ</th><th class="px-2 py-2">ユーザー名</th><th class="px-2 py-2">メール</th><th class="px-2 py-2">状態</th></tr>
+  </thead>
+  <tbody>
+    {% for a in accts %}
+    <tr class="border-b">
+      <td class="px-2 py-2">{{ a.site.user.username if a.site else '-' }}</td>
+      <td class="px-2 py-2">{{ a.blog_type.value }}</td>
+      <td class="px-2 py-2">{{ a.username }}</td>
+      <td class="px-2 py-2">{{ decrypt(a.email) }}</td>
+      <td class="px-2 py-2">
+        {% if a.status=='active' %}<span class="text-green-600">active</span>{% else %}<span class="text-red-600">{{ a.status }}</span>{% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td class="px-2 py-4 text-gray-500" colspan="5">アカウントがありません。</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
