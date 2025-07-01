@@ -7,16 +7,21 @@
 {% for s in sites %}
   {# ── 最新ジョブを取得 ── #}
   {% set latest = job_map.get(s.id) %}
-  {# ジョブがあり、かつ status != error ならパネル表示 #}
+
+  {# ジョブが存在し running / success の場合はパネル表示 #}
   {% if latest and latest.status in ['running', 'success'] %}
-    {# → 直接パーシャルを呼び出して初期描画 #}
-    {% include "_job_progress.html" with context %}
+    {% with site_id=s.id, job=latest %}
+      {% include "_job_progress.html" %}
+    {% endwith %}
+
   {% else %}
-    {# → 従来のカード + ボタン #}
+    {# ── 開始ボタン付きの通常カード #}
     <div id="site-card-{{ s.id }}" class="border rounded p-4 flex justify-between items-center mb-4">
       <div class="overflow-hidden">
         <div class="font-semibold truncate max-w-xs">{{ s.name }}</div>
-        <a href="{{ s.url }}" class="text-blue-600 text-sm break-all" target="_blank">{{ s.url }}</a>
+        <a href="{{ s.url }}"
+           class="text-blue-600 text-sm break-all"
+           target="_blank">{{ s.url }}</a>
       </div>
 
       <button
