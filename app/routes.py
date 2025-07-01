@@ -3327,13 +3327,21 @@ def external_seo_sites():
     return render_template("external_sites.html", sites=sites)
 
 
-# routes.py  抜粋
 @bp.route("/external/start/<int:site_id>", methods=["POST"])
 @login_required
 def start_external_seo(site_id):
-    from app.tasks import enqueue_external_seo      # ← run_external_seo → enqueue_external_seo に変更
+    from app.tasks import enqueue_external_seo
     enqueue_external_seo(site_id)
+
+    # HTMX リクエストなら progress パネルを返す
+    if request.headers.get("HX-Request"):
+        return render_template("_job_progress.html",
+                               job=None,   # まだ無いので None
+                               site_id=site_id)
+
+    # 通常リクエストなら JSON
     return jsonify({"status": "queued"})
+
 
 # ─── 外部SEO進捗を返す HTMX ルート ─────────────────
 @bp.route("/external/jobs/<int:site_id>")

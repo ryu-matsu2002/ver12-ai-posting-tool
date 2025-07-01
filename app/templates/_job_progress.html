@@ -1,39 +1,47 @@
-{% if not job %}
-  <div class="p-4 bg-gray-100 border rounded text-sm text-gray-600">
-    ジョブはまだ開始されていません
-  </div>
-{% else %}
-  <div class="p-4 bg-white border rounded shadow">
-    <h3 class="font-semibold mb-2">
-      {% if job.status == 'running' %}🛠️ 実行中…
-      {% elif job.status == 'success' %}🎉 完了
-      {% else %}⚠️ エラー
-      {% endif %}
-    </h3>
+{# templates/_job_progress.html #}
 
-    <ul class="space-y-1 text-sm">
-      <li>
-        ステータス: <span class="font-mono">{{ job.status }}</span>
-      </li>
-      <li>
-        ステップ: <span class="font-mono">{{ job.step }}</span>
-      </li>
-      <li>
-        記事数: {{ job.article_cnt }} 本
-      </li>
-      {% if job.message %}
-      <li class="text-red-600">エラー: {{ job.message }}</li>
-      {% endif %}
-      <li class="text-gray-500">更新: {{ job.updated_at.strftime('%Y-%m-%d %H:%M:%S') }}</li>
-    </ul>
+<div id="seo-panel-{{ site_id }}"
+     class="w-full"
+     hx-get="{{ url_for('main.external_seo_job_status', site_id=site_id) }}"
+     hx-trigger="every 5s"
+     hx-swap="innerHTML">
 
-    {% if job.status == 'success' %}
-      <div class="mt-4 flex gap-3">
-        <a href="{{ url_for('main.something') }}"  <!-- TODO: 投稿結果ページ -->
-           class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm">
-          投稿一覧を見る
-        </a>
-      </div>
-    {% endif %}
-  </div>
-{% endif %}
+  {% if not job %}
+    <div class="p-4 bg-gray-100 border rounded text-sm text-gray-600">
+      ジョブを開始しました。反映まで数秒お待ちください…
+    </div>
+
+  {% else %}
+    <div class="p-4 bg-white border rounded shadow">
+      <h3 class="font-semibold mb-2">
+        {% if job.status == 'running' %}🛠️ 実行中…
+        {% elif job.status == 'success' %}🎉 完了
+        {% else %}⚠️ エラー
+        {% endif %}
+      </h3>
+
+      <ul class="space-y-1 text-sm">
+        <li>ステータス: <span class="font-mono">{{ job.status }}</span></li>
+        <li>ステップ&nbsp;: <span class="font-mono">{{ job.step }}</span></li>
+        <li>記事数&nbsp;: {{ job.article_cnt }} 本</li>
+
+        {% if job.message %}
+          <li class="text-red-600">エラー: {{ job.message }}</li>
+        {% endif %}
+
+        <li class="text-gray-500">
+          更新: {{ job.updated_at.strftime('%Y-%m-%d %H:%M:%S') }}
+        </li>
+      </ul>
+
+      {% if job.status == 'success' %}
+        <div class="mt-4 flex gap-3">
+          <a href="#"
+             class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm">
+            投稿一覧を見る
+          </a>
+        </div>
+      {% endif %}
+    </div>
+  {% endif %}
+</div>
