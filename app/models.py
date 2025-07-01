@@ -340,3 +340,21 @@ class ExternalArticleSchedule(db.Model):
 
     def __repr__(self):
         return f"<ExtArticleSched {self.blog_account_id}:{self.keyword_id}>"
+
+# ──── NEW: 外部SEOジョブステータス ────
+class ExternalSEOJob(db.Model):
+    __tablename__ = "external_seo_jobs"
+
+    id         = db.Column(db.Integer, primary_key=True)
+    site_id    = db.Column(db.Integer, db.ForeignKey("site.id"), nullable=False, index=True)
+    status     = db.Column(db.String(20), default="queued")   # queued / running / success / error
+    step       = db.Column(db.String(50),  default="waiting") # signup / generating / posting / finished
+    message    = db.Column(db.Text)                           # エラーや備考を残す
+    article_cnt= db.Column(db.Integer, default=0)             # 生成した記事数
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    site = db.relationship("Site", backref="seo_jobs")
+
+    def __repr__(self) -> str:
+        return f"<SEOJob site={self.site_id} status={self.status} step={self.step}>"
