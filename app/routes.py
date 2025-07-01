@@ -3450,25 +3450,28 @@ def admin_blog_accounts():
 # ---------------------------------------------------------
 # 🔐 管理者専用：ワンクリックで対象ブログへログインする中間ページ
 # ---------------------------------------------------------
+# app/routes.py など
+from flask import Blueprint, request, abort, render_template_string
+from flask_login import login_required, current_user
+from app import db
+
+
+# ---------------------------------------------------------
+# 🔐 管理者専用：ワンクリック自動ログイン
+# ---------------------------------------------------------
 @admin_bp.route("/admin/blog_login", methods=["POST"])
 @login_required
 def admin_blog_login():
     """
-    管理者が「🔐 ログイン」ボタンを押したときに呼ばれる。
-    1. 受け取った blog_account_id で ExternalBlogAccount を取得
-    2. 資格情報を復号
-    3. 対応ブログごとのログイン URL と hidden フォームを生成
-       └ ブラウザが自動送信（JavaScript）してワンクリックログインを実現
-    4. 未対応ブログは資格情報表示のみ
+    管理者が「ワンクリックログイン」を押した時に呼び出される。
+    - 対応サービス (note / hatena …) は自動 POST
+    - 未対応サービスは資格情報を表示
     """
-    # --- パラメータ取得 & 権限チェック --------------------
-    from app.models import ExternalBlogAccount
-    from flask import abort, render_template_string, request
-    from app.utils.encryption import decrypt  # ← 例：独自 util（要調整）
-
-    # 管理者以外はブロック
     if not current_user.is_admin:
         abort(403)
+
+    from app.models import ExternalBlogAccount
+    from app.services.blog_signup.crypto_utils import decrypt
 
     acct_id = request.form.get("account_id", type=int)
     if not acct_id:
@@ -3476,15 +3479,13 @@ def admin_blog_login():
 
     acct: ExternalBlogAccount | None = ExternalBlogAccount.query.get(acct_id)
     if not acct:
-        abort(404, "Account not found")
+        abort(404, "account not found")
 
-    # --- 資格情報復号 ------------------------------------
     email    = decrypt(acct.email)
     password = decrypt(acct.password)
     username = acct.username
 
-    # --- ブログ別ログインエンドポイント -------------------
-    login_map: dict[str, dict[str, str]] = {
+    login_map = {
         "note": {
             "url": "https://note.com/login",
             "user_field": "email",
@@ -3495,65 +3496,41 @@ def admin_blog_login():
             "user_field": "name",
             "pass_field": "password",
         },
-        # 追加で他サービスを登録可能
+        # ここに他ブログを追加
     }
 
-    blog_key = acct.blog_type.value
-    cfg = login_map.get(blog_key)
+    cfg = login_map.get(acct.blog_type.value)
 
-    # --- 1) 対応ブログ → 自動 POST フォーム ----------------
+    # --- 対応ブログ：自動 POST フォーム ----
     if cfg:
-        html = f"""
-        <!doctype html>
-        <html lang="ja">
-        <head>
-          <meta charset="utf-8">
-          <title>{blog_key} auto-login</title>
-        </head>
-        <body>
+        return f"""
+        <!doctype html><html lang="ja"><head><meta charset="utf-8">
+        <title>auto-login</title></head><body>
           <p style="font-family:sans-serif;margin-top:2rem">
-            {blog_key} へリダイレクト中です…
-            <br>もし自動で遷移しない場合は
-            <button onclick="document.forms[0].submit()">こちら</button>
+            {acct.blog_type.value} にリダイレクト中…
           </p>
-
-          <form id="loginForm" method="POST" action="{cfg['url']}">
+          <form id="f" action="{cfg['url']}" method="post">
             <input type="hidden" name="{cfg['user_field']}" value="{email}">
             <input type="hidden" name="{cfg['pass_field']}" value="{password}">
           </form>
-
-          <script>
-            // 0.3 秒待って自動送信（ブラウザが許可する範囲で）
-            setTimeout(() => {{
-              document.getElementById('loginForm').submit();
-            }}, 300);
-          </script>
-        </body>
-        </html>
+          <script>setTimeout(()=>document.getElementById('f').submit(), 300);</script>
+        </body></html>
         """
-        return html
 
-    # --- 2) 未対応ブログ → 資格情報だけ表示 -----------------
-    fallback_html = """
-    <!doctype html><html lang="ja"><head><meta charset="utf-8">
-    <title>ブログ資格情報</title></head><body style="font-family:sans-serif">
-      <h2>手動ログインが必要です</h2>
-      <ul>
-        <li><strong>サービス</strong>: {{ blog }}</li>
-        <li><strong>ユーザー名</strong>: {{ uname }}</li>
-        <li><strong>メール</strong>: {{ mail }}</li>
-        <li><strong>パスワード</strong>: {{ pwd }}</li>
-      </ul>
-      <p>対応サービスに追加したい場合は開発者へお知らせください。</p>
-    </body></html>
-    """
-    return render_template_string(
-        fallback_html,
-        blog  = acct.blog_type.value,
-        uname = username,
-        mail  = email,
-        pwd   = password
-    )
+    # --- 未対応ブログ：資格情報表示 ----
+    return render_template_string("""
+      <!doctype html><html lang="ja"><head><meta charset="utf-8">
+      <title>資格情報</title></head><body style="font-family:sans-serif">
+        <h2>手動ログインが必要です</h2>
+        <ul>
+          <li><b>サービス</b>: {{ blog }}</li>
+          <li><b>ユーザー名</b>: {{ uname }}</li>
+          <li><b>メール</b>: {{ mail }}</li>
+          <li><b>パスワード</b>: {{ pwd }}</li>
+        </ul>
+      </body></html>
+    """, blog=acct.blog_type.value, uname=username, mail=email, pwd=password)
+
 
 
 # -----------------------------------------------------------
