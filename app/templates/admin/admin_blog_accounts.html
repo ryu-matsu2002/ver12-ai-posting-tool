@@ -1,3 +1,4 @@
+{# app/templates/admin/admin_blog_accounts.html #}
 {% extends "base_admin.html" %}
 {% block title %}ブログアカウント管理{% endblock %}
 
@@ -13,15 +14,18 @@
       <th class="px-2 py-2">メール</th>
       <th class="px-2 py-2">状態</th>
       <th class="px-2 py-2 text-right">作成日</th>
+      <th class="px-2 py-2 text-right">操作</th>     {# ★ 新列 #}
     </tr>
   </thead>
+
   <tbody>
     {% for a in accts %}
     <tr class="border-b">
       <td class="px-2 py-2">{{ a.site.user.username if a.site else '-' }}</td>
       <td class="px-2 py-2">{{ a.blog_type.value }}</td>
       <td class="px-2 py-2">{{ a.username }}</td>
-      <td class="px-2 py-2">{{ decrypt(a.email) }}</td>
+      <td class="px-2 py-2 break-all">{{ decrypt(a.email) }}</td>
+
       <td class="px-2 py-2">
         {% if a.status == 'active' %}
           <span class="text-green-600">active</span>
@@ -29,10 +33,34 @@
           <span class="text-red-600">{{ a.status }}</span>
         {% endif %}
       </td>
-      <td class="px-2 py-2 text-right">{{ a.created_at.strftime('%Y-%m-%d') }}</td>
+
+      <td class="px-2 py-2 text-right">
+        {{ a.created_at.strftime('%Y-%m-%d') }}
+      </td>
+
+      {# ▼ ワンクリックログインボタン #}
+      <td class="px-2 py-2 text-right">
+        {% if a.status == 'active' %}
+          <form method="POST"
+                action="{{ url_for('admin.admin_blog_login') }}"
+                target="_blank">
+            <input type="hidden" name="account_id" value="{{ a.id }}">
+            <button type="submit"
+                    class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm">
+              🔐 ログイン
+            </button>
+          </form>
+        {% else %}
+          <span class="text-gray-400 text-sm">-</span>
+        {% endif %}
+      </td>
     </tr>
     {% else %}
-    <tr><td class="px-2 py-4 text-gray-500" colspan="6">アカウントがありません。</td></tr>
+    <tr>
+      <td colspan="7" class="px-2 py-4 text-gray-500 text-center">
+        アカウントがありません。
+      </td>
+    </tr>
     {% endfor %}
   </tbody>
 </table>
