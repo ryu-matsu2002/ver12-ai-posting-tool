@@ -377,7 +377,8 @@ def enqueue_generation(
     body_prompt: str,
     site_id: int,
     format: str = "html",
-    self_review: bool = False
+    self_review: bool = False,
+    source: str = "manual"
 ) -> None:
     if site_id is None:
         raise ValueError("site_id is required for scheduling")
@@ -413,7 +414,7 @@ def enqueue_generation(
                             status="pending",
                             progress=0,
                             scheduled_at=next(slots, None),
-                            source=kobj.source if kobj else None  # ✅ ここが重要
+                            source=source if source else (kobj.source if kobj else None)  # ★ 修正
                         )
                         db.session.add(art)
                         db.session.flush()

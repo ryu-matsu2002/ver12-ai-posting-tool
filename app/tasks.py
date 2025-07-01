@@ -238,6 +238,9 @@ def _run_external_seo_job(app, site_id: int):
             # キュー投入 & スケジュール生成
             schedules = []
             for kw in top_kws:
+                kw.source = "external"    # ★← ここを追加
+                kw.status = "queued"      # すでに書いてあるなら併せて
+
                 # 既存の非同期記事生成キューを使用
                 enqueue_generation(
                     user_id      = kw.user_id,
@@ -247,6 +250,7 @@ def _run_external_seo_job(app, site_id: int):
                     body_prompt  = "",
                     format       = "html",
                     self_review  = False,
+                    source       = "external"
                 )
                 # キュー投入済みとしてキーワードの status を更新しておくとベター
                 kw.status = "queued"
