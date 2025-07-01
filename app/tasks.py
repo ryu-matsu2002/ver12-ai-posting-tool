@@ -240,12 +240,17 @@ def _run_external_seo_job(app, site_id: int):
             for kw in top_kws:
                 # 既存の非同期記事生成キューを使用
                 enqueue_generation(
-                    user_id=kw.user_id,
-                    site_id=site_id,
-                    keywords=[kw.keyword],
-                    format="html",
-                    self_review=False,
+                    user_id      = kw.user_id,
+                    site_id      = site_id,
+                    keywords     = [kw.keyword],
+                    title_prompt = "",     # 空でOK。将来テンプレを渡すならここに文字列
+                    body_prompt  = "",
+                    format       = "html",
+                    self_review  = False,
                 )
+                # キュー投入済みとしてキーワードの status を更新しておくとベター
+                kw.status = "queued"
+
 
                 sched = ExternalArticleSchedule(
                     blog_account_id=account.id,
