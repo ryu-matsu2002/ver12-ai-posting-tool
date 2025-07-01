@@ -5,28 +5,21 @@
 <h2 class="text-2xl font-bold mb-6">🚀 外部SEO | サイト一覧</h2>
 
 {% for s in sites %}
-  <div class="border rounded p-4 flex justify-between items-center mb-4 bg-white dark:bg-gray-800">
+  <div id="site-card-{{ s.id }}" class="border rounded p-4 flex justify-between items-center mb-4">
     <div class="overflow-hidden">
       <div class="font-semibold truncate max-w-xs">{{ s.name }}</div>
       <a href="{{ s.url }}" class="text-blue-600 text-sm break-all" target="_blank">{{ s.url }}</a>
     </div>
 
-    <!-- ★ エンドポイントを修正 -->
+    <!-- ボタンを押すと行全体が _job_progress.html に置き換わる -->
     <button
       class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
       hx-post="{{ url_for('main.start_external_seo', site_id=s.id) }}"
-      hx-target="this"          
+      hx-target="#site-card-{{ s.id }}"
       hx-swap="outerHTML">
       外部SEO開始
     </button>
-
-    <!-- 🔄 進捗パネル（押すと自動表示に置換される） -->
-    <div id="seo-panel-{{ s.id }}"
-         hx-get="{{ url_for('main.external_seo_job_status', site_id=s.id) }}"
-         hx-trigger="every 5s"
-         hx-swap="innerHTML">
-    <!-- 初期表示は空 (ルートが 'ジョブ無し' テキストを返す) -->
-    </div>
+  </div>
 {% else %}
   <p class="text-gray-600">登録されたサイトがありません。</p>
 {% endfor %}
