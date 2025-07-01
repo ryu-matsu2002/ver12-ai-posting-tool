@@ -3414,7 +3414,7 @@ def admin_blog_accounts():
         abort(403)
 
     from app.models import ExternalBlogAccount
-    from app.utils.encryption import decrypt
+    from app.services.blog_signup.crypto_utils import decrypt
 
     accts = (ExternalBlogAccount
              .query.order_by(ExternalBlogAccount.created_at.desc())
