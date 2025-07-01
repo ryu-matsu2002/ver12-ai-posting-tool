@@ -888,6 +888,7 @@ def toggle_special_access(uid):
     return redirect(url_for("admin.admin_users"))
 
 
+
 @admin_bp.route("/admin/sites")
 @login_required
 def admin_sites():
@@ -3406,7 +3407,7 @@ def my_blog_accounts():
 # -----------------------------------------------------------
 # 管理者向け: 全ユーザーの外部ブログアカウント一覧
 # -----------------------------------------------------------
-@bp.route("/admin/blog_accounts")
+@admin_bp.route("/admin/blog_accounts")
 @login_required
 def admin_blog_accounts():
     if not current_user.is_admin:
