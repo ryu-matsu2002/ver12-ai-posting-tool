@@ -3363,3 +3363,23 @@ def external_seo_job_status(site_id):
                            job=job,
                            site_id=site_id)
 
+# ──────────────────────────────────────────
+# 外部SEO: 投稿スケジュール一覧表示
+# ──────────────────────────────────────────
+@bp.route("/external/schedules/<int:site_id>")
+@login_required
+def external_schedules(site_id):
+    from app.models import ExternalArticleSchedule, Keyword, ExternalBlogAccount
+
+    # blog_account_id を site_id で絞る
+    schedules = (
+        db.session.query(ExternalArticleSchedule, Keyword, ExternalBlogAccount)
+        .join(Keyword, ExternalArticleSchedule.keyword_id == Keyword.id)
+        .join(ExternalBlogAccount, ExternalArticleSchedule.blog_account_id == ExternalBlogAccount.id)
+        .filter(ExternalBlogAccount.site_id == site_id)
+        .order_by(ExternalArticleSchedule.scheduled_date.asc())
+        .all()
+    )
+    return render_template("external_schedules.html",
+                           schedules=schedules,
+                           site_id=site_id)

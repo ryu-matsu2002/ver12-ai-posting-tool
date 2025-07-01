@@ -35,7 +35,7 @@
 
     {% if job.status == 'success' %}
       <div class="mt-4">
-        <a href="#"
+        <a href="{{ url_for('main.external_schedules', site_id=site_id) }}"
            class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm">
           投稿一覧を見る
         </a>
