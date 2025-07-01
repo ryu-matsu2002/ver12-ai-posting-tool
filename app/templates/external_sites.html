@@ -4,7 +4,7 @@
 {% block content %}
 <h2 class="text-2xl font-bold mb-6 flex items-center justify-between">
   🚀 外部SEO | サイト一覧
-  <!-- ⭐ 新規追加：自分のブログアカウント一覧 -->
+  <!-- 自分のブログアカウント一覧ページ -->
   <a href="{{ url_for('main.my_blog_accounts') }}"
      class="text-sm px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded">
     外部ブログアカウント一覧
@@ -12,10 +12,12 @@
 </h2>
 
 {% for s in sites %}
-  {# ---------- 進捗パネル or ボタン ---------- #}
-  {% set latest = job_map.get(s.id) %}
-  {% if latest and latest.status in ['running','success'] %}
-    {% include "_job_progress.html" with context %}
+  {% set site_id = s.id %}                 {# ← include 用に明示セット #}
+  {% set job     = job_map.get(s.id) %}
+
+  {% if job and job.status in ['running', 'success'] %}
+    {# 進捗パネルを挿入 #}
+    {% include "_job_progress.html" %}
   {% else %}
     <div id="site-card-{{ s.id }}" class="border rounded p-4 flex justify-between items-center mb-4">
       <div class="overflow-hidden">
