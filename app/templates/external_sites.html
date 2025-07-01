@@ -5,21 +5,29 @@
 <h2 class="text-2xl font-bold mb-6">🚀 外部SEO | サイト一覧</h2>
 
 {% for s in sites %}
-  <div id="site-card-{{ s.id }}" class="border rounded p-4 flex justify-between items-center mb-4">
-    <div class="overflow-hidden">
-      <div class="font-semibold truncate max-w-xs">{{ s.name }}</div>
-      <a href="{{ s.url }}" class="text-blue-600 text-sm break-all" target="_blank">{{ s.url }}</a>
-    </div>
+  {# ── 最新ジョブを取得 ── #}
+  {% set latest = job_map.get(s.id) %}
+  {# ジョブがあり、かつ status != error ならパネル表示 #}
+  {% if latest and latest.status in ['running', 'success'] %}
+    {# → 直接パーシャルを呼び出して初期描画 #}
+    {% include "_job_progress.html" with context %}
+  {% else %}
+    {# → 従来のカード + ボタン #}
+    <div id="site-card-{{ s.id }}" class="border rounded p-4 flex justify-between items-center mb-4">
+      <div class="overflow-hidden">
+        <div class="font-semibold truncate max-w-xs">{{ s.name }}</div>
+        <a href="{{ s.url }}" class="text-blue-600 text-sm break-all" target="_blank">{{ s.url }}</a>
+      </div>
 
-    <!-- ボタンを押すと行全体が _job_progress.html に置き換わる -->
-    <button
-      class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
-      hx-post="{{ url_for('main.start_external_seo', site_id=s.id) }}"
-      hx-target="#site-card-{{ s.id }}"
-      hx-swap="outerHTML">
-      外部SEO開始
-    </button>
-  </div>
+      <button
+        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
+        hx-post="{{ url_for('main.start_external_seo', site_id=s.id) }}"
+        hx-target="#site-card-{{ s.id }}"
+        hx-swap="outerHTML">
+        外部SEO開始
+      </button>
+    </div>
+  {% endif %}
 {% else %}
   <p class="text-gray-600">登録されたサイトがありません。</p>
 {% endfor %}

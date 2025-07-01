@@ -3314,17 +3314,22 @@ def delete_genre(username, genre_id):
 @bp.route("/external/sites")
 @login_required
 def external_seo_sites():
-    # ★ 遅延インポート（循環回避）
-    from app.models import Site
+    from app.models import Site, ExternalSEOJob
 
-    # ★ 修正: 管理者でも “自分のサイトのみ” 取得
-    sites = (
-        Site.query
-            .filter_by(user_id=current_user.id)      # 自ユーザーに限定
-            .order_by(Site.id.desc())                # 任意: 新しい順
-            .all()
-    )
-    return render_template("external_sites.html", sites=sites)
+    sites = Site.query.filter_by(user_id=current_user.id).all()
+
+    # site_id -> latest_job の辞書
+    job_map = {
+        s.id: (ExternalSEOJob.query
+               .filter_by(site_id=s.id)
+               .order_by(ExternalSEOJob.id.desc())
+               .first())
+        for s in sites
+    }
+    return render_template("external_sites.html",
+                           sites=sites,
+                           job_map=job_map)
+
 
 
 # -----------------------------------------------------------------
