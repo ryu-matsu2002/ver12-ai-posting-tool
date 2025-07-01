@@ -3327,13 +3327,31 @@ def external_seo_sites():
     return render_template("external_sites.html", sites=sites)
 
 
+# routes.py  抜粋
 @bp.route("/external/start/<int:site_id>", methods=["POST"])
 @login_required
 def start_external_seo(site_id):
-    # ★ 同様に遅延インポート
-    from app.tasks import enqueue_external_seo
-
-    enqueue_external_seo.delay(site_id)
+    from app.tasks import enqueue_external_seo      # ← run_external_seo → enqueue_external_seo に変更
+    enqueue_external_seo(site_id)
     return jsonify({"status": "queued"})
+
+# ─── 外部SEO進捗を返す HTMX ルート ─────────────────
+@bp.route("/external/jobs/<int:site_id>")
+@login_required
+def external_seo_job_status(site_id):
+    from app.models import ExternalSEOJob
+
+    job = (ExternalSEOJob
+           .query
+           .filter_by(site_id=site_id)
+           .order_by(ExternalSEOJob.id.desc())
+           .first())
+
+    return render_template(
+        "_job_progress.html",
+        job=job,
+        site_id=site_id
+    )
+
 # ───────────────────────────────
 

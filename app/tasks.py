@@ -14,9 +14,18 @@ from sqlalchemy.orm import selectinload
 # ✅ GSCクリック・表示回数の毎日更新ジョブ用
 from app.google_client import update_all_gsc_sites
 
+# 既存 import の下あたりに追加
+from concurrent.futures import ThreadPoolExecutor
+from .models import (Site, Keyword, ExternalSEOJob,
+                     BlogType, ExternalBlogAccount, ExternalArticleSchedule)
+from app.services.blog_signup import register_blog_account
+from app.article_generator import enqueue_generation  # 既存非同期記事生成キュー
+
+
 
 # グローバルな APScheduler インスタンス（__init__.py で start されています）
 scheduler = BackgroundScheduler(timezone="UTC")
+executor = ThreadPoolExecutor(max_workers=4)  # 🆕 外部SEOジョブ用
 
 
 def _auto_post_job(app):
@@ -194,6 +203,78 @@ def _gsc_generation_job(app):
                 current_app.logger.warning(f"[GSC自動生成] 失敗 - {site.url}: {e}")
 
         current_app.logger.info("✅ GSC記事生成ジョブが完了しました")
+
+def _run_external_seo_job(app, site_id: int):
+    """
+    1) ExternalSEOJob を running に
+    2) Note アカウントを自動登録
+    3) 上位キーワード100件で記事生成をキューに流し
+    4) ExternalArticleSchedule を作成
+    """
+    with app.app_context():
+        from sqlalchemy.exc import SQLAlchemyError
+
+        # ── 1. ジョブ行を作成 ──────────────────
+        job = ExternalSEOJob(site_id=site_id, status="running", step="signup")
+        db.session.add(job)
+        db.session.commit()
+
+        try:
+            # ── 2. アカウント自動登録 ───────────
+            account = register_blog_account(site_id, BlogType.NOTE)
+            job.step = "generating"
+            db.session.commit()
+
+            # ── 3. 上位キーワード100件抽出 ────────
+            top_kws = (
+                Keyword.query.filter_by(site_id=site_id, status="done")
+                .order_by(Keyword.times_used.desc())
+                .limit(100)
+                .all()
+            )
+            if not top_kws:
+                raise ValueError("上位キーワードがありません")
+
+            # キュー投入 & スケジュール生成
+            schedules = []
+            for kw in top_kws:
+                # 既存の非同期記事生成キューを使用
+                enqueue_generation(
+                    user_id=kw.user_id,
+                    site_id=site_id,
+                    keywords=[kw.keyword],
+                    format="html",
+                    self_review=False,
+                )
+
+                sched = ExternalArticleSchedule(
+                    blog_account_id=account.id,
+                    keyword_id=kw.id,
+                    scheduled_date=datetime.utcnow(),  # ★あとで間隔制御可
+                )
+                schedules.append(sched)
+
+            db.session.bulk_save_objects(schedules)
+            job.article_cnt = len(schedules)
+            job.step = "finished"
+            job.status = "success"
+            db.session.commit()
+
+        except Exception as e:
+            db.session.rollback()
+            job.status = "error"
+            job.message = str(e)
+            db.session.commit()
+            current_app.logger.error(f"[外部SEO] 失敗: {e}")
+
+def enqueue_external_seo(site_id: int):
+    """
+    外部SEOジョブをバックグラウンドスレッドに投入。
+    ルート側から `enqueue_external_seo(site_id)` を呼ぶだけでOK。
+    """
+    app = current_app._get_current_object()
+    executor.submit(_run_external_seo_job, app, site_id)
+
 
 
 def init_scheduler(app):
