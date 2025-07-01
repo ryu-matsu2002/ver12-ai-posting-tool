@@ -3398,11 +3398,30 @@ import asyncio, json, time
 # -----------------------------------------------------------
 # ユーザー向け: 自分の外部ブログアカウント一覧
 # -----------------------------------------------------------
+
 @bp.route("/external/accounts")
 @login_required
 def my_blog_accounts():
-    accts = ExternalBlogAccount.query.filter_by(site_id=None, user_id=current_user.id).all()
-    return render_template("my_blog_accounts.html", accts=accts, decrypt=decrypt)
+    from app.models import ExternalBlogAccount, Site
+    from app.services.blog_signup.crypto_utils import decrypt
+
+    # サイトと JOIN して「自分のサイト分」＋ site_id=None をまとめて取得
+    accts = (
+        db.session.query(ExternalBlogAccount)
+        .outerjoin(Site, ExternalBlogAccount.site_id == Site.id)
+        .filter(
+            (ExternalBlogAccount.site_id == None)  # noqa: E711
+            | (Site.user_id == current_user.id)
+        )
+        .order_by(ExternalBlogAccount.created_at.desc())
+        .all()
+    )
+
+    return render_template(
+        "blog_accounts.html",   # ← テンプレ名注意！ admin なら admin_blog_accounts.html
+        accts=accts,
+        decrypt=decrypt
+    )
 
 # -----------------------------------------------------------
 # 管理者向け: 全ユーザーの外部ブログアカウント一覧
