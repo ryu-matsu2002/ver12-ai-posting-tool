@@ -3412,10 +3412,22 @@ def my_blog_accounts():
 def admin_blog_accounts():
     if not current_user.is_admin:
         abort(403)
-    accts = ExternalBlogAccount.query.order_by(ExternalBlogAccount.created_at.desc()).all()
-    return render_template("admin_blog_accounts.html", accts=accts, decrypt=decrypt)
 
-# app/routes.py  内（admin BluePrint = bp として想定）
+    from app.models import ExternalBlogAccount
+    from app.utils.encryption import decrypt
+
+    accts = (ExternalBlogAccount
+             .query.order_by(ExternalBlogAccount.created_at.desc())
+             .all())
+
+    # ★ パスを "admin/xxx.html" に変更
+    return render_template(
+        "admin/admin_blog_accounts.html",
+        accts    = accts,
+        decrypt  = decrypt,
+    )
+
+
 # ---------------------------------------------------------
 # 🔐 管理者専用：ワンクリックで対象ブログへログインする中間ページ
 # ---------------------------------------------------------
