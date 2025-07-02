@@ -25,7 +25,7 @@ from app.article_generator import enqueue_generation  # 既存非同期記事生
 
 # グローバルな APScheduler インスタンス（__init__.py で start されています）
 scheduler = BackgroundScheduler(timezone="UTC")
-executor = ThreadPoolExecutor(max_workers=4)  # 🆕 外部SEOジョブ用
+executor = ThreadPoolExecutor(max_workers=2)  # ✅ 外部SEOでは同時2件まで
 
 
 def _auto_post_job(app):
@@ -229,7 +229,7 @@ def _run_external_seo_job(app, site_id: int):
             top_kws = (
                 Keyword.query.filter_by(site_id=site_id, status="done")
                 .order_by(Keyword.times_used.desc())
-                .limit(100)
+                .limit(50)
                 .all()
             )
             if not top_kws:
@@ -250,7 +250,8 @@ def _run_external_seo_job(app, site_id: int):
                     body_prompt  = "",
                     format       = "html",
                     self_review  = False,
-                    source       = "external"
+                    source       = "external",
+                    copies=[1],  # ✅ 常に1本だけ生成
                 )
                 # キュー投入済みとしてキーワードの status を更新しておくとベター
                 kw.status = "queued"

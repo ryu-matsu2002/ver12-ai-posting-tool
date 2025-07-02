@@ -14,6 +14,7 @@ from .image_utils import fetch_featured_image, fetch_featured_image_from_body  #
 from . import db
 from .models import Article, Keyword
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Sequence, Optional   # ← 先頭付近の import に追記
 
 
 # OpenAI設定
@@ -378,13 +379,20 @@ def enqueue_generation(
     site_id: int,
     format: str = "html",
     self_review: bool = False,
-    source: str = "manual"
+    source: str = "manual",
+    copies: Optional[Sequence[int]] = None,   # 🆕 追加
 ) -> None:
     if site_id is None:
         raise ValueError("site_id is required for scheduling")
 
     app = current_app._get_current_object()
-    copies = [random.randint(2, 3) for _ in keywords[:40]]
+    if copies is None:
+        # 従来通り：キーワードごとに 2〜3 本ランダム
+        copies = [random.randint(2, 3) for _ in keywords[:40]]
+    else:
+        # 外部 SEO などから明示されたパターンをそのまま使う
+        # キーワード数と copies 数がずれていたら 1 本で埋める
+        copies = list(copies) + [1] * (len(keywords[:40]) - len(copies))
     total = sum(copies)
     slots = iter(_generate_slots_per_site(app, site_id, total))
 
