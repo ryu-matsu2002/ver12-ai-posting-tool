@@ -3423,6 +3423,40 @@ def my_blog_accounts():
         decrypt=decrypt
     )
 
+
+
+@bp.route("/external/account/<int:acct_id>/articles")
+@login_required
+def external_account_articles(acct_id):
+    from app.models import ExternalBlogAccount, ExternalArticleSchedule, Keyword, Article
+
+    acct = ExternalBlogAccount.query.get_or_404(acct_id)
+    site = acct.site
+    if site.user_id != current_user.id and not current_user.is_admin:
+        abort(403)
+
+    rows = (
+        db.session.query(ExternalArticleSchedule, Keyword, Article)
+        .join(Keyword, ExternalArticleSchedule.keyword_id == Keyword.id)
+        .outerjoin(
+            Article,
+            db.and_(
+                Article.keyword == Keyword.keyword,
+                Article.site_id == site.id,
+                Article.source == "external"
+            )
+        )
+        .filter(ExternalArticleSchedule.blog_account_id == acct_id)
+        .order_by(ExternalArticleSchedule.scheduled_date.desc())
+        .all()
+    )
+
+    return render_template(
+        "external_articles.html",   # 新テンプレ
+        acct=acct, site=site, rows=rows
+    )
+
+
 # -----------------------------------------------------------
 # 管理者向け: 全ユーザーの外部ブログアカウント一覧
 # -----------------------------------------------------------

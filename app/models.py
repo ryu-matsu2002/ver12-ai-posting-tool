@@ -315,6 +315,8 @@ class ExternalBlogAccount(db.Model):
     password    = db.Column(db.String(255), nullable=False)          # 🔐 salted-hash 予定
     status      = db.Column(db.String(30), default="active")         # active / done / error
     created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+    posted_cnt          = db.Column(db.Integer,  default=0,  nullable=False)
+    next_batch_started  = db.Column(db.Boolean,  default=False, nullable=False)
 
     site        = db.relationship("Site", backref="external_accounts")
     schedules   = db.relationship("ExternalArticleSchedule", backref="blog_account", cascade="all, delete-orphan")
@@ -331,7 +333,9 @@ class ExternalArticleSchedule(db.Model):
     scheduled_date   = db.Column(db.DateTime, nullable=False)
     status           = db.Column(db.String(30), default="pending")   # pending / posted / error
     created_at       = db.Column(db.DateTime, default=datetime.utcnow)
-
+    posted_url       = db.Column(db.String(512), nullable=True)      # ✅ 追加
+    message          = db.Column(db.Text,        nullable=True)      # エラー内容等
+    posted_at        = db.Column(db.DateTime,    nullable=True)
     keyword          = db.relationship("Keyword")
 
     __table_args__ = (

@@ -1,61 +1,82 @@
 {# app/templates/blog_accounts.html #}
 {% extends "base.html" %}
-{% block title %}外部ブログアカウント{% endblock %}
+{% block title %}外部ブログアカウント一覧{% endblock %}
 
 {% block content %}
-<h2 class="text-2xl font-bold mb-6">📒 外部ブログアカウント</h2>
+<h2 class="text-2xl font-bold mb-6">📝 外部ブログアカウント一覧</h2>
 
 {% if accts %}
 <table class="w-full text-sm">
   <thead class="bg-gray-100">
     <tr>
-      <th class="px-2 py-2">ブログ</th>
-      <th class="px-2 py-2">ユーザー名</th>
-      <th class="px-2 py-2">メール</th>
-      <th class="px-2 py-2">状態</th>
-      <th class="px-2 py-2 text-right">操作</th>
+      <th class="px-3 py-2">ブログ</th>
+      <th class="px-3 py-2">メール</th>
+      <th class="px-3 py-2">投稿済</th>
+      <th class="px-3 py-2">予定</th>
+      <th class="px-3 py-2">進捗</th>
+      <th class="px-3 py-2">最終投稿</th>
+      <th class="px-3 py-2">詳細</th>
+      <th class="px-3 py-2 text-right">操作</th>
     </tr>
   </thead>
   <tbody>
     {% for a in accts %}
+    {% set scheduled = a.schedules|length %}
+    {% set posted    = a.posted_cnt %}
     <tr class="border-b">
-      <!-- ブログ種別 (note / hatena …) -->
-      <td class="px-2 py-2">{{ a.blog_type.value|capitalize }}</td>
-
-      <!-- ブログ側ユーザー名 -->
-      <td class="px-2 py-2 font-mono">{{ a.username }}</td>
-
-      <!-- 登録メール（複合化表示） -->
-      <td class="px-2 py-2 font-mono">{{ decrypt(a.email) }}</td>
-
-      <!-- ステータス表示 -->
-      <td class="px-2 py-2">
-        {% if a.status == 'active' %}
-          <span class="text-green-600">active</span>
-        {% else %}
-          <span class="text-red-600">{{ a.status }}</span>
-        {% endif %}
+      {# ブログ種別バッジ #}
+      <td class="px-3 py-2">
+        <span class="px-2 py-1 rounded text-white text-xs 
+              {% if a.blog_type.value == 'note' %} bg-blue-600
+              {% elif a.blog_type.value == 'blogger' %} bg-orange-600
+              {% else %} bg-gray-600 {% endif %}">
+          {{ a.blog_type.value }}
+        </span>
       </td>
 
-      <!-- 操作ボタン -->
-      <td class="px-2 py-2 text-right">
-        {# ▼ ① ワンクリックログイン #}
+      {# メール（複合化） #}
+      <td class="px-3 py-2 font-mono">{{ decrypt(a.email) }}</td>
+
+      {# 投稿済 #}
+      <td class="px-3 py-2 text-center">{{ posted }}</td>
+
+      {# 予定 #}
+      <td class="px-3 py-2 text-center">{{ scheduled }}</td>
+
+      {# 進捗バー #}
+      <td class="px-3 py-2 w-40">
+        <div class="w-full bg-gray-200 h-2 rounded">
+          <div class="bg-emerald-600 h-2 rounded
+                      w-[calc({{ (100 * posted / max(1, scheduled)) | round(1) }}%)]">
+          </div>
+        </div>
+      </td>
+      {# 最終投稿日時 #}
+      <td class="px-3 py-2">
+        {{ a.updated_at.strftime('%Y-%m-%d %H:%M') if a.updated_at else '-' }}
+      </td>
+
+      {# 詳細リンク #}
+      <td class="px-3 py-2">
+        <a href="{{ url_for('external.external_account_articles', acct_id=a.id) }}"
+           class="text-blue-600 hover:underline">記事一覧</a>
+      </td>
+
+      {# 操作（ワンクリックログイン & ID/Passコピー） #}
+      <td class="px-3 py-2 text-right">
         <form action="{{ url_for('main.blog_login') }}" method="post" class="inline">
           <input type="hidden" name="account_id" value="{{ a.id }}">
-          <button
-            type="submit"
-            class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs">
-            ワンクリックログイン
+          <button type="submit"
+                  class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs">
+            ログイン
           </button>
         </form>
 
-        {# ▼ ② 資格情報コピー #}
-        <button
-          type="button"
-          class="ml-2 px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-xs copy-cred"
-          data-user="{{ a.username }}"
-          data-pass="{{ decrypt(a.password) }}">
-          ID/Pass コピー
+        <button type="button"
+                class="ml-2 px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-xs copy-cred"
+                data-user="{{ a.username }}"
+                data-pass="{{ decrypt(a.password) }}">
+          ID/Pass
         </button>
       </td>
     </tr>
@@ -63,18 +84,18 @@
   </tbody>
 </table>
 
-<!-- クリップボードコピー用 JS -->
 <script>
 document.querySelectorAll('.copy-cred').forEach(btn => {
   btn.addEventListener('click', () => {
-    const user = btn.dataset.user;
-    const pass = btn.dataset.pass;
-    navigator.clipboard.writeText(`ユーザー名: ${user}\nパスワード: ${pass}`);
-    btn.textContent = "✔ コピー完了";
-    setTimeout(() => (btn.textContent = "ID/Pass コピー"), 2000);
+    const u = btn.dataset.user;
+    const p = btn.dataset.pass;
+    navigator.clipboard.writeText(`ユーザー名: ${u}\nパスワード: ${p}`);
+    btn.textContent = "✔ コピー";
+    setTimeout(()=>btn.textContent="ID/Pass",1500);
   });
 });
 </script>
+
 {% else %}
 <p class="text-gray-500">まだ外部ブログアカウントは作成されていません。</p>
 {% endif %}

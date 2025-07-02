@@ -20,6 +20,9 @@ from .models import (Site, Keyword, ExternalSEOJob,
                      BlogType, ExternalBlogAccount, ExternalArticleSchedule)
 from app.services.blog_signup import register_blog_account
 from app.article_generator import enqueue_generation  # 既存非同期記事生成キュー
+from app.services.blog_post import post_blog_article     # ✅ 追加
+from app.services.blog_signup.crypto_utils import decrypt  # ✅ 追加
+from app.article_generator import _generate_slots_per_site   # 先頭に追加
 
 
 
@@ -188,7 +191,7 @@ def gsc_loop_generate(site):
 
 def _gsc_generation_job(app):
     """
-    ✅ GSC記事自動生成ジョブ（毎日）
+    ✅ GSC記事自動生成ジョブ
     """
     with app.app_context():
         from app.models import Site
@@ -229,7 +232,7 @@ def _run_external_seo_job(app, site_id: int):
             top_kws = (
                 Keyword.query.filter_by(site_id=site_id, status="done")
                 .order_by(Keyword.times_used.desc())
-                .limit(50)
+                .limit(100)
                 .all()
             )
             if not top_kws:
@@ -237,6 +240,7 @@ def _run_external_seo_job(app, site_id: int):
 
             # キュー投入 & スケジュール生成
             schedules = []
+            slots = iter(_generate_slots_per_site(app, site_id, len(top_kws)))
             for kw in top_kws:
                 kw.source = "external"    # ★← ここを追加
                 kw.status = "queued"      # すでに書いてあるなら併せて
@@ -251,7 +255,6 @@ def _run_external_seo_job(app, site_id: int):
                     format       = "html",
                     self_review  = False,
                     source       = "external",
-                    copies=[1],  # ✅ 常に1本だけ生成
                 )
                 # キュー投入済みとしてキーワードの status を更新しておくとベター
                 kw.status = "queued"
@@ -260,7 +263,7 @@ def _run_external_seo_job(app, site_id: int):
                 sched = ExternalArticleSchedule(
                     blog_account_id=account.id,
                     keyword_id=kw.id,
-                    scheduled_date=datetime.utcnow(),  # ★あとで間隔制御可
+                    scheduled_date  = next(slots),   # ✅ 既存ロジックを再利用
                 )
                 schedules.append(sched)
 
@@ -277,6 +280,79 @@ def _run_external_seo_job(app, site_id: int):
             db.session.commit()
             current_app.logger.error(f"[外部SEO] 失敗: {e}")
 
+# ──────────────────────────────────────────
+# 外部ブログ投稿ジョブ
+# ──────────────────────────────────────────
+def _run_external_post_job(app):
+    """
+    10 分おきに呼ばれ、
+    - scheduled_date <= 現在 の ExternalArticleSchedule(pending) を取得
+    - Note 等へ投稿し、成功すれば status=posted, posted_url 保存
+    """
+    with app.app_context():
+        now = datetime.utcnow()
+
+        rows = (
+            db.session.query(ExternalArticleSchedule,
+                             ExternalBlogAccount,
+                             Keyword)
+            .join(ExternalBlogAccount, ExternalArticleSchedule.blog_account_id == ExternalBlogAccount.id)
+            .join(Keyword, ExternalArticleSchedule.keyword_id == Keyword.id)
+            .filter(ExternalArticleSchedule.status == "pending",
+                    ExternalArticleSchedule.scheduled_date <= now)
+            .order_by(ExternalArticleSchedule.scheduled_date.asc())
+            .limit(10)          # 1 回で 10 本まで処理
+            .all()
+        )
+
+        if not rows:
+            return
+
+        for sched, acct, kw in rows:
+            try:
+                # ----- 記事本文を取得（最初に 'done' になった WP 記事を使う） -----
+                art = (
+                    Article.query
+                    .filter(Article.keyword == kw.keyword,
+                            Article.site_id == acct.site_id,
+                            Article.status == "done")
+                    .order_by(Article.id.asc())
+                    .first()
+                )
+
+                if not art:
+                    sched.message = "記事未生成"
+                    sched.status  = "error"
+                    continue
+
+                # ----- ブログへ投稿 -----
+                res = post_blog_article(
+                    blog_type = acct.blog_type,
+                    title     = art.title,
+                    body_html = art.body,
+                    email     = decrypt(acct.email),
+                    password  = decrypt(acct.password)
+                )
+
+                if res.get("ok"):
+                    sched.status     = "posted"
+                    sched.posted_url = res["url"]
+                    sched.posted_at  = res["posted_at"]
+                    # 👇 追加：バッチ監視用にカウントアップ
+                    acct.posted_cnt += 1
+                    db.session.commit()  # ← 成功ごとに保存！
+                else:
+                    sched.status  = "error"
+                    sched.message = res.get("error")
+
+            except Exception as e:
+                current_app.logger.warning(f"[ExtPost] {e}")
+                sched.status  = "error"
+                sched.message = str(e)
+
+        db.session.commit()
+
+
 def enqueue_external_seo(site_id: int):
     """
     外部SEOジョブをバックグラウンドスレッドに投入。
@@ -285,6 +361,61 @@ def enqueue_external_seo(site_id: int):
     app = current_app._get_current_object()
     executor.submit(_run_external_seo_job, app, site_id)
 
+# ────────────────────────────────
+# 外部SEO アカウント監視ジョブ
+# ────────────────────────────────
+def _external_watch_job(app):
+    """
+    15 分おき：posted_cnt が 100 に達したアカウントを検知し、
+    - next_batch_started を True に
+    - 新アカウントを自動登録
+    - 次の 100KW を生成・スケジュール
+    """
+    with app.app_context():
+        # ① 100 本完了・次バッチ未開始のアカウント一覧
+        targets = ExternalBlogAccount.query.filter(
+            ExternalBlogAccount.posted_cnt >= 100,
+            ExternalBlogAccount.next_batch_started.is_(False)
+        ).all()
+
+        for acct in targets:
+            try:
+                # ② フラグを立てる
+                acct.next_batch_started = True
+                db.session.commit()
+
+                # ③ 同じ site_id で新アカウントを作成
+                new_acct = register_blog_account(acct.site_id, BlogType.NOTE)
+
+                # ④ 上位 KW 再取得 → enqueue_generation
+                kws = (Keyword.query.filter_by(site_id=acct.site_id, status="done")
+                       .order_by(Keyword.times_used.desc()).limit(100).all())
+
+                enqueue_generation(
+                    user_id      = acct.site.user_id,
+                    site_id      = acct.site_id,
+                    keywords     = [k.keyword for k in kws],
+                    title_prompt = "",
+                    body_prompt  = "",
+                    source       = "external",
+                )
+
+                # ⑤ スケジュール行を作成（既存ロジック流用）
+                slots = iter(_generate_slots_per_site(app, acct.site_id, 100))
+                rows  = [
+                    ExternalArticleSchedule(
+                        blog_account_id=new_acct.id,
+                        keyword_id=k.id,
+                        scheduled_date=next(slots)
+                    ) for k in kws
+                ]
+                db.session.bulk_save_objects(rows)
+                db.session.commit()
+                current_app.logger.info(f"[Watch] 次バッチ開始：site {acct.site_id}")
+
+            except Exception as e:
+                db.session.rollback()
+                current_app.logger.error(f"[Watch] 失敗: {e}")
 
 
 def init_scheduler(app):
@@ -327,8 +458,30 @@ def init_scheduler(app):
         max_instances=1
     )
 
+    # ✅ 外部ブログ投稿ジョブ（10分おき）
+    scheduler.add_job(
+        func=_run_external_post_job,
+        trigger="interval",
+        minutes=10,
+        args=[app],
+        id="external_post_job",
+        replace_existing=True,
+        max_instances=1
+    )
+
+    # 外部SEO監視ジョブ（15 分おき）
+    scheduler.add_job(
+        func=_external_watch_job,
+        trigger="interval",
+        minutes=15,
+        args=[app],
+        id="external_watch_job",
+        replace_existing=True,
+        max_instances=1
+    )
 
     scheduler.start()
     app.logger.info("Scheduler started: auto_post_job every 3 minutes")
     app.logger.info("Scheduler started: gsc_metrics_job daily at 0:00")
     app.logger.info("Scheduler started: gsc_generation_job every 20 minutes")
+    app.logger.info("Scheduler started: external_post_job every 10 minutes")

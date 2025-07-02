@@ -1,0 +1,74 @@
+{# app/templates/external_articles.html #}
+{% extends "base.html" %}
+{% block title %}外部SEO | 記事一覧{% endblock %}
+
+{% block content %}
+<h2 class="text-2xl font-bold mb-6">
+  ✍️ {{ site.name }} —
+  <span class="px-2 py-1 rounded text-white text-xs
+        {% if acct.blog_type.value == 'note' %}bg-blue-600
+        {% elif acct.blog_type.value == 'blogger' %}bg-orange-600
+        {% else %}bg-gray-600{% endif %}">
+    {{ acct.blog_type.value }}
+  </span>
+  の記事一覧
+</h2>
+
+<a href="{{ url_for('external.external_accounts') }}"
+   class="text-sm text-blue-600 hover:underline mb-4 inline-block">
+  ← アカウント一覧に戻る
+</a>
+
+<table class="w-full text-sm">
+  <thead class="bg-gray-100 text-left">
+    <tr>
+      <th class="px-3 py-2">キーワード</th>
+      <th class="px-3 py-2">予定日時</th>
+      <th class="px-3 py-2">状態</th>
+      <th class="px-3 py-2">投稿URL</th>
+      <th class="px-3 py-2">WP元記事</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for sched, kw, art in rows %}
+    <tr class="border-b">
+      <td class="px-3 py-2 break-all">{{ kw.keyword }}</td>
+      <td class="px-3 py-2">{{ sched.scheduled_date.strftime('%Y-%m-%d %H:%M') }}</td>
+
+      {# 状態 #}
+      <td class="px-3 py-2">
+        {% if sched.status == 'posted' %}
+          <span class="text-emerald-600">posted</span>
+        {% elif sched.status == 'error' %}
+          <span class="text-red-600">error</span>
+        {% else %}
+          <span class="text-gray-500">pending</span>
+        {% endif %}
+      </td>
+
+      {# 投稿URL #}
+      <td class="px-3 py-2">
+        {% if sched.posted_url %}
+          <a href="{{ sched.posted_url }}" class="text-blue-600 hover:underline"
+             target="_blank">open</a>
+        {% endif %}
+      </td>
+
+      {# WP 元記事 #}
+      <td class="px-3 py-2">
+        {% if art %}
+          <a href="{{ url_for('main.preview_article', article_id=art.id) }}"
+             class="text-blue-600 hover:underline" target="_blank">WP記事</a>
+        {% endif %}
+      </td>
+    </tr>
+  {% else %}
+    <tr>
+      <td colspan="5" class="py-6 text-center text-gray-500">
+        記事がありません
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

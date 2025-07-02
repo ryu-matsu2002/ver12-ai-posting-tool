@@ -47,7 +47,7 @@ def signup_note_account(site_id: int):
     asyncio.run(_open_link(link))
 
     # ④ DB 保存
-    from .crypto_utils import encrypt
+
     acct = ExternalBlogAccount(
         site_id   = site_id,
         blog_type = BlogType.NOTE,
