@@ -20,7 +20,7 @@ from .models import (Site, Keyword, ExternalSEOJob,
                      BlogType, ExternalBlogAccount, ExternalArticleSchedule)
 from app.services.blog_signup import register_blog_account
 from app.article_generator import enqueue_generation  # 既存非同期記事生成キュー
-from app.services.blog_post import post_blog_article     # ✅ 追加
+from app.services.blog_signup.blog_post import post_blog_article
 from app.services.blog_signup.crypto_utils import decrypt  # ✅ 追加
 from app.article_generator import _generate_slots_per_site   # 先頭に追加
 
