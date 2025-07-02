@@ -64,7 +64,8 @@
 
       {# 操作（ワンクリックログイン & ID/Passコピー） #}
       <td class="px-3 py-2 text-right">
-        <form action="{{ url_for('main.blog_login') }}" method="post" class="inline">
+        <form action="{{ url_for('main.blog_one_click_login', acct_id=a.id) }}"
+              method="get" class="inline"></form>
           <input type="hidden" name="account_id" value="{{ a.id }}">
           <button type="submit"
                   class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs">
