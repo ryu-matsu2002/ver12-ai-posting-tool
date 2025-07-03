@@ -1,93 +1,108 @@
 # -*- coding: utf-8 -*-
 """
-note.com アカウント完全自動登録（Mail.tm + Playwright）
+note.com アカウント自動登録
+Mail.tm で取得した使い捨てメールを使って完全自動サインアップ
+playwright==1.53.0
 """
 
-import logging, random, time, re
+import logging, random, string, time
 from playwright.sync_api import (
     sync_playwright, TimeoutError as PWTimeout, Error as PWError
 )
 from app.services.mail_utils.mail_tm import create_inbox, wait_link
 
+LANDING = "https://note.com/signup?signup_type=email"
+FORM    = "https://note.com/signup/form?redirectPath=%2Fsignup"
+
 __all__ = ["signup_note_account"]
 
-LANDING = "https://note.com/signup?signup_type=email"
-FORM_PAT = "**/signup/form**"
-COMPLETE_PAT = "**/signup/complete**"
 
-def _w(a=0.6, b=1.2):
+def _rand_pw(n=10):
+    return (
+        random.choice(string.ascii_uppercase)
+        + random.choice(string.ascii_lowercase)
+        + random.choice("0123456789")
+        + random.choice("!#@$")
+        + "".join(random.choices(string.ascii_letters + string.digits, k=n - 4))
+    )
+
+
+def _w(a=0.8, b=1.5):
     time.sleep(random.uniform(a, b))
 
-# ---------------------------------------------------------------------
 
-def signup_note_account(nickname_prefix: str = "user") -> dict:
+def signup_note_account() -> dict:
     """
-    戻り値: {"ok": bool, "email": str | None, "error": str | None}
+    完全自動で note アカウントを作成
+    Returns
+    -------
+    dict = {
+        "ok": bool,
+        "email": str|None,
+        "password": str|None,
+        "error": str|None,
+    }
     """
-    # 1️⃣ 使い捨てメール作成
-    email, jwt = create_inbox()
-    password = f"Pwd{random.randint(10000,99999)}!"
+    email, jwt = create_inbox()            # ← Mail.tm でメール確保
+    password   = _rand_pw()
 
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(
                 headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage"]
+                args=["--no-sandbox", "--disable-dev-shm-usage"],
             )
-            ctx = browser.new_context(
-                locale="ja-JP",
-                user_agent=("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                            "AppleWebKit/537.36 (KHTML, like Gecko) "
-                            "Chrome/125.0.0.0 Safari/537.36")
-            )
+            ctx = browser.new_context(locale="ja-JP")
             page = ctx.new_page()
 
-            # 2️⃣ フォームへ遷移
+            # ───────────────────────────────────────────────────────── landing
             page.goto(LANDING, timeout=30_000)
             page.locator("text=メールで登録").first.click()
-            page.wait_for_url(FORM_PAT, timeout=15_000)
+            page.wait_for_url("**/signup/form**", timeout=15_000)
 
-            # 3️⃣ 入力（遅延タイプでreCAPTCHA対策）
-            def slow_fill(sel, txt):
-                page.click(sel)
-                for ch in txt:
-                    page.keyboard.type(ch, delay=random.randint(80, 140))
-                _w()
+            # ────────────────────────────────────────────────────────── inputs
+            page.fill('input[type="email"]', email)
+            _w()
+            page.fill('input[type="password"]', password)
+            _w()
 
-            slow_fill('input[type="email"]', email)
-            slow_fill('input[type="password"]', password)
+            # ニックネーム欄がある場合
+            if page.locator('input[name="nickname"]').count():
+                page.fill('input[name="nickname"]', "user" + email.split("@")[0])
 
-            # optional nickname
-            nick_sel = 'input[name="nickname"]'
-            if page.locator(nick_sel).count():
-                slow_fill(nick_sel, f"{nickname_prefix}{random.randint(1000,9999)}")
-
-            # checkbox
+            # 規約チェックボックス (存在時のみ)
             cb = page.locator('input[type="checkbox"]')
             if cb.count():
                 cb.check()
 
-            # ボタン enable 待機
-            btn = page.locator('button:has-text("同意して登録")')
+            # ボタンが有効になるまで待機（ ← 修正ポイント ）
             page.wait_for_function(
-                "(b)=>!b.disabled", btn, timeout=20_000
+                "() => {"
+                "  const btn = document.querySelector('button[type=\"submit\"]');"
+                "  return btn && !btn.disabled;"
+                "}",                # expression
+                timeout=15_000      # ← ★キーワード引数で渡す
             )
-            btn.click()
+
+            page.locator('button[type="submit"]').click()
             _w()
 
-            # 4️⃣ 認証メールを待機 → リンク GET
-            link = wait_link(jwt, subject_kw="メールアドレスの確認")
-            if not link:
-                raise RuntimeError("verification mail timeout")
+            # ───────────────────────────────────────── メールの確認リンク
+            verify_url = wait_link(jwt, timeout_sec=120)
+            if not verify_url:
+                raise RuntimeError("verification mail not received")
 
-            # 5️⃣ リンクを開いて完了判定
-            page.goto(link, timeout=30_000)
-            page.wait_for_url(COMPLETE_PAT, timeout=30_000)
+            page.goto(verify_url, timeout=30_000)
+            page.wait_for_url("**/signup/complete**", timeout=30_000)
 
             browser.close()
             return {"ok": True, "email": email, "password": password, "error": None}
 
-    # ---------- Error ----------
-    except (PWTimeout, PWError, RuntimeError) as e:
-        logging.error("[note_signup] %s", e)
-        return {"ok": False, "email": None, "error": str(e)}
+    # ───────────── error handling
+    except PWTimeout as e:
+        logging.error("[note_signup] Timeout: %s", e)
+        return {"ok": False, "email": None, "password": None, "error": f"Timeout: {e}"}
+
+    except (PWError, Exception) as e:        # noqa: BLE001
+        logging.error("[note_signup] %s", e, exc_info=True)
+        return {"ok": False, "email": None, "password": None, "error": str(e)}
