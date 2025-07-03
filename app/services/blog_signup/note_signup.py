@@ -35,10 +35,13 @@ def signup_note_account(email: str, password: str) -> dict:
             page.goto(SIGNUP_URL, timeout=30_000)
             page.wait_for_load_state("networkidle")
 
-            # 2️⃣ メール／パスワード入力
-            page.get_by_placeholder("メールアドレス").fill(email)
+            # 2️⃣ メール／パスワード入力（placeholder 依存をやめる）
+            page.wait_for_selector('input[type="email"]', timeout=30_000)
+            page.fill('input[type="email"]', email)
             _random_wait()
-            page.get_by_placeholder("パスワード").fill(password)
+
+            page.wait_for_selector('input[type="password"]', timeout=30_000)
+            page.fill('input[type="password"]', password)
             _random_wait()
 
             # 3️⃣ 「同意して登録」ボタン
