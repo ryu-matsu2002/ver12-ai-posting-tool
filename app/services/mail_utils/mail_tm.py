@@ -1,59 +1,81 @@
 # -*- coding: utf-8 -*-
 """
-Mail.tm で disposable メールを作成 & 受信リンク取得
+Mail.tm で disposable メールを生成し、検証リンクを取得
 """
 
 import random, string, time, requests, logging
 
 API = "https://api.mail.tm"
 
-def _rand_str(n=10):
+
+def _randstr(n=10):
     return "".join(random.choices(string.ascii_lowercase + string.digits, k=n))
 
-# -------------------------------------------------------------
+
+# ------------------------------------------------------------------
+# ① 利用可能ドメインを取ってからアカウントを作成
+# ------------------------------------------------------------------
+def _pick_domain() -> str:
+    """有効なドメインを 1 つ返す（API が複数返す場合あり）"""
+    r = requests.get(f"{API}/domains?page=1", timeout=10).json()
+    domains = [d["domain"] for d in r["hydra:member"]]
+    if not domains:
+        raise RuntimeError("mail.tm domains not available")
+    return random.choice(domains)
+
 
 def create_inbox() -> tuple[str, str]:
     """
-    新規 INBOX を生成し (address, token) を返す。
-    token は後続の GET /messages 用 JWT。
+    新しい INBOX を生成 → (email, JWT token) を返す
     """
-    email = f"{_rand_str()}@mail.tm"
-    password = _rand_str(12)
+    domain = _pick_domain()
+    email = f"{_randstr()}@{domain}"
+    password = _randstr(12)
 
-    # 1️⃣ アカウント作成
-    resp = requests.post(f"{API}/accounts", json={
+    # アカウント作成
+    res = requests.post(f"{API}/accounts", json={
         "address": email, "password": password
     }, timeout=10)
-    resp.raise_for_status()
 
-    # 2️⃣ トークン取得
-    tok = requests.post(f"{API}/token", json={
+    # 既に同じ ID が生成されていた等で 422 が返ったら 1 回だけリトライ
+    if res.status_code == 422:
+        email = f"{_randstr()}@{domain}"
+        res = requests.post(f"{API}/accounts", json={
+            "address": email, "password": password
+        }, timeout=10)
+
+    res.raise_for_status()
+
+    # トークン取得
+    jwt = requests.post(f"{API}/token", json={
         "address": email, "password": password
     }, timeout=10).json()["token"]
-    return email, tok
 
-# -------------------------------------------------------------
+    return email, jwt
 
-def wait_link(token: str, subject_kw="note", timeout_sec=90) -> str | None:
+
+# ------------------------------------------------------------------
+def wait_link(token: str,
+              subject_kw: str = "メールアドレスの確認",
+              timeout_sec: int = 90) -> str | None:
     """
-    subject に `subject_kw` を含むメールを待ち、本文から
-    'https://note.com/signup/complete...' を抽出して返す。
+    検証メールを待ち、本文から note の確認リンクを抽出して返す
     """
     hdrs = {"Authorization": f"Bearer {token}"}
-    end = time.time() + timeout_sec
-    while time.time() < end:
-        msgs = requests.get(f"{API}/messages", headers=hdrs, timeout=10).json()["hydra:member"]
+    deadline = time.time() + timeout_sec
+    while time.time() < deadline:
+        msgs = requests.get(f"{API}/messages", headers=hdrs, timeout=10)\
+                       .json()["hydra:member"]
         for m in msgs:
             if subject_kw.lower() in m["subject"].lower():
-                # 本文取得
                 mid = m["id"]
-                full = requests.get(f"{API}/messages/{mid}", headers=hdrs, timeout=10).json()
-                html = full["html"][0]  # list[str]
-                # リンク抽出
+                html = requests.get(f"{API}/messages/{mid}",
+                                    headers=hdrs, timeout=10).json()["html"][0]
                 import re
-                m = re.search(r"https://note\.com/[^\"']+signup/[^\"']+", html)
-                if m:
-                    return m.group(0)
+                mt = re.search(r"https://note\.com/[^\"']+signup/[^\"']+", html)
+                if mt:
+                    return mt.group(0)
         time.sleep(5)
+
     logging.error("[mail_tm] verification mail not arrived")
     return None
