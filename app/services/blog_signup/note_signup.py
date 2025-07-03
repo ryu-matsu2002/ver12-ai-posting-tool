@@ -17,7 +17,11 @@ FORM    = "https://note.com/signup/form?redirectPath=%2Fsignup"
 __all__ = ["signup_note_account"]
 
 
-def _rand_pw(n=10):
+# --------------------------------------------------------------------------- #
+# ユーティリティ
+# --------------------------------------------------------------------------- #
+def _rand_pw(n: int = 10) -> str:
+    """英大小・数字・記号を 1 文字ずつ含むランダムパスワード"""
     return (
         random.choice(string.ascii_uppercase)
         + random.choice(string.ascii_lowercase)
@@ -27,23 +31,30 @@ def _rand_pw(n=10):
     )
 
 
-def _w(a=0.8, b=1.5):
+def _w(a: float = 0.8, b: float = 1.5) -> None:
+    """0.8〜1.5 秒のランダム wait"""
     time.sleep(random.uniform(a, b))
 
 
+# --------------------------------------------------------------------------- #
+# メイン処理
+# --------------------------------------------------------------------------- #
 def signup_note_account() -> dict:
     """
-    完全自動で note アカウントを作成
+    完全自動で note アカウントを作成し、
+    メール・パスワードを返却する。
+
     Returns
     -------
     dict = {
         "ok": bool,
-        "email": str|None,
-        "password": str|None,
-        "error": str|None,
+        "email": str | None,
+        "password": str | None,
+        "error": str | None,
     }
     """
-    email, jwt = create_inbox()            # ← Mail.tm でメール確保
+    # ① 使い捨てメール確保 ----------------------------------------------------
+    email, jwt = create_inbox()          # Mail.tm API
     password   = _rand_pw()
 
     try:
@@ -52,43 +63,39 @@ def signup_note_account() -> dict:
                 headless=True,
                 args=["--no-sandbox", "--disable-dev-shm-usage"],
             )
-            ctx = browser.new_context(locale="ja-JP")
+            ctx  = browser.new_context(locale="ja-JP")
             page = ctx.new_page()
 
-            # ───────────────────────────────────────────────────────── landing
+            # ② サインアップフォームへ ----------------------------------------
             page.goto(LANDING, timeout=30_000)
             page.locator("text=メールで登録").first.click()
             page.wait_for_url("**/signup/form**", timeout=15_000)
 
-            # ────────────────────────────────────────────────────────── inputs
+            # ③ フォーム入力 ---------------------------------------------------
             page.fill('input[type="email"]', email)
             _w()
             page.fill('input[type="password"]', password)
             _w()
 
-            # ニックネーム欄がある場合
+            # ニックネーム（存在時のみ）
             if page.locator('input[name="nickname"]').count():
-                page.fill('input[name="nickname"]', "user" + email.split("@")[0])
+                nickname = "user" + email.split("@")[0]
+                page.fill('input[name="nickname"]', nickname)
 
-            # 規約チェックボックス (存在時のみ)
+            # 規約チェックボックス（存在時のみ）
             cb = page.locator('input[type="checkbox"]')
             if cb.count():
                 cb.check()
 
-            # ボタンが有効になるまで待機（ ← 修正ポイント ）
-            page.wait_for_function(
-                "() => {"
-                "  const btn = document.querySelector('button[type=\"submit\"]');"
-                "  return btn && !btn.disabled;"
-                "}",                # expression
-                timeout=15_000      # ← ★キーワード引数で渡す
-            )
+            # ④ 「同意して登録」ボタン が有効になるのを待機  -------------------
+            btn = page.locator('button[type="submit"]')
+            btn.wait_for(state="attached", timeout=15_000)
+            btn.wait_for(state="visible",  timeout=15_000)
+            btn.wait_for(state="enabled",  timeout=15_000)
+            btn.click()
 
-            page.locator('button[type="submit"]').click()
-            _w()
-
-            # ───────────────────────────────────────── メールの確認リンク
-            verify_url = wait_link(jwt, timeout_sec=120)
+            # ⑤ 認証メールのリンク取得 ----------------------------------------
+            verify_url = wait_link(jwt, timeout_sec=180)
             if not verify_url:
                 raise RuntimeError("verification mail not received")
 
@@ -98,7 +105,9 @@ def signup_note_account() -> dict:
             browser.close()
             return {"ok": True, "email": email, "password": password, "error": None}
 
-    # ───────────── error handling
+    # ----------------------------------------------------------------------- #
+    # エラーハンドリング
+    # ----------------------------------------------------------------------- #
     except PWTimeout as e:
         logging.error("[note_signup] Timeout: %s", e)
         return {"ok": False, "email": None, "password": None, "error": f"Timeout: {e}"}
