@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 note.com アカウント自動登録
-playwright==1.53.0 で検証
+動作確認：playwright 1.53.0 / Chromium 125
 """
 
 import logging, random, time
@@ -18,9 +18,13 @@ __all__     = ["signup_note_account"]
 def _wait(a: float = .6, b: float = 1.2) -> None:
     time.sleep(random.uniform(a, b))
 
-# ──────────────────────────────────────────────
+
+# ──────────────────────────────────────────────────────────────
 def signup_note_account(email: str, password: str) -> dict:
-    """メール & パスワードで Note にサインアップ"""
+    """
+    Note にメール＆パスワードでサインアップ。
+    Returns: {"ok": bool, "error": str|None}
+    """
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(
@@ -37,7 +41,7 @@ def signup_note_account(email: str, password: str) -> dict:
             )
             page = ctx.new_page()
 
-            # 1️⃣ ランディング → 登録フォーム
+            # 1️⃣ ランディング → フォーム
             page.goto(LANDING_URL, timeout=30_000)
             page.wait_for_load_state("networkidle")
             try:
@@ -48,27 +52,34 @@ def signup_note_account(email: str, password: str) -> dict:
             _wait()
 
             # 2️⃣ 入力欄
-            email_in = (
+            email_sel = (
                 'input[name="email"], input[type="email"], '
                 'input[placeholder*="メールアドレス"]'
             )
-            pass_in = (
+            pass_sel = (
                 'input[name="password"], input[type="password"], '
                 'input[placeholder*="パスワード"]'
             )
-            page.locator(email_in).first.fill(email, timeout=15_000)
+
+            page.locator(email_sel).first.fill(email, timeout=15_000)
             _wait()
-            page.locator(pass_in).first.fill(password, timeout=15_000)
+            page.locator(pass_sel).first.fill(password, timeout=15_000)
             _wait()
 
-            # 3️⃣ ボタン enable 待ち → クリック
-            signup_btn = page.locator('button:has-text("同意して登録")')
-            signup_btn.wait_for(state="enabled", timeout=15_000)
+            # 3️⃣ ボタンが有効になるまで **自前でポーリング**
+            signup_btn = page.locator('button:has-text("同意して登録")').first
+            deadline = time.time() + 15        # 15 s 上限
+            while time.time() < deadline:
+                if signup_btn.is_enabled():
+                    break
+                time.sleep(0.3)
+            else:
+                raise PWTimeout("signup button never enabled")
+
             signup_btn.click()
 
             # 4️⃣ 完了ページ
             page.wait_for_url("**/signup/complete**", timeout=60_000)
-
             browser.close()
             return {"ok": True, "error": None}
 
@@ -81,6 +92,6 @@ def signup_note_account(email: str, password: str) -> dict:
         logging.error("[note_signup] Playwright error: %s", e)
         return {"ok": False, "error": str(e)}
 
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:                         # noqa: BLE001
         logging.exception("[note_signup] Unexpected error")
         return {"ok": False, "error": str(e)}
