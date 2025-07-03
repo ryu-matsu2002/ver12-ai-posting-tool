@@ -36,7 +36,7 @@ def signup_note_account(email: str, password: str) -> dict:
             page.wait_for_load_state("networkidle")
 
             # 2️⃣ メール／パスワード入力
-            page.get_by_placeholder("mail@example.com").fill(email)
+            page.get_by_placeholder("メールアドレス").fill(email)
             _random_wait()
             page.get_by_placeholder("パスワード").fill(password)
             _random_wait()
