@@ -1,99 +1,112 @@
 # -*- coding: utf-8 -*-
 """
-mail.tm API ラッパー（最小実装）
-----------------------------------------------
-1) create_inbox()       … 使い捨てメールを生成
-2) poll_latest_link()   … 新着メールをポーリングして本文から URL を抽出
-   * sender_like で差出人フィルタが可能
-----------------------------------------------
-依存: requests, beautifulsoup4
+mail.tm API helper
+──────────────────────────────
+create_inbox()       → (email, jwt)
+poll_latest_link()   → 最初に見つけた URL を返す
+──────────────────────────────
 """
 
 from __future__ import annotations
 
 import html
-import json
 import logging
+import random
 import re
+import string
 import time
 from typing import Optional
 
 import requests
 from bs4 import BeautifulSoup
 
-BASE = "https://api.mail.tm"          # ドメインが .tm の場合
-SESSION = requests.Session()
-SESSION.headers.update({"User-Agent": "Mozilla/5.0"})
+BASE = "https://api.mail.tm"
+S = requests.Session()
+S.headers.update({"User-Agent": "Mozilla/5.0"})
 
-# ---------------------------------------------------------------------- utils
-
-
-def _log_resp(resp: requests.Response) -> None:
-    logging.debug("[mail.tm] %s %s %s", resp.request.method, resp.url, resp.status_code)
+# ---------------------------------------------------------------- utilities
 
 
-def _parse_links(html_body: str) -> list[str]:
-    """本文内の http(s) リンクをすべて返す"""
-    soup = BeautifulSoup(html_body, "lxml")
-    links = [a["href"] for a in soup.find_all("a", href=True)]
-    # HTML エンティティ解除
-    return [html.unescape(u) for u in links]
+def _rand_str(n: int = 10) -> str:
+    return "".join(random.choices(string.ascii_lowercase + string.digits, k=n))
 
 
-# ---------------------------------------------------------------------- main
+def _links_from_html(body: str) -> list[str]:
+    soup = BeautifulSoup(body, "lxml")
+    return [html.unescape(a["href"]) for a in soup.find_all("a", href=True)]
+
+
+def _log(resp: requests.Response) -> None:
+    logging.debug("[mail.tm] %s %s → %s", resp.request.method, resp.url, resp.status_code)
+
+
+# ---------------------------------------------------------------- main API
 
 
 def create_inbox() -> tuple[str, str]:
     """
-    新規 inbox を作成し (email, JWT) を返す
-    Raises : requests.HTTPError
+    1) ドメイン取得 → ランダム email 作成
+    2) /accounts で登録
+    3) /token で JWT 取得
+    Returns
+    -------
+    (email, jwt)
+    Raises
+    ------
+    requests.HTTPError
     """
-    resp = SESSION.post(f"{BASE}/accounts", json={})
-    _log_resp(resp)
-    resp.raise_for_status()
+    # 1️⃣ ドメイン
+    r = S.get(f"{BASE}/domains")
+    _log(r)
+    r.raise_for_status()
+    domain = r.json()["hydra:member"][0]["domain"]
 
-    data = resp.json()
-    email = data["address"]
-    token = data["token"]         # JWT
+    email = f"{_rand_str()}@{domain}"
+    pwd = _rand_str(12)  # 使い捨て用パス
 
-    SESSION.headers.update({"Authorization": f"Bearer {token}"})
-    return email, token
+    # 2️⃣ アカウント作成
+    r = S.post(f"{BASE}/accounts", json={"address": email, "password": pwd})
+    _log(r)
+    r.raise_for_status()
+
+    # 3️⃣ トークン取得
+    r = S.post(f"{BASE}/token", json={"address": email, "password": pwd})
+    _log(r)
+    r.raise_for_status()
+    jwt = r.json()["token"]
+
+    S.headers.update({"Authorization": f"Bearer {jwt}"})
+    return email, jwt
 
 
 def poll_latest_link(
     jwt: str,
-    sender_like: str | None = None,
+    sender_like: str | None = "@note.com",
     timeout: int = 180,
     interval: int = 6,
 ) -> Optional[str]:
     """
-    新着メールを polls して本文中の最初の URL を返す。
-    - sender_like: 差出人メールアドレスに含まれる文字列（フィルタ）
-    - timeout    : 最大待ち時間 (sec)
+    受信箱をポーリングし本文内の最初の URL を返す
     """
     deadline = time.time() + timeout
-    SESSION.headers.update({"Authorization": f"Bearer {jwt}"})
+    S.headers.update({"Authorization": f"Bearer {jwt}"})
 
     while time.time() < deadline:
-        resp = SESSION.get(f"{BASE}/messages")
-        _log_resp(resp)
-        resp.raise_for_status()
-        items = resp.json().get("hydra:member", [])
+        r = S.get(f"{BASE}/messages")
+        _log(r)
+        r.raise_for_status()
+        msgs = sorted(r.json()["hydra:member"], key=lambda x: x["createdAt"], reverse=True)
 
-        # 最新メールから順に
-        for msg in sorted(items, key=lambda x: x["createdAt"], reverse=True):
-            if sender_like and sender_like not in (msg.get("from", {}).get("address") or ""):
+        for msg in msgs:
+            frm = msg.get("from", {}).get("address", "")
+            if sender_like and sender_like not in frm:
                 continue
-            # 本文取得
-            msg_resp = SESSION.get(f'{BASE}/messages/{msg["id"]}')
-            _log_resp(msg_resp)
-            msg_resp.raise_for_status()
-            body_html = msg_resp.json()["html"][0]
-            links = _parse_links(body_html)
+            mid = msg["id"]
+            body = S.get(f"{BASE}/messages/{mid}").json()["html"][0]
+            links = _links_from_html(body)
             if links:
                 return links[0]
-
         time.sleep(interval)
 
-    logging.error("[mail_tm] verification link not found (timeout)")
+    logging.error("[mail.tm] verification link not found (timeout)")
     return None
