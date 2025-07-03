@@ -1,42 +1,44 @@
 # -*- coding: utf-8 -*-
 """
 note.com アカウント自動登録
-playwright==1.53.0 で動作確認
+playwright==1.53.0 で検証
 """
 
 import logging
 import random
 import time
+
 from playwright.sync_api import (
     sync_playwright,
     TimeoutError as PWTimeout,
     Error as PWError,
 )
 
-# ────────────────────────────────────────────────────────────
 LANDING_URL = "https://note.com/signup?signup_type=email"
 FORM_URL    = "https://note.com/signup/form?redirectPath=%2Fsignup"
 __all__     = ["signup_note_account"]
-# ────────────────────────────────────────────────────────────
 
 
+# ──────────────────────────────────────────────
 def _wait(a: float = 0.6, b: float = 1.2) -> None:
-    """人間っぽいランダム wait"""
+    """人間らしいランダム wait"""
     time.sleep(random.uniform(a, b))
+# ──────────────────────────────────────────────
 
 
 def signup_note_account(email: str, password: str) -> dict:
     """
-    Note にメール＆パスワードでサインアップする。
+    Note にメール登録 → 完了ページ到達を自動化
 
     Returns
     -------
-    {"ok": True,  "error": None}            成功
-    {"ok": False, "error": "<msg>"}         失敗
+    dict
+      {"ok": True , "error": None}   成功
+      {"ok": False, "error": "..."}  失敗
     """
     try:
         with sync_playwright() as p:
-            # ── 0. ブラウザ起動 ───────────────────────────────
+            # 0️⃣ Browser
             browser = p.chromium.launch(
                 headless=True,
                 args=["--no-sandbox", "--disable-dev-shm-usage"],
@@ -51,11 +53,10 @@ def signup_note_account(email: str, password: str) -> dict:
             )
             page = ctx.new_page()
 
-            # ── 1. ランディング → フォーム ───────────────────
+            # 1️⃣ landing → フォーム
             page.goto(LANDING_URL, timeout=30_000)
             page.wait_for_load_state("networkidle")
 
-            # 「メールで登録」ボタンがあればクリック、なければ直接フォーム URL へ
             try:
                 page.locator("text=メールで登録").first.click(timeout=5_000)
                 page.wait_for_url("**/signup/form**", timeout=15_000)
@@ -64,7 +65,7 @@ def signup_note_account(email: str, password: str) -> dict:
 
             _wait()
 
-            # ── 2. メール & パスワード入力 ───────────────────
+            # 2️⃣ 入力
             email_in = (
                 'input[name="email"], input[type="email"], '
                 'input[placeholder*="メールアドレス"]'
@@ -74,40 +75,37 @@ def signup_note_account(email: str, password: str) -> dict:
                 'input[placeholder*="パスワード"]'
             )
 
-            # メール
             page.wait_for_selector(email_in, timeout=15_000)
             page.click(email_in)
             page.keyboard.type(email, delay=50)
-            #   blur を飛ばしてバリデーションを強制
             page.dispatch_event(email_in, "blur")
             _wait()
 
-            # パスワード
             page.click(pass_in)
             page.keyboard.type(password, delay=50)
             page.dispatch_event(pass_in, "blur")
             _wait()
 
-            # ── 3. 「同意して登録」ボタンを待つ → クリック ───
-            btn_all = 'button:has-text("同意して登録")'
-            # JS で “enabled になるまで” ポーリング
+            # 3️⃣ 「同意して登録」ボタンが enabled になるまで待つ
+            signup_btn = 'button:has-text("同意して登録")'
+
             page.wait_for_function(
-                """sel => {
-                     const el = document.querySelector(sel);
+                """selector => {
+                     const el = document.querySelector(selector);
                      return el && !el.disabled;
-                   }""",
-                btn_all,
+                 }""",
+                arg=signup_btn,          # ← ★ キーワード引数で渡す
                 timeout=15_000,
             )
 
-            page.locator(btn_all).click(force=True)
+            page.locator(signup_btn).click(force=True)
 
-            # ── 4. 完了ページへ ────────────────────────────
+            # 4️⃣ 完了ページ確認
             page.wait_for_url("**/signup/complete**", timeout=60_000)
             browser.close()
             return {"ok": True, "error": None}
 
-    # ── エラーハンドリング ──────────────────────────────────
+    # ── error handling ─────────────────────────
     except PWTimeout as e:
         logging.error("[note_signup] Timeout: %s", e)
         return {"ok": False, "error": f"Timeout: {e}"}
@@ -116,6 +114,6 @@ def signup_note_account(email: str, password: str) -> dict:
         logging.error("[note_signup] Playwright error: %s", e)
         return {"ok": False, "error": str(e)}
 
-    except Exception as e:                             # noqa: BLE001
+    except Exception as e:                      # noqa: BLE001
         logging.exception("[note_signup] Unexpected error")
         return {"ok": False, "error": str(e)}
