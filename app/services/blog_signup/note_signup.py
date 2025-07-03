@@ -1,61 +1,94 @@
 # -*- coding: utf-8 -*-
 """
-note.com アカウント自動登録
-Mail.tm で取得した使い捨てメールを使って完全自動サインアップ
-playwright==1.53.0
+note.com アカウント自動登録（2025-07 修正版）
+--------------------------------------------------
+● Playwright 1.53.0 で動作確認
+● 手順
+    1. 「メールで登録」をクリックして /signup/form に遷移
+    2. ランダムメール（Mail.tm）と強力パスワードを入力
+    3. ニックネーム入力・利用規約チェック
+    4. 「同意して登録」ボタンが有効になったらクリック
+    5. /signup/complete に遷移すれば成功
 """
 
-import logging, random, string, time
-from playwright.sync_api import (
-    sync_playwright, TimeoutError as PWTimeout, Error as PWError
-)
-from app.services.mail_utils.mail_tm import create_inbox, wait_link
+import logging
+import random
+import string
+import time
+from typing import Tuple
 
-LANDING = "https://note.com/signup?signup_type=email"
-FORM    = "https://note.com/signup/form?redirectPath=%2Fsignup"
+from playwright.sync_api import (
+    sync_playwright,
+    TimeoutError as PWTimeout,
+    Error as PWError,
+    Page,
+)
+
+# ---------------------------------------------------------------------------
+# 設定値
+# ---------------------------------------------------------------------------
+LANDING_URL = "https://note.com/signup?signup_type=email"
+FORM_URL = "https://note.com/signup/form"
+WAIT = 0.8, 1.6        # ランダム待機（sec）
+TIMEOUT = 30_000       # 最大待機（ms）
 
 __all__ = ["signup_note_account"]
 
 
-# --------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------
 # ユーティリティ
-# --------------------------------------------------------------------------- #
-def _rand_pw(n: int = 10) -> str:
-    """英大小・数字・記号を 1 文字ずつ含むランダムパスワード"""
-    return (
-        random.choice(string.ascii_uppercase)
-        + random.choice(string.ascii_lowercase)
-        + random.choice("0123456789")
-        + random.choice("!#@$")
-        + "".join(random.choices(string.ascii_letters + string.digits, k=n - 4))
-    )
-
-
-def _w(a: float = 0.8, b: float = 1.5) -> None:
-    """0.8〜1.5 秒のランダム wait"""
+# ---------------------------------------------------------------------------
+def _rand_wait(a: float = WAIT[0], b: float = WAIT[1]) -> None:
     time.sleep(random.uniform(a, b))
 
 
-# --------------------------------------------------------------------------- #
-# メイン処理
-# --------------------------------------------------------------------------- #
+def _random_password(length: int = 12) -> str:
+    """強力パスワード生成"""
+    chars = string.ascii_letters + string.digits + "!@#$%&*?"
+    return "".join(random.choice(chars) for _ in range(length))
+
+
+def _create_random_email() -> Tuple[str, str]:
+    """簡易ランダムメール（Mail.tm を使用。失敗時は例外送出）"""
+    import requests, json, uuid, secrets
+
+    session = requests.Session()
+    # 1️⃣ ドメイン取得
+    domain = session.get("https://api.mail.tm/domains").json()["hydra:member"][0]["domain"]
+    # 2️⃣ アカウント作成
+    user = f"{uuid.uuid4().hex[:10]}@{domain}"
+    pw = secrets.token_urlsafe(12)
+    resp = session.post(
+        "https://api.mail.tm/accounts",
+        json={"address": user, "password": pw},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    token = session.post(
+        "https://api.mail.tm/token",
+        json={"address": user, "password": pw},
+        timeout=10,
+    ).json()["token"]
+    return user, token  # token は未使用だが戻しておく
+
+
+# ---------------------------------------------------------------------------
+# メイン
+# ---------------------------------------------------------------------------
 def signup_note_account() -> dict:
     """
-    完全自動で note アカウントを作成し、
-    メール・パスワードを返却する。
-
     Returns
     -------
-    dict = {
-        "ok": bool,
-        "email": str | None,
-        "password": str | None,
-        "error": str | None,
-    }
+    dict
+        {"ok": bool, "email": str | None, "password": str | None, "error": str | None}
     """
-    # ① 使い捨てメール確保 ----------------------------------------------------
-    email, jwt = create_inbox()          # Mail.tm API
-    password   = _rand_pw()
+    # ① ランダムメール & PW 生成
+    try:
+        email, _ = _create_random_email()
+    except Exception as e:
+        return {"ok": False, "email": None, "password": None, "error": f"mail.tm error: {e}"}
+
+    password = _random_password()
 
     try:
         with sync_playwright() as p:
@@ -63,55 +96,73 @@ def signup_note_account() -> dict:
                 headless=True,
                 args=["--no-sandbox", "--disable-dev-shm-usage"],
             )
-            ctx  = browser.new_context(locale="ja-JP")
-            page = ctx.new_page()
+            ctx = browser.new_context(locale="ja-JP")
+            page: Page = ctx.new_page()
 
-            # ② サインアップフォームへ ----------------------------------------
-            page.goto(LANDING, timeout=30_000)
-            page.locator("text=メールで登録").first.click()
-            page.wait_for_url("**/signup/form**", timeout=15_000)
+            # ─────────────────────────────────────────────
+            # STEP 0: ランディング
+            # ─────────────────────────────────────────────
+            page.goto(LANDING_URL, timeout=TIMEOUT)
+            print("▶ goto:", page.url)
 
-            # ③ フォーム入力 ---------------------------------------------------
+            # 「メールで登録」ボタン押下
+            register_btn = page.locator("text=メールで登録").first
+            register_btn.wait_for(state="visible", timeout=10_000)
+            register_btn.click()
+            print("▶ メールで登録クリック")
+
+            # `/signup/form` に遷移
+            page.wait_for_url("**/signup/form**", timeout=TIMEOUT)
+            print("▶ formURL:", page.url)
+
+            # ─────────────────────────────────────────────
+            # STEP 1: フォーム入力
+            # ─────────────────────────────────────────────
+            _rand_wait()
             page.fill('input[type="email"]', email)
-            _w()
+            _rand_wait()
             page.fill('input[type="password"]', password)
-            _w()
 
-            # ニックネーム（存在時のみ）
+            # ニックネーム
             if page.locator('input[name="nickname"]').count():
-                nickname = "user" + email.split("@")[0]
-                page.fill('input[name="nickname"]', nickname)
+                page.fill('input[name="nickname"]', f"user_{random.randint(1000,9999)}")
 
-            # 規約チェックボックス（存在時のみ）
+            # 規約チェック
             cb = page.locator('input[type="checkbox"]')
             if cb.count():
                 cb.check()
 
-            # ④ 「同意して登録」ボタン が有効になるのを待機  -------------------
-            btn = page.locator('button[type="submit"]')
-            btn.wait_for(state="attached", timeout=15_000)
-            btn.wait_for(state="visible",  timeout=15_000)
-            btn.wait_for(state="enabled",  timeout=15_000)
-            btn.click()
+            # ─────────────────────────────────────────────
+            # STEP 2: ボタン有効化待ち
+            # ─────────────────────────────────────────────
+            submit_btn = page.locator('button[type="submit"]')
+            try:
+                submit_btn.wait_for(state="enabled", timeout=15_000)
+            except PWTimeout:
+                logging.error("[note_signup] signup button never enabled (captcha?)")
+                return {"ok": False, "email": None, "password": None, "error": "signup button never enabled"}
 
-            # ⑤ 認証メールのリンク取得 ----------------------------------------
-            verify_url = wait_link(jwt, timeout_sec=180)
-            if not verify_url:
-                raise RuntimeError("verification mail not received")
+            submit_btn.click()
+            print("▶ submit click")
 
-            page.goto(verify_url, timeout=30_000)
-            page.wait_for_url("**/signup/complete**", timeout=30_000)
+            # ─────────────────────────────────────────────
+            # STEP 3: 完了ページ確認
+            # ─────────────────────────────────────────────
+            page.wait_for_url("**/signup/complete**", timeout=TIMEOUT)
+            print("✅ signup complete:", page.url)
 
             browser.close()
             return {"ok": True, "email": email, "password": password, "error": None}
 
-    # ----------------------------------------------------------------------- #
-    # エラーハンドリング
-    # ----------------------------------------------------------------------- #
+    # ─────────── 例外処理 ───────────
     except PWTimeout as e:
         logging.error("[note_signup] Timeout: %s", e)
         return {"ok": False, "email": None, "password": None, "error": f"Timeout: {e}"}
 
-    except (PWError, Exception) as e:        # noqa: BLE001
-        logging.error("[note_signup] %s", e, exc_info=True)
+    except PWError as e:
+        logging.error("[note_signup] Playwright error: %s", e)
+        return {"ok": False, "email": None, "password": None, "error": str(e)}
+
+    except Exception as e:  # noqa: BLE001
+        logging.exception("[note_signup] Unexpected error")
         return {"ok": False, "email": None, "password": None, "error": str(e)}
