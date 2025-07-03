@@ -1,99 +1,93 @@
-# app/services/blog_signup/note_signup.py  ★全コード
+# -*- coding: utf-8 -*-
+"""
+note.com アカウント完全自動登録（Mail.tm + Playwright）
+"""
 
-import random, string, time, logging
+import logging, random, time, re
 from playwright.sync_api import (
-    sync_playwright,
-    TimeoutError as PWTimeout,
-    Error as PWError
+    sync_playwright, TimeoutError as PWTimeout, Error as PWError
 )
-
-LANDING = "https://note.com/signup?signup_type=email"
-FORM    = "https://note.com/signup/form?redirectPath=%2Fsignup"
+from app.services.mail_utils.mail_tm import create_inbox, wait_link
 
 __all__ = ["signup_note_account"]
 
+LANDING = "https://note.com/signup?signup_type=email"
+FORM_PAT = "**/signup/form**"
+COMPLETE_PAT = "**/signup/complete**"
 
-def _wait(a=0.6, b=1.5):
+def _w(a=0.6, b=1.2):
     time.sleep(random.uniform(a, b))
 
+# ---------------------------------------------------------------------
 
-def _rand_ua() -> str:
-    # Chrome 117〜125 あたりをランダム生成
-    ver = random.randint(117, 125)
-    build = random.randint(0, 9999)
-    patch = random.randint(0, 199)
-    return (f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            f"AppleWebKit/537.36 (KHTML, like Gecko) "
-            f"Chrome/{ver}.0.{build}.{patch} Safari/537.36")
-
-
-def signup_note_account(email: str, password: str) -> dict:
+def signup_note_account(nickname_prefix: str = "user") -> dict:
     """
-    Note にメール+PWで会員登録。成功なら {"ok": True}
+    戻り値: {"ok": bool, "email": str | None, "error": str | None}
     """
+    # 1️⃣ 使い捨てメール作成
+    email, jwt = create_inbox()
+    password = f"Pwd{random.randint(10000,99999)}!"
+
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(
                 headless=True,
-                args=[
-                    "--no-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-blink-features=AutomationControlled",
-                ],
+                args=["--no-sandbox", "--disable-dev-shm-usage"]
             )
             ctx = browser.new_context(
                 locale="ja-JP",
-                viewport={"width": 1280, "height": 960},
-                user_agent=_rand_ua(),
+                user_agent=("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/125.0.0.0 Safari/537.36")
             )
             page = ctx.new_page()
 
-            # webdriver フラグ偽装
-            page.add_init_script("Object.defineProperty(navigator,'webdriver',{get:() => undefined})")
-
-            # -- 1. ランディング → フォーム ---------------------------------
+            # 2️⃣ フォームへ遷移
             page.goto(LANDING, timeout=30_000)
-            page.wait_for_load_state("networkidle")
+            page.locator("text=メールで登録").first.click()
+            page.wait_for_url(FORM_PAT, timeout=15_000)
 
-            try:
-                page.locator("text=メールで登録").first.click(timeout=5_000)
-                page.wait_for_url("**/signup/form**", timeout=15_000)
-            except PWTimeout:
-                page.goto(FORM, timeout=15_000)
+            # 3️⃣ 入力（遅延タイプでreCAPTCHA対策）
+            def slow_fill(sel, txt):
+                page.click(sel)
+                for ch in txt:
+                    page.keyboard.type(ch, delay=random.randint(80, 140))
+                _w()
 
-            # -- 2. メール & パスワード入力 ----------------------------------
-            email_sel = 'input[type="email"]'
-            pass_sel  = 'input[type="password"]'
+            slow_fill('input[type="email"]', email)
+            slow_fill('input[type="password"]', password)
 
-            page.fill(email_sel, email, timeout=15_000)
-            _wait()
-            page.fill(pass_sel, password)
-            _wait()
+            # optional nickname
+            nick_sel = 'input[name="nickname"]'
+            if page.locator(nick_sel).count():
+                slow_fill(nick_sel, f"{nickname_prefix}{random.randint(1000,9999)}")
 
-            # -- 3. reCAPTCHA スコアが上がるのを最大 15 s 待つ --------------
-            btn = page.locator("button:has-text('同意して登録')")
-            for _ in range(30):         # 30 × 0.5 ≒ 15 s
-                if btn.is_enabled():
-                    break
-                time.sleep(0.5)
-            else:
-                logging.error("[note_signup] signup button never enabled (captcha)")
-                return {"ok": False, "error": "reCAPTCHA score too low → button disabled"}
+            # checkbox
+            cb = page.locator('input[type="checkbox"]')
+            if cb.count():
+                cb.check()
 
-            # -- 4. クリック → 完了ページ -----------------------------------
+            # ボタン enable 待機
+            btn = page.locator('button:has-text("同意して登録")')
+            page.wait_for_function(
+                "(b)=>!b.disabled", btn, timeout=20_000
+            )
             btn.click()
-            page.wait_for_url("**/signup/complete**", timeout=60_000)
+            _w()
+
+            # 4️⃣ 認証メールを待機 → リンク GET
+            link = wait_link(jwt, subject_kw="メールアドレスの確認")
+            if not link:
+                raise RuntimeError("verification mail timeout")
+
+            # 5️⃣ リンクを開いて完了判定
+            page.goto(link, timeout=30_000)
+            page.wait_for_url(COMPLETE_PAT, timeout=30_000)
+
             browser.close()
-            return {"ok": True, "error": None}
+            return {"ok": True, "email": email, "password": password, "error": None}
 
-    except PWTimeout as e:
-        logging.error("[note_signup] Timeout: %s", e)
-        return {"ok": False, "error": f"Timeout: {e}"}
-
-    except PWError as e:
-        logging.error("[note_signup] Playwright error: %s", e)
-        return {"ok": False, "error": str(e)}
-
-    except Exception as e:          # noqa: BLE001
-        logging.exception("[note_signup] Unexpected")
-        return {"ok": False, "error": str(e)}
+    # ---------- Error ----------
+    except (PWTimeout, PWError, RuntimeError) as e:
+        logging.error("[note_signup] %s", e)
+        return {"ok": False, "email": None, "error": str(e)}
