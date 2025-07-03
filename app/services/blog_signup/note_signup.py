@@ -133,17 +133,20 @@ def signup_note_account() -> dict:
                 cb.check()
 
             # ─────────────────────────────────────────────
-            # STEP 2: ボタン有効化待ち
+            # STEP 2: ボタン有効化待ち（手動ループに変更）
             # ─────────────────────────────────────────────
             submit_btn = page.locator('button[type="submit"]')
-            try:
-                submit_btn.wait_for(state="enabled", timeout=15_000)
-            except PWTimeout:
+            for _ in range(30):  # 最大15秒間試行
+                if submit_btn.is_enabled():
+                    break
+                time.sleep(0.5)
+            else:
                 logging.error("[note_signup] signup button never enabled (captcha?)")
                 return {"ok": False, "email": None, "password": None, "error": "signup button never enabled"}
 
             submit_btn.click()
             print("▶ submit click")
+
 
             # ─────────────────────────────────────────────
             # STEP 3: 完了ページ確認
