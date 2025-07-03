@@ -9,7 +9,8 @@
 <table class="w-full text-sm">
   <thead class="bg-gray-100">
     <tr>
-      <th class="px-3 py-2">ブログ</th>
+      <th class="px-3 py-2">ブログ</th>      {# note / hatena … #}
+      <th class="px-3 py-2">サイト</th>      {# 対象サイトを追加 ★ #}
       <th class="px-3 py-2">メール</th>
       <th class="px-3 py-2">投稿済</th>
       <th class="px-3 py-2">予定</th>
@@ -19,14 +20,17 @@
       <th class="px-3 py-2 text-right">操作</th>
     </tr>
   </thead>
+
   <tbody>
-    {% for a in accts %}
+  {% for a in accts %}
     {% set scheduled = a.schedules|length %}
     {% set posted    = a.posted_cnt %}
+    {% set pct       = (100 * posted / (scheduled if scheduled else 1)) | round(1) %}
+
     <tr class="border-b">
-      {# ブログ種別バッジ #}
+      {# ── ブログ種別バッジ ─────────────────────────── #}
       <td class="px-3 py-2">
-        <span class="px-2 py-1 rounded text-white text-xs 
+        <span class="px-2 py-1 rounded text-white text-xs
               {% if a.blog_type.value == 'note' %} bg-blue-600
               {% elif a.blog_type.value == 'blogger' %} bg-orange-600
               {% else %} bg-gray-600 {% endif %}">
@@ -34,13 +38,24 @@
         </span>
       </td>
 
-      {# メール（複合化） #}
-      <td class="px-3 py-2 font-mono">{{ decrypt(a.email) }}</td>
+      {# ── 対象サイト ──────────────────────────────── #}
+      <td class="px-3 py-2">
+        {% if a.site %}
+          <a href="{{ a.site.url }}" class="text-blue-600 hover:underline" target="_blank">
+            {{ a.site.name }}
+          </a>
+        {% else %}
+          -
+        {% endif %}
+      </td>
 
-      {# 投稿済 #}
+      {# ── メール（複合化） ────────────────────────── #}
+      <td class="px-3 py-2 font-mono max-w-[220px] truncate">
+        {{ decrypt(a.email) }}
+      </td>
+
+      {# ── 投稿済・予定 ──────────────────────────── #}
       <td class="px-3 py-2 text-center">{{ posted }}</td>
-
-      {# 予定 #}
       <td class="px-3 py-2 text-center">{{ scheduled }}</td>
 
       {# 進捗バー #}
@@ -51,22 +66,22 @@
           </div>
         </div>
       </td>
-      {# 最終投稿日時 #}
+
+      {# ── 最終投稿日時 ──────────────────────────── #}
       <td class="px-3 py-2">
         {{ a.updated_at.strftime('%Y-%m-%d %H:%M') if a.updated_at else '-' }}
       </td>
 
-      {# 詳細リンク #}
+      {# ── 詳細（記事一覧） ───────────────────────── #}
       <td class="px-3 py-2">
         <a href="{{ url_for('main.external_account_articles', acct_id=a.id) }}"
            class="text-blue-600 hover:underline">記事一覧</a>
       </td>
 
-      {# 操作（ワンクリックログイン & ID/Passコピー） #}
+      {# ── 操作：ワンクリックログイン / IDコピー ──────── #}
       <td class="px-3 py-2 text-right">
         <form action="{{ url_for('main.blog_one_click_login', acct_id=a.id) }}"
-              method="get" class="inline"></form>
-          <input type="hidden" name="account_id" value="{{ a.id }}">
+              method="get" class="inline">
           <button type="submit"
                   class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs">
             ログイン
@@ -81,7 +96,7 @@
         </button>
       </td>
     </tr>
-    {% endfor %}
+  {% endfor %}
   </tbody>
 </table>
 
@@ -92,7 +107,7 @@ document.querySelectorAll('.copy-cred').forEach(btn => {
     const p = btn.dataset.pass;
     navigator.clipboard.writeText(`ユーザー名: ${u}\nパスワード: ${p}`);
     btn.textContent = "✔ コピー";
-    setTimeout(()=>btn.textContent="ID/Pass",1500);
+    setTimeout(() => btn.textContent = "ID/Pass", 1500);
   });
 });
 </script>
