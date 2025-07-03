@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 NOTE (note.com) アカウント自動登録
-playwright==1.53.0 で動作確認
+playwright==1.53.0
 """
 
 import logging, random, time
@@ -9,7 +9,11 @@ from playwright.sync_api import (
     sync_playwright, TimeoutError as PWTimeout, Error as PWError
 )
 
-SIGNUP_URL = "https://note.com/signup?signup_type=email"   # ← 直接ランディングへ
+# ① ランディング（ボタン付き）
+LANDING_URL = "https://note.com/signup?signup_type=email"
+# ② ボタンを押した後に遷移する“本フォーム”URL
+FORM_URL    = "https://note.com/signup/form?redirectPath=%2Fsignup"
+
 __all__ = ["signup_note_account"]
 
 
@@ -19,7 +23,7 @@ def _rand_wait(a=0.8, b=1.6):
 
 def signup_note_account(email: str, password: str) -> dict:
     """
-    Note アカウントを新規登録する
+    Note アカウントを新規登録
     Returns
     -------
     {"ok": bool, "error": str | None}
@@ -38,21 +42,30 @@ def signup_note_account(email: str, password: str) -> dict:
             )
             page = ctx.new_page()
 
-            # 1️⃣ ランディングを開く
-            page.goto(SIGNUP_URL, timeout=30_000)
+            # ------------------------------------------------------------------
+            # 1️⃣ ランディング
+            # ------------------------------------------------------------------
+            page.goto(LANDING_URL, timeout=30_000)
             page.wait_for_load_state("networkidle")
 
-            # 2️⃣ 「メールで登録」ボタンを押して“本フォーム”へ遷移
+            # “メールで登録” ボタン（<button> or <a> のテキスト一致）を探す
+            clicked = False
             try:
-                page.get_by_role("button", name="メールで登録").click(timeout=10_000)
+                page.locator("text=メールで登録").first.click(timeout=5_000)
+                clicked = True
             except PWTimeout:
-                logging.error("[note_signup] 'メールで登録' ボタンが見つからない")
-                browser.close()
-                return {"ok": False, "error": "signup button not found"}
+                # ボタンが無い → フォーム URL へダイレクト遷移
+                page.goto(FORM_URL, timeout=15_000)
+
+            if clicked:
+                # 自動遷移が終わるまで待つ
+                page.wait_for_url("**/signup/form**", timeout=15_000)
 
             _rand_wait()
 
-            # 3️⃣ email / password を入力（iframe なし）
+            # ------------------------------------------------------------------
+            # 2️⃣ email / password 入力
+            # ------------------------------------------------------------------
             email_sel = (
                 'input[name="email"], input[type="email"], '
                 'input[placeholder*="メールアドレス"], input[placeholder*="mail@example.com"]'
@@ -68,15 +81,18 @@ def signup_note_account(email: str, password: str) -> dict:
             page.fill(pass_sel, password)
             _rand_wait()
 
-            # 4️⃣ 「同意して登録」クリック
-            page.get_by_role("button", name="同意して登録").click()
+            # 「同意して登録」
+            page.locator("text=同意して登録").click()
             _rand_wait()
 
-            # 5️⃣ 完了ページの確認
+            # ------------------------------------------------------------------
+            # 3️⃣ 完了確認
+            # ------------------------------------------------------------------
             page.wait_for_url("**/signup/complete**", timeout=60_000)
             browser.close()
             return {"ok": True, "error": None}
 
+    # ---------------- エラーハンドリング ----------------
     except PWTimeout as e:
         logging.error("[note_signup] Timeout: %s", e)
         return {"ok": False, "error": f"Timeout: {e}"}
@@ -85,6 +101,6 @@ def signup_note_account(email: str, password: str) -> dict:
         logging.error("[note_signup] Playwright error: %s", e)
         return {"ok": False, "error": str(e)}
 
-    except Exception as e:                                     # noqa: BLE001
+    except Exception as e:                                    # noqa: BLE001
         logging.exception("[note_signup] Unexpected error")
         return {"ok": False, "error": str(e)}
