@@ -20,17 +20,20 @@ from .models import (Site, Keyword, ExternalSEOJob,
                      BlogType, ExternalBlogAccount, ExternalArticleSchedule)
 from app.services.blog_signup import register_blog_account
 from app.article_generator import enqueue_generation  # 既存非同期記事生成キュー
-from app.services.blog_signup.blog_post import post_blog_article
-from app.services.blog_signup.crypto_utils import decrypt  # ✅ 追加
 from app.article_generator import _generate_slots_per_site   # 先頭に追加
+from app.services.blog_signup.blog_post import post_blog_article
+import asyncio
 
-
-
+# ────────────────────────────────────────────────
+# APScheduler ＋ スレッドプール
+# ────────────────────────────────────────────────
 # グローバルな APScheduler インスタンス（__init__.py で start されています）
 scheduler = BackgroundScheduler(timezone="UTC")
 executor = ThreadPoolExecutor(max_workers=2)  # ✅ 外部SEOでは同時2件まで
 
-
+# --------------------------------------------------------------------------- #
+# 1) WordPress 自動投稿ジョブ
+# --------------------------------------------------------------------------- #
 def _auto_post_job(app):
     with app.app_context():
         now = datetime.now(pytz.utc)
@@ -79,6 +82,9 @@ def _auto_post_job(app):
         finally:
             db.session.close()
 
+# --------------------------------------------------------------------------- #
+# 2) GSC メトリクス毎日更新
+# --------------------------------------------------------------------------- #
 def _gsc_metrics_job(app):
     """
     ✅ GSCクリック・表示回数の毎日更新ジョブ
@@ -91,6 +97,9 @@ def _gsc_metrics_job(app):
         except Exception as e:
             current_app.logger.error(f"❌ GSCメトリクス更新失敗: {str(e)}")
 
+# --------------------------------------------------------------------------- #
+# 3) GSC 連携サイト向け 1000 記事ループ生成
+# --------------------------------------------------------------------------- #
 def gsc_loop_generate(site):
     """
     🔁 GSCからのクエリで1000記事未満なら通常記事フローで生成する（修正済）
@@ -207,6 +216,10 @@ def _gsc_generation_job(app):
 
         current_app.logger.info("✅ GSC記事生成ジョブが完了しました")
 
+# --------------------------------------------------------------------------- #
+# 4) 外部SEO ① キュー作成ジョブ
+# --------------------------------------------------------------------------- #
+
 def _run_external_seo_job(app, site_id: int):
     """
     1) ExternalSEOJob を running に
@@ -218,14 +231,14 @@ def _run_external_seo_job(app, site_id: int):
         from sqlalchemy.exc import SQLAlchemyError
 
         # ── 1. ジョブ行を作成 ──────────────────
-        job = ExternalSEOJob(site_id=site_id, status="running", step="signup")
+        job = ExternalSEOJob(site_id=site_id, status="running", step="signup", article_cnt=0)
         db.session.add(job)
         db.session.commit()
 
         try:
             # ── 2. アカウント自動登録 ───────────
-            account = register_blog_account(site_id, BlogType.NOTE)
-            job.step = "generating"
+            account = register_blog_account(site_id, BlogType.NOTE)  # 内部で signup_note_account() を実行
+            job.step = "generate"
             db.session.commit()
 
             # ── 3. 上位キーワード100件抽出 ────────
@@ -269,8 +282,7 @@ def _run_external_seo_job(app, site_id: int):
 
             db.session.bulk_save_objects(schedules)
             job.article_cnt = len(schedules)
-            job.step = "finished"
-            job.status = "success"
+            job.step = "post"
             db.session.commit()
 
         except Exception as e:
@@ -279,6 +291,27 @@ def _run_external_seo_job(app, site_id: int):
             job.message = str(e)
             db.session.commit()
             current_app.logger.error(f"[外部SEO] 失敗: {e}")
+
+# --------------------------------------------------------------------------- #
+# 5) 外部SEO ② 投稿ジョブ
+# --------------------------------------------------------------------------- #
+def _finalize_external_job(job_id: int):
+    """すべて posted になったら job を完了にする"""
+    job = ExternalSEOJob.query.get(job_id)
+    if not job:
+        return
+
+    total = job.article_cnt
+    posted = (ExternalArticleSchedule.query
+              .join(ExternalBlogAccount,
+                    ExternalArticleSchedule.blog_account_id == ExternalBlogAccount.id)
+              .filter(ExternalBlogAccount.site_id == job.site_id,
+                      ExternalArticleSchedule.status == "posted")
+              .count())
+    if posted >= total:
+        job.step   = "done"
+        job.status = "success"
+        db.session.commit()           
 
 # ──────────────────────────────────────────
 # 外部ブログ投稿ジョブ
@@ -328,10 +361,10 @@ def _run_external_post_job(app):
                 # ----- ブログへ投稿 -----
                 res = post_blog_article(
                     blog_type = acct.blog_type,
+                    account   = acct,  
                     title     = art.title,
                     body_html = art.body,
-                    email     = decrypt(acct.email),
-                    password  = decrypt(acct.password)
+                    image_path= None,        # 画像を渡す場合はここ
                 )
 
                 if res.get("ok"):
@@ -341,6 +374,12 @@ def _run_external_post_job(app):
                     # 👇 追加：バッチ監視用にカウントアップ
                     acct.posted_cnt += 1
                     db.session.commit()  # ← 成功ごとに保存！
+                    latest_job = (ExternalSEOJob.query
+                                  .filter_by(site_id=acct.site_id)
+                                  .order_by(ExternalSEOJob.id.desc())
+                                  .first())
+                    if latest_job:
+                        _finalize_external_job(latest_job.id)
                 else:
                     sched.status  = "error"
                     sched.message = res.get("error")
@@ -361,9 +400,9 @@ def enqueue_external_seo(site_id: int):
     app = current_app._get_current_object()
     executor.submit(_run_external_seo_job, app, site_id)
 
-# ────────────────────────────────
-# 外部SEO アカウント監視ジョブ
-# ────────────────────────────────
+# --------------------------------------------------------------------------- #
+# 6) 外部SEO バッチ監視ジョブ（100 本完了ごとに次バッチ）
+# --------------------------------------------------------------------------- #
 def _external_watch_job(app):
     """
     15 分おき：posted_cnt が 100 に達したアカウントを検知し、

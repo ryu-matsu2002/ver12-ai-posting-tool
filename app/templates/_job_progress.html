@@ -1,45 +1,35 @@
-{# templates/_job_progress.html #}
+{# app/templates/_job_progress.html #}
+{% set has_job = job is not none %}
 
-<div id="site-card-{{ site_id }}"
-     class="border rounded p-4 w-full"
-     hx-get="{{ url_for('main.external_seo_job_status', site_id=site_id) }}"
-     hx-trigger="every 5s"
-     hx-swap="outerHTML">
+{% if not has_job %}
+  <!-- 外部SEO開始ボタン -->
+  <button class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
+          hx-post="{{ url_for('external.start_external_seo', site_id=site_id) }}"
+          hx-target="#site-card-{{ site_id }}"
+          hx-swap="outerHTML">
+    外部SEO開始
+  </button>
 
-  {% if not job %}
-    <div class="text-sm text-gray-600">
-      ジョブを開始しました。反映まで数秒お待ちください…
-    </div>
-
-  {% else %}
-    <h3 class="font-semibold mb-2">
-      {% if job.status == 'running' %}🛠️ 実行中…
-      {% elif job.status == 'success' %}🎉 完了
-      {% else %}⚠️ エラー
-      {% endif %}
-    </h3>
-
-    <ul class="space-y-1 text-sm">
-      <li>ステータス : <span class="font-mono">{{ job.status }}</span></li>
-      <li>ステップ   : <span class="font-mono">{{ job.step }}</span></li>
-      <li>記事数     : {{ job.article_cnt }} 本</li>
-
-      {% if job.message %}
-        <li class="text-red-600">エラー: {{ job.message }}</li>
-      {% endif %}
-
-      <li class="text-gray-500">
-        更新: {{ job.updated_at.strftime('%Y-%m-%d %H:%M:%S') }}
-      </li>
-    </ul>
-
-    {% if job.status == 'success' %}
-      <div class="mt-4">
-        <a href="{{ url_for('main.external_schedules', site_id=site_id) }}"
-           class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm">
-          投稿一覧を見る
-        </a>
-      </div>
+{% elif job.step in ['signup', 'generate', 'post'] %}
+  <!-- 進捗パネル (5 秒おきに自分を書き換え) -->
+  <div hx-get="{{ url_for('external.external_seo_job_status', site_id=site_id) }}"
+       hx-trigger="every 5s"
+       hx-swap="outerHTML"
+       class="flex items-center space-x-3">
+    <span class="text-sm text-gray-600">{{ job.posted_cnt }} / {{ job.article_cnt }}</span>
+    {% if job.step == 'signup' %}
+      <span class="px-2 py-1 rounded bg-yellow-100 text-yellow-700 text-xs">signup</span>
+    {% elif job.step == 'generate' %}
+      <span class="px-2 py-1 rounded bg-blue-100 text-blue-700 text-xs">generate</span>
+    {% else %}
+      <span class="px-2 py-1 rounded bg-purple-100 text-purple-700 text-xs">post</span>
     {% endif %}
-  {% endif %}
-</div>
+  </div>
+
+{% else %}
+  <!-- ジョブ完了 → ブログ一覧へ -->
+  <a href="{{ url_for('external.external_site_blogs', site_id=site_id) }}"
+     class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded">
+     ブログ一覧へ
+  </a>
+{% endif %}

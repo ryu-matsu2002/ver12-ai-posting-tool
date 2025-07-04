@@ -1,78 +1,66 @@
-{# app/templates/blog_accounts.html #}
+{# app/templates/external_site_blogs.html #}
 {% extends "base.html" %}
-{% block title %}外部ブログアカウント一覧{% endblock %}
+{% block title %}外部ブログ一覧 – {{ site.name }}{% endblock %}
 
 {% block content %}
-<h2 class="text-2xl font-bold mb-6">📝 外部ブログアカウント一覧</h2>
+<h2 class="text-2xl font-bold mb-6 flex items-center">
+  🚀 {{ site.name }} の無料ブログ一覧
+  <a href="{{ url_for('external.external_seo_sites') }}"
+     class="ml-4 text-sm text-blue-600 hover:underline">← サイト一覧へ戻る</a>
+</h2>
 
 {% if accts %}
 <table class="w-full text-sm">
   <thead class="bg-gray-100">
     <tr>
       <th class="px-3 py-2">ブログ</th>
-      <th class="px-3 py-2">サイト</th>
       <th class="px-3 py-2">メール</th>
       <th class="px-3 py-2 text-center">投稿済</th>
       <th class="px-3 py-2 text-center">予定</th>
       <th class="px-3 py-2 w-48">進捗</th>
-      <th class="px-3 py-2">最終投稿</th>
-      <th class="px-3 py-2">詳細</th>
+      <th class="px-3 py-2">記事一覧</th>
       <th class="px-3 py-2 text-right">操作</th>
     </tr>
   </thead>
-
   <tbody>
   {% for a in accts %}
     {% set scheduled = a.schedules|length %}
     {% set posted    = a.posted_cnt %}
     {% set pct       = (100 * posted / (scheduled if scheduled else 1)) | round(1) %}
-
     <tr class="border-b">
       <!-- ブログ種別バッジ -->
       <td class="px-3 py-2">
         <span class="px-2 py-1 rounded text-white text-xs
               {% if a.blog_type.value == 'note' %} bg-blue-600
-              {% elif a.blog_type.value == 'blogger' %} bg-orange-600
+              {% elif a.blog_type.value == 'ameba' %} bg-green-600
               {% else %} bg-gray-600 {% endif %}">
           {{ a.blog_type.value }}
         </span>
       </td>
 
-      <!-- 対象サイト -->
-      <td class="px-3 py-2">
-        {% if a.site %}
-          <a href="{{ a.site.url }}" class="text-blue-600 hover:underline" target="_blank">
-            {{ a.site.name }}
-          </a>
-        {% else %}-{% endif %}
-      </td>
-
       <!-- メール -->
-      <td class="px-3 py-2 font-mono max-w-[220px] truncate">
+      <td class="px-3 py-2 font-mono truncate max-w-[220px]">
         {{ decrypt(a.email) }}
       </td>
 
-      <!-- 投稿済・予定 -->
+      <!-- 投稿済/予定 -->
       <td class="px-3 py-2 text-center">{{ posted }}</td>
       <td class="px-3 py-2 text-center">{{ scheduled }}</td>
 
-      {# 進捗バー #}
-      <td class="px-3 py-2 w-40">
-        <div class="w-full bg-gray-200 h-2 rounded">
-          <div class="bg-emerald-600 h-2 rounded
-                      w-[calc({{ (100 * posted / (scheduled if scheduled else 1)) | round(1) }}%)]
-          </div>
+      <!-- 進捗バー -->
+      <td class="px-3 py-2">
+        <div class="flex items-center space-x-2">
+          <div class="flex-1 h-2 bg-gray-200 rounded">
+            {# ⬇️ VS Code 警告を出さないように inline-style へ変更 #}
+            <div class="h-2 bg-emerald-600 rounded"
+                 style="width: {{ pct }}%;"></div>
+            </div>
+            <span class="text-xs text-gray-500 w-10 text-right">{{ pct }}%</span>
         </div>
       </td>
-
-      <!-- 最終投稿日時 -->
+      <!-- 記事一覧 -->
       <td class="px-3 py-2">
-        {{ a.updated_at.strftime('%Y-%m-%d %H:%M') if a.updated_at else '-' }}
-      </td>
-
-      <!-- 記事一覧リンク -->
-      <td class="px-3 py-2">
-        <a href="{{ url_for('main.external_account_articles', acct_id=a.id) }}"
+        <a href="{{ url_for('external.external_account_articles', acct_id=a.id) }}"
            class="text-blue-600 hover:underline">記事一覧</a>
       </td>
 
@@ -85,7 +73,6 @@
             ログイン
           </button>
         </form>
-
         <button type="button"
                 class="ml-2 px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-xs copy-cred"
                 data-user="{{ a.username }}"
@@ -99,18 +86,18 @@
 </table>
 
 <script>
-document.querySelectorAll('.copy-cred').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const u = btn.dataset.user;
-    const p = btn.dataset.pass;
-    navigator.clipboard.writeText(`ユーザー名: ${u}\nパスワード: ${p}`);
-    btn.textContent = "✔ コピー";
-    setTimeout(() => btn.textContent = "ID/Pass", 1500);
+document.querySelectorAll('.copy-cred').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    navigator.clipboard.writeText(
+      `ユーザー名: ${btn.dataset.user}\nパスワード: ${btn.dataset.pass}`
+    );
+    btn.textContent="✔ コピー";
+    setTimeout(()=>btn.textContent="ID/Pass",1500);
   });
 });
 </script>
 
 {% else %}
-<p class="text-gray-500">まだ外部ブログアカウントは作成されていません。</p>
+<p class="text-gray-500">まだ外部ブログアカウントはありません。</p>
 {% endif %}
 {% endblock %}

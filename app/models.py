@@ -295,6 +295,7 @@ class RyunosukeDeposit(db.Model):
 
 # ──── 🔸 NEW: 外部ブログ自動投稿機能 ────
 from enum import Enum
+from .enums import BlogType   # 既存であればそのまま
 
 class BlogType(str, Enum):
     NOTE     = "note"
@@ -313,6 +314,8 @@ class ExternalBlogAccount(db.Model):
     email       = db.Column(db.String(120), nullable=False, unique=True)
     username    = db.Column(db.String(100), nullable=False)
     password    = db.Column(db.String(255), nullable=False)          # 🔐 salted-hash 予定
+    nickname    = db.Column(db.String(100), nullable=False, default="")   # ← ADD
+    cookie_path = db.Column(db.Text,         nullable=True)               # ← ADD  Playwright storage_state 保存先
     status      = db.Column(db.String(30), default="active")         # active / done / error
     created_at  = db.Column(db.DateTime, default=datetime.utcnow)
     posted_cnt          = db.Column(db.Integer,  default=0,  nullable=False)

@@ -3310,26 +3310,39 @@ def delete_genre(username, genre_id):
     return redirect(url_for("main.manage_genres", username=username))
 
 
+# -----------------------------------------------------------------
+#────────── 外部SEO関連ルート ──────────
+# -----------------------------------------------------------------
 
-# ────────── 外部SEO関連ルート ──────────
 @bp.route("/external/sites")
 @login_required
 def external_seo_sites():
-    from app.models import Site, ExternalSEOJob
+    from app.models import Site, ExternalSEOJob, ExternalArticleSchedule
+    from sqlalchemy.orm import selectinload
 
-    sites = Site.query.filter_by(user_id=current_user.id).all()
+    sites = (Site.query
+             .filter_by(user_id=current_user.id)
+             .options(selectinload(Site.external_jobs))
+             .all())
 
-    # site_id -> latest_job の辞書
-    job_map = {
-        s.id: (ExternalSEOJob.query
-               .filter_by(site_id=s.id)
-               .order_by(ExternalSEOJob.id.desc())
-               .first())
-        for s in sites
-    }
+    job_map = {}
+    for s in sites:
+        job = max(s.external_jobs, key=lambda j: j.id) if s.external_jobs else None
+        if job:
+            # posted_cnt を動的に計算（schedule が多くても 1 クエリ）
+            posted_cnt = (ExternalArticleSchedule.query
+                          .join(ExternalBlogAccount,
+                                ExternalArticleSchedule.blog_account_id == ExternalBlogAccount.id)
+                          .filter(ExternalBlogAccount.site_id == s.id,
+                                  ExternalArticleSchedule.status == "posted")
+                          .count())
+            job.posted_cnt = posted_cnt   # ← テンプレで使えるよう突っ込む
+        job_map[s.id] = job
+
     return render_template("external_sites.html",
                            sites=sites,
                            job_map=job_map)
+
 
 
 
@@ -3597,3 +3610,23 @@ def blog_one_click_login(acct_id):
             expires=int(time.time()) + 60*60
         )
     return resp
+
+# controllers/external.py
+@bp.route("/external/blogs/<int:site_id>")
+@login_required
+def external_site_blogs(site_id):
+    site = Site.query.get_or_404(site_id)
+    if site.user_id != current_user.id and not current_user.is_admin:
+        abort(403)
+
+    accts = (ExternalBlogAccount.query
+             .filter_by(site_id=site_id)
+             .options(
+                 selectinload(ExternalBlogAccount.schedules),
+                 selectinload(ExternalBlogAccount.site)
+             ).all())
+
+    return render_template("external_site_blogs.html",
+                           site=site,
+                           accts=accts,
+                           decrypt=decrypt)

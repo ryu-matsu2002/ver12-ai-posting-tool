@@ -1,35 +1,57 @@
-# app/services/blog_signup/blog_post/__init__.py
+# -*- coding: utf-8 -*-
 """
-ブログ種別ごとの投稿ディスパッチャ
-post_blog_article(...) を呼ぶだけで、
-BlogType に応じた poster が実行される。
+blog_post パッケージの投稿ディスパッチャ
+===============================================================
+post_blog_article(blog_type, account, title, body_html, image_path=None)
+  └ 各サービス固有の投稿関数を呼び出し、
+      {"ok": True,  "url": "...", "posted_at": datetime}
+      もしくは {"ok": False, "error": "..."} を返す。
+---------------------------------------------------------------
+* 今回は Note のみ実装。将来 Ameba / はてな等は elif を追加するだけで対応。
 """
 
-import logging
-from typing import Dict, Any
-from app.models import BlogType            # Enum(NOTE / HATENA / …)
+from __future__ import annotations
 
-# ---- ブログ別 poster を import ----
-from .note_post import post_to_note        # ← 修正済み
+from typing import Optional, Dict, Any
 
-# --------------------------------------------------------------
-def post_blog_article(
-    blog_type: BlogType,
-    title: str,
-    body_html: str,
-    email: str,
-    password: str
-) -> Dict[str, Any]:
-    """
-    Returns:
-        {"ok": True/False, "url": ..., "error": ...}
-    """
-    if blog_type == BlogType.NOTE:
-        return post_to_note(title, body_html, email, password)
+from ...models import BlogType, ExternalBlogAccount  # 相対 import
 
-    msg = f"[post_blog_article] blog_type {blog_type} not supported"
-    logging.warning(msg)
-    return {"ok": False, "error": msg}
-
+# ── ブログ別 poster を import ───────────────────────────────
+from .note_post import post_note_article
+# 例）Ameba を追加する場合：
+# from .ameba_post import post_ameba_article
 
 __all__ = ["post_blog_article"]
+
+
+def post_blog_article(
+    blog_type: BlogType,
+    account: ExternalBlogAccount,
+    title: str,
+    body_html: str,
+    image_path: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Parameters
+    ----------
+    blog_type   : BlogType  (Enum: NOTE, AMEBA, …)
+    account     : ExternalBlogAccount
+        cookie_path などログイン済み情報を保持
+    title       : str  投稿タイトル
+    body_html   : str  本文 (HTML)
+    image_path  : str | None アイキャッチ画像ファイルパス
+
+    Returns
+    -------
+    dict
+        成功 -> {"ok": True, "url": "...", "posted_at": datetime}
+        失敗 -> {"ok": False, "error": "..."}
+    """
+    if blog_type == BlogType.NOTE:
+        return post_note_article(account, title, body_html, image_path)
+
+    # ここに elif を追加していく
+    # elif blog_type == BlogType.AMEBA:
+    #     return post_ameba_article(account, title, body_html, image_path)
+
+    return {"ok": False, "error": f"Unsupported blog_type: {blog_type.name}"}
