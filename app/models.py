@@ -96,6 +96,13 @@ class Site(db.Model):
     articles = db.relationship("Article", backref="site", lazy='selectin')
     plan_type = db.Column(db.String(50), nullable=True)  # 'affiliate' または 'business'
 
+    external_jobs = db.relationship(
+        "ExternalSEOJob",
+        back_populates="site",
+        cascade="all, delete-orphan",
+        lazy="selectin"
+    )
+
 
 
 # ──── プロンプト ────
@@ -361,7 +368,10 @@ class ExternalSEOJob(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    site = db.relationship("Site", backref="seo_jobs")
+    site = db.relationship(
+    "Site",
+    back_populates="external_jobs"   # ← ここを back_populates に
+    )
 
     def __repr__(self) -> str:
         return f"<SEOJob site={self.site_id} status={self.status} step={self.step}>"

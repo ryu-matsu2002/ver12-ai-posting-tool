@@ -1,23 +1,25 @@
 {# _job_progress.html #}
-{# site_id  と  job (None / ExternalSEOJob) が渡される前提 #}
+{#  site_id と job (None / ExternalSEOJob) がコンテキストに入る前提 #}
 
 {% set has_job = job is not none %}
 
 {% if not has_job %}
-  {# ───────── ① 外部SEO開始ボタン ────────── #}
-  <button class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
-          hx-post="{{ url_for('external.start_external_seo', site_id=site_id) }}"
-          hx-target="#site-card-{{ site_id }}"
-          hx-swap="outerHTML">
+  {# ─── ① 外部SEO開始ボタン ─────────────── #}
+  <button
+    class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
+    hx-post="{{ url_for('main.start_external_seo', site_id=site_id) }}"
+    hx-target="#site-card-{{ site_id }}"
+    hx-swap="outerHTML">
     外部SEO開始
   </button>
 
 {% elif job.step in ['signup', 'generate', 'post'] %}
-  {# ───────── ② 進捗パネル ────────── #}
-  <div hx-get="{{ url_for('external.external_seo_job_status', site_id=site_id) }}"
-       hx-trigger="every 5s"
-       hx-swap="outerHTML"
-       class="flex items-center space-x-3 text-sm">
+  {# ─── ② 進捗パネル（5 秒毎にポーリング）─── #}
+  <div
+    hx-get="{{ url_for('main.external_seo_job_status', site_id=site_id) }}"
+    hx-trigger="every 5s"
+    hx-swap="outerHTML"
+    class="flex items-center space-x-3 text-sm">
 
     <span class="text-gray-600">{{ job.posted_cnt }} / {{ job.article_cnt }}</span>
 
@@ -31,9 +33,10 @@
   </div>
 
 {% else %}
-  {# ───────── ③ ブログ一覧ボタン ────────── #}
-  <a href="{{ url_for('external.external_site_blogs', site_id=site_id) }}"
-     class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded">
+  {# ─── ③ ブログ一覧へ ──────────────────── #}
+  <a
+    href="{{ url_for('main.external_site_blogs', site_id=site_id) }}"
+    class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded">
     ブログ一覧へ
   </a>
 {% endif %}
