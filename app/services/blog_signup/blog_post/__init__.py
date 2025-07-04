@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Optional, Dict, Any
 
-from ...models import BlogType, ExternalBlogAccount  # 相対 import
+from app.models import BlogType, ExternalBlogAccount  # 相対 import
 
 # ── ブログ別 poster を import ───────────────────────────────
 from .note_post import post_note_article
