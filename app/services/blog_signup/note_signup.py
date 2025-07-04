@@ -30,7 +30,7 @@ from playwright.sync_api import (
 
 # ── プロジェクト内部 ──────────────────────────────────────────────────────
 from .. import db  # blog_signup パッケージの __init__.py から再エクスポート済み想定
-from ..models import ExternalBlogAccount
+from app.models import ExternalBlogAccount
 
 # ---------------- 共通定数 ----------------
 LANDING_URL = "https://note.com/signup?signup_type=email"
