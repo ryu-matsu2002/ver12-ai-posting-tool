@@ -3,7 +3,7 @@ blog_signup パッケージの公開インターフェース
 - register_blog_account    … ブログ種別を判断して登録を呼び出すラッパー
 - register_note_account    … Note 専用の実体（note_signup.py 内の signup_note_account を別名で公開）
 """
-
+from app import db 
 from app.models import BlogType
 from .note_signup import signup_note_account as register_note_account  # ✅ エイリアス
 
