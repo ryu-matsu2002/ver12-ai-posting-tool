@@ -23,7 +23,7 @@ from typing import Optional
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
 from .. import db  # blog_signup パッケージの __init__.py で再エクスポートしている想定
-from ..models import ExternalBlogAccount
+from app.models import ExternalBlogAccount
 
 
 # ──────────────────────────────────────────
