@@ -3359,23 +3359,28 @@ def external_seo_sites():
 # -----------------------------------------------------------------
 # 外部SEO: 開始ボタン → ジョブ生成 & 進捗パネル返却
 # -----------------------------------------------------------------
-@bp.route("/external/start/<int:site_id>/<blog>", methods=["POST"])
+@bp.post("/external/start/<int:site_id>/<blog>")
 @login_required
 def start_external_seo(site_id, blog):
-    from app.tasks import enqueue_external_seo
     from app.models import BlogType
-    enqueue_external_seo(site_id, BlogType(blog.upper()))
+    from app.tasks import enqueue_external_seo
 
-    # HTMX リクエストなら HTML パネルを返す
+    try:
+        blog_type = BlogType(blog)     # ← 変換せずそのまま
+    except ValueError:
+        return "不正なブログタイプ", 400
+
+    enqueue_external_seo(site_id, blog_type)
+
+    # HTMX リクエスト
     if request.headers.get("HX-Request"):
-        return render_template("_job_progress.html",
-                               job=None,
-                               site_id=site_id,
-                               blog=blog)
-
-    # それ以外は JSON
-    return jsonify({"status": "queued"})
-
+        return render_template(
+            "_job_progress.html",
+            site_id=site_id,
+            blog=blog,
+            job=None
+        )
+    return jsonify(status="queued")
 
 # -----------------------------------------------------------------
 # 外部SEO: 進捗パネル HTMX 用
