@@ -1,6 +1,7 @@
 # app/tasks.py
 
 import logging
+import asyncio
 from datetime import datetime
 import pytz
 from flask import current_app
@@ -18,11 +19,10 @@ from app.google_client import update_all_gsc_sites
 from concurrent.futures import ThreadPoolExecutor
 from .models import (Site, Keyword, ExternalSEOJob,
                      BlogType, ExternalBlogAccount, ExternalArticleSchedule)
+
 from app.services.blog_signup import register_blog_account
-from app.article_generator import enqueue_generation  # 既存非同期記事生成キュー
-from app.article_generator import _generate_slots_per_site   # 先頭に追加
 from app.services.blog_signup.blog_post import post_blog_article
-import asyncio
+from app.article_generator import enqueue_generation, _generate_slots_per_site
 
 # ────────────────────────────────────────────────
 # APScheduler ＋ スレッドプール
@@ -220,7 +220,7 @@ def _gsc_generation_job(app):
 # 4) 外部SEO ① キュー作成ジョブ
 # --------------------------------------------------------------------------- #
 
-def _run_external_seo_job(app, site_id: int):
+def _run_external_seo_job(app, job_id: int):
     """
     1) ExternalSEOJob を running に
     2) Note アカウントを自動登録
@@ -228,16 +228,18 @@ def _run_external_seo_job(app, site_id: int):
     4) ExternalArticleSchedule を作成
     """
     with app.app_context():
-        from sqlalchemy.exc import SQLAlchemyError
 
         # ── 1. ジョブ行を作成 ──────────────────
-        job = ExternalSEOJob(site_id=site_id, status="running", step="signup", article_cnt=0)
-        db.session.add(job)
-        db.session.commit()
+        # ① ジョブを再取得し running に
+        job  = ExternalSEOJob.query.get(job_id)
+        job.status = "running"; job.step = "signup"; db.session.commit()
+
+        site_id   = job.site_id
+        blog_type = job.blog_type           # NOTE / AMEBA / …
 
         try:
-            # ── 2. アカウント自動登録 ───────────
-            account = register_blog_account(site_id, BlogType.NOTE)  # 内部で signup_note_account() を実行
+            # ② アカウント自動登録
+            account = register_blog_account(site_id, blog_type)
             job.step = "generate"
             db.session.commit()
 
@@ -251,7 +253,7 @@ def _run_external_seo_job(app, site_id: int):
             if not top_kws:
                 raise ValueError("上位キーワードがありません")
 
-            # キュー投入 & スケジュール生成
+            # ③ キュー投入 & スケジュール生成
             schedules = []
             slots = iter(_generate_slots_per_site(app, site_id, len(top_kws)))
             for kw in top_kws:
@@ -360,11 +362,11 @@ def _run_external_post_job(app):
 
                 # ----- ブログへ投稿 -----
                 res = post_blog_article(
-                    blog_type = acct.blog_type,
-                    account   = acct,  
-                    title     = art.title,
-                    body_html = art.body,
-                    image_path= None,        # 画像を渡す場合はここ
+                    blog_type  = acct.blog_type,
+                    account    = acct,   # ← 順序合わせ（関数シグネチャ次第）
+                    title      = art.title,
+                    body_html  = art.body,
+                    image_path = None,
                 )
 
                 if res.get("ok"):
@@ -392,13 +394,15 @@ def _run_external_post_job(app):
         db.session.commit()
 
 
-def enqueue_external_seo(site_id: int):
+def enqueue_external_seo(site_id: int, blog_type: BlogType):
     """
-    外部SEOジョブをバックグラウンドスレッドに投入。
-    ルート側から `enqueue_external_seo(site_id)` を呼ぶだけでOK。
+    外部SEOジョブをバックグラウンドスレッドに投入
     """
     app = current_app._get_current_object()
-    executor.submit(_run_external_seo_job, app, site_id)
+    # ExternalSEOJob をまず DB に作成して job.id を渡す
+    job = ExternalSEOJob(site_id=site_id, blog_type=blog_type, status="queued")
+    db.session.add(job); db.session.commit()
+    executor.submit(_run_external_seo_job, app, job.id)
 
 # --------------------------------------------------------------------------- #
 # 6) 外部SEO バッチ監視ジョブ（100 本完了ごとに次バッチ）
@@ -424,7 +428,7 @@ def _external_watch_job(app):
                 db.session.commit()
 
                 # ③ 同じ site_id で新アカウントを作成
-                new_acct = register_blog_account(acct.site_id, BlogType.NOTE)
+                new_acct = register_blog_account(acct.site_id, acct.blog_type)
 
                 # ④ 上位 KW 再取得 → enqueue_generation
                 kws = (Keyword.query.filter_by(site_id=acct.site_id, status="done")
@@ -524,3 +528,4 @@ def init_scheduler(app):
     app.logger.info("Scheduler started: gsc_metrics_job daily at 0:00")
     app.logger.info("Scheduler started: gsc_generation_job every 20 minutes")
     app.logger.info("Scheduler started: external_post_job every 10 minutes")
+    app.logger.info("Scheduler started: external_watch_job every 15 minutes")

@@ -44,14 +44,17 @@
         {% endif %}
       </div>
     {% else %}
-      <!-- まだジョブが無い場合は開始ボタン -->
-      <button
-        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
-        hx-post="{{ url_for('main.start_external_seo', site_id=s.id) }}"
-        hx-target="#site-card-{{ s.id }}"
-        hx-swap="outerHTML">
-        外部SEO開始
-      </button>
+      <!-- ブログ種別ごとの開始ボタン -->
+      {% for b in ['note', 'ameba', 'livedoor'] %}
+        <button
+          class="px-3 py-1 mr-2 rounded text-white text-sm
+                 {% if b=='note' %}bg-emerald-600{% elif b=='ameba' %}bg-pink-600{% else %}bg-indigo-600{% endif %}"
+          hx-post="{{ url_for('main.start_external_seo', site_id=s.id, blog=b) }}"
+          hx-target="#site-card-{{ s.id }}"
+          hx-swap="outerHTML">
+          {{ b|capitalize }} 外部SEO開始
+        </button>
+      {% endfor %}
     {% endif %}
   </div>
 {% endfor %}

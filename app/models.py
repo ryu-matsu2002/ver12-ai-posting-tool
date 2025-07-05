@@ -361,6 +361,7 @@ class ExternalSEOJob(db.Model):
 
     id         = db.Column(db.Integer, primary_key=True)
     site_id    = db.Column(db.Integer, db.ForeignKey("site.id"), nullable=False, index=True)
+    blog_type  = db.Column(db.Enum(BlogType), nullable=False, default=BlogType.NOTE)
     status     = db.Column(db.String(20), default="queued")   # queued / running / success / error
     step       = db.Column(db.String(50),  default="waiting") # signup / generating / posting / finished
     message    = db.Column(db.Text)                           # エラーや備考を残す
