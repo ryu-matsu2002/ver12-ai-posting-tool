@@ -23,12 +23,10 @@
       {% for b in ['note', 'ameba', 'livedoor'] %}
         {% set key = (s.id, b) %}
         {% set job = job_map.get(key) %}
+        {% set site_id = s.id %}     {# _job_progress.html で参照 #}
+        {% set blog    = b    %}
 
-        {# _job_progress.html に blog も渡す #}
-        {% include "_job_progress.html" with
-           site_id=s.id
-           blog=b
-           job=job %}
+        {% include "_job_progress.html" %}
       {% endfor %}
     </div>
   </div>
