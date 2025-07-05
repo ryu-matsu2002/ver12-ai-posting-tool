@@ -24,35 +24,11 @@
         {% set key = (s.id, b) %}
         {% set job = job_map.get(key) %}
 
-        {% if job %}
-          <!-- 投稿済 / 総数 + ステータスバッジ -->
-          <div class="flex items-center space-x-2 border px-2 py-1 rounded">
-            <span class="text-sm text-gray-600 font-semibold">{{ b|capitalize }}</span>
-            <span class="text-sm text-gray-500">{{ job.posted_cnt }} / {{ job.article_cnt }}</span>
-
-            {% if job.step == 'signup' %}
-              <span class="px-2 py-1 rounded bg-yellow-100 text-yellow-700 text-xs">signup</span>
-            {% elif job.step == 'generate' %}
-              <span class="px-2 py-1 rounded bg-blue-100 text-blue-700 text-xs">generate</span>
-            {% elif job.step == 'post' %}
-              <span class="px-2 py-1 rounded bg-purple-100 text-purple-700 text-xs">post</span>
-            {% elif job.step == 'done' %}
-              <span class="px-2 py-1 rounded bg-green-100 text-green-700 text-xs">done</span>
-            {% else %}
-              <span class="px-2 py-1 rounded bg-red-100 text-red-700 text-xs">error</span>
-            {% endif %}
-          </div>
-        {% else %}
-          <!-- 外部SEO開始ボタン -->
-          <button
-            class="px-3 py-1 rounded text-white text-sm
-                   {% if b=='note' %}bg-emerald-600{% elif b=='ameba' %}bg-pink-600{% else %}bg-indigo-600{% endif %}"
-            hx-post="{{ url_for('main.start_external_seo', site_id=s.id, blog=b) }}"
-            hx-target="#site-card-{{ s.id }}"
-            hx-swap="outerHTML">
-            {{ b|capitalize }} 外部SEO開始
-          </button>
-        {% endif %}
+        {# _job_progress.html に blog も渡す #}
+        {% include "_job_progress.html" with
+           site_id=s.id
+           blog=b
+           job=job %}
       {% endfor %}
     </div>
   </div>
