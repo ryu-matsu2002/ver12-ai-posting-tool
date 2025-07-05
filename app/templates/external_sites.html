@@ -4,7 +4,6 @@
 {% block content %}
 <h2 class="text-2xl font-bold mb-6 flex items-center justify-between">
   🚀 外部SEO | サイト一覧
-  <!-- 自分のブログアカウント一覧ページ -->
   <a href="{{ url_for('main.my_blog_accounts') }}"
      class="text-sm px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded">
     外部ブログアカウント一覧
@@ -12,50 +11,50 @@
 </h2>
 
 {% for s in sites %}
-  {% set job = job_map.get(s.id) %}
-
-  <div id="site-card-{{ s.id }}" class="border rounded p-4 flex justify-between items-center mb-4">
-    <!-- ── 左: サイト名 & URL ─────────────────────────── -->
-    <div class="overflow-hidden">
+  <div id="site-card-{{ s.id }}" class="border rounded p-4 mb-4">
+    <!-- サイト名 & URL -->
+    <div class="mb-2">
       <div class="font-semibold truncate max-w-xs">{{ s.name }}</div>
       <a href="{{ s.url }}" class="text-blue-600 text-sm break-all" target="_blank">{{ s.url }}</a>
     </div>
 
-    <!-- ── 右: バッジ or 開始ボタン ─────────────────── -->
-    {% if job %}
-      <!-- 進捗 & ステップ表示 -->
-      <div class="flex items-center space-x-3">
-        <!-- 投稿済 / 全体  -->
-        <span class="text-sm text-gray-500">
-          {{ job.posted_cnt }} / {{ job.article_cnt }}
-        </span>
-
-        <!-- ステップバッジ -->
-        {% if job.step == 'signup' %}
-          <span class="px-2 py-1 rounded bg-yellow-100 text-yellow-700 text-xs">signup</span>
-        {% elif job.step == 'generate' %}
-          <span class="px-2 py-1 rounded bg-blue-100 text-blue-700 text-xs">generate</span>
-        {% elif job.step == 'post' %}
-          <span class="px-2 py-1 rounded bg-purple-100 text-purple-700 text-xs">post</span>
-        {% elif job.step == 'done' %}
-          <span class="px-2 py-1 rounded bg-green-100 text-green-700 text-xs">done</span>
-        {% else %}
-          <span class="px-2 py-1 rounded bg-red-100 text-red-700 text-xs">error</span>
-        {% endif %}
-      </div>
-    {% else %}
-      <!-- ブログ種別ごとの開始ボタン -->
+    <!-- ブログ種別ごとの操作 -->
+    <div class="flex flex-wrap gap-2 mt-2">
       {% for b in ['note', 'ameba', 'livedoor'] %}
-        <button
-          class="px-3 py-1 mr-2 rounded text-white text-sm
-                 {% if b=='note' %}bg-emerald-600{% elif b=='ameba' %}bg-pink-600{% else %}bg-indigo-600{% endif %}"
-          hx-post="{{ url_for('main.start_external_seo', site_id=s.id, blog=b) }}"
-          hx-target="#site-card-{{ s.id }}"
-          hx-swap="outerHTML">
-          {{ b|capitalize }} 外部SEO開始
-        </button>
+        {% set key = (s.id, b) %}
+        {% set job = job_map.get(key) %}
+
+        {% if job %}
+          <!-- 投稿済 / 総数 + ステータスバッジ -->
+          <div class="flex items-center space-x-2 border px-2 py-1 rounded">
+            <span class="text-sm text-gray-600 font-semibold">{{ b|capitalize }}</span>
+            <span class="text-sm text-gray-500">{{ job.posted_cnt }} / {{ job.article_cnt }}</span>
+
+            {% if job.step == 'signup' %}
+              <span class="px-2 py-1 rounded bg-yellow-100 text-yellow-700 text-xs">signup</span>
+            {% elif job.step == 'generate' %}
+              <span class="px-2 py-1 rounded bg-blue-100 text-blue-700 text-xs">generate</span>
+            {% elif job.step == 'post' %}
+              <span class="px-2 py-1 rounded bg-purple-100 text-purple-700 text-xs">post</span>
+            {% elif job.step == 'done' %}
+              <span class="px-2 py-1 rounded bg-green-100 text-green-700 text-xs">done</span>
+            {% else %}
+              <span class="px-2 py-1 rounded bg-red-100 text-red-700 text-xs">error</span>
+            {% endif %}
+          </div>
+        {% else %}
+          <!-- 外部SEO開始ボタン -->
+          <button
+            class="px-3 py-1 rounded text-white text-sm
+                   {% if b=='note' %}bg-emerald-600{% elif b=='ameba' %}bg-pink-600{% else %}bg-indigo-600{% endif %}"
+            hx-post="{{ url_for('main.start_external_seo', site_id=s.id, blog=b) }}"
+            hx-target="#site-card-{{ s.id }}"
+            hx-swap="outerHTML">
+            {{ b|capitalize }} 外部SEO開始
+          </button>
+        {% endif %}
       {% endfor %}
-    {% endif %}
+    </div>
   </div>
 {% endfor %}
 {% endblock %}

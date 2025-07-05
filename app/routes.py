@@ -3317,7 +3317,10 @@ def delete_genre(username, genre_id):
 @bp.route("/external/sites")
 @login_required
 def external_seo_sites():
-    from app.models import Site, ExternalSEOJob, ExternalArticleSchedule
+    from app.models import (
+        Site, ExternalSEOJob, ExternalArticleSchedule,
+        ExternalBlogAccount, BlogType
+    )
     from sqlalchemy.orm import selectinload
 
     sites = (Site.query
@@ -3325,25 +3328,29 @@ def external_seo_sites():
              .options(selectinload(Site.external_jobs))
              .all())
 
+    # ── key = (site_id, blog) のマップに変更 ─────────────────────
     job_map = {}
     for s in sites:
-        job = max(s.external_jobs, key=lambda j: j.id) if s.external_jobs else None
-        if job:
-            # posted_cnt を動的に計算（schedule が多くても 1 クエリ）
+        for job in s.external_jobs:
+            key = (s.id, job.blog_type.value.lower())   # 例: (3, 'note')
+
+            # 進捗カウントをブログ種別で集計
             posted_cnt = (ExternalArticleSchedule.query
                           .join(ExternalBlogAccount,
                                 ExternalArticleSchedule.blog_account_id == ExternalBlogAccount.id)
                           .filter(ExternalBlogAccount.site_id == s.id,
+                                  ExternalBlogAccount.blog_type == job.blog_type,
                                   ExternalArticleSchedule.status == "posted")
                           .count())
-            job.posted_cnt = posted_cnt   # ← テンプレで使えるよう突っ込む
-        job_map[s.id] = job
+            job.posted_cnt = posted_cnt
 
-    return render_template("external_sites.html",
-                           sites=sites,
-                           job_map=job_map)
+            job_map[key] = job   # ← (site, blog) → job
 
-
+    return render_template(
+        "external_sites.html",
+        sites    = sites,
+        job_map  = job_map
+    )
 
 
 # -----------------------------------------------------------------
