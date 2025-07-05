@@ -3332,6 +3332,9 @@ def external_seo_sites():
     job_map = {}
     for s in sites:
         for job in s.external_jobs:
+            # status=archived はスキップ
+            if job.status == "archived":
+                continue
             key = (s.id, job.blog_type.value.lower())   # 例: (3, 'note')
 
             # 進捗カウントをブログ種別で集計
