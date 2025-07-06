@@ -94,7 +94,7 @@ async def signup_note_account(account: ExternalBlogAccount) -> Dict[str, str | b
                 # 3) 無ければ「メールで登録」→ iframe 内フォーム
                 logging.info("[note_signup] fallback ⇒ click 'メールで登録'")
                 await page.locator("text=メールで登録").first.click()
-                frame = page.frame_locator("iframe")
+                frame = page.frame_locator("iframe").nth(0)
 
                 await frame.locator(email_sel).first.wait_for(
                     state="visible", timeout=20_000
