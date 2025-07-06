@@ -118,7 +118,7 @@ def legacy_signup_note() -> Dict[str, str | bool | None]:
             if cb.count():
                 cb.check()
 
-            submit_btn = page.locator('button[type="submit"]')
+            submit_btn = page.locator('[data-testid="signup-submit"]')
             for _ in range(60):
                 if submit_btn.is_enabled():
                     break
@@ -206,7 +206,7 @@ async def signup_note_account(account: ExternalBlogAccount) -> None:
         if await cb.count():
             await cb.check()
 
-        submit = page.locator('button[type="submit"]')
+        submit = page.locator('[data-testid="signup-submit"]')
         for _ in range(60):
             if await submit.is_enabled():
                 break
