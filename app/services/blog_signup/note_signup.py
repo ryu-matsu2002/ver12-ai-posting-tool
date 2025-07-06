@@ -7,8 +7,8 @@ signup_note_account(account: ExternalBlogAccount) -> dict
   * storage_state.json を保存し DB を更新
   * 戻り値: {"ok": True} もしくは {"ok": False, "error": "..."}
 --------------------------------------------------------------
-※ 旧 `legacy_signup_note()`（mail.tm を経由する検証向け）は
-   2025-07-06 時点で未使用となったため完全に削除しました。
+※ 旧 legacy_signup_note()（mail.tm を経由する検証向け）は
+   2025-07-06 時点で未使用になったため完全に削除しました。
 """
 
 from __future__ import annotations
@@ -24,10 +24,7 @@ from pathlib import Path
 from typing import Dict
 
 # ── Playwright ────────────────────────────────────────────────
-from playwright.async_api import (
-    async_playwright,
-    TimeoutError as PWTimeout,
-)
+from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
 # ── プロジェクト内部 ──────────────────────────────────────────
 from .. import db
@@ -45,7 +42,7 @@ Object.defineProperty(navigator,'plugins',{get:()=>[1,2,3,4,5]});
 """
 
 # =============================================================================
-# 0. ユーティリティ (簡易)
+# 0. ユーティリティ
 # =============================================================================
 def _rand(n: int = 8) -> str:
     return "".join(random.choices(string.ascii_lowercase + string.digits, k=n))
@@ -117,7 +114,8 @@ async def signup_note_account(account: ExternalBlogAccount) -> Dict[str, str | b
                 await cb.check()
 
             submit = page.locator('[data-testid="signup-submit"]')
-            await page.wait_for_function("el => !el.disabled", submit, timeout=30_000)
+            # ── Playwright v1.43+：arg= で渡す ──
+            await page.wait_for_function("el => !el.disabled", arg=submit, timeout=30_000)
             await submit.click()
             await page.wait_for_url(f"**{COMPLETE_PATH}**", timeout=30_000)
 
@@ -146,5 +144,4 @@ async def signup_note_account(account: ExternalBlogAccount) -> Dict[str, str | b
         return {"ok": False, "error": str(e)}
 
 
-# エクスポート
 __all__ = ["signup_note_account"]
