@@ -1,8 +1,16 @@
+# -*- coding: utf-8 -*-
 """
 blog_signup パッケージ公開 API
 ------------------------------------------------
 register_blog_account(site_id, blog_type)
-  └ ブログ種別ごとにアカウント登録を振り分ける同期同期関数
+  └ ブログ種別ごとにアカウント登録を振り分ける**同期**関数
+
+変更点（2025-07-06）
+────────────────────────────────────────────
+* register_note_account_sync() の戻り値を dict → ExternalBlogAccount に変更
+* 成功時は acct.status="active" に更新して return
+* 失敗時は acct.status="error"／acct.message に理由を残し RuntimeError を raise
+  └ 呼び出し側 (_run_external_seo_job) で捕捉→ExternalSEOJob.message へ転記される
 """
 
 from __future__ import annotations
@@ -17,23 +25,27 @@ from .note_signup import signup_note_account  # async coroutine
 
 # ──────────────────────────────────────────
 def _random_email() -> str:
-    # disposable ドメインだと弾かれるため汎用ドメインを使用
+    """example.net ドメインでランダム email を生成"""
     prefix = "".join(secrets.choice(string.ascii_lowercase) for _ in range(10))
     return f"{prefix}@example.net"
 
 
 def _random_password() -> str:
-    # 8 文字以上・英数＋記号を必ず含む
+    """8 文字以上・英数＋記号を必ず含むパスワード"""
     core = secrets.token_urlsafe(10)[:8]
     return core + "A1!"
 
 
 # ──────────────────────────────────────────
-def register_note_account_sync(site_id: int) -> dict:
+def register_note_account_sync(site_id: int) -> ExternalBlogAccount:  # ← 戻り値型をモデルに
     """
-    Note アカウントを同期で登録し、結果 dict を返す
+    Note アカウントを同期で登録し、成功時は ExternalBlogAccount を返す
+
+    Raises
+    ------
+    RuntimeError : サインアップ失敗時
     """
-    # 1) DB にレコードを作成して ID を確定
+    # 1️⃣ DB にレコードを作成
     email    = _random_email()
     password = _random_password()
 
@@ -49,30 +61,35 @@ def register_note_account_sync(site_id: int) -> dict:
     db.session.add(acct)
     db.session.commit()
 
-    # 2) Playwright でサインアップ実行
+    # 2️⃣ Playwright でサインアップ実行
     result = asyncio.run(signup_note_account(acct))
 
-    # 3) 成否に応じて処理
+    # 3️⃣ 成否判定
     if result.get("ok"):
-        return {
-            "ok": True,
-            "account_id": acct.id,
-            "email": email,
-            "password": password,
-        }
+        acct.status = "active"
+        db.session.commit()
+        return acct
 
-    # 失敗時はレコードを無効化
-    acct.status = "error"
+    # 失敗時: レコードを error にして例外
+    acct.status  = "error"
+    acct.message = result.get("error", "unknown")  # ExternalBlogAccount に message カラムがある前提
     db.session.commit()
-    return {"ok": False, "error": result.get("error", "unknown")}
+    raise RuntimeError(acct.message)
 
 
 # ──────────────────────────────────────────
-def register_blog_account(site_id: int, blog_type: BlogType):
-    """ブログ種別ディスパッチャ"""
+def register_blog_account(site_id: int, blog_type: BlogType) -> ExternalBlogAccount:
+    """
+    ブログ種別ディスパッチャ
+    Returns
+    -------
+    ExternalBlogAccount
+        成功時は status="active" のモデル
+    """
     if blog_type == BlogType.NOTE:
         return register_note_account_sync(site_id)
 
+    # まだ未実装のブログ
     raise ValueError(f"Blog type {blog_type} not supported yet.")
 
 

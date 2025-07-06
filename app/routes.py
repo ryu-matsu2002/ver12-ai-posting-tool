@@ -3362,25 +3362,36 @@ def external_seo_sites():
 @bp.post("/external/start/<int:site_id>/<blog>")
 @login_required
 def start_external_seo(site_id, blog):
+    """
+    NOTE 以外はまだ実装されていないため 400 を返す
+    """
     from app.models import BlogType
     from app.tasks import enqueue_external_seo
 
+    # --- Enum へ変換（大文字・小文字どちらでも受け入れ） -------------------
     try:
-        blog_type = BlogType(blog)     # ← 変換せずそのまま
+        blog_type = BlogType(blog.lower())
     except ValueError:
         return "不正なブログタイプ", 400
 
+    # --- 現在サポートしているブログタイプは NOTE のみ ------------------------
+    SUPPORTED_BLOG_TYPES = {BlogType.NOTE}
+    if blog_type not in SUPPORTED_BLOG_TYPES:
+        return f"{blog_type.value} は現在未実装です", 400
+
+    # --- ジョブ登録 ----------------------------------------------------------
     enqueue_external_seo(site_id, blog_type)
 
-    # HTMX リクエスト
+    # --- HTMX リクエストへの応答 --------------------------------------------
     if request.headers.get("HX-Request"):
         return render_template(
             "_job_progress.html",
             site_id=site_id,
-            blog=blog,
+            blog=blog_type.value,
             job=None
         )
     return jsonify(status="queued")
+
 
 # -----------------------------------------------------------------
 # 外部SEO: 進捗パネル HTMX 用
