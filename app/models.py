@@ -324,6 +324,7 @@ class ExternalBlogAccount(db.Model):
     nickname    = db.Column(db.String(100), nullable=False, default="")   # ← ADD
     cookie_path = db.Column(db.Text,         nullable=True)               # ← ADD  Playwright storage_state 保存先
     status      = db.Column(db.String(30), default="active")         # active / done / error
+    message = db.Column(db.Text, nullable=True)  # signupエラー時の説明メッセージ
     created_at  = db.Column(db.DateTime, default=datetime.utcnow)
     posted_cnt          = db.Column(db.Integer,  default=0,  nullable=False)
     next_batch_started  = db.Column(db.Boolean,  default=False, nullable=False)
