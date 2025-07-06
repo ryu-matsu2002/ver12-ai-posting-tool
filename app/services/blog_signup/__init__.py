@@ -1,29 +1,39 @@
 """
 blog_signup パッケージ公開 API
----------------------------------
+------------------------------------------------
 register_blog_account(site_id, blog_type)
-    ブログ種別ごとにアカウント登録を振り分ける同期関数
+  └ ブログ種別ごとにアカウント登録を振り分ける同期同期関数
 """
 
-import asyncio, secrets, string
+from __future__ import annotations
+
+import asyncio
+import secrets
+import string
+
 from app import db
 from app.models import BlogType, ExternalBlogAccount
-from .note_signup import signup_note_account   # async coroutine
+from .note_signup import signup_note_account  # async coroutine
 
 # ──────────────────────────────────────────
 def _random_email() -> str:
-    prefix = ''.join(secrets.choice(string.ascii_lowercase) for _ in range(10))
-    return f"{prefix}@example.com"
+    # disposable ドメインだと弾かれるため汎用ドメインを使用
+    prefix = "".join(secrets.choice(string.ascii_lowercase) for _ in range(10))
+    return f"{prefix}@example.net"
+
 
 def _random_password() -> str:
-    return secrets.token_urlsafe(12)
+    # 8 文字以上・英数＋記号を必ず含む
+    core = secrets.token_urlsafe(10)[:8]
+    return core + "A1!"
+
 
 # ──────────────────────────────────────────
 def register_note_account_sync(site_id: int) -> dict:
     """
-    async 関数 signup_note_account(account) を同期ラッパで実行。
+    Note アカウントを同期で登録し、結果 dict を返す
     """
-    # ① 先にアカウントレコードを作成
+    # 1) DB にレコードを作成して ID を確定
     email    = _random_email()
     password = _random_password()
 
@@ -34,32 +44,36 @@ def register_note_account_sync(site_id: int) -> dict:
         password  = password,
         username  = email.split("@")[0],
         nickname  = email.split("@")[0],
+        status    = "pending",
     )
     db.session.add(acct)
     db.session.commit()
 
-    # ② Playwright で Note サインアップ（cookie 保存など）
-    result = asyncio.run(signup_note_account(acct))   # ← acct を引数に渡す
+    # 2) Playwright でサインアップ実行
+    result = asyncio.run(signup_note_account(acct))
 
-    # ③ 成功なら OK フラグと account_id を返却
+    # 3) 成否に応じて処理
     if result.get("ok"):
-        result.update({
+        return {
+            "ok": True,
             "account_id": acct.id,
             "email": email,
-            "password": password
-        })
-    else:
-        # 失敗したらアカウントをロールバック削除しておく
-        db.session.delete(acct)
-        db.session.commit()
+            "password": password,
+        }
 
-    return result
+    # 失敗時はレコードを無効化
+    acct.status = "error"
+    db.session.commit()
+    return {"ok": False, "error": result.get("error", "unknown")}
+
 
 # ──────────────────────────────────────────
 def register_blog_account(site_id: int, blog_type: BlogType):
-    """共通入口：ブログ種別で振り分け"""
+    """ブログ種別ディスパッチャ"""
     if blog_type == BlogType.NOTE:
         return register_note_account_sync(site_id)
+
     raise ValueError(f"Blog type {blog_type} not supported yet.")
+
 
 __all__ = ["register_blog_account"]
