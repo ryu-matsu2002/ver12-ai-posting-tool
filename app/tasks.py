@@ -250,7 +250,7 @@ def _run_livedoor_signup(app, site_id: int):
                 site_id   = site_id,
                 blog_type = BlogType.LIVEDOOR,
                 status    = "error",
-                step      = "signup",
+                step      = "error", 
                 message   = str(e)
             )
             db.session.add(job); db.session.commit()

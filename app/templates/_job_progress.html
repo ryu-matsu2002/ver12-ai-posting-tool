@@ -9,12 +9,12 @@
 {% set in_progress = job is not none and job.step in ['signup', 'generate', 'post'] %}
 
 {# ──────────────────────────────────────────────────────────────────
-   ① まだジョブが無い → 開始ボタン
+   ① ジョブが無い → 開始ボタン
    ────────────────────────────────────────────────────────────────── #}
 {% if job is none %}
 <button
   class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
-  hx-post="{{ url_for('main.start_external_seo') }}"      {# /external/start ルート #}
+  hx-post="{{ url_for('main.start_external_seo') }}"
   hx-vals='{"site_id":"{{ site_id }}","blog":"{{ blog }}"}'
   hx-target="this"
   hx-swap="outerHTML">
@@ -22,7 +22,7 @@
 </button>
 
 {# ──────────────────────────────────────────────────────────────────
-   ② ジョブ進行中 → 進捗表示（5 秒ごとにポーリングして自己更新）
+   ② ジョブ進行中 → 進捗バー（5s ごとポーリング）
    ────────────────────────────────────────────────────────────────── #}
 {% elif in_progress %}
 <div
@@ -43,7 +43,20 @@
 </div>
 
 {# ──────────────────────────────────────────────────────────────────
-   ③ 完了・エラー後 → ブログ記事一覧へリンク
+   ③ エラー → 再試行ボタン
+   ────────────────────────────────────────────────────────────────── #}
+{% elif job.status == 'error' %}
+<button
+  class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded"
+  hx-post="{{ url_for('main.start_external_seo') }}"
+  hx-vals='{"site_id":"{{ site_id }}","blog":"{{ blog }}"}'
+  hx-target="this"
+  hx-swap="outerHTML">
+  再試行 (Error)
+</button>
+
+{# ──────────────────────────────────────────────────────────────────
+   ④ 完了 → ブログ一覧リンク
    ────────────────────────────────────────────────────────────────── #}
 {% else %}
 <a

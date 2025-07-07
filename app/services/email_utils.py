@@ -16,24 +16,44 @@ def _client():
 def create_temp_mail() -> Tuple[str, str, str]:
     """
     Returns:
-        address  … 新規メールアドレス
-        password … ランダムに生成されたパスワード
-        token    … 認証用 JWT (後続の GET /messages で使用)
+        address, password, token  (JWT)
+    Retries on 429 with exponential backoff (max ~2 min)
     """
     with _client() as cli:
         # 1) 利用可能ドメイン取得
         dom = cli.get("/domains").json()["hydra:member"][0]["domain"]
 
         # 2) アカウント作成
-        import secrets, string
+        import secrets, string, time, logging
         addr = f"{secrets.token_hex(6)}@{dom}"
-        pwd  = "".join(secrets.choice(string.ascii_letters+string.digits) for _ in range(12))
-        r = cli.post("/accounts", json={"address": addr, "password": pwd})
-        r.raise_for_status()
+        pwd  = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
 
-        # 3) トークン取得
-        tok = cli.post("/token", json={"address": addr, "password": pwd}).json()["token"]
+        for i in range(6):                          # 0..5 → 最大 64 秒
+            r = cli.post("/accounts", json={"address": addr, "password": pwd})
+            if r.status_code != 429:
+                r.raise_for_status()
+                break
+            wait = 2 ** i
+            logging.warning("[mail.tm] 429 /accounts, retry in %ss", wait)
+            time.sleep(wait)
+        else:
+            raise RuntimeError("mail.tm 429 on /accounts (too many retries)")
+
+        # 3) JWT トークン取得
+        for i in range(6):
+            r = cli.post("/token", json={"address": addr, "password": pwd})
+            if r.status_code != 429:
+                r.raise_for_status()
+                tok = r.json()["token"]
+                break
+            wait = 2 ** i
+            logging.warning("[mail.tm] 429 /token, retry in %ss", wait)
+            time.sleep(wait)
+        else:
+            raise RuntimeError("mail.tm 429 on /token (too many retries)")
+
         return addr, pwd, tok
+
 
 def _auth_headers(token: str):
     return {"Authorization": f"Bearer {token}"}
