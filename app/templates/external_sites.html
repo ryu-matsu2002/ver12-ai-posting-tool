@@ -20,7 +20,7 @@
 
     <!-- ブログ種別ごとの操作 -->
     <div class="flex flex-wrap gap-2 mt-2">
-      {% for b in ['note', 'ameba', 'livedoor'] %}
+      {% for b in ['note', 'ameba', 'livedoor', 'hatena'] %}
         {% set key = (s.id, b) %}
         {% set job = job_map.get(key) %}
         {% set site_id = s.id %}     {# _job_progress.html で参照 #}

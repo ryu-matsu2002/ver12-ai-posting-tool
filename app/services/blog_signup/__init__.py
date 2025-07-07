@@ -22,6 +22,7 @@ import string
 from app import db
 from app.models import BlogType, ExternalBlogAccount
 from .note_signup import signup_note_account  # async coroutine
+from .hatena_signup import signup_hatena_account
 
 # ──────────────────────────────────────────
 def _random_email() -> str:
@@ -76,6 +77,27 @@ def register_note_account_sync(site_id: int) -> ExternalBlogAccount:  # ← 戻�
     db.session.commit()
     raise RuntimeError(acct.message)
 
+# 追記：同期ラッパ
+def register_hatena_account_sync(site_id:int) -> ExternalBlogAccount:
+    email    = _random_email()
+    password = _random_password()
+    acct = ExternalBlogAccount(
+        site_id   = site_id,
+        blog_type = BlogType.HATENA,
+        email     = email,
+        password  = password,
+        username  = email.split("@")[0],
+        nickname  = email.split("@")[0],
+        status    = "pending",
+    )
+    db.session.add(acct); db.session.commit()
+
+    result = asyncio.run(signup_hatena_account(acct))
+    if result.get("ok"):
+        acct.status = "active"; db.session.commit(); return acct
+    acct.status = "error"; acct.message = result["error"]; db.session.commit()
+    raise RuntimeError(acct.message)
+
 
 # ──────────────────────────────────────────
 def register_blog_account(site_id: int, blog_type: BlogType) -> ExternalBlogAccount:
@@ -88,6 +110,9 @@ def register_blog_account(site_id: int, blog_type: BlogType) -> ExternalBlogAcco
     """
     if blog_type == BlogType.NOTE:
         return register_note_account_sync(site_id)
+    
+    elif blog_type == BlogType.HATENA:                            # ★追加
+        return register_hatena_account_sync(site_id)
 
     # まだ未実装のブログ
     raise ValueError(f"Blog type {blog_type} not supported yet.")

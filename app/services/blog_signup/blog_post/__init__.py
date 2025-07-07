@@ -16,8 +16,10 @@ from typing import Optional, Dict, Any
 
 from app.models import BlogType, ExternalBlogAccount  # 相対 import
 
+
 # ── ブログ別 poster を import ───────────────────────────────
 from .note_post import post_note_article
+from .hatena_post import post_hatena_article
 # 例）Ameba を追加する場合：
 # from .ameba_post import post_ameba_article
 
@@ -49,6 +51,9 @@ def post_blog_article(
     """
     if blog_type == BlogType.NOTE:
         return post_note_article(account, title, body_html, image_path)
+    
+    elif blog_type == BlogType.HATENA:                  # ★追加
+        return post_hatena_article(account, title, body_html, image_path)
 
     # ここに elif を追加していく
     # elif blog_type == BlogType.AMEBA:
