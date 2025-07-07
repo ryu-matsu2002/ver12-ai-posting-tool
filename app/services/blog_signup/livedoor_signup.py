@@ -5,77 +5,79 @@
 
 from __future__ import annotations
 
-import logging
-import random
-import string
+import logging, random, string
 from datetime import datetime
-
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+
 from app.services.mail_utils.mail_tm import create_inbox, poll_latest_link
 from app.models import db, ExternalBlogAccount, BlogType
 
-REG_URL     = "https://member.livedoor.com/lite/register/"
-BLOG_CREATE = "https://member.livedoor.com/blog/register"
-APIKEY_URL  = "https://livedoor.blogcms.jp/atompub/{blog}/apikey"
-
+# ---------------------------------------------------------------- URLs
+REG_URL      = "https://member.livedoor.com/lite/register/"     # メール入力ページ
+BLOG_CREATE  = "https://member.livedoor.com/blog/register"      # ブログ作成ページ
+APIKEY_URL   = "https://livedoor.blogcms.jp/atompub/{blog}/apikey"
 
 # ---------------------------------------------------------------- helpers
 def _rand_pw(n: int = 10) -> str:
-    pool = string.ascii_letters + string.digits
-    return "".join(random.choice(pool) for _ in range(n))
-
+    return "".join(random.choices(string.ascii_letters + string.digits, k=n))
 
 # ---------------------------------------------------------------- main
 def signup(site_id: int) -> ExternalBlogAccount:
-    """site_id にひも付ける Livedoor ブログを完全自動で生成し ExternalBlogAccount を返す"""
-    email, jwt = create_inbox()                       # ① 使い捨てメール作成
+    """site_id にひも付く Livedoor ブログを完全自動生成し ExternalBlogAccount を返す"""
+    email, jwt = create_inbox()                # ① 使い捨てメール
     passwd     = _rand_pw()
     nick       = "auto" + datetime.utcnow().strftime("%f")  # ID / blog 共通
 
     with sync_playwright() as p:
         br   = p.chromium.launch(headless=True, args=["--no-sandbox"])
         page = br.new_page()
-        page.set_default_timeout(60_000)              # 60 秒タイムアウトに拡張
+        page.set_default_timeout(60_000)       # 全操作 60 秒待機
 
-        # ② 仮登録フォーム（メール送信）
+        # ② 仮登録：メール入力 → 確認メール送信
         page.goto(REG_URL, wait_until="networkidle")
         page.wait_for_selector("input[type='email']")
         page.fill("input[type='email']", email)
-        page.click("input[type='submit']")
+        page.click("button[type='submit']")    # ← ボタンは <button>
 
-        # ③ メールの確認リンク取得 → 本登録
+        # ③ メール内リンク → 本登録フォーム (register/input)
         verify = poll_latest_link(jwt, sender_like="@livedoor", timeout=300)
         if not verify:
             br.close()
             raise RuntimeError("verification mail not found")
         page.goto(verify, wait_until="networkidle")
 
-        # 本登録フォーム：2025/07 時点の DOM
-        page.wait_for_selector("#username")
-        page.fill("#username", nick)
-        page.fill("#password1", passwd)
-        page.fill("#password2", passwd)
-        page.click("input[type='submit']")
+        # ④ ユーザー情報を入力
+        #    実 DOM (2025-07) では：
+        #      livedoor ID        → input[name='login'] か #username
+        #      パスワード         → input[name='password']
+        #      パスワード(確認)    → input[name='password2']
+        #      メールアドレス      → input[name='mail']         (自動で入っている)
+        page.wait_for_selector("input[name='login'], #username")
+        page.fill("input[name='login'], #username", nick)
+        page.fill("input[name='password']",  passwd)
+        page.fill("input[name='password2']", passwd)
+        # メール欄は既に filled されているが念のため
+        page.fill("input[name='mail']", email)
+        page.click("button[type='submit']")
 
-        # ④ ブログ開設
+        # ⑤ ブログ開設
         page.goto(BLOG_CREATE, wait_until="networkidle")
         page.wait_for_selector("input[name='blog_id']")
         page.fill("input[name='blog_id']", nick)
-        page.fill("input[name='title']", f"{nick}-blog")
-        page.check("input[type='checkbox']")          # 規約チェック
+        page.fill("input[name='title']",  f"{nick}-blog")
+        page.check("input[type='checkbox']")   # 利用規約
         page.click("input[type='submit']")
 
-        # ⑤ AtomPub キー発行
+        # ⑥ AtomPub API キー発行
         page.goto(APIKEY_URL.format(blog=nick), wait_until="networkidle")
         try:
-            page.click("text=APIキーを発行", timeout=10_000)
+            page.click("text=APIキーを発行", timeout=8_000)
         except PWTimeout:
-            # 既に発行済みならスルー
-            pass
+            pass                                # 既に発行済み
         api_key = page.text_content("css=td.api_key, css=code").strip()
         br.close()
 
-    # ⑥ DB へ保存
+    # ⑦ DB 保存
     acc = ExternalBlogAccount(
         site_id   = site_id,
         blog_type = BlogType.LIVEDOOR,
@@ -84,7 +86,7 @@ def signup(site_id: int) -> ExternalBlogAccount:
         password  = passwd,
         nickname  = nick,
         status    = "active",
-        message   = api_key,          # ひとまず message フィールドに格納
+        message   = api_key,        # API キーを message に保管
     )
     db.session.add(acc)
     db.session.commit()
