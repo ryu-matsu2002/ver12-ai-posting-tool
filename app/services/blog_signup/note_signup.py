@@ -29,6 +29,7 @@ from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
 from .. import db
 from app.models import ExternalBlogAccount
+from .mail_tm_client import create_inbox, wait_verify_link
 
 # --------------------------------------------------------------------
 # 固定定数
@@ -68,10 +69,14 @@ async def signup_note_account(account: ExternalBlogAccount) -> Dict[str, str | b
     dict
         {"ok": True} もしくは {"ok": False, "error": "..."}
     """
-    if not (account.email and account.password):
-        return {"ok": False, "error": "email/password not set"}
-
+    # ① ここでワンタイムメール発行し、モデルにセット --------------★ NEW
+    email, mail_pwd, token = create_inbox()
+    account.email = email
+    account.password = _rand(12) + "A1!"
     nickname = account.nickname or f"user-{_rand(6)}"
+    db.session.commit()   # email/password を DB に確定
+
+    
     logging.info("[note_signup] ▶ START id=%s mail=%s", account.id, account.email)
 
     try:
@@ -153,6 +158,13 @@ async def signup_note_account(account: ExternalBlogAccount) -> Dict[str, str | b
             await page.wait_for_url(f"**{COMPLETE_PATH}**", timeout=60_000)
             logging.info("[note_signup] step=complete-page id=%s", account.id)
 
+            # ② メール認証リンクを待ち受けて開く ----------------------★ NEW
+            verify_link = wait_verify_link(token, timeout=180)
+            if not verify_link:
+                raise RuntimeError("verification mail timeout")
+            await page.goto(verify_link, timeout=60_000)
+            await page.wait_for_selector("text=メール認証が完了", timeout=30_000)
+
 
             # ────────────────────────────────────────────────
             # 4) storage_state 保存
@@ -177,7 +189,15 @@ async def signup_note_account(account: ExternalBlogAccount) -> Dict[str, str | b
 
     except (PWTimeout, Exception) as e:      # noqa: BLE001
         logging.error("[note_signup] ❌ FAILED id=%s %s", account.id, e)
+        _mark_error(account, str(e))
         return {"ok": False, "error": str(e)}
+    
+# ---------------------------------------------------------------
+# 共通エラーハンドラ  ★NEW
+def _mark_error(acct: ExternalBlogAccount, msg: str):
+    acct.status  = "error"
+    acct.message = msg[:255]
+    db.session.commit()
 
 # 外部公開
 __all__ = ["signup_note_account"]

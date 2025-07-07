@@ -23,6 +23,7 @@ from app import db
 from app.models import BlogType, ExternalBlogAccount
 from .note_signup import signup_note_account  # async coroutine
 from .hatena_signup import signup_hatena_account
+from .mail_tm_client import create_inbox
 
 # ──────────────────────────────────────────
 def _random_email() -> str:
