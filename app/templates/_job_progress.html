@@ -1,41 +1,54 @@
-{# _job_progress.html — site_id / blog / job が渡ってくる前提 #}
+{# --------------------------------------------------------------------- #}
+{#  _job_progress.html                                                   #}
+{#  1 サイト × 1 ブログの進捗ウィジェット                               #}
+{#  期待変数: site_id, blog, job                                         #}
+{# --------------------------------------------------------------------- #}
 
-{% set has_job = job is not none %}
+{% set blog_label = blog|capitalize %}
+{% set card_id    = "site-card-" ~ site_id %}
+{% set in_progress = job is not none and job.step in ['signup', 'generate', 'post'] %}
 
-{% if not has_job %}
-  {# ① 外部SEO開始ボタン #}
-  <button
-    class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
-    hx-post="{{ url_for('main.start_external_seo', site_id=site_id, blog=blog) }}"
-    hx-target="#site-card-{{ site_id }}"
-    hx-swap="outerHTML">
-    {{ blog|capitalize }} 外部SEO開始
-  </button>
+{# ──────────────────────────────────────────────────────────────────
+   ① まだジョブが無い → 開始ボタン
+   ────────────────────────────────────────────────────────────────── #}
+{% if job is none %}
+<button
+  class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
+  hx-post="{{ url_for('main.start_external_seo') }}"
+  hx-vals='{"site_id":"{{ site_id }}","blog":"{{ blog }}"}'
+  hx-target="#{{ card_id }}"
+  hx-swap="outerHTML">
+  {{ blog_label }} 外部SEO開始
+</button>
 
-{% elif job.step in ['signup', 'generate', 'post'] %}
-  {# ② 進捗パネル：5 秒毎にポーリング #}
-  <div
-    hx-get="{{ url_for('main.external_seo_job_status', site_id=site_id, blog=blog) }}"
-    hx-trigger="every 5s"
-    hx-swap="outerHTML"
-    class="flex items-center space-x-3 text-sm">
+{# ──────────────────────────────────────────────────────────────────
+   ② ジョブ進行中 → 進捗表示（5 秒ごとにポーリングして自己更新）
+   ────────────────────────────────────────────────────────────────── #}
+{% elif in_progress %}
+<div
+  hx-get="{{ url_for('main.external_seo_job_status', site_id=site_id) }}"
+  hx-trigger="every 5s"
+  hx-swap="outerHTML"
+  class="flex items-center space-x-3 text-sm">
 
-    <span class="text-gray-600">{{ job.posted_cnt }} / {{ job.article_cnt }}</span>
+  <span class="text-gray-600">{{ job.posted_cnt }} / {{ job.article_cnt }}</span>
 
-    {% if job.step == 'signup' %}
-      <span class="px-2 py-1 rounded bg-yellow-100 text-yellow-700 text-xs">signup</span>
-    {% elif job.step == 'generate' %}
-      <span class="px-2 py-1 rounded bg-blue-100 text-blue-700 text-xs">generate</span>
-    {% else %}
-      <span class="px-2 py-1 rounded bg-purple-100 text-purple-700 text-xs">post</span>
-    {% endif %}
-  </div>
+  {% if job.step == 'signup' %}
+    <span class="px-2 py-1 rounded bg-yellow-100 text-yellow-700 text-xs">signup</span>
+  {% elif job.step == 'generate' %}
+    <span class="px-2 py-1 rounded bg-blue-100 text-blue-700 text-xs">generate</span>
+  {% else %}
+    <span class="px-2 py-1 rounded bg-purple-100 text-purple-700 text-xs">post</span>
+  {% endif %}
+</div>
 
+{# ──────────────────────────────────────────────────────────────────
+   ③ 完了・エラー後 → ブログ記事一覧へリンク
+   ────────────────────────────────────────────────────────────────── #}
 {% else %}
-  {# ③ 完了したらブログ一覧へ #}
-  <a
-    href="{{ url_for('main.external_site_blogs', site_id=site_id, blog=blog) }}"
-    class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded">
-    ブログ一覧へ
-  </a>
+<a
+  href="{{ url_for('main.external_site_blogs', site_id=site_id) }}"
+  class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded">
+  ブログ一覧へ
+</a>
 {% endif %}

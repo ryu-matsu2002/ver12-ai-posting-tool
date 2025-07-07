@@ -3359,39 +3359,63 @@ def external_seo_sites():
 # -----------------------------------------------------------------
 # 外部SEO: 開始ボタン → ジョブ生成 & 進捗パネル返却
 # -----------------------------------------------------------------
-@bp.post("/external/start/<int:site_id>/<blog>")
+@bp.post("/external/start")
 @login_required
-def start_external_seo(site_id, blog):
+def start_external_seo() -> "Response":
     """
-    NOTE 以外はまだ実装されていないため 400 を返す
-    """
-    from app.models import BlogType
-    from app.tasks import enqueue_external_seo
+    HTMX から送られてくる
 
-    # --- Enum へ変換（大文字・小文字どちらでも受け入れ） -------------------
+        site_id=<数字>&blog=<文字列>
+
+    を受け取り、対応する BlogType で ExternalSEOJob を enqueue する。
+    - **NOTE / HATENA / LIVEDOOR / AMEBA** までは許可  
+      （未実装ブログは enqueue 後にバックエンドでエラーになるが 400 は返さない）
+    - パラメータ不足・存在しないサイトの場合のみ 400 / 404 を返す
+    - HTMX リクエストなら `_job_progress.html` を部分描画
+    """
+    from app.models import BlogType, Site
+    from app.tasks  import enqueue_external_seo
+
+    # ----------------------------------------------------------------
+    # 1. パラメータ取得
+    # ----------------------------------------------------------------
+    site_id = request.form.get("site_id", type=int)
+    blog    = (request.form.get("blog") or "").lower()
+
+    if not site_id or not blog:
+        return "site_id と blog は必須です", 400
+
+    # BlogType へ変換（Enum 不一致なら 400）
     try:
-        blog_type = BlogType(blog.lower())
+        blog_type = BlogType(blog)
     except ValueError:
         return "不正なブログタイプ", 400
 
-    # --- 現在サポートしているブログタイプは NOTE のみ ------------------------
-    SUPPORTED_BLOG_TYPES = {BlogType.NOTE}
-    if blog_type not in SUPPORTED_BLOG_TYPES:
-        return f"{blog_type.value} は現在未実装です", 400
+    # ----------------------------------------------------------------
+    # 2. サイト所有権チェック（管理者はスキップ）
+    # ----------------------------------------------------------------
+    site = Site.query.get_or_404(site_id)
+    if (not current_user.is_admin) and (site.user_id != current_user.id):
+        abort(403)
 
-    # --- ジョブ登録 ----------------------------------------------------------
-    enqueue_external_seo(site_id, blog_type)
+    # ----------------------------------------------------------------
+    # 3. ジョブをキューへ投入
+    # ----------------------------------------------------------------
+    enqueue_external_seo(site_id=site_id, blog_type=blog_type)
 
-    # --- HTMX リクエストへの応答 --------------------------------------------
+    # ----------------------------------------------------------------
+    # 4. レスポンス
+    # ----------------------------------------------------------------
     if request.headers.get("HX-Request"):
+        # HTMX: 進捗カードだけ差し替え
         return render_template(
             "_job_progress.html",
             site_id=site_id,
-            blog=blog_type.value,
-            job=None
+            blog   =blog_type.value,
+            job    =None
         )
+    # 通常 POST: JSON を返す
     return jsonify(status="queued")
-
 
 # -----------------------------------------------------------------
 # 外部SEO: 進捗パネル HTMX 用
