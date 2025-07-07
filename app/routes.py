@@ -3367,14 +3367,22 @@ def start_external_seo() -> "Response":
 
         site_id=<数字>&blog=<文字列>
 
-    を受け取り、対応する BlogType で ExternalSEOJob を enqueue する。
-    - **NOTE / HATENA / LIVEDOOR / AMEBA** までは許可  
-      （未実装ブログは enqueue 後にバックエンドでエラーになるが 400 は返さない）
-    - パラメータ不足・存在しないサイトの場合のみ 400 / 404 を返す
-    - HTMX リクエストなら `_job_progress.html` を部分描画
+    を受け取り、対応するジョブをバックエンドへ enqueue する。
+
+    - **LIVEDOOR**   → まず Playwright でアカウント作成 & AtomPubキー発行
+                       (`enqueue_livedoor_signup`)
+    - **NOTE / HATENA / AMEBA / SEESAA …** など
+                       → 既存ロジック (`enqueue_external_seo`)
+    - パラメータ不足・BlogType 不正・権限不足は 400 / 404 / 403
+    - HTMX リクエストなら `_job_progress.html` を返して
+      サイトカード内のボタンを進捗パネルに置き換える。
     """
+    from flask import request, abort, jsonify, render_template
     from app.models import BlogType, Site
-    from app.tasks  import enqueue_external_seo
+    from app.tasks  import (
+        enqueue_external_seo,
+        enqueue_livedoor_signup,     # ★ Livedoor 専用
+    )
 
     # ----------------------------------------------------------------
     # 1. パラメータ取得
@@ -3401,7 +3409,12 @@ def start_external_seo() -> "Response":
     # ----------------------------------------------------------------
     # 3. ジョブをキューへ投入
     # ----------------------------------------------------------------
-    enqueue_external_seo(site_id=site_id, blog_type=blog_type)
+    if blog_type == BlogType.LIVEDOOR:
+        # Playwright での ID 登録 → ブログ作成 → APIキー発行
+        enqueue_livedoor_signup(site_id)
+    else:
+        # NOTE / HATENA / AMEBA など従来フロー
+        enqueue_external_seo(site_id=site_id, blog_type=blog_type)
 
     # ----------------------------------------------------------------
     # 4. レスポンス
@@ -3412,10 +3425,11 @@ def start_external_seo() -> "Response":
             "_job_progress.html",
             site_id=site_id,
             blog   =blog_type.value,
-            job    =None
+            job    =None   # 新規ジョブなのでまだ存在しない
         )
     # 通常 POST: JSON を返す
     return jsonify(status="queued")
+
 
 # -----------------------------------------------------------------
 # 外部SEO: 進捗パネル HTMX 用

@@ -4,8 +4,8 @@
 {#  期待変数: site_id, blog, job                                         #}
 {# --------------------------------------------------------------------- #}
 
-{% set blog_label = blog|capitalize %}
-{% set card_id    = "site-card-" ~ site_id %}
+{% set blog_label  = blog|capitalize %}
+{% set card_id     = "site-card-" ~ site_id %}
 {% set in_progress = job is not none and job.step in ['signup', 'generate', 'post'] %}
 
 {# ──────────────────────────────────────────────────────────────────
@@ -13,8 +13,8 @@
    ────────────────────────────────────────────────────────────────── #}
 {% if job is none %}
 <button
-  class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
-  hx-post="{{ url_for('main.start_external_seo') }}"
+  class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
+  hx-post="{{ url_for('main.start_external_seo') }}"      {# /external/start ルート #}
   hx-vals='{"site_id":"{{ site_id }}","blog":"{{ blog }}"}'
   hx-target="this"
   hx-swap="outerHTML">
