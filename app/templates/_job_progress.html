@@ -16,7 +16,7 @@
   class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
   hx-post="{{ url_for('main.start_external_seo') }}"
   hx-vals='{"site_id":"{{ site_id }}","blog":"{{ blog }}"}'
-  hx-target="#{{ card_id }}"
+  hx-target="this"
   hx-swap="outerHTML">
   {{ blog_label }} 外部SEO開始
 </button>
