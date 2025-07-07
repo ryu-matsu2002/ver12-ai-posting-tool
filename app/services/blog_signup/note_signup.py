@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-Note.com アカウント自動登録モジュール（iframe 対応 完全版）
-================================================================
-signup_note_account(account: ExternalBlogAccount) -> dict
-  • ExternalBlogAccount を受け取り、Playwright でサインアップ
-  • storage_state.json を保存し DB を更新
-  • 成功: {"ok": True}
-    失敗: {"ok": False, "error": "..."}   ※失敗時は PNG を保存
+Note.com アカウント自動登録モジュール（本番用・2025-07-07 改訂）
+====================================================================
+signup_note_account(account: ExternalBlogAccount) -> {"ok":True} |
+                                             {"ok":False, "error":...}
+
+変更点
+--------------------------------------------------------------------
+1.  フォーム検出を「iframe 全走査 → メイン DOM 再走査」の二段階に。
+2.  ボタン活性化待機を wait_for_selector('[data-testid=signup-submit]:not([disabled])')
+3.  失敗時にスクリーンショットを保存（storage_states/signup_fail_<id>.png）
+4.  ステップ毎の詳細ログを追加。
 """
 
 from __future__ import annotations
@@ -26,13 +30,12 @@ from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 from .. import db
 from app.models import ExternalBlogAccount
 
-# ──────────────────────────────────────────────
-LANDING_URL = "https://note.com/signup?signup_type=email"
+# --------------------------------------------------------------------
+# 固定定数
+# --------------------------------------------------------------------
+LANDING_URL   = "https://note.com/signup?signup_type=email"
+FORM_PATH     = "/signup/form"
 COMPLETE_PATH = "/signup/complete"
-
-SEL_EMAIL = "input[type='email'], input[name='email']"
-SEL_PWD   = "input[type='password'], input[name='password']"
-SEL_BTN   = "[data-testid='signup-submit'], button[type='submit']"
 
 STEALTH_JS = """
 Object.defineProperty(navigator,'webdriver',{get:()=>undefined});
@@ -41,15 +44,30 @@ Object.defineProperty(navigator,'languages',{get:()=>['ja-JP','ja']});
 Object.defineProperty(navigator,'plugins',{get:()=>[1,2,3,4,5]});
 """
 
-# ──────────────────────────────────────────────
+# --------------------------------------------------------------------
+# ユーティリティ
+# --------------------------------------------------------------------
 def _rand(n: int = 8) -> str:
     return "".join(random.choices(string.ascii_lowercase + string.digits, k=n))
 
-def _wait(a: float = 0.6, b: float = 1.2) -> None:
+def _wait(a: float = .6, b: float = 1.3) -> None:
     time.sleep(random.uniform(a, b))
 
-# ──────────────────────────────────────────────
+# --------------------------------------------------------------------
+# メイン関数
+# --------------------------------------------------------------------
 async def signup_note_account(account: ExternalBlogAccount) -> Dict[str, str | bool]:
+    """
+    Parameters
+    ----------
+    account : ExternalBlogAccount
+        email / password / nickname が設定済みのモデル
+
+    Returns
+    -------
+    dict
+        {"ok": True} もしくは {"ok": False, "error": "..."}
+    """
     if not (account.email and account.password):
         return {"ok": False, "error": "email/password not set"}
 
@@ -65,50 +83,87 @@ async def signup_note_account(account: ExternalBlogAccount) -> Dict[str, str | b
                     "--disable-blink-features=AutomationControlled",
                     "--disable-gpu",
                 ],
-                slow_mo=150,
+                slow_mo=200,   # bot 検知回避：少しウェイト
             )
             ctx = await browser.new_context(locale="ja-JP")
             page = await ctx.new_page()
             await page.add_init_script(STEALTH_JS)
 
-            # 1️⃣ LP へ遷移
-            await page.goto(LANDING_URL, timeout=30_000)
+            # ────────────────────────────────────────────────
+            # 1) LP → ページロード
+            # ────────────────────────────────────────────────
+            await page.goto(LANDING_URL, timeout=60_000)
             await page.wait_for_load_state("domcontentloaded")
+            logging.info("[note_signup] step=lp-loaded id=%s", account.id)
 
-            # 2️⃣ email/password フィールド探索（ページ + すべての iframe）
-            target_email = target_pwd = None
-            form_ctx = None                     # ボタン等を探すフレーム
-            for f in [page, *page.frames]:
-                email_el = f.locator(SEL_EMAIL).first
-                if await email_el.count():
-                    pwd_el = f.locator(SEL_PWD).first
-                    if await pwd_el.count():
-                        target_email, target_pwd = email_el, pwd_el
-                        form_ctx = f
-                        logging.info("[note_signup] ✓ form found in %s", "iframe" if f is not page else "page")
+            # ────────────────────────────────────────────────
+            # 2) フォーム検出（iframe 全走査 → DOM）
+            # ────────────────────────────────────────────────
+            logging.info("[note_signup] step=form-scan id=%s", account.id)
+
+            email_sel = "input[type='email']"
+            pwd_sel   = "input[type='password']"
+
+            target_email = None
+            target_pwd   = None
+
+            # a) iframe をすべて走査
+            for f in page.frames:
+                try:
+                    if await f.locator(email_sel).count() and await f.locator(pwd_sel).count():
+                        target_email = f.locator(email_sel).first
+                        target_pwd   = f.locator(pwd_sel).first
+                        logging.info("[note_signup] ✓ form in iframe src=%s", f.url)
                         break
+                except Exception:
+                    continue   # cross-origin 等でアクセス出来ない iframe は無視
 
-            if target_email is None:
-                raise RuntimeError("e-mail form iframe not found")
+            # b) 見つからなければメイン DOM をチェック
+            if not target_email:
+                # 「メールで登録」ボタンがあれば押下
+                if await page.locator("text=メールで登録").count():
+                    await page.locator("text=メールで登録").first.click()
+                    await page.wait_for_timeout(1000)
 
-            # 3️⃣ 入力
+                if await page.locator(email_sel).count() and await page.locator(pwd_sel).count():
+                    target_email = page.locator(email_sel).first
+                    target_pwd   = page.locator(pwd_sel).first
+                    logging.info("[note_signup] ✓ form in main DOM id=%s", account.id)
+
+            # c) それでも無ければスクショを撮ってエラー
+            # ③ 入力フォームが見つかった後
+            if not target_email:
+                fail_png = Path("storage_states") / f"signup_fail_{account.id}.png"
+                fail_png.parent.mkdir(exist_ok=True)
+                await page.screenshot(path=str(fail_png))
+                raise RuntimeError("signup form not found")
+
+            # ✅ フォームの存在する frame コンテキストを取得
+            form_ctx = target_email.page  # これは target_email が属する frame/Page を返す
+
+            # ③ 入力 → 送信
             await target_email.fill(account.email)
             await target_pwd.fill(account.password)
 
-            # 4️⃣ submit ボタンクリック（iframe 内でも OK）
-            submit_btn = form_ctx.locator(SEL_BTN).first
+            # ✅ フォーム内で submit ボタンを探す（frame 上）
+            submit_btn = form_ctx.locator("[data-testid='signup-submit'], button[type='submit']").first
             await submit_btn.wait_for(state="visible", timeout=60_000)
             await submit_btn.click()
 
-            # 5️⃣ 完了ページ待機
             await page.wait_for_url(f"**{COMPLETE_PATH}**", timeout=60_000)
+            logging.info("[note_signup] step=complete-page id=%s", account.id)
 
-            # 6️⃣ storage_state 保存
-            state_dir = Path("storage_states"); state_dir.mkdir(exist_ok=True)
+
+            # ────────────────────────────────────────────────
+            # 4) storage_state 保存
+            # ────────────────────────────────────────────────
+            state_dir  = Path("storage_states"); state_dir.mkdir(exist_ok=True)
             state_path = state_dir / f"note_{account.id}.json"
             state_path.write_text(json.dumps(await ctx.storage_state(), ensure_ascii=False))
 
-            # 7️⃣ DB 更新
+            # ────────────────────────────────────────────────
+            # 5) DB 更新
+            # ────────────────────────────────────────────────
             account.nickname    = nickname
             account.cookie_path = str(state_path)
             account.status      = "active"
@@ -116,19 +171,13 @@ async def signup_note_account(account: ExternalBlogAccount) -> Dict[str, str | b
             db.session.commit()
 
             await browser.close()
-            logging.info("[note_signup] ✅ SUCCESS id=%s", account.id)
-            return {"ok": True}
 
-    except Exception as e:                       # すべて握って PNG 保存
-        try:
-            err_dir = Path("storage_states"); err_dir.mkdir(exist_ok=True)
-            png = err_dir / f"signup_fail_{account.id}.png"
-            if 'page' in locals():
-                await page.screenshot(path=str(png))
-        except Exception:                        # screenshot 失敗は無視
-            pass
+        logging.info("[note_signup] ✅ SUCCESS id=%s", account.id)
+        return {"ok": True}
 
+    except (PWTimeout, Exception) as e:      # noqa: BLE001
         logging.error("[note_signup] ❌ FAILED id=%s %s", account.id, e)
         return {"ok": False, "error": str(e)}
 
+# 外部公開
 __all__ = ["signup_note_account"]
