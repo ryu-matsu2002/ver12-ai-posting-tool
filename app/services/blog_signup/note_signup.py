@@ -151,7 +151,13 @@ async def signup_note_account(account: ExternalBlogAccount) -> Dict[str, str | b
             await target_pwd.fill(account.password)
 
             # ✅ フォーム内で submit ボタンを探す（frame 上）
-            submit_btn = form_ctx.locator("[data-testid='signup-submit'], button[type='submit']").first
+            submit_btn = form_ctx.locator(
+                "[data-testid='signup-submit']:not([disabled]), "
+                "button[type='submit']:not([disabled]), "
+                "button:has-text('登録'), "
+                "button:has-text('サインアップ'), "           # ★追加
+                "button:has-text('メールアドレスで登録')"      # ★追加
+            ).first
             await submit_btn.wait_for(state="visible", timeout=60_000)
             await submit_btn.click()
 
@@ -187,10 +193,22 @@ async def signup_note_account(account: ExternalBlogAccount) -> Dict[str, str | b
         logging.info("[note_signup] ✅ SUCCESS id=%s", account.id)
         return {"ok": True}
 
-    except (PWTimeout, Exception) as e:      # noqa: BLE001
+    # ── ファイル末尾付近 ─────────────────────────────────────────────
+    except (PWTimeout, Exception) as e:          # noqa: BLE001
         logging.error("[note_signup] ❌ FAILED id=%s %s", account.id, e)
+
+        # ★ 失敗時に必ず PNG を残す
+        try:
+            err_png = Path("storage_states") / f"signup_fail_{account.id}.png"
+            err_png.parent.mkdir(exist_ok=True)
+            await page.screenshot(path=str(err_png))
+            logging.info("[note_signup] 📸 saved => %s", err_png)
+        except Exception:
+            logging.warning("[note_signup] screenshot failed")
+
         _mark_error(account, str(e))
         return {"ok": False, "error": str(e)}
+
     
 # ---------------------------------------------------------------
 # 共通エラーハンドラ  ★NEW
