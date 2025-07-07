@@ -320,6 +320,10 @@ class ExternalBlogAccount(db.Model):
     posted_cnt          = db.Column(db.Integer,  default=0,  nullable=False)
     next_batch_started  = db.Column(db.Boolean,  default=False, nullable=False)
 
+    livedoor_blog_id  = db.Column(db.String(50),  nullable=True, index=True)
+    atompub_key_enc   = db.Column(db.String(255), nullable=True)
+    api_post_enabled  = db.Column(db.Boolean,     default=False, nullable=False)
+
     site        = db.relationship("Site", backref="external_accounts")
     schedules   = db.relationship("ExternalArticleSchedule", backref="blog_account", cascade="all, delete-orphan")
 

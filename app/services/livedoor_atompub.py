@@ -1,65 +1,175 @@
-# app/services/livedoor_atompub.py
-import base64, requests, uuid, datetime as dt
-from xml.etree import ElementTree as ET
-from slugify import slugify
-from flask import current_app
+"""
+app/services/livedoor_atompub.py
+--------------------------------
+ライブドアブログ公式 AtomPub API とのやり取りをラップするモジュール。
+  * 記事投稿（POST）
+  * 記事更新（PUT）
+  * 記事削除（DELETE）
+  * 画像アップロード用の汎用関数も後で追加可能
+"""
 
-# ---------- config ----------
-API_BASE_FMT  = "https://livedoor.blogcms.jp/atompub/{blog}/"
-HEADERS_ENTRY = {"Content-Type": "application/atom+xml;type=entry;charset=utf-8"}
-HEADERS_IMAGE = {"Content-Type": "image/jpeg"}         # png/gif は呼び出し側で変える
+from __future__ import annotations
 
-class LivedoorClient:
-    def __init__(self, blog_name: str, username: str, apikey: str):
-        self.blog     = blog_name
-        self.endpoint = API_BASE_FMT.format(blog=blog_name)
-        self.session  = requests.Session()
-        self.session.auth  = (username, apikey)
-        self.timeout  = getattr(current_app, "config", {}).get(
-            "LIVEDOOR_API_TIMEOUT", 15
-        )
+import logging
+from datetime import datetime, timezone
+from typing import Optional, Tuple, Dict, Any, List
 
-    # ---- public ----------------------------------------------------
-    def new_post(self, title: str, html: str,
-                 categories: list[str] | None = None, draft: bool = False) -> str:
-        xml = self._build_entry_xml(title, html, categories, draft)
-        url = self.endpoint + "article"
-        res = self.session.post(url, data=xml.encode("utf-8"),
-                                headers=HEADERS_ENTRY, timeout=self.timeout)
-        res.raise_for_status()
-        # 投稿 URL は <link rel="alternate" …> から取得
-        root = ET.fromstring(res.text)
-        link = root.find(".//{http://www.w3.org/2005/Atom}link[@rel='alternate']")
-        return link.attrib["href"] if link is not None else ""
+import requests
+import xmltodict
+from requests.auth import HTTPBasicAuth
 
-    def new_image(self, name: str, data: bytes, mime: str = "image/jpeg") -> str:
-        url = self.endpoint + "image"
-        headers = {"Content-Type": mime}
-        res = self.session.post(url, data=data, headers=headers,
-                                timeout=self.timeout)
-        res.raise_for_status()
-        root = ET.fromstring(res.text)
-        link = root.find(".//{http://www.w3.org/2005/Atom}link[@rel='edit-media']")
-        return link.attrib["href"] if link is not None else ""
+# 🔐 既存の共通暗号ユーティリティ
+from app.services.blog_signup.crypto_utils import decrypt
 
-    # ---- private ---------------------------------------------------
-    def _build_entry_xml(self, title: str, html: str,
-                         categories: list[str] | None, draft: bool) -> str:
-        ns   = "http://www.w3.org/2005/Atom"
-        app  = "http://purl.org/atom/app#"
-        ET.register_namespace("", ns)
-        ET.register_namespace("app", app)
+logger = logging.getLogger(__name__)
 
-        entry      = ET.Element(ET.QName(ns, "entry"))
-        ET.SubElement(entry, ET.QName(ns, "title")).text = title
-        ET.SubElement(entry, ET.QName(ns, "updated")).text = dt.datetime.utcnow().isoformat()+"Z"
-        ET.SubElement(entry, ET.QName(ns, "content"),
-                      {"type": "html"}).text = html
-        if categories:
-            for c in categories:
-                ET.SubElement(entry, ET.QName(ns, "category"),
-                              {"term": c})
-        if draft:
-            control = ET.SubElement(entry, ET.QName(app, "control"))
-            ET.SubElement(control, ET.QName(app, "draft")).text = "yes"
-        return ET.tostring(entry, encoding="utf-8", xml_declaration=True).decode()
+# ---------------------------------------------------------------------
+# ユーティリティ
+# ---------------------------------------------------------------------
+def _auth(blog_id: str, api_key_enc: str) -> HTTPBasicAuth:
+    """暗号化済み AtomPub Key を復号して Basic 認証オブジェクトに変換"""
+    api_key = decrypt(api_key_enc)
+    return HTTPBasicAuth(blog_id, api_key)
+
+
+def _endpoint(blog_id: str, resource: str = "article") -> str:
+    """
+    AtomPub エンドポイントを生成.
+    resource:
+        - "article"                → 記事コレクション（POST で新規）
+        - f"article/{article_id}"  → 特定記事（PUT / DELETE）
+    """
+    return f"https://livedoor.blogcms.jp/atom/blog/{blog_id}/{resource}"
+
+
+def _build_entry_xml(
+    title: str,
+    content: str,
+    categories: Optional[List[str]] = None,
+    draft: bool = False,
+) -> str:
+    """Atom Entry XML を組み立てて文字列で返す"""
+    now = datetime.now(timezone.utc).isoformat()
+    entry_dict: Dict[str, Any] = {
+        "entry": {
+            "@xmlns": "http://purl.org/atom/ns#",
+            "title": title,
+            "issued": now,
+            "modified": now,
+            "content": {
+                "@type": "text/html",
+                "#text": content,
+            },
+        }
+    }
+
+    if categories:
+        entry_dict["entry"]["category"] = [
+            {"@term": c.strip()} for c in categories if c.strip()
+        ]
+
+    if draft:
+        # LiveDoor 独自拡張ではなく AtomPub <app:draft>
+        entry_dict["entry"]["app:control"] = {
+            "@xmlns:app": "http://www.w3.org/2007/app",
+            "app:draft": "yes",
+        }
+
+    return xmltodict.unparse(entry_dict, pretty=True)
+
+
+# ---------------------------------------------------------------------
+# 公開 API
+# ---------------------------------------------------------------------
+def post_entry(
+    blog_id: str,
+    api_key_enc: str,
+    title: str,
+    content: str,
+    categories: Optional[List[str]] = None,
+    draft: bool = False,
+    timeout: int = 30,
+) -> Tuple[int, str]:
+    """
+    新規記事を投稿し `(article_id, public_url)` を返す。
+    失敗時は HTTPError を送出。
+    """
+    xml_body = _build_entry_xml(title, content, categories, draft)
+    url = _endpoint(blog_id, "article")
+    logger.info("[AtomPub] POST %s", url)
+
+    resp = requests.post(
+        url,
+        data=xml_body.encode("utf-8"),
+        headers={"Content-Type": "application/atom+xml; charset=utf-8"},
+        auth=_auth(blog_id, api_key_enc),
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+
+    # レスポンス XML から ARTICLE_ID と URL を抽出
+    entry = xmltodict.parse(resp.text)["entry"]
+    article_id = int(entry["id"].split(".")[-1])  # tag:.blogcms.jp,XXXX:article-xxxx.<ID>
+    public_url = next(
+        link["@href"]
+        for link in entry["link"]
+        if link["@rel"] == "alternate" and link["@type"] == "text/html"
+    )
+
+    logger.info("[AtomPub] Posted article_id=%s", article_id)
+    return article_id, public_url
+
+
+def update_entry(
+    blog_id: str,
+    api_key_enc: str,
+    article_id: int,
+    title: Optional[str] = None,
+    content: Optional[str] = None,
+    categories: Optional[List[str]] = None,
+    timeout: int = 30,
+) -> None:
+    """既存記事を更新（全文 PUT）。"""
+    if not (title or content or categories):
+        raise ValueError("update_entry: 変更点がありません")
+
+    # 現行記事を GET → 差し替え（タイトルだけ更新などのため）
+    get_url = _endpoint(blog_id, f"article/{article_id}")
+    r = requests.get(get_url, auth=_auth(blog_id, api_key_enc), timeout=timeout)
+    r.raise_for_status()
+    entry = xmltodict.parse(r.text)["entry"]
+
+    if title:
+        entry["title"] = title
+    if content:
+        entry["content"]["#text"] = content
+    if categories is not None:
+        entry["category"] = [{"@term": c.strip()} for c in categories]
+
+    put_xml = xmltodict.unparse({"entry": entry}, pretty=True)
+    put_url = _endpoint(blog_id, f"article/{article_id}")
+    logger.info("[AtomPub] PUT %s", put_url)
+
+    pr = requests.put(
+        put_url,
+        data=put_xml.encode("utf-8"),
+        headers={"Content-Type": "application/atom+xml; charset=utf-8"},
+        auth=_auth(blog_id, api_key_enc),
+        timeout=timeout,
+    )
+    pr.raise_for_status()
+    logger.info("[AtomPub] Updated article_id=%s", article_id)
+
+
+def delete_entry(
+    blog_id: str,
+    api_key_enc: str,
+    article_id: int,
+    timeout: int = 30,
+) -> None:
+    """記事を削除。成功すれば 204 No Content。"""
+    url = _endpoint(blog_id, f"article/{article_id}")
+    logger.info("[AtomPub] DELETE %s", url)
+    resp = requests.delete(url, auth=_auth(blog_id, api_key_enc), timeout=timeout)
+    resp.raise_for_status()
+    logger.info("[AtomPub] Deleted article_id=%s", article_id)
