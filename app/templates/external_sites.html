@@ -18,16 +18,14 @@
       <a href="{{ s.url }}" class="text-blue-600 text-sm break-all" target="_blank">{{ s.url }}</a>
     </div>
 
-    <!-- ブログ種別ごとの操作 -->
+    <!-- Livedoor だけ操作ボタン／進捗 -->
     <div class="flex flex-wrap gap-2 mt-2">
-      {% for b in ['note', 'ameba', 'livedoor', 'hatena'] %}
-        {% set key = (s.id, b) %}
-        {% set job = job_map.get(key) %}
-        {% set site_id = s.id %}     {# _job_progress.html で参照 #}
-        {% set blog    = b    %}
-
-        {% include "_job_progress.html" %}
-      {% endfor %}
+      {% set b = 'livedoor' %}
+      {% set key      = (s.id, b) %}
+      {% set job      = job_map.get(key) %}
+      {% set site_id  = s.id %}
+      {% set blog     = b %}
+      {% include "_job_progress.html" %}
     </div>
   </div>
 {% endfor %}
