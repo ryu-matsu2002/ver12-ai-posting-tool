@@ -1,110 +1,123 @@
-# app/services/email_utils.py
+# app/services/mail_utils/mail_tm.py
+# -*- coding: utf-8 -*-
 """
-Mail.tm API を用いた『使い捨てメールアドレス自動発行』ユーティリティ
-1) create_temp_mail()  : (address, password, token) を返す
-2) wait_for_link(token, pattern, timeout) : 最新メール本文から URL を抽出
+mail.tm API helper
+──────────────────────────────
+create_inbox()       → (email, jwt)
+poll_latest_link()   → 最初に見つけた URL を返す
+──────────────────────────────
 """
 
 from __future__ import annotations
 
-import httpx
-import time
+import html
 import logging
+import random
 import re
-import secrets
 import string
-from typing import Tuple
+import time
+from typing import Optional
+
+import requests
 
 BASE = "https://api.mail.tm"
+S = requests.Session()
+S.headers.update({"User-Agent": "Mozilla/5.0"})
 
 
-# ---------------------------------------------------------------- client factory
-def _client() -> httpx.Client:                       # 20 秒に短いタイムアウト
-    return httpx.Client(base_url=BASE, timeout=20)
+# ---------------------------------------------------------------- utilities
+def _rand_str(n: int = 10) -> str:
+    return "".join(random.choices(string.ascii_lowercase + string.digits, k=n))
 
 
-# ---------------------------------------------------------------- create_temp_mail
-def create_temp_mail() -> Tuple[str, str, str]:
+def _links_from_html(body: str) -> list[str]:
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(body, "lxml")
+    return [html.unescape(a["href"]) for a in soup.find_all("a", href=True)]
+
+
+def _log(resp: requests.Response) -> None:
+    logging.debug("[mail.tm] %s %s → %s", resp.request.method, resp.url, resp.status_code)
+
+
+# ---------------------------------------------------------------- main API with 429-retry
+def _post_with_retry(url: str, json_data: dict, max_retry: int = 6) -> requests.Response:
     """
-    Returns
-    -------
-    (address, password, jwt)
-        *429 Too Many Requests* が出た場合は
-        2, 4, 8, 16, 32, 64 秒で指数バックオフしながら最大 6 回リトライ。
-        それでも成功しなければ RuntimeError を送出する。
+    429 が返ったら指数バックオフで再試行
+    2, 4, 8, 16, 32, 64 秒 → 最大 ~2 分
     """
-    with _client() as cli:
-
-        # 1) 利用可能ドメイン取得
-        dom_resp = cli.get("/domains")
-        dom_resp.raise_for_status()
-        dom = dom_resp.json()["hydra:member"][0]["domain"]
-
-        # 2) アカウント作成 ── 429 時は指数バックオフ
-        addr = f"{secrets.token_hex(6)}@{dom}"
-        pwd  = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
-
-        for i in range(6):                       # 6 回 → 最大 64 秒待機
-            r = cli.post("/accounts", json={"address": addr, "password": pwd})
-            if r.status_code != 429:
-                r.raise_for_status()
-                break
-            wait = 2 ** i
-            logging.warning("[mail.tm] 429 /accounts → retry in %ss", wait)
-            time.sleep(wait)
-        else:
-            raise RuntimeError("mail.tm 429 on /accounts (too many retries)")
-
-        # 3) JWT トークン取得 ── 同じくリトライ
-        for i in range(6):
-            r = cli.post("/token", json={"address": addr, "password": pwd})
-            if r.status_code != 429:
-                r.raise_for_status()
-                tok = r.json()["token"]
-                break
-            wait = 2 ** i
-            logging.warning("[mail.tm] 429 /token → retry in %ss", wait)
-            time.sleep(wait)
-        else:
-            raise RuntimeError("mail.tm 429 on /token (too many retries)")
-
-        return addr, pwd, tok
+    for i in range(max_retry):
+        r = S.post(url, json=json_data)
+        _log(r)
+        if r.status_code != 429:
+            return r
+        wait = 2 ** i
+        logging.warning("[mail.tm] 429 %s retry in %ss", url.rsplit('/', 1)[-1], wait)
+        time.sleep(wait)
+    raise RuntimeError(f"mail.tm 429 on {url} (too many retries)")
 
 
-# ---------------------------------------------------------------- wait_for_link
-def _auth_headers(token: str):
-    return {"Authorization": f"Bearer {token}"}
-
-
-def wait_for_link(
-    token: str,
-    pattern: str = r"https?://[^\s\"'<>]+",
-    timeout: int = 60,
-) -> str | None:
+def create_inbox() -> tuple[str, str]:
     """
-    指定秒以内に受信した最初のメール本文から URL を抽出して返す。
-
-    Parameters
-    ----------
-    token   : JWT returned by create_temp_mail()
-    pattern : 正規表現で表した抽出対象 URL
-    timeout : 秒
+    1) ドメイン取得 → ランダム email 作成
+    2) /accounts で登録（429 時はリトライ）
+    3) /token で JWT 取得      （429 時はリトライ）
 
     Returns
     -------
-    str | None
-        最初に見つけた URL。タイムアウトした場合は None。
+    (email, jwt)
+    """
+    # 1️⃣ ドメイン
+    r = S.get(f"{BASE}/domains")
+    _log(r)
+    r.raise_for_status()
+    domain = r.json()["hydra:member"][0]["domain"]
+
+    email = f"{_rand_str()}@{domain}"
+    pwd = _rand_str(12)  # 使い捨てパス
+
+    # 2️⃣ アカウント作成（429 対応）
+    r = _post_with_retry(f"{BASE}/accounts", {"address": email, "password": pwd})
+    r.raise_for_status()
+
+    # 3️⃣ トークン取得（429 対応）
+    r = _post_with_retry(f"{BASE}/token", {"address": email, "password": pwd})
+    r.raise_for_status()
+    jwt = r.json()["token"]
+
+    S.headers.update({"Authorization": f"Bearer {jwt}"})
+    return email, jwt
+
+
+def poll_latest_link(
+    jwt: str,
+    sender_like: str | None = "@livedoor",
+    timeout: int = 180,
+    interval: int = 6,
+) -> Optional[str]:
+    """
+    受信箱をポーリングし本文内の最初の URL を返す
     """
     deadline = time.time() + timeout
-    with _client() as cli:
-        while time.time() < deadline:
-            msgs = cli.get("/messages", headers=_auth_headers(token)).json()["hydra:member"]
-            if msgs:
-                mid  = msgs[0]["id"]
-                body = cli.get(f"/messages/{mid}", headers=_auth_headers(token)).json()["html"]
-                if body and (m := re.search(pattern, body)):
-                    return m.group(0)
-            time.sleep(3)
+    S.headers.update({"Authorization": f"Bearer {jwt}"})
 
-    logging.warning("[email_utils] メール受信待ちタイムアウト")
+    while time.time() < deadline:
+        r = S.get(f"{BASE}/messages")
+        _log(r)
+        r.raise_for_status()
+        msgs = sorted(r.json()["hydra:member"], key=lambda x: x["createdAt"], reverse=True)
+
+        for msg in msgs:
+            frm = msg.get("from", {}).get("address", "")
+            if sender_like and sender_like not in frm:
+                continue
+            mid = msg["id"]
+            body = S.get(f"{BASE}/messages/{mid}").json()["html"][0]
+            links = _links_from_html(body)
+            if links:
+                return links[0]
+        time.sleep(interval)
+
+    logging.error("[mail.tm] verification link not found (timeout)")
     return None
