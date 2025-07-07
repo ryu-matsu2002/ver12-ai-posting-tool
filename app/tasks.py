@@ -30,7 +30,7 @@ from app.services.blog_signup.livedoor_signup import signup as livedoor_signup
 # ────────────────────────────────────────────────
 # グローバルな APScheduler インスタンス（__init__.py で start されています）
 scheduler = BackgroundScheduler(timezone="UTC")
-executor = ThreadPoolExecutor(max_workers=2)  # ✅ 外部SEOでは同時2件まで
+executor = ThreadPoolExecutor(max_workers=1)  # ✅ 外部SEOでは同時1件まで
 
 # --------------------------------------------------------------------------- #
 # 1) WordPress 自動投稿ジョブ
