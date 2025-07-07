@@ -301,16 +301,7 @@ class RyunosukeDeposit(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 # ──── 🔸 NEW: 外部ブログ自動投稿機能 ────
-from enum import Enum
-from .enums import BlogType   # 既存であればそのまま
-
-class BlogType(str, Enum):
-    NOTE     = "note"
-    HATENA   = "hatena"
-    AMEBA    = "ameba"
-    LIVEDOOR = "livedoor"
-    SEESAA   = "seesaa"
-    EXCITE   = "excite"
+from app.enums import BlogType
 
 class ExternalBlogAccount(db.Model):
     __tablename__ = "external_blog_account"
@@ -362,7 +353,8 @@ class ExternalSEOJob(db.Model):
 
     id         = db.Column(db.Integer, primary_key=True)
     site_id    = db.Column(db.Integer, db.ForeignKey("site.id"), nullable=False, index=True)
-    blog_type  = db.Column(db.Enum(BlogType), nullable=False, default=BlogType.NOTE)
+    blog_type  = db.Column(db.Enum(BlogType), nullable=False,
+                           default=BlogType.LIVEDOOR)  # ← 変更
     status     = db.Column(db.String(20), default="queued")   # queued / running / success / error
     step       = db.Column(db.String(50),  default="waiting") # signup / generating / posting / finished
     message    = db.Column(db.Text)                           # エラーや備考を残す
