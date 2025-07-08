@@ -20,8 +20,7 @@ from app.enums import BlogType
 from app.models import ExternalBlogAccount
 from app.services.livedoor.llm_helper import extract_form_fields
 from app.services.blog_signup.crypto_utils import encrypt
-from app.services.mail_utils.mail_tm_client import create_disposable_email, poll_inbox  # 既存 util
-
+from app.services.mail_utils.mail_tm import create_disposable_email, poll_inbox
 logger = logging.getLogger(__name__)
 
 SIGNUP_URL = "https://member.livedoor.com/register/input"
