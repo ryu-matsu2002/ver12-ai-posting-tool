@@ -47,7 +47,7 @@ async def _fill_form_with_llm(page: Page, hints: Dict[str, str]) -> None:
 
 async def _signup_internal(email: str, token: str, password: str, nickname: str) -> Dict[str, str]:
     async with async_playwright() as p:
-        br = await p.chromium.launch(headless=True, args=["--no-sandbox"])
+        br = await p.chromium.launch(headless=False, args=["--no-sandbox"])
         page = await br.new_page()
 
         # 1) 会員登録フォーム
@@ -61,7 +61,7 @@ async def _signup_internal(email: str, token: str, password: str, nickname: str)
                 "ニックネーム": nickname,
             },
         )
-        await page.click("button[type='submit']")
+        await page.click("input[type='submit'][value*='ユーザー情報を登録']")
 
         # 2) メール認証リンクを取得
         link = poll_inbox(token, pattern=r"https://member\.livedoor\.com/register/.*")
