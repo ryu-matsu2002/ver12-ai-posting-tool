@@ -57,7 +57,14 @@ async def _signup_internal(
     nickname: str,
 ) -> Dict[str, str]:
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False, args=["--no-sandbox"])
+        browser = await p.chromium.launch(
+            headless=True,                            # ← ここを True に戻す
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",            # /dev/shm が小さい環境対策
+                "--disable-gpu",                      # GPU なしサーバ対策
+            ],
+        )
         page    = await browser.new_page()
 
         # 1)  会員登録フォームへ遷移
