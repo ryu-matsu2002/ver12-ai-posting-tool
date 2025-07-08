@@ -45,45 +45,91 @@ async def _fill_form_with_llm(page: Page, hints: Dict[str, str]) -> None:
             logger.warning("failed to fill %s (%s)", label, sel)
 
 
-async def _signup_internal(email: str, token: str, password: str, nickname: str) -> Dict[str, str]:
-    async with async_playwright() as p:
-        br = await p.chromium.launch(headless=False, args=["--no-sandbox"])
-        page = await br.new_page()
+# livedoor_signup.py  ── 修正後の _signup_internal() 〈省略なし〉
+# ※ 冒頭 import に以下が追加されていることを確認してください
+from pathlib import Path
+from playwright.async_api import TimeoutError as PwTimeout
 
-        # 1) 会員登録フォーム
-        await page.goto(SIGNUP_URL, timeout=30000)
+async def _signup_internal(
+    email: str,
+    token: str,
+    password: str,
+    nickname: str,
+) -> Dict[str, str]:
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=False, args=["--no-sandbox"])
+        page    = await browser.new_page()
+
+        # 1)  会員登録フォームへ遷移
+        await page.goto(SIGNUP_URL, timeout=30_000)
+
+        # GPT で推定したセレクタを使って自動入力
         await _fill_form_with_llm(
             page,
             {
-                "メールアドレス": email,
-                "パスワード": password,
-                "パスワード(確認)": password,
-                "ニックネーム": nickname,
+                "メールアドレス":    email,
+                "パスワード":        password,
+                "パスワード(確認)":   password,
+                "ニックネーム":      nickname,
             },
         )
-        await page.click("input[type='submit'][value*='ユーザー情報を登録']")
 
-        # 2) メール認証リンクを取得
-        link = poll_inbox(token, pattern=r"https://member\.livedoor\.com/register/.*")
-        await page.goto(link, timeout=30000)
+        # ---- 送信ボタンを押す（複数セレクタを順に試す）-------------
+        await page.wait_for_load_state("networkidle")
 
-        # 3) ブログ開設（自動リダイレクトで完了）
+        selectors = [
+            "input[type='submit'][value*='ユーザー情報を登録']",
+            "input[type='submit']",
+            "button:has-text('確認メール')",
+            "button.c-btn--primary",
+        ]
+
+        clicked = False
+        for sel in selectors:
+            if await page.is_visible(sel):
+                try:
+                    await page.click(sel, timeout=5_000)
+                    clicked = True
+                    break
+                except PwTimeout:
+                    pass  # selector は見えるがクリック不可 → 次へ
+
+        if not clicked:
+            # デバッグ用に HTML とスクショを保存して例外送出
+            html_path = Path("/tmp/ld_signup_debug.html")
+            html_path.write_text(await page.content(), encoding="utf-8")
+            await page.screenshot(path="/tmp/ld_signup_debug.png", full_page=True)
+            await browser.close()
+            raise RuntimeError(
+                f"登録フォームの送信ボタンが見つからず失敗。HTML 保存: {html_path}"
+            )
+        # -----------------------------------------------------------
+
+        # 2)  メール認証リンクを取得
+        link = poll_inbox(
+            token,
+            pattern=r"https://member\.livedoor\.com/register/.*",
+        )
+        await page.goto(link, timeout=30_000)
+
+        # 3)  ブログ開設（自動リダイレクトを待つ）
         await page.wait_for_url(re.compile(r"https://blog\.livedoor\.com/.*"))
 
-        # 4) blog_id を抽出
-        m = re.search(r"https://(.+?)\.blogcms\.jp", page.url)
-        blog_id = m.group(1)
+        # 4)  blog_id を抽出
+        m        = re.search(r"https://(.+?)\.blogcms\.jp", page.url)
+        blog_id  = m.group(1)
 
-        # 5) API Key を生成
-        await page.goto("https://blog.livedoor.com/settings/api", timeout=30000)
-        # 「APIキーを生成」ボタンがあれば押す
+        # 5)  API Key を生成
+        await page.goto("https://blog.livedoor.com/settings/api", timeout=30_000)
         if await page.is_visible("text=APIキーを生成"):
             await page.click("text=APIキーを生成")
             await page.wait_for_selector("input[name='apikey']")
 
         api_key = await page.input_value("input[name='apikey']")
-        await br.close()
+
+        await browser.close()
         return {"blog_id": blog_id, "api_key": api_key}
+
 
 
 # ──────────────────────────────────────────────────────────────
