@@ -218,43 +218,55 @@ def _gsc_generation_job(app):
         current_app.logger.info("✅ GSC記事生成ジョブが完了しました")
 
 # app/tasks.py どこでも OK ですが _run_external_seo_job の直前あたりが読みやすい
-def _run_livedoor_signup(app, site_id: int):
+def _run_livedoor_signup(app, site_id: int) -> None:
     """
-    • livedoor_signup.signup() を呼び出して
-        - ExternalBlogAccount を作成
-        - APIキーを message カラムに保管
-    • 成功したら ExternalSEOJob を作る or update して step='generate'
+    1) livedoor_signup.signup() を呼び出し ExternalBlogAccount を新規作成
+       - 成功時は ExternalSEOJob を step='generate' で作成 / 更新
+       - 失敗時は status='error' のジョブを残す
+    2) API キーなど詳細ログは ExternalBlogAccount のカラムに保存済み
     """
     with app.app_context():
         try:
-            # ① livedoor アカウント自動登録
-            acc = livedoor_signup(site_id)
+            # ① Site オブジェクトを取得して存在確認
+            site = Site.query.get(site_id)
+            if not site:
+                raise ValueError(f"Site id={site_id} not found")
 
-            # ② ジョブ行を running → generate へ
-            job = ExternalSEOJob(
-                site_id   = site_id,
-                blog_type = BlogType.LIVEDOOR,
-                status    = "running",
-                step      = "generate",
-                article_cnt = 0
+            # ② livedoor アカウント自動登録
+            acc = livedoor_signup(site)   # ← Site オブジェクトを渡す
+            current_app.logger.info(
+                "[LD-Signup] success: site=%s account_id=%s", site_id, acc.id
             )
-            db.session.add(job); db.session.commit()
 
-            # （ここで enqueue_generation(...) を呼ぶなら追加）
-            current_app.logger.info(f"[LD-Signup] success: site {site_id}")
+            # ③ ジョブ行を running → generate へ
+            job = ExternalSEOJob(
+                site_id     = site_id,
+                blog_type   = BlogType.LIVEDOOR,
+                status      = "running",
+                step        = "generate",
+                article_cnt = 0,
+                message     = "signup OK",
+            )
+            db.session.add(job)
+            db.session.commit()
+
+            # TODO: enqueue_generation(job.id) などで記事生成タスクを投入する場合はここ
 
         except Exception as e:
-            current_app.logger.exception(f"[LD-Signup] failed: {e}")
-            # 失敗専用ジョブを残す
+            # ④ 失敗時：エラージョブを残す & ログ
+            current_app.logger.exception("[LD-Signup] failed: %s", e)
+
             job = ExternalSEOJob(
                 site_id   = site_id,
                 blog_type = BlogType.LIVEDOOR,
                 status    = "error",
-                step      = "error", 
-                message   = str(e)
+                step      = "error",
+                message   = str(e),
             )
-            db.session.add(job); db.session.commit()
+            db.session.add(job)
+            db.session.commit()
 
+            
 def enqueue_livedoor_signup(site_id: int):
     """
     外部SEO開始ボタン → この関数を呼ぶ
