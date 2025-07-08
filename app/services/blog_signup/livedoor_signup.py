@@ -129,3 +129,10 @@ def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
     db.session.add(new_account)
     db.session.commit()
     return new_account
+# --- ここから追加 ----------------------------------------------------
+def signup(site, email_seed: str = "ld"):
+    """
+    互換ラッパー（tasks.py が import するため）
+    """
+    return register_blog_account(site, email_seed=email_seed)
+# --- 追加ここまで ----------------------------------------------------
