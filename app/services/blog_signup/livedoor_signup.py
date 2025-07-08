@@ -113,11 +113,18 @@ async def _signup_internal(
         # -----------------------------------------------------------
 
         # 2)  メール認証リンクを取得
+        # 2) メール認証リンクを取得
         link = poll_inbox(
             token,
             pattern=r"https://member\.livedoor\.com/register/.*",
+            timeout=180          # ← 必要なら延長
         )
+
+        if not link:
+            raise RuntimeError("メール認証リンクを取得できませんでした")
+
         await page.goto(link, timeout=30_000)
+
 
         # 3)  ブログ開設（自動リダイレクトを待つ）
         await page.wait_for_url(re.compile(r"https://blog\.livedoor\.com/.*"))
