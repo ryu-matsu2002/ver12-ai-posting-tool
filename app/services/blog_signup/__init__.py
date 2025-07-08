@@ -24,6 +24,8 @@ from app.models import BlogType, ExternalBlogAccount
 from .note_signup import signup_note_account  # async coroutine
 from .hatena_signup import signup_hatena_account
 from .mail_tm_client import create_inbox
+# 末尾など分かりやすい場所に
+from .livedoor_signup import register_blog_account as register_livedoor_account
 
 # ──────────────────────────────────────────
 def _random_email() -> str:

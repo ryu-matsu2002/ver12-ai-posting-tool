@@ -1,89 +1,130 @@
-# -*- coding: utf-8 -*-
 """
-完全自動：Livedoor ID 登録 → ブログ開設 → AtomPub APIキー発行
+ライブドアブログ アカウント自動登録
+==================================
+* Playwright + GPT でフォーム入力
+* メールは mail.tm → 1secmail に切替
+* 取得した API Key を ExternalBlogAccount に保存
 """
 
 from __future__ import annotations
-import logging, random, string
-from datetime import datetime
 
-from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
-from app.services.mail_utils.mail_tm import create_inbox, poll_latest_link
-from app.models import db, ExternalBlogAccount, BlogType
+import asyncio
+import logging
+import re
+import time
+from typing import Dict
 
-REG_URL      = "https://member.livedoor.com/lite/register/"
-BLOG_CREATE  = "https://member.livedoor.com/blog/register"
-APIKEY_URL   = "https://livedoor.blogcms.jp/atompub/{blog}/apikey"
+from playwright.async_api import async_playwright, Page
+from app import db
+from app.enums import BlogType
+from app.models import ExternalBlogAccount
+from app.services.livedoor.llm_helper import extract_form_fields
+from app.services.blog_signup.crypto_utils import encrypt
+from app.services.mail_utils.mail_tm_client import create_disposable_email, poll_inbox  # 既存 util
 
+logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------- helpers
-def _rand_pw(n: int = 10) -> str:
-    return "".join(random.choices(string.ascii_letters + string.digits, k=n))
+SIGNUP_URL = "https://member.livedoor.com/register/input"
 
-
-# ---------------------------------------------------------------- main
-def signup(site_id: int) -> ExternalBlogAccount:
-    """site_id にひも付く Livedoor ブログを完全自動生成し ExternalBlogAccount を返す"""
-    email, jwt = create_inbox()
-    passwd     = _rand_pw()
-    nick       = "auto" + datetime.utcnow().strftime("%f")  # ID / blog 共通
-
-    with sync_playwright() as p:
-        br   = p.chromium.launch(headless=True, args=["--no-sandbox"])
-        page = br.new_page()
-        page.set_default_timeout(60_000)
-
-        # ① 仮登録（メール送信）
-        page.goto(REG_URL, wait_until="networkidle")
-        page.wait_for_selector("input[type='email']")
-        page.fill("input[type='email']", email)
-        page.click("button[type='submit']")
-
-        # ② メール確認リンク → 本登録ページ
-        verify = poll_latest_link(jwt, sender_like="@livedoor", timeout=300)
-        if not verify:
-            br.close()
-            raise RuntimeError("verification mail not found")
-        page.goto(verify, wait_until="networkidle")
-
-        # ③ ユーザー情報入力（/register/input）
-        page.wait_for_selector("#username")
-        page.fill("#username", nick)
-        page.fill("input[name='password']",  passwd)
-        page.fill("input[name='password2']", passwd)
-        page.fill("input[name='mail']",      email)
-        # ⬇⬇⬇ ボタンセレクタを修正 ⬇⬇⬇
-        page.click("input[value='ユーザー情報を登録']")
-
-        # ④ ブログ開設
-        page.goto(BLOG_CREATE, wait_until="networkidle")
-        page.wait_for_selector("input[name='blog_id']")
-        page.fill("input[name='blog_id']", nick)
-        page.fill("input[name='title']",   f"{nick}-blog")
-        page.check("input[type='checkbox']")
-        page.click("input[type='submit']")
-
-        # ⑤ AtomPub APIキー発行
-        page.goto(APIKEY_URL.format(blog=nick), wait_until="networkidle")
+# ──────────────────────────────────────────────────────────────
+async def _fill_form_with_llm(page: Page, hints: Dict[str, str]) -> None:
+    html = await page.content()
+    mapping = extract_form_fields(html)
+    for field in mapping:
+        sel = field["selector"]
+        label = field["label"]
+        value = hints.get(label, "")
+        if not value:
+            continue
         try:
-            page.click("text=APIキーを発行", timeout=8_000)
-        except PWTimeout:
-            pass
-        api_key = page.text_content("css=td.api_key, css=code").strip()
-        br.close()
+            await page.fill(sel, value)
+        except Exception:
+            logger.warning("failed to fill %s (%s)", label, sel)
 
-    # ⑥ DB 保存
-    acc = ExternalBlogAccount(
-        site_id   = site_id,
-        blog_type = BlogType.LIVEDOOR,
-        email     = email,
-        username  = nick,
-        password  = passwd,
-        nickname  = nick,
-        status    = "active",
-        message   = api_key,
+
+async def _signup_internal(email: str, password: str, nickname: str) -> Dict[str, str]:
+    async with async_playwright() as p:
+        br = await p.chromium.launch(headless=True, args=["--no-sandbox"])
+        page = await br.new_page()
+
+        # 1) 会員登録フォーム
+        await page.goto(SIGNUP_URL, timeout=30000)
+        await _fill_form_with_llm(
+            page,
+            {
+                "メールアドレス": email,
+                "パスワード": password,
+                "パスワード(確認)": password,
+                "ニックネーム": nickname,
+            },
+        )
+        await page.click("button[type='submit']")
+
+        # 2) メール認証リンクを取得
+        link = poll_inbox(email, pattern=r"https://member\.livedoor\.com/register/.*")
+        await page.goto(link, timeout=30000)
+
+        # 3) ブログ開設（自動リダイレクトで完了）
+        await page.wait_for_url(re.compile(r"https://blog\.livedoor\.com/.*"))
+
+        # 4) blog_id を抽出
+        m = re.search(r"https://(.+?)\.blogcms\.jp", page.url)
+        blog_id = m.group(1)
+
+        # 5) API Key を生成
+        await page.goto("https://blog.livedoor.com/settings/api", timeout=30000)
+        # 「APIキーを生成」ボタンがあれば押す
+        if await page.is_visible("text=APIキーを生成"):
+            await page.click("text=APIキーを生成")
+            await page.wait_for_selector("input[name='apikey']")
+
+        api_key = await page.input_value("input[name='apikey']")
+        await br.close()
+        return {"blog_id": blog_id, "api_key": api_key}
+
+
+# ──────────────────────────────────────────────────────────────
+def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
+    """
+    外部呼び出し関数
+    -------------
+    * Site オブジェクトを受け取り、ExternalBlogAccount を新規作成
+    * 既にアカウントがある場合はそのまま返す
+    """
+    account = (
+        ExternalBlogAccount.query.filter_by(
+            site_id=site.id, blog_type=BlogType.LIVEDOOR
+        ).first()
     )
-    db.session.add(acc)
+    if account:
+        return account
+
+    # 使い捨てメールを発行
+    email, mailbox_id = create_disposable_email(seed=email_seed)
+    password = "Ld" + str(int(time.time()))  # シンプルでOK
+    nickname = site.name[:10]
+
+    try:
+        loop = asyncio.get_event_loop()
+        res = loop.run_until_complete(
+            _signup_internal(email, password, nickname)
+        )
+    except Exception as e:
+        logger.exception("[LD-Signup] failed: %s", e)
+        raise
+
+    # DB 保存
+    new_account = ExternalBlogAccount(
+        site_id=site.id,
+        blog_type=BlogType.LIVEDOOR,
+        email=email,
+        username=nickname,
+        password=password,
+        livedoor_blog_id=res["blog_id"],
+        atompub_key_enc=encrypt(res["api_key"]),
+        api_post_enabled=True,
+        nickname=nickname,
+    )
+    db.session.add(new_account)
     db.session.commit()
-    logging.info("[LD-Signup] account id=%s created", acc.id)
-    return acc
+    return new_account
