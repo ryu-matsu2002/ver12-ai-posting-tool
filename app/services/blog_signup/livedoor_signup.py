@@ -20,9 +20,9 @@ from app.enums import BlogType
 from app.models import ExternalBlogAccount
 from app.services.livedoor.llm_helper import extract_form_fields
 from app.services.blog_signup.crypto_utils import encrypt
-from app.services.mail_utils.one_sec_mail import (
-     create_inbox,
-     poll_latest_link,
+from app.services.mail_utils.mail_gw import (
+     create_inbox,      # returns (email, jwt)
+     poll_latest_link,  # jwt を渡す
 )
 
 logger = logging.getLogger(__name__)
@@ -115,7 +115,7 @@ async def _signup_internal(
         # 2)  メール認証リンクを取得
         # 2) メール認証リンクを取得
         link = poll_latest_link(
-            email,
+            token,
             pattern=r"https://member\.livedoor\.com/register/.*",
             timeout=180
         )
