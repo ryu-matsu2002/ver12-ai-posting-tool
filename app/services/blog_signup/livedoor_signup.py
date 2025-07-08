@@ -154,11 +154,14 @@ def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
     nickname = site.name[:10]
 
     try:
-        loop = asyncio.get_event_loop()
-        res = loop.run_until_complete(_signup_internal(email, token, password, nickname))
+        # ThreadPoolExecutor 内でも安全に実行できるワンショット実行
+        res = asyncio.run(
+            _signup_internal(email, token, password, nickname)
+        )
     except Exception as e:
         logger.exception("[LD-Signup] failed: %s", e)
         raise
+
 
     # DB 保存
     new_account = ExternalBlogAccount(
