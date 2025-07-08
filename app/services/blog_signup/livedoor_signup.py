@@ -165,6 +165,7 @@ def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
     # 使い捨てメールを発行
     email, token = create_inbox()
     logger.info("[LD-Signup] disposable email = %s", email)   # ★ 追加
+    logger.info("[LD-Signup] mailgw jwt = %s", token)
     password = "Ld" + str(int(time.time()))  # シンプルでOK
     nickname = site.name[:10]
 
