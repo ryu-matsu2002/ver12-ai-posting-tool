@@ -20,9 +20,9 @@ from app.enums import BlogType
 from app.models import ExternalBlogAccount
 from app.services.livedoor.llm_helper import extract_form_fields
 from app.services.blog_signup.crypto_utils import encrypt
-from app.services.blog_signup.mail_tm_client import (
-     create_disposable_email,
-     poll_inbox,
+from app.services.mail_utils.one_sec_mail import (
+     create_inbox,
+     poll_latest_link,
 )
 
 logger = logging.getLogger(__name__)
@@ -114,10 +114,10 @@ async def _signup_internal(
 
         # 2)  メール認証リンクを取得
         # 2) メール認証リンクを取得
-        link = poll_inbox(
-            token,
+        link = poll_latest_link(
+            email,
             pattern=r"https://member\.livedoor\.com/register/.*",
-            timeout=180          # ← 必要なら延長
+            timeout=180
         )
 
         if not link:
@@ -163,7 +163,7 @@ def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
         return account
 
     # 使い捨てメールを発行
-    email, token = create_disposable_email(seed=email_seed)
+    email, token = create_inbox()
     password = "Ld" + str(int(time.time()))  # シンプルでOK
     nickname = site.name[:10]
 
