@@ -20,7 +20,11 @@ from app.enums import BlogType
 from app.models import ExternalBlogAccount
 from app.services.livedoor.llm_helper import extract_form_fields
 from app.services.blog_signup.crypto_utils import encrypt
-from app.services.mail_utils.mail_tm import create_disposable_email, poll_inbox
+from app.services.blog_signup.mail_tm_client import (
+     create_disposable_email,
+     poll_inbox,
+)
+
 logger = logging.getLogger(__name__)
 
 SIGNUP_URL = "https://member.livedoor.com/register/input"
@@ -41,7 +45,7 @@ async def _fill_form_with_llm(page: Page, hints: Dict[str, str]) -> None:
             logger.warning("failed to fill %s (%s)", label, sel)
 
 
-async def _signup_internal(email: str, password: str, nickname: str) -> Dict[str, str]:
+async def _signup_internal(email: str, token: str, password: str, nickname: str) -> Dict[str, str]:
     async with async_playwright() as p:
         br = await p.chromium.launch(headless=True, args=["--no-sandbox"])
         page = await br.new_page()
@@ -60,7 +64,7 @@ async def _signup_internal(email: str, password: str, nickname: str) -> Dict[str
         await page.click("button[type='submit']")
 
         # 2) メール認証リンクを取得
-        link = poll_inbox(email, pattern=r"https://member\.livedoor\.com/register/.*")
+        link = poll_inbox(token, pattern=r"https://member\.livedoor\.com/register/.*")
         await page.goto(link, timeout=30000)
 
         # 3) ブログ開設（自動リダイレクトで完了）
@@ -99,15 +103,13 @@ def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
         return account
 
     # 使い捨てメールを発行
-    email, mailbox_id = create_disposable_email(seed=email_seed)
+    email, token = create_disposable_email(seed=email_seed)
     password = "Ld" + str(int(time.time()))  # シンプルでOK
     nickname = site.name[:10]
 
     try:
         loop = asyncio.get_event_loop()
-        res = loop.run_until_complete(
-            _signup_internal(email, password, nickname)
-        )
+        res = loop.run_until_complete(_signup_internal(email, token, password, nickname))
     except Exception as e:
         logger.exception("[LD-Signup] failed: %s", e)
         raise

@@ -40,3 +40,24 @@ def wait_verify_link(token: str,
             time.sleep(5)
     logging.error("[mail.tm] verification link not found")
     return None
+
+# --- ここから追加 ----------------------------------------------------
+
+# livedoor_signup 互換エイリアス
+def create_disposable_email(seed: str | None = None):
+    """
+    ライブドア版サインアップが期待する関数名。
+    返り値は (email, jwt) のタプル。
+    """
+    email, _pwd, token = create_inbox()
+    return email, token
+
+
+def poll_inbox(email_or_token: str, pattern: str, timeout: int = 180, interval: int = 6):
+    """
+    livedoor_signup.py から呼ばれるポーリング関数。
+    token を直接受け取り、wait_verify_link() に委譲する。
+    """
+    # ※ signup 側では token をそのまま渡してくる仕様
+    return wait_verify_link(email_or_token, pattern=pattern, timeout=timeout)
+# --- 追加ここまで ----------------------------------------------------
