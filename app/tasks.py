@@ -3,6 +3,7 @@
 import logging
 from datetime import datetime
 import pytz
+import time 
 from flask import current_app
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -61,6 +62,7 @@ def _auto_post_job(app):
                     art.status = "posted"
                     db.session.commit()
                     current_app.logger.info(f"Auto-posted Article {art.id} -> {url}")
+                    time.sleep(1)
 
                 except Exception as e:
                     db.session.rollback()
