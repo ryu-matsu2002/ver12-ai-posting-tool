@@ -34,30 +34,48 @@
             <th class="py-3 px-4 text-base text-purple-700">毅取り分</th>
           </tr>
         </thead>
-        <tbody class="text-gray-800 text-lg">
+        <tbody class="text-gray-800 text-lg" id="quota-table">
           <tr class="hover:bg-gray-50">
             <td class="py-3 px-4 font-semibold">TCC研究生（@3,000）</td>
-            <td class="py-3 px-4 text-blue-700 font-bold">{{ breakdown.unpurchased.count }} 件</td>
-            <td class="py-3 px-4 text-green-700 font-bold">¥{{ breakdown.unpurchased.ryu | comma }}</td>
-            <td class="py-3 px-4 text-purple-700 font-bold">¥{{ breakdown.unpurchased.take | comma }}</td>
+            <td class="py-3 px-4 text-blue-700 font-bold" id="count-student">
+              <button class="px-2 py-1 bg-gray-200 rounded mr-1"
+                      onclick="adjustQuota('student', -1)">－</button>
+              <span>{{ breakdown.unpurchased.count }}</span> 件
+              <button class="px-2 py-1 bg-gray-200 rounded ml-1"
+                      onclick="adjustQuota('student', 1)">＋</button>
+            </td>
+            <td class="py-3 px-4 text-green-700 font-bold" id="ryu-student">¥{{ breakdown.unpurchased.ryu | comma }}</td>
+            <td class="py-3 px-4 text-purple-700 font-bold" id="take-student">¥{{ breakdown.unpurchased.take | comma }}</td>
           </tr>
           <tr class="hover:bg-gray-50">
             <td class="py-3 px-4 font-semibold">TCCメンバー（@1,000）</td>
-            <td class="py-3 px-4 text-blue-700 font-bold">{{ breakdown.purchased.count }} 件</td>
-            <td class="py-3 px-4 text-green-700 font-bold">¥{{ breakdown.purchased.ryu | comma }}</td>
-            <td class="py-3 px-4 text-purple-700 font-bold">¥{{ breakdown.purchased.take | comma }}</td>
+            <td class="py-3 px-4 text-blue-700 font-bold" id="count-member">
+              <button class="px-2 py-1 bg-gray-200 rounded mr-1"
+                      onclick="adjustQuota('member', -1)">－</button>
+              <span>{{ breakdown.purchased.count }}</span> 件
+              <button class="px-2 py-1 bg-gray-200 rounded ml-1"
+                      onclick="adjustQuota('member', 1)">＋</button>
+            </td>
+            <td class="py-3 px-4 text-green-700 font-bold" id="ryu-member">¥{{ breakdown.purchased.ryu | comma }}</td>
+            <td class="py-3 px-4 text-purple-700 font-bold" id="take-member">¥{{ breakdown.purchased.take | comma }}</td>
           </tr>
           <tr class="hover:bg-gray-50">
             <td class="py-3 px-4 font-semibold">事業用プラン（@20,000/月）</td>
-            <td class="py-3 px-4 text-blue-700 font-bold">{{ breakdown.business.count }} 件</td>
-            <td class="py-3 px-4 text-green-700 font-bold">¥{{ breakdown.business.ryu | comma }}</td>
-            <td class="py-3 px-4 text-purple-700 font-bold">¥{{ breakdown.business.take | comma }}</td>
+            <td class="py-3 px-4 text-blue-700 font-bold" id="count-business">
+              <button class="px-2 py-1 bg-gray-200 rounded mr-1"
+                      onclick="adjustQuota('business', -1)">－</button>
+              <span>{{ breakdown.business.count }}</span> 件
+              <button class="px-2 py-1 bg-gray-200 rounded ml-1"
+                      onclick="adjustQuota('business', 1)">＋</button>
+            </td>
+            <td class="py-3 px-4 text-green-700 font-bold" id="ryu-business">¥{{ breakdown.business.ryu | comma }}</td>
+            <td class="py-3 px-4 text-purple-700 font-bold" id="take-business">¥{{ breakdown.business.take | comma }}</td>
           </tr>
           <tr class="bg-gray-50 border-t font-bold">
             <td class="py-3 px-4">合計</td>
-            <td class="py-3 px-4 text-blue-700">{{ breakdown.total.count }} 件</td>
-            <td class="py-3 px-4 text-green-800">¥{{ breakdown.total.ryu | comma }}</td>
-            <td class="py-3 px-4 text-purple-800">¥{{ breakdown.total.take | comma }}</td>
+            <td class="py-3 px-4 text-blue-700" id="count-total">{{ breakdown.total.count }} 件</td>
+            <td class="py-3 px-4 text-green-800" id="ryu-total">¥{{ breakdown.total.ryu | comma }}</td>
+            <td class="py-3 px-4 text-purple-800" id="take-total">¥{{ breakdown.total.take | comma }}</td>
           </tr>
         </tbody>
       </table>
@@ -102,8 +120,6 @@
     </a>
   </div>
 
-  
-
   <!-- 📜 入金履歴一覧 -->
   <div class="bg-white border rounded-lg shadow-md">
     <div class="p-4 border-b bg-gray-50 rounded-t">
@@ -135,4 +151,25 @@
     </div>
   </div>
 </div>
+
+<!-- 🔧 JS：サイト数調整用 -->
+<script>
+function adjustQuota(category, delta) {
+  fetch("/admin/accounting/adjust", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ category, delta })
+  })
+  .then(response => response.json())
+  .then(data => {
+    // 件数だけ更新（金額は自動再計算されない場合、JSで計算可）
+    document.querySelector("#count-student span").innerText = data.student;
+    document.querySelector("#count-member span").innerText = data.member;
+    document.querySelector("#count-business span").innerText = data.business;
+    document.getElementById("count-total").innerText = data.total + " 件";
+  });
+}
+</script>
 {% endblock %}

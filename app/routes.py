@@ -1219,6 +1219,85 @@ def accounting_details():
         all_months=all_months
     )
 
+@admin_bp.route("/admin/accounting/adjust", methods=["POST"])
+@login_required
+def adjust_quota():
+    if not current_user.is_admin:
+        abort(403)
+
+    from flask import jsonify, request
+
+    # category: "student" / "member" / "business"
+    # delta: +1 or -1 など
+    data = request.get_json()
+    category = data.get("category")
+    delta = int(data.get("delta", 0))
+
+    if category not in ["student", "member", "business"]:
+        return jsonify({"error": "Invalid category"}), 400
+
+    # 対象ユーザーの絞り込み条件
+    query = User.query.filter_by(is_admin=False)
+
+    if category == "student":
+        query = query.filter_by(is_special_access=False)
+    elif category == "member":
+        query = query.filter_by(is_special_access=True)
+    elif category == "business":
+        query = query.join(UserSiteQuota).filter(UserSiteQuota.plan_type == "business")
+
+    # 調整対象ユーザー（最初に該当した1人だけでOK）
+    target_user = query.join(UserSiteQuota).first()
+
+    if not target_user or not target_user.site_quota:
+        return jsonify({"error": "対象ユーザーが見つかりません"}), 404
+
+    # 合計数を増減（0以下にはならないように）
+    quota = target_user.site_quota
+    quota.total_quota = max(quota.total_quota + delta, 0)
+    db.session.commit()
+
+    # ✅ 最新の再計算（同じロジックを再利用）
+    def calculate_financials():
+        users = User.query.all()
+
+        tcc_1000_total = 0     # TCC決済ページあり（@1,000）
+        tcc_3000_total = 0     # TCC決済ページなし（@3,000）
+        business_total = 0     # 事業用プラン（@20,000/月）
+
+        for user in users:
+            if user.is_admin:
+                continue
+            site_quota = user.site_quota
+            total_quota = site_quota.total_quota if site_quota else 0
+
+            if total_quota == 0:
+                continue
+
+            if site_quota and site_quota.plan_type == "business":
+                business_total += total_quota
+            elif user.is_special_access:
+                tcc_1000_total += total_quota
+            else:
+                tcc_3000_total += total_quota
+
+        return {
+            "student": tcc_3000_total,
+            "member": tcc_1000_total,
+            "business": business_total,
+            "total": tcc_3000_total + tcc_1000_total + business_total,
+        }
+
+    latest = calculate_financials()
+
+    # JSONで返す（HTMX側やJS側で書き換える）
+    return jsonify({
+        "student": latest["student"],
+        "member": latest["member"],
+        "business": latest["business"],
+        "total": latest["total"]
+    })
+
 
 # --- 既存: ユーザー全記事表示 ---
 @admin_bp.route("/admin/user/<int:uid>/articles")
