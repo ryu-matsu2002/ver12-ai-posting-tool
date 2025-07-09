@@ -1,20 +1,29 @@
-# scripts/label_captcha.py
+# scripts/label_captcha.py   ← ★全文コピペ
 
 import csv
-import os
+import shutil
+import subprocess
 from pathlib import Path
-from PIL import Image
 import pytesseract
+from PIL import Image
 
-# ── 設定 ───────────────────────────────────────────────
+# ── 設定 ─────────────────────────────────────────────
 DATASET_DIR  = Path("dataset/raw")
 LABEL_CSV    = Path("dataset/labels.csv")
-NUM_TARGETS  = 200          # ラベル付けする枚数
-TESS_CONFIG  = "--psm 7 -l jpn"   # 1 行テキスト想定
-# ────────────────────────────────────────────────────
+NUM_TARGETS  = 200                       # ラベル付け枚数
+TESS_CONFIG  = "--psm 7 -l jpn"
+IMG2TXT_BIN  = shutil.which("img2txt")   # caca-utils の実体パス
+# ───────────────────────────────────────────────────
+
+def ascii_preview(image_path: Path) -> None:
+    """img2txt で画像を ASCII アート表示"""
+    if IMG2TXT_BIN:
+        subprocess.run([IMG2TXT_BIN, "--gamma=0.6", "--width=60", str(image_path)])
+    else:
+        print("(img2txt が見つからないため ASCII 表示をスキップ)")
 
 def guess_text(image_path: Path) -> str:
-    """Tesseract でひらがな推測（5 文字まで切り出す）"""
+    """Tesseract でひらがな推測（先頭5文字）"""
     try:
         img = Image.open(image_path)
         text = pytesseract.image_to_string(img, config=TESS_CONFIG)
@@ -26,7 +35,7 @@ def guess_text(image_path: Path) -> str:
 def main():
     image_files = sorted(DATASET_DIR.glob("*.png"))[:NUM_TARGETS]
     if not image_files:
-        print("❌ dataset/raw に画像が見つかりません")
+        print("❌ dataset/raw に画像がありません")
         return
 
     print(f"🖼️ {len(image_files)} 枚をラベリングします（Enter で既定値を採用）")
@@ -35,23 +44,20 @@ def main():
         writer.writerow(["filename", "label"])
 
         for img_path in image_files:
-            try:
-                Image.open(img_path).show()
-            except Exception:
-                pass  # GUI の無い環境ならスキップ
+            print(f"\n=== {img_path.name} ===")
+            ascii_preview(img_path)
 
             default = guess_text(img_path)
-            prompt  = f"[{default}] >>> {img_path.name} の文字: "
-            label   = input(prompt).strip() or default
+            label = input(f"[{default}] >>> 文字を入力: ").strip() or default
 
             if label == "":
                 print("⚠️ 空ラベル → スキップ")
                 continue
 
             writer.writerow([img_path.name, label])
-            print("✅  保存しました")
+            print("✅ 保存しました")
 
-    print(f"\n🎉 ラベル付け完了 → {LABEL_CSV}")
+    print(f"\n🎉 完了！ labels.csv を作成しました → {LABEL_CSV}")
 
 if __name__ == "__main__":
     main()
