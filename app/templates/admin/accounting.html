@@ -19,7 +19,7 @@
     </select>
   </form>
 
-  <!-- ✅ サイト枠購入の内訳（テーブル形式） -->
+  <!-- ✅ サイト枠購入の内訳 -->
   <div class="bg-white border border-gray-300 rounded-lg shadow-md mb-10">
     <div class="p-4 border-b bg-gray-50 rounded-t">
       <h2 class="text-xl font-bold text-gray-800">📊 サイト枠購入の内訳</h2>
@@ -34,47 +34,48 @@
             <th class="py-3 px-4 text-base text-purple-700">毅取り分</th>
           </tr>
         </thead>
-        <tbody class="text-gray-800 text-lg" id="quota-table">
+        <tbody class="text-gray-800 text-lg">
+          <!-- ▼ TCC研究生 -->
           <tr class="hover:bg-gray-50">
             <td class="py-3 px-4 font-semibold">TCC研究生（@3,000）</td>
-            <td class="py-3 px-4 text-blue-700 font-bold" id="count-student">
-              <button class="px-2 py-1 bg-gray-200 rounded mr-1"
-                      onclick="adjustQuota('student', -1)">－</button>
+            <td class="py-3 px-4 text-blue-700 font-bold" id="cnt-student">
+              <button class="px-2 bg-gray-200 rounded mr-1" onclick="adjustQuota('student', -1)">－</button>
               <span>{{ breakdown.unpurchased.count }}</span> 件
-              <button class="px-2 py-1 bg-gray-200 rounded ml-1"
-                      onclick="adjustQuota('student', 1)">＋</button>
+              <button class="px-2 bg-gray-200 rounded ml-1" onclick="adjustQuota('student', 1)">＋</button>
             </td>
-            <td class="py-3 px-4 text-green-700 font-bold" id="ryu-student">¥{{ breakdown.unpurchased.ryu | comma }}</td>
+            <td class="py-3 px-4 text-green-700 font-bold"  id="ryu-student">¥{{ breakdown.unpurchased.ryu | comma }}</td>
             <td class="py-3 px-4 text-purple-700 font-bold" id="take-student">¥{{ breakdown.unpurchased.take | comma }}</td>
           </tr>
+
+          <!-- ▼ TCCメンバー -->
           <tr class="hover:bg-gray-50">
             <td class="py-3 px-4 font-semibold">TCCメンバー（@1,000）</td>
-            <td class="py-3 px-4 text-blue-700 font-bold" id="count-member">
-              <button class="px-2 py-1 bg-gray-200 rounded mr-1"
-                      onclick="adjustQuota('member', -1)">－</button>
+            <td class="py-3 px-4 text-blue-700 font-bold" id="cnt-member">
+              <button class="px-2 bg-gray-200 rounded mr-1" onclick="adjustQuota('member', -1)">－</button>
               <span>{{ breakdown.purchased.count }}</span> 件
-              <button class="px-2 py-1 bg-gray-200 rounded ml-1"
-                      onclick="adjustQuota('member', 1)">＋</button>
+              <button class="px-2 bg-gray-200 rounded ml-1" onclick="adjustQuota('member', 1)">＋</button>
             </td>
-            <td class="py-3 px-4 text-green-700 font-bold" id="ryu-member">¥{{ breakdown.purchased.ryu | comma }}</td>
+            <td class="py-3 px-4 text-green-700 font-bold"  id="ryu-member">¥{{ breakdown.purchased.ryu | comma }}</td>
             <td class="py-3 px-4 text-purple-700 font-bold" id="take-member">¥{{ breakdown.purchased.take | comma }}</td>
           </tr>
+
+          <!-- ▼ 事業プラン -->
           <tr class="hover:bg-gray-50">
             <td class="py-3 px-4 font-semibold">事業用プラン（@20,000/月）</td>
-            <td class="py-3 px-4 text-blue-700 font-bold" id="count-business">
-              <button class="px-2 py-1 bg-gray-200 rounded mr-1"
-                      onclick="adjustQuota('business', -1)">－</button>
+            <td class="py-3 px-4 text-blue-700 font-bold" id="cnt-business">
+              <button class="px-2 bg-gray-200 rounded mr-1" onclick="adjustQuota('business', -1)">－</button>
               <span>{{ breakdown.business.count }}</span> 件
-              <button class="px-2 py-1 bg-gray-200 rounded ml-1"
-                      onclick="adjustQuota('business', 1)">＋</button>
+              <button class="px-2 bg-gray-200 rounded ml-1" onclick="adjustQuota('business', 1)">＋</button>
             </td>
-            <td class="py-3 px-4 text-green-700 font-bold" id="ryu-business">¥{{ breakdown.business.ryu | comma }}</td>
+            <td class="py-3 px-4 text-green-700 font-bold"  id="ryu-business">¥{{ breakdown.business.ryu | comma }}</td>
             <td class="py-3 px-4 text-purple-700 font-bold" id="take-business">¥{{ breakdown.business.take | comma }}</td>
           </tr>
+
+          <!-- ▼ 合計 -->
           <tr class="bg-gray-50 border-t font-bold">
             <td class="py-3 px-4">合計</td>
-            <td class="py-3 px-4 text-blue-700" id="count-total">{{ breakdown.total.count }} 件</td>
-            <td class="py-3 px-4 text-green-800" id="ryu-total">¥{{ breakdown.total.ryu | comma }}</td>
+            <td class="py-3 px-4 text-blue-700"   id="cnt-total">{{ breakdown.total.count }} 件</td>
+            <td class="py-3 px-4 text-green-800"  id="ryu-total">¥{{ breakdown.total.ryu | comma }}</td>
             <td class="py-3 px-4 text-purple-800" id="take-total">¥{{ breakdown.total.take | comma }}</td>
           </tr>
         </tbody>
@@ -82,7 +83,7 @@
     </div>
   </div>
 
-  <!-- 🏦 入金情報と残高表示 -->
+  <!-- 🏦 入金状況など（以下元コードそのまま） -->
   <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
     <div class="bg-white border rounded-lg shadow-md p-6">
       <h3 class="text-lg font-bold text-gray-700 mb-4">💰 龍之介の入金状況</h3>
@@ -115,12 +116,13 @@
 
   <!-- 🔗 ユーザー別購入履歴リンク -->
   <div class="mb-10 text-right">
-    <a href="{{ url_for('admin.accounting_details') }}" class="inline-block bg-blue-600 text-white text-sm font-semibold px-4 py-2 rounded hover:bg-blue-700 shadow">
+    <a href="{{ url_for('admin.accounting_details') }}"
+       class="inline-block bg-blue-600 text-white text-sm font-semibold px-4 py-2 rounded hover:bg-blue-700 shadow">
       🧾 ユーザー別の購入履歴を見る
     </a>
   </div>
 
-  <!-- 📜 入金履歴一覧 -->
+  <!-- 📜 入金履歴一覧（元コード通り） -->
   <div class="bg-white border rounded-lg shadow-md">
     <div class="p-4 border-b bg-gray-50 rounded-t">
       <h3 class="text-lg font-bold text-gray-700">📜 龍之介の入金履歴</h3>
@@ -142,9 +144,7 @@
             <td class="py-2 px-4 border-b">{{ log.memo or '-' }}</td>
           </tr>
           {% else %}
-          <tr>
-            <td colspan="3" class="py-4 text-gray-500 italic text-center">まだ入金記録がありません</td>
-          </tr>
+          <tr><td colspan="3" class="py-4 text-gray-500 italic text-center">まだ入金記録がありません</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -152,24 +152,53 @@
   </div>
 </div>
 
-<!-- 🔧 JS：サイト数調整用 -->
+<!-- 🔧 JS 部分：件数・金額リアルタイム更新 -->
 <script>
+/* 価格テーブル */
+const PRICE = {
+  student:  { ryu: 1000,  take: 2000 },
+  member:   { ryu: 0,     take: 1000 },
+  business: { ryu: 16000, take: 4000 }
+};
+
+/* 3 桁カンマ */
+const fmt = n => n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+/* ボタン押下 → API → 表更新 */
 function adjustQuota(category, delta) {
   fetch("/admin/accounting/adjust", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ category, delta })
   })
-  .then(response => response.json())
+  .then(r => r.ok ? r.json() : Promise.reject(r))
   .then(data => {
-    // 件数だけ更新（金額は自動再計算されない場合、JSで計算可）
-    document.querySelector("#count-student span").innerText = data.student;
-    document.querySelector("#count-member span").innerText = data.member;
-    document.querySelector("#count-business span").innerText = data.business;
-    document.getElementById("count-total").innerText = data.total + " 件";
-  });
+    // ① 件数セルを更新
+    document.querySelector("#cnt-student span").innerText  = data.student;
+    document.querySelector("#cnt-member span").innerText   = data.member;
+    document.querySelector("#cnt-business span").innerText = data.business;
+    document.getElementById("cnt-total").innerText         = data.total + " 件";
+
+    // ② 金額セルを計算して更新
+    updateAmounts("student",  data.student);
+    updateAmounts("member",   data.member);
+    updateAmounts("business", data.business);
+
+    const totalRyu  = PRICE.student.ryu  * data.student  + PRICE.member.ryu  * data.member  + PRICE.business.ryu  * data.business;
+    const totalTake = PRICE.student.take * data.student  + PRICE.member.take * data.member  + PRICE.business.take * data.business;
+
+    document.getElementById("ryu-total").innerText  = "¥" + fmt(totalRyu);
+    document.getElementById("take-total").innerText = "¥" + fmt(totalTake);
+  })
+  .catch(err => alert("更新に失敗しました"));
+}
+
+/* 個別カテゴリーの取り分更新 */
+function updateAmounts(cat, cnt) {
+  const ryu  = PRICE[cat].ryu  * cnt;
+  const take = PRICE[cat].take * cnt;
+  document.getElementById(`ryu-${cat}`).innerText  = "¥" + fmt(ryu);
+  document.getElementById(`take-${cat}`).innerText = "¥" + fmt(take);
 }
 </script>
 {% endblock %}
