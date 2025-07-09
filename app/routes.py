@@ -1227,76 +1227,76 @@ def adjust_quota():
 
     from flask import jsonify, request
 
-    # category: "student" / "member" / "business"
-    # delta: +1 or -1 など
-    data = request.get_json()
-    category = data.get("category")
-    delta = int(data.get("delta", 0))
-
+    data      = request.get_json()
+    category  = data.get("category")
+    delta     = int(data.get("delta", 0))
     if category not in ["student", "member", "business"]:
         return jsonify({"error": "Invalid category"}), 400
 
-    # 対象ユーザーの絞り込み条件
+    # 対象ユーザー取得
     query = User.query.filter_by(is_admin=False)
-
     if category == "student":
         query = query.filter_by(is_special_access=False)
     elif category == "member":
         query = query.filter_by(is_special_access=True)
-    elif category == "business":
+    else:
         query = query.join(UserSiteQuota).filter(UserSiteQuota.plan_type == "business")
 
-    # 調整対象ユーザー（最初に該当した1人だけでOK）
-    target_user = query.join(UserSiteQuota).first()
-
-    if not target_user or not target_user.site_quota:
+    target = query.join(UserSiteQuota).first()
+    if not target or not target.site_quota:
         return jsonify({"error": "対象ユーザーが見つかりません"}), 404
 
-    # 合計数を増減（0以下にはならないように）
-    quota = target_user.site_quota
-    quota.total_quota = max(quota.total_quota + delta, 0)
+    # 件数調整
+    q = target.site_quota
+    q.total_quota = max(q.total_quota + delta, 0)
     db.session.commit()
 
-    # ✅ 最新の再計算（同じロジックを再利用）
-    def calculate_financials():
-        users = User.query.all()
+    # ─── 集計を再計算 ───
+    stu_cnt = mem_cnt = biz_cnt = 0
+    for u in User.query.filter_by(is_admin=False).all():
+        sq = u.site_quota
+        cnt = sq.total_quota if sq else 0
+        if cnt == 0:
+            continue
+        if sq and sq.plan_type == "business":
+            biz_cnt += cnt
+        elif u.is_special_access:
+            mem_cnt += cnt
+        else:
+            stu_cnt += cnt
 
-        tcc_1000_total = 0     # TCC決済ページあり（@1,000）
-        tcc_3000_total = 0     # TCC決済ページなし（@3,000）
-        business_total = 0     # 事業用プラン（@20,000/月）
+    PRICES = {
+        "student":  {"ryu": 1000,  "take": 2000},
+        "member":   {"ryu": 0,     "take": 1000},
+        "business": {"ryu": 16000, "take": 4000},
+    }
 
-        for user in users:
-            if user.is_admin:
-                continue
-            site_quota = user.site_quota
-            total_quota = site_quota.total_quota if site_quota else 0
-
-            if total_quota == 0:
-                continue
-
-            if site_quota and site_quota.plan_type == "business":
-                business_total += total_quota
-            elif user.is_special_access:
-                tcc_1000_total += total_quota
-            else:
-                tcc_3000_total += total_quota
-
+    def calc(cat_cnt, cat_key):
         return {
-            "student": tcc_3000_total,
-            "member": tcc_1000_total,
-            "business": business_total,
-            "total": tcc_3000_total + tcc_1000_total + business_total,
+            "count": cat_cnt,
+            "ryu":  cat_cnt * PRICES[cat_key]["ryu"],
+            "take": cat_cnt * PRICES[cat_key]["take"],
         }
 
-    latest = calculate_financials()
+    res_student  = calc(stu_cnt, "student")
+    res_member   = calc(mem_cnt, "member")
+    res_business = calc(biz_cnt, "business")
 
-    # JSONで返す（HTMX側やJS側で書き換える）
+    total_cnt  = stu_cnt + mem_cnt + biz_cnt
+    total_ryu  = res_student["ryu"]  + res_member["ryu"]  + res_business["ryu"]
+    total_take = res_student["take"] + res_member["take"] + res_business["take"]
+
     return jsonify({
-        "student": latest["student"],
-        "member": latest["member"],
-        "business": latest["business"],
-        "total": latest["total"]
+        "student":  res_student,
+        "member":   res_member,
+        "business": res_business,
+        "total": {
+            "count": total_cnt,
+            "ryu":   total_ryu,
+            "take":  total_take,
+        },
     })
+
 
 
 # --- 既存: ユーザー全記事表示 ---

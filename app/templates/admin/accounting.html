@@ -154,51 +154,35 @@
 
 <!-- 🔧 JS 部分：件数・金額リアルタイム更新 -->
 <script>
-/* 価格テーブル */
-const PRICE = {
-  student:  { ryu: 1000,  take: 2000 },
-  member:   { ryu: 0,     take: 1000 },
-  business: { ryu: 16000, take: 4000 }
-};
-
 /* 3 桁カンマ */
 const fmt = n => n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
-/* ボタン押下 → API → 表更新 */
 function adjustQuota(category, delta) {
   fetch("/admin/accounting/adjust", {
     method: "POST",
+    credentials: "include",           // ←★ これを追加
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ category, delta })
   })
   .then(r => r.ok ? r.json() : Promise.reject(r))
-  .then(data => {
-    // ① 件数セルを更新
-    document.querySelector("#cnt-student span").innerText  = data.student;
-    document.querySelector("#cnt-member span").innerText   = data.member;
-    document.querySelector("#cnt-business span").innerText = data.business;
-    document.getElementById("cnt-total").innerText         = data.total + " 件";
+  .then(d => {
+    // 件数セル
+    document.querySelector("#cnt-student span").innerText  = d.student.count;
+    document.querySelector("#cnt-member span").innerText   = d.member.count;
+    document.querySelector("#cnt-business span").innerText = d.business.count;
+    document.getElementById("cnt-total").innerText         = d.total.count + " 件";
 
-    // ② 金額セルを計算して更新
-    updateAmounts("student",  data.student);
-    updateAmounts("member",   data.member);
-    updateAmounts("business", data.business);
-
-    const totalRyu  = PRICE.student.ryu  * data.student  + PRICE.member.ryu  * data.member  + PRICE.business.ryu  * data.business;
-    const totalTake = PRICE.student.take * data.student  + PRICE.member.take * data.member  + PRICE.business.take * data.business;
-
-    document.getElementById("ryu-total").innerText  = "¥" + fmt(totalRyu);
-    document.getElementById("take-total").innerText = "¥" + fmt(totalTake);
+    // 取り分セル
+    document.getElementById("ryu-student").innerText   = "¥" + fmt(d.student.ryu);
+    document.getElementById("take-student").innerText  = "¥" + fmt(d.student.take);
+    document.getElementById("ryu-member").innerText    = "¥" + fmt(d.member.ryu);
+    document.getElementById("take-member").innerText   = "¥" + fmt(d.member.take);
+    document.getElementById("ryu-business").innerText  = "¥" + fmt(d.business.ryu);
+    document.getElementById("take-business").innerText = "¥" + fmt(d.business.take);
+    document.getElementById("ryu-total").innerText     = "¥" + fmt(d.total.ryu);
+    document.getElementById("take-total").innerText    = "¥" + fmt(d.total.take);
   })
-  .catch(err => alert("更新に失敗しました"));
-}
-
-/* 個別カテゴリーの取り分更新 */
-function updateAmounts(cat, cnt) {
-  const ryu  = PRICE[cat].ryu  * cnt;
-  const take = PRICE[cat].take * cnt;
-  document.getElementById(`ryu-${cat}`).innerText  = "¥" + fmt(ryu);
-  document.getElementById(`take-${cat}`).innerText = "¥" + fmt(take);
+  .catch(() => alert("更新に失敗しました"));
 }
 </script>
 {% endblock %}
