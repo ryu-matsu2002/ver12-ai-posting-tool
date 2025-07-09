@@ -1,63 +1,48 @@
-# scripts/label_captcha.py   ← ★全文コピペ
+# scripts/label_captcha.py
+"""
+CAPTCHA ラベル付け：OCR が自動候補を出すので
+Enter で確定、違えば修正して Enter。
+画像プレビュー無しなので SSH ターミナルだけで完結します。
+"""
 
 import csv
-import shutil
-import subprocess
 from pathlib import Path
 import pytesseract
 from PIL import Image
 
-# ── 設定 ─────────────────────────────────────────────
-DATASET_DIR  = Path("dataset/raw")
-LABEL_CSV    = Path("dataset/labels.csv")
-NUM_TARGETS  = 200                       # ラベル付け枚数
-TESS_CONFIG  = "--psm 7 -l jpn"
-IMG2TXT_BIN  = shutil.which("img2txt")   # caca-utils の実体パス
-# ───────────────────────────────────────────────────
+# ── 設定 ──────────────────────────────
+DATASET_DIR = Path("dataset/raw")
+LABEL_CSV   = Path("dataset/labels.csv")
+NUM_TARGETS = 200                 # 200 枚で十分
+TESS_CFG    = "--psm 7 -l jpn"    # 1 行テキスト想定
+# ────────────────────────────────────
 
-def ascii_preview(image_path: Path) -> None:
-    """img2txt で画像を ASCII アート表示"""
-    if IMG2TXT_BIN:
-        subprocess.run([IMG2TXT_BIN, "--gamma=0.6", "--width=60", str(image_path)])
-    else:
-        print("(img2txt が見つからないため ASCII 表示をスキップ)")
-
-def guess_text(image_path: Path) -> str:
-    """Tesseract でひらがな推測（先頭5文字）"""
-    try:
-        img = Image.open(image_path)
-        text = pytesseract.image_to_string(img, config=TESS_CONFIG)
-        guess = "".join([c for c in text if '\u3041' <= c <= '\u309F']).strip()
-        return guess[:5]
-    except Exception:
-        return ""
+def ocr_guess(img_path: Path) -> str:
+    """Tesseract で ひらがな予測（先頭5文字）"""
+    text = pytesseract.image_to_string(Image.open(img_path), config=TESS_CFG)
+    hiragana = [c for c in text if "\u3041" <= c <= "\u309F"]
+    return "".join(hiragana)[:5]
 
 def main():
-    image_files = sorted(DATASET_DIR.glob("*.png"))[:NUM_TARGETS]
-    if not image_files:
+    imgs = sorted(DATASET_DIR.glob("*.png"))[:NUM_TARGETS]
+    if not imgs:
         print("❌ dataset/raw に画像がありません")
         return
 
-    print(f"🖼️ {len(image_files)} 枚をラベリングします（Enter で既定値を採用）")
+    print(f"🔖  {len(imgs)} 枚に OCR 推測を付けます。Enter = そのまま採用")
     with LABEL_CSV.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["filename", "label"])
+        w = csv.writer(f)
+        w.writerow(["filename", "label"])
 
-        for img_path in image_files:
-            print(f"\n=== {img_path.name} ===")
-            ascii_preview(img_path)
-
-            default = guess_text(img_path)
-            label = input(f"[{default}] >>> 文字を入力: ").strip() or default
-
+        for i, img in enumerate(imgs, 1):
+            guess = ocr_guess(img)
+            label = input(f"[{i}/{len(imgs)}] {img.name}  推測 → '{guess}' : ").strip() or guess
             if label == "":
-                print("⚠️ 空ラベル → スキップ")
+                print("⚠️ 空なのでスキップ")
                 continue
+            w.writerow([img.name, label])
 
-            writer.writerow([img_path.name, label])
-            print("✅ 保存しました")
-
-    print(f"\n🎉 完了！ labels.csv を作成しました → {LABEL_CSV}")
+    print(f"\n🎉  完了！ → {LABEL_CSV}")
 
 if __name__ == "__main__":
     main()
