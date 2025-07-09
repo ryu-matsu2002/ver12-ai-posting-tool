@@ -9,6 +9,8 @@ import csv
 from pathlib import Path
 import pytesseract
 from PIL import Image
+import shutil, pytesseract
+pytesseract.pytesseract.tesseract_cmd = shutil.which("tesseract") or "/usr/bin/tesseract"
 
 # ── 設定 ──────────────────────────────
 DATASET_DIR = Path("dataset/raw")
