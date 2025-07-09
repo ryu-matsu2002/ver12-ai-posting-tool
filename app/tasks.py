@@ -46,7 +46,7 @@ def _auto_post_job(app):
                 .filter(Article.status == "done", Article.scheduled_at <= now)
                 .options(selectinload(Article.site))
                 .order_by(Article.scheduled_at.asc())
-                .limit(300)
+                .limit(50)
                 .all()
             )
 
@@ -530,7 +530,7 @@ def init_scheduler(app):
     scheduler.add_job(
         func=_auto_post_job,
         trigger="interval",
-        minutes=3,
+        minutes=1,
         args=[app],
         id="auto_post_job",
         replace_existing=True,
@@ -583,7 +583,7 @@ def init_scheduler(app):
     )
 
     scheduler.start()
-    app.logger.info("Scheduler started: auto_post_job every 3 minutes")
+    app.logger.info("Scheduler started: auto_post_job every 1 minutes")
     app.logger.info("Scheduler started: gsc_metrics_job daily at 0:00")
     app.logger.info("Scheduler started: gsc_generation_job every 20 minutes")
     app.logger.info("Scheduler started: external_post_job every 10 minutes")
