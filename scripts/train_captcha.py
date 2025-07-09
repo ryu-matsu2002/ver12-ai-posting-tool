@@ -66,28 +66,26 @@ class CaptchaSet(Dataset):
 
 # ───────────── Model ─────────────
 class SimpleCRNN(nn.Module):
-    """
-    CNN で特徴抽出 → 時系列 5 ステップに分割し全結合で各文字分類
-    """
     def __init__(self, num_classes=47):
         super().__init__()
         self.cnn = nn.Sequential(
             nn.Conv2d(1, 32, 3, 1, 1), nn.ReLU(),
-            nn.MaxPool2d((2, 2)),      # 30×100
+            nn.MaxPool2d(2),                    # 30×100
             nn.Conv2d(32, 64, 3, 1, 1), nn.ReLU(),
-            nn.MaxPool2d((2, 2)),      # 15×50
+            nn.MaxPool2d(2),                    # 15×50
             nn.Conv2d(64, 128, 3, 1, 1), nn.ReLU(),
-            nn.MaxPool2d((3, 3)),      # 5×16
+            nn.MaxPool2d(3),                    #  5×16
+            nn.AdaptiveAvgPool2d((1, 5))        #  1×5  ←★ NEW
         )
-        self.fc = nn.Linear(128 * 5 * 16 // 5, num_classes)  # 時系列長 5
+        self.fc = nn.Linear(128, num_classes)   # 高さ=1 なので 128 だけ
 
     def forward(self, x):
-        feat = self.cnn(x)             # [B, C, 5, 16]
-        B, C, H, W = feat.shape
-        feat = feat.reshape(B, C * H, 5)  # [B, C*H, 5]
-        feat = feat.permute(0, 2, 1)      # [B, 5, C*H]
-        logit = self.fc(feat)             # [B, 5, num_classes]
+        feat = self.cnn(x)          # [B, 128, 1, 5]
+        feat = feat.squeeze(2)      # [B, 128, 5]
+        feat = feat.permute(0, 2, 1)  # [B, 5, 128]
+        logit = self.fc(feat)         # [B, 5, cls]
         return logit
+
 
 
 def train():
