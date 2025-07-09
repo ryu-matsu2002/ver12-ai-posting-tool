@@ -6,6 +6,9 @@ Enter で確定、違えば修正して Enter。
 """
 
 import csv
+import os
+os.environ["TESSDATA_PREFIX"] = "/usr/share/tesseract-ocr/5/tessdata"
+
 from pathlib import Path
 import pytesseract
 from PIL import Image
