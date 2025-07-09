@@ -37,6 +37,7 @@ executor = ThreadPoolExecutor(max_workers=1)  # ✅ 外部SEOでは同時1件ま
 # --------------------------------------------------------------------------- #
 def _auto_post_job(app):
     with app.app_context():
+        current_app.logger.info("Running auto_post_job")
         now = datetime.now(pytz.utc)
 
         try:

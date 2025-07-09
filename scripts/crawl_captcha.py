@@ -1,4 +1,4 @@
-# scripts/crawl_captcha.py  ★上書きしてください
+# scripts/crawl_captcha.py
 
 import asyncio
 import time
@@ -19,15 +19,20 @@ async def crawl_once(p, index: int):
     try:
         await page.goto(TARGET, timeout=30_000)
 
-        # ① captcha-img が DOM に現れるまで待つ（visible でなくて OK）
+        # ① CAPTCHA画像が DOM に現れるのを待つ（hidden でもOK）
+        await page.wait_for_selector("#captcha-img", state="attached", timeout=7000)
         img = page.locator("#captcha-img")
-        await img.wait_for(timeout=7_000)
 
-        # ② src 属性を取得し完全 URL に変換
-        src = await img.get_attribute("src")              # /register/captcha?123
-        captcha_url = page.url.rstrip("/register/input") + src
+        # ② src 属性を取得し、null チェック
+        src = await img.get_attribute("src")
+        if not src:
+            print(f"⚠️  CAPTCHA src not found at index={index}")
+            return
 
-        # ③ PNG バイト列を直接ダウンロード
+        # ③ 完全URLにして PNG バイト列を取得
+        base_url = page.url.split("/register/input")[0]
+        captcha_url = base_url + src
+
         resp = await page.request.get(captcha_url, timeout=15_000)
         if resp.ok:
             img_bytes = await resp.body()
