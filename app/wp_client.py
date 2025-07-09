@@ -11,6 +11,14 @@ from .models import Site, Article
 # タイムアウト（秒）
 TIMEOUT = 30
 
+# --- ① ブラウザを装う汎用 UA --------------------------------------------
+UA_FAKE = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/125.0.0.0 Safari/537.36"
+)
+# ---------------------------------------------------------------------------
+
 # URL正規化
 def normalize_url(url: str) -> str:
     return url.rstrip('/')
@@ -21,7 +29,7 @@ def _post_headers(username: str, app_pass: str, site_url: str) -> dict:
     return {
         'Authorization': f'Basic {token}',
         'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0',
+        'User-Agent': UA_FAKE, 
         'Referer': f'{site_url}/wp-admin',
         'Origin': site_url,
         'Accept': '*/*, application/json',
@@ -32,7 +40,7 @@ def _upload_headers(username: str, app_pass: str, site_url: str) -> dict:
     token = base64.b64encode(f'{username}:{app_pass}'.encode('utf-8')).decode('utf-8')
     return {
         'Authorization': f'Basic {token}',
-        'User-Agent': 'Mozilla/5.0',
+        'User-Agent': UA_FAKE, 
         'Referer': f'{site_url}/wp-admin',
         'Accept': '*/*',
     }
