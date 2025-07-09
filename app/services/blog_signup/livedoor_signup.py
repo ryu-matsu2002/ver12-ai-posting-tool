@@ -6,8 +6,8 @@
 * 取得した API Key／Blog ID を ExternalBlogAccount に保存
 *
 * 2025-07-09 改訂:
+*  - CAPTCHA 画像を自前OCRで自動入力（captcha_solver.solve）
 *  - 送信直後に URL／タイトル／成功メッセージを検証
-*  - CAPTCHA iframe 検出ログを追加
 *  - クリック出来ない場合に HTML／PNG を /tmp に保存
 *  - 詳細ログを強化しデバッグ容易化
 """
@@ -23,43 +23,36 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import requests
-from playwright.async_api import (Page, TimeoutError as PwTimeout,
-                                  async_playwright)
+from playwright.async_api import async_playwright, Page
+from playwright.async_api import TimeoutError as PwTimeout
 
 from app import db
 from app.enums import BlogType
 from app.models import ExternalBlogAccount
 from app.services.blog_signup.crypto_utils import encrypt
 from app.services.livedoor.llm_helper import extract_form_fields
-from app.services.mail_utils.mail_gw import (create_inbox, poll_latest_link)
+from app.services.mail_utils.mail_gw import create_inbox, poll_latest_link
+from app.services.captcha_solver import solve  # ←★ 追加
 
 logger = logging.getLogger(__name__)
 
 SIGNUP_URL = "https://member.livedoor.com/register/input"
-SUCCESS_PATTERNS: List[str] = ["メールを送信しました", "仮登録"]  # 送信完了画面に含まれる文言
-
+SUCCESS_PATTERNS: List[str] = ["メールを送信しました", "仮登録"]
 
 # ──────────────────────────────────────────────────────────────
 async def _fill_form_with_llm(page: Page, hints: Dict[str, str]) -> None:
-    """
-    livedoor 登録画面の各入力欄に値を埋め込む。
-
-    GPT-4o によるフィールド推定結果（label → selector）の
-    マッピング `extract_form_fields()` を流用。
-    """
+    """GPT で推定したセレクタに値を流し込む"""
     html = await page.content()
     mapping = extract_form_fields(html)
     for field in mapping:
         sel = field["selector"]
-        label = field["label"]
-        value = hints.get(label, "")
+        value = hints.get(field["label"], "")
         if not value:
             continue
         try:
             await page.fill(sel, value)
         except Exception:
-            logger.warning("failed to fill %s (%s)", label, sel)
-
+            logger.warning("failed to fill %s (%s)", field["label"], sel)
 
 # ──────────────────────────────────────────────────────────────
 async def _signup_internal(
@@ -68,31 +61,15 @@ async def _signup_internal(
     password: str,
     nickname: str,
 ) -> Dict[str, str]:
-    """
-    実際のブラウザ操作を行うコルーチン。
-
-    Returns
-    -------
-    dict
-        {"blog_id": <str>, "api_key": <str>}
-    """
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-            ],
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
         )
         page = await browser.new_page()
 
-        # 1) 会員登録フォームへ遷移
+        # 1) フォームへ遷移
         await page.goto(SIGNUP_URL, timeout=30_000)
-
-        # CAPTCHA iframe が最初から出ていないか確認
-        captcha_present = await page.query_selector("iframe[src*='recaptcha']") is not None
-        logger.info("[LD-Signup] captcha_present=%s", captcha_present)
 
         await _fill_form_with_llm(
             page,
@@ -104,109 +81,101 @@ async def _signup_internal(
             },
         )
 
-        # ---- 送信ボタンを押す（複数セレクタを順に試す）-------------
-        await page.wait_for_load_state("networkidle")
+        # 画像CAPTCHAがある場合は自動で解く
+        if await page.is_visible("img[src*='captcha']"):
+            for attempt in range(3):  # 最大3回
+                img_bytes = await page.locator("img[src*='captcha']").screenshot()
+                text = solve(img_bytes)
+                await page.fill("input[name='captcha']", text)
+                logger.info("[LD-Signup] solve captcha try%d='%s'", attempt + 1, text)
 
-        selectors = [
+                # 送信ボタン押下
+                if await page.is_visible("input[type='submit']"):
+                    await page.click("input[type='submit']")
+                else:
+                    await page.click("button.c-btn--primary")
+
+                # 成功判定：エラーメッセージが空
+                await page.wait_for_load_state("networkidle")
+                if not await page.is_visible("#captcha_msg:not(:empty)"):
+                    break   # 成功
+                # 失敗 → 画像をクリックしてリフレッシュして再挑戦
+                await page.click("img[src*='captcha']")
+
+        # ---- CAPTCHA が無い or 入力済み状態で送信ボタン確実クリック ----
+        await page.wait_for_load_state("networkidle")
+        clicked = False
+        for sel in [
             "input[type='submit'][value*='ユーザー情報を登録']",
             "input[type='submit']",
             "button:has-text('確認メール')",
             "button.c-btn--primary",
-        ]
-
-        clicked = False
-        for sel in selectors:
+        ]:
             if await page.is_visible(sel):
                 try:
                     await page.click(sel, timeout=5_000)
                     clicked = True
                     break
                 except PwTimeout:
-                    pass  # selector は見えるがクリック不可 → 次へ
-
+                    pass
         if not clicked:
-            html_path = Path("/tmp/ld_signup_debug.html")
-            png_path = Path("/tmp/ld_signup_debug.png")
-            html_path.write_text(await page.content(), encoding="utf-8")
-            await page.screenshot(path=str(png_path), full_page=True)
+            html = Path("/tmp/ld_signup_debug.html")
+            png  = Path("/tmp/ld_signup_debug.png")
+            html.write_text(await page.content(), encoding="utf-8")
+            await page.screenshot(path=str(png), full_page=True)
             await browser.close()
-            raise RuntimeError(
-                f"登録フォームの送信ボタンが見つからず失敗。HTML: {html_path}, PNG: {png_path}"
-            )
+            raise RuntimeError(f"送信ボタンが押せず失敗。HTML:{html} PNG:{png}")
 
-        # クリック後にネットワークが静まるまで待ち、現在の URL／タイトルをログ
         await page.wait_for_load_state("networkidle")
-        title_now = await page.title()
-        logger.info("[LD-Signup] after submit url=%s title=%s", page.url, title_now)
+        logger.info("[LD-Signup] after submit url=%s title=%s", page.url, await page.title())
 
-        # 送信成功判定
-        html_after = await page.content()
-        if not any(pat in html_after for pat in SUCCESS_PATTERNS):
-            bad_html = Path("/tmp/ld_signup_post_submit.html")
-            bad_png = Path("/tmp/ld_signup_post_submit.png")
-            bad_html.write_text(html_after, encoding="utf-8")
-            await page.screenshot(path=str(bad_png), full_page=True)
+        # 成功文言チェック
+        if not any(pat in await page.content() for pat in SUCCESS_PATTERNS):
+            bad = Path("/tmp/ld_signup_post_submit.html")
+            bad.write_text(await page.content(), encoding="utf-8")
             await browser.close()
-            raise RuntimeError(
-                f"送信後に成功メッセージが見当たらない。HTML: {bad_html}, PNG: {bad_png}"
-            )
-        # -----------------------------------------------------------
+            raise RuntimeError(f"送信後に成功メッセージが無い → {bad}")
 
-        # 2) メール認証リンクを取得
+        # 2) 認証リンク
         link = poll_latest_link(
-            token,
-            pattern=r"https://member\.livedoor\.com/register/.*",
-            timeout=180,
+            token, r"https://member\.livedoor\.com/register/.*", timeout=180
         )
         if not link:
             await browser.close()
-            raise RuntimeError("メール認証リンクを取得できませんでした")
-
+            raise RuntimeError("メール認証リンクが取得できません")
         logger.info("[LD-Signup] verification link=%s", link)
         await page.goto(link, timeout=30_000)
 
-        # 3) ブログ開設（自動リダイレクトを待つ）
+        # 3) 自動リダイレクトを待つ
         await page.wait_for_url(re.compile(r"https://blog\.livedoor\.com/.*"), timeout=60_000)
 
-        # 4) blog_id を抽出
+        # 4) blog_id
         m = re.search(r"https://(.+?)\.blogcms\.jp", page.url)
         if not m:
             await browser.close()
-            raise RuntimeError("blog_id を URL から抽出できませんでした")
+            raise RuntimeError("blog_id が抽出できませんでした")
         blog_id = m.group(1)
 
-        # 5) API Key を生成／取得
+        # 5) APIキー取得
         await page.goto("https://blog.livedoor.com/settings/api", timeout=30_000)
         if await page.is_visible("text=APIキーを生成"):
-            await page.click("text=APIキーを生成", timeout=15_000)
-            await page.wait_for_selector("input[name='apikey']", timeout=15_000)
-
+            await page.click("text=APIキーを生成")
+            await page.wait_for_selector("input[name='apikey']")
         api_key = await page.input_value("input[name='apikey']")
 
         await browser.close()
         return {"blog_id": blog_id, "api_key": api_key}
 
-
 # ──────────────────────────────────────────────────────────────
 def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
-    """
-    外部呼び出し関数
-    -------------
-    * Site オブジェクトを受け取り、ExternalBlogAccount を新規作成
-    * 既にアカウントがある場合はそのまま返す
-    """
-    account = (
-        ExternalBlogAccount.query.filter_by(
-            site_id=site.id, blog_type=BlogType.LIVEDOOR
-        ).first()
-    )
+    account = ExternalBlogAccount.query.filter_by(
+        site_id=site.id, blog_type=BlogType.LIVEDOOR
+    ).first()
     if account:
         return account
 
-    # 使い捨てメールを発行
     email, token = create_inbox()
     logger.info("[LD-Signup] disposable email = %s", email)
-    logger.info("[LD-Signup] mailgw jwt = %s", token)
 
     password = "Ld" + str(int(time.time()))
     nickname = site.name[:10]
@@ -217,7 +186,6 @@ def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
         logger.exception("[LD-Signup] failed: %s", e)
         raise
 
-    # DB 保存
     new_account = ExternalBlogAccount(
         site_id=site.id,
         blog_type=BlogType.LIVEDOOR,
@@ -233,8 +201,6 @@ def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
     db.session.commit()
     return new_account
 
-
-# --- 互換エイリアス（tasks.py から import される） -------------------
-def signup(site, email_seed: str = "ld") -> ExternalBlogAccount:
-    """tasks.py 用ラッパー"""
+# 互換ラッパー
+def signup(site, email_seed: str = "ld"):
     return register_blog_account(site, email_seed=email_seed)
