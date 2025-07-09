@@ -15,6 +15,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_migrate import Migrate
 from celery import Celery
+from multiprocessing import current_process
 
 
 # ── Flask-拡張の“空”インスタンスを先に作成 ───────────
@@ -95,7 +96,7 @@ def create_app() -> Flask:
         #app.register_blueprint(external_bp)
 
     # ✅ スケジューラー起動（--preload により1回のみ呼ばれる）
-    if os.getenv("SCHEDULER_ENABLED") == "1":
+    if os.getenv("SCHEDULER_ENABLED") == "1" and current_process().name == "MainProcess":
         app.logger.info("✅ init_scheduler() を起動します（is_main_process チェックなし）")
         from .tasks import init_scheduler
         init_scheduler(app)
