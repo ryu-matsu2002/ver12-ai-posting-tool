@@ -58,7 +58,7 @@ def _auto_post_job(app):
                     continue
 
                 try:
-                    site = db.session.query(Site).get(art.site_id)  # ✅ 修正ここ
+                    site = db.session.query(Site).get(art.site_id)
                     url = post_to_wp(site, art)
                     art.posted_at = now
                     art.status = "posted"
@@ -68,22 +68,8 @@ def _auto_post_job(app):
                 except Exception as e:
                     db.session.rollback()
                     current_app.logger.warning(f"初回投稿失敗: Article {art.id} {e}")
-
-                    retry_attempts = 3
-                    for attempt in range(retry_attempts):
-                        try:
-                            site = db.session.query(Site).get(art.site_id)  # ✅ リトライ時も明示取得
-                            url = post_to_wp(site, art)
-                            art.posted_at = now
-                            art.status = "posted"
-                            db.session.commit()
-                            current_app.logger.info(f"Retry Success: Article {art.id} -> {url}")
-                            break
-                        except Exception as retry_exception:
-                            db.session.rollback()
-                            current_app.logger.warning(
-                                f"Retry {attempt + 1} failed for Article {art.id}: {retry_exception}"
-                            )
+                    art.status = "error"  # 投稿失敗時にステータスを "error" に変更
+                    db.session.commit()  # エラー状態として保存
 
         finally:
             db.session.close()
