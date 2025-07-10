@@ -2206,7 +2206,8 @@ def view_errors(username):
 
     # エラー情報の取得（ページネーション対応）
     page = request.args.get('page', 1, type=int)
-    errors = Error.query.filter_by(user_id=current_user.id).order_by(Error.created_at.desc()).paginate(page, per_page=10)
+    errors = Error.query.filter_by(user_id=current_user.id).order_by(Error.created_at.desc()).paginate(page=page, per_page=10)
+
 
     return render_template(
         "view_errors.html",
