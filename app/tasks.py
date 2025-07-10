@@ -38,6 +38,7 @@ executor = ThreadPoolExecutor(max_workers=1)  # ✅ 外部SEOでは同時1件ま
 # --------------------------------------------------------------------------- #
 def _auto_post_job(app):
     with app.app_context():
+        start = time.time()
         current_app.logger.info("Running auto_post_job")
         now = datetime.now(pytz.utc)
 
@@ -47,7 +48,7 @@ def _auto_post_job(app):
                 .filter(Article.status == "done", Article.scheduled_at <= now)
                 .options(selectinload(Article.site))
                 .order_by(Article.scheduled_at.asc())
-                .limit(50)
+                .limit(20)
                 .all()
             )
 
@@ -63,7 +64,6 @@ def _auto_post_job(app):
                     art.status = "posted"
                     db.session.commit()
                     current_app.logger.info(f"Auto-posted Article {art.id} -> {url}")
-                    time.sleep(1)
 
                 except Exception as e:
                     db.session.rollback()
@@ -87,6 +87,8 @@ def _auto_post_job(app):
 
         finally:
             db.session.close()
+            end = time.time()
+            current_app.logger.info(f"✅ [AutoPost] 自動投稿ジョブ終了（所要時間: {end - start:.1f}秒）")
 
 # --------------------------------------------------------------------------- #
 # 2) GSC メトリクス毎日更新
@@ -587,7 +589,7 @@ def init_scheduler(app):
     )
 
     scheduler.start()
-    app.logger.info("Scheduler started: auto_post_job every 1 minutes")
+    app.logger.info("Scheduler started: auto_post_job every 3 minutes")
     app.logger.info("Scheduler started: gsc_metrics_job daily at 0:00")
     app.logger.info("Scheduler started: gsc_generation_job every 20 minutes")
     app.logger.info("Scheduler started: external_post_job every 10 minutes")
