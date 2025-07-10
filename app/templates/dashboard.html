@@ -29,7 +29,7 @@
     <p class="text-4xl font-extrabold text-red-600">
       {{ error or 0 }} 
       {% if error %}
-        <a href="{{ url_for('main.view_errors') }}" class="text-blue-500 underline">エラー詳細</a>
+        <a href="{{ url_for('main.view_errors', username=current_user.username) }}" class="text-blue-500 underline">エラー詳細</a>
       {% endif %}
     </p>
   </div>
