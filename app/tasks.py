@@ -57,7 +57,8 @@ def _auto_post_job(app):
                     continue
 
                 try:
-                    url = post_to_wp(art.site, art)
+                    site = db.session.query(Site).get(art.site_id)  # ✅ 修正ここ
+                    url = post_to_wp(site, art)
                     art.posted_at = now
                     art.status = "posted"
                     db.session.commit()
@@ -71,7 +72,8 @@ def _auto_post_job(app):
                     retry_attempts = 3
                     for attempt in range(retry_attempts):
                         try:
-                            url = post_to_wp(art.site, art)
+                            site = db.session.query(Site).get(art.site_id)  # ✅ リトライ時も明示取得
+                            url = post_to_wp(site, art)
                             art.posted_at = now
                             art.status = "posted"
                             db.session.commit()
