@@ -25,7 +25,7 @@
         </tr>
       </thead>
       <tbody>
-        {% for error in errors %}
+        {% for error in errors.items %}
         <tr class="border-b">
           <td class="p-2">{{ error.article_id }}</td>
           <td class="p-2">{{ error.user.username }}</td>
@@ -44,7 +44,7 @@
     <ul class="inline-flex -space-x-px">
       {% if errors.has_prev %}
       <li>
-        <a href="{{ url_for('view_errors', page=errors.prev_num) }}" class="px-4 py-2 bg-blue-600 text-white rounded-l-md hover:bg-blue-700">前へ</a>
+        <a href="{{ url_for('main.view_errors', username=current_user.username, page=errors.prev_num) }}" class="px-4 py-2 bg-blue-600 text-white rounded-l-md hover:bg-blue-700">前へ</a>
       </li>
       {% endif %}
       <li>
@@ -52,7 +52,7 @@
       </li>
       {% if errors.has_next %}
       <li>
-        <a href="{{ url_for('view_errors', page=errors.next_num) }}" class="px-4 py-2 bg-blue-600 text-white rounded-r-md hover:bg-blue-700">次へ</a>
+        <a href="{{ url_for('main.view_errors', username=current_user.username, page=errors.next_num) }}" class="px-4 py-2 bg-blue-600 text-white rounded-r-md hover:bg-blue-700">次へ</a>
       </li>
       {% endif %}
     </ul>

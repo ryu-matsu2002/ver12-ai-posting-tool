@@ -2204,15 +2204,17 @@ def view_errors(username):
     if current_user.username != username:
         abort(403)
 
-    # エラー情報の取得（ページネーション対応）
+    # ページ番号を取得
     page = request.args.get('page', 1, type=int)
+    
+    # エラー情報の取得（ページネーション対応）
     errors = Error.query.filter_by(user_id=current_user.id).order_by(Error.created_at.desc()).paginate(page=page, per_page=10)
-
 
     return render_template(
         "view_errors.html",
         errors=errors  # エラー詳細のリストをテンプレートに渡す
     )
+
 
 
 @bp.route("/api/rankings")
