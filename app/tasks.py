@@ -534,11 +534,11 @@ def init_scheduler(app):
     scheduler.add_job(
         func=_auto_post_job,
         trigger="interval",
-        minutes=1,
+        minutes=3,
         args=[app],
         id="auto_post_job",
         replace_existing=True,
-        max_instances=1
+        max_instances=5
     )
 
     # ✅ GSCクリック・表示回数を毎日0時に自動更新するジョブ
