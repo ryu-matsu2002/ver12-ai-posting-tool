@@ -76,6 +76,20 @@ class Genre(db.Model):
     user = db.relationship("User", backref="genres")  # ✅ 追加
     sites = db.relationship("Site", backref="genre", lazy=True)
 
+# ──── エラー記録 ────
+
+class Error(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    article_id = db.Column(db.Integer, nullable=False)
+    user_id = db.Column(db.Integer, nullable=False)
+    site_id = db.Column(db.Integer, nullable=False)
+    error_message = db.Column(db.String(512), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<Error {self.article_id} - {self.error_message}>'
+
+
 
 # ──── WP サイト ────
 class Site(db.Model):

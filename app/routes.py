@@ -2194,6 +2194,26 @@ def dashboard(username):
         rankings=rankings  # 🔥 新たにテンプレートへ渡す
     )
 
+# ─────────── Error Details
+from app.models import Error  # ← Error モデルを追加
+from flask import render_template, request
+
+@bp.route("/<username>/view_errors")
+@login_required
+def view_errors(username):
+    if current_user.username != username:
+        abort(403)
+
+    # エラー情報の取得（ページネーション対応）
+    page = request.args.get('page', 1, type=int)
+    errors = Error.query.filter_by(user_id=current_user.id).order_by(Error.created_at.desc()).paginate(page, per_page=10)
+
+    return render_template(
+        "view_errors.html",
+        errors=errors  # エラー詳細のリストをテンプレートに渡す
+    )
+
+
 @bp.route("/api/rankings")
 @login_required
 def api_rankings():

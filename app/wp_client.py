@@ -6,7 +6,9 @@ import time
 from . import db
 from requests.exceptions import HTTPError
 from flask import current_app
-from .models import Site, Article
+from .models import Site, Article, Error
+from datetime import datetime
+
 
 # タイムアウト（秒）
 TIMEOUT = 30
@@ -91,6 +93,20 @@ def upload_image_to_wp(site_url: str, image_path: str, username: str, app_pass: 
             error = response.text
         current_app.logger.warning(f"画像のアップロードに失敗: {response.status_code}, {error}")
         raise HTTPError(f"画像のアップロードに失敗しました: {response.status_code}, {error}")
+
+def log_error_to_db(article_id, user_id, site_id, error_message):
+    try:
+        error = Error(
+            article_id=article_id,
+            user_id=user_id,
+            site_id=site_id,
+            error_message=error_message,
+            created_at=datetime.utcnow()
+        )
+        db.session.add(error)
+        db.session.commit()
+    except Exception as e:
+        current_app.logger.error(f"エラー情報の保存失敗: {e}")
 
 # WordPress投稿処理（画像アップロード処理を拡張）
 def post_to_wp(site: Site, art: Article) -> str:

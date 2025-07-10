@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}エラー詳細 | SITE CRAFT{% endblock %}
+
+{% block content %}
+<!-- 🔷 ヘッダーロゴ -->
+<div class="flex flex-col items-center justify-center mt-10 mb-6">
+  <div class="flex items-center space-x-6">
+    <img src="{{ url_for('static', filename='images/tcc_logo.png') }}" alt="SITE CRAFT ロゴ" class="w-24 h-24" />
+    <h1 class="text-[5rem] font-extrabold tracking-wide text-custom-brand leading-none">SITE CRAFT</h1>
+  </div>
+</div>
+
+<!-- 📋 エラーリスト -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6 justify-center mt-8 mb-16 px-6">
+  <div class="bg-white shadow rounded p-6">
+    <h2 class="text-2xl font-bold text-gray-900 mb-4">エラー詳細</h2>
+    <table class="w-full bg-white shadow text-sm">
+      <thead class="bg-gray-100 text-gray-700">
+        <tr>
+          <th class="p-2 text-left">記事ID</th>
+          <th class="p-2 text-left">ユーザー名</th>
+          <th class="p-2 text-left">エラー内容</th>
+          <th class="p-2 text-left">発生日時</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for error in errors %}
+        <tr class="border-b">
+          <td class="p-2">{{ error.article_id }}</td>
+          <td class="p-2">{{ error.user.username }}</td>
+          <td class="p-2">{{ error.error_message }}</td>
+          <td class="p-2">{{ error.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ページネーション -->
+<div class="flex justify-center mt-6">
+  <nav aria-label="Page navigation">
+    <ul class="inline-flex -space-x-px">
+      {% if errors.has_prev %}
+      <li>
+        <a href="{{ url_for('view_errors', page=errors.prev_num) }}" class="px-4 py-2 bg-blue-600 text-white rounded-l-md hover:bg-blue-700">前へ</a>
+      </li>
+      {% endif %}
+      <li>
+        <a href="#" class="px-4 py-2 bg-gray-200 text-gray-800 hover:bg-gray-300">{{ errors.page }} / {{ errors.pages }}</a>
+      </li>
+      {% if errors.has_next %}
+      <li>
+        <a href="{{ url_for('view_errors', page=errors.next_num) }}" class="px-4 py-2 bg-blue-600 text-white rounded-r-md hover:bg-blue-700">次へ</a>
+      </li>
+      {% endif %}
+    </ul>
+  </nav>
+</div>
+
+{% endblock %}
