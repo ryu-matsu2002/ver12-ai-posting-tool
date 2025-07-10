@@ -59,6 +59,7 @@ def _auto_post_job(app):
 
                 try:
                     site = db.session.query(Site).get(art.site_id)
+                    current_app.logger.info(f"投稿処理開始: Article {art.id}, User ID: {art.user_id}, Site ID: {art.site_id}")
                     url = post_to_wp(site, art)
                     art.posted_at = now
                     art.status = "posted"
@@ -67,7 +68,7 @@ def _auto_post_job(app):
 
                 except Exception as e:
                     db.session.rollback()
-                    current_app.logger.warning(f"初回投稿失敗: Article {art.id} {e}")
+                    current_app.logger.error(f"初回投稿失敗: Article {art.id}, User ID: {art.user_id}, Site ID: {art.site_id}, エラー: {e}")
                     art.status = "error"  # 投稿失敗時にステータスを "error" に変更
                     db.session.commit()  # エラー状態として保存
 

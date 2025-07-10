@@ -96,7 +96,7 @@ def upload_image_to_wp(site_url: str, image_path: str, username: str, app_pass: 
 def post_to_wp(site: Site, art: Article) -> str:
     # ✅ すでに投稿済みかどうかチェック（重要）
     if art.status == "posted" and art.posted_url:
-        current_app.logger.info(f"[スキップ] すでに投稿済み: Article ID {art.id}")
+        current_app.logger.info(f"[スキップ] すでに投稿済み: Article ID {art.id}, User: {art.user_id}, Site: {site.url}")
         return art.posted_url or "already posted"
 
     site_url = normalize_url(site.url)
@@ -133,7 +133,7 @@ def post_to_wp(site: Site, art: Article) -> str:
                 os.remove(temp_path)
 
         except Exception as e:
-            current_app.logger.warning(f"アイキャッチ画像のアップロード失敗: {e}")
+            current_app.logger.warning(f"アイキャッチ画像のアップロード失敗: Article ID {art.id}, User: {art.user_id}, Site: {site.url}, エラー: {e}")
 
     post_data = {
         "title": art.title,
@@ -143,27 +143,23 @@ def post_to_wp(site: Site, art: Article) -> str:
     if featured_media_id:
         post_data["featured_media"] = featured_media_id
 
-    for attempt in range(3):
-        try:
-            response = requests.post(url, json=post_data, headers=headers, timeout=TIMEOUT)
-            if response.status_code == 201:
-                art.status = "posted"
-                art.posted_url = response.json().get("link")
-                db.session.commit()
-                return response.json().get("link") or "success"
-            else:
-                raise HTTPError(f"ステータスコード {response.status_code}")
-        except Exception as e:
-            if attempt < 2:
-                current_app.logger.warning(f"[{attempt+1}回目] 投稿リトライ中: {e}")
-                time.sleep(2)
-            else:
-                try:
-                    error = response.json()
-                except Exception:
-                    error = response.text
-                current_app.logger.error(f"記事の作成に失敗: {response.status_code}, {error}")
-                raise HTTPError(f"記事の作成に失敗: {response.status_code}, {error}")
+    try:
+        response = requests.post(url, json=post_data, headers=headers, timeout=TIMEOUT)
+        if response.status_code == 201:
+            art.status = "posted"
+            art.posted_url = response.json().get("link")
+            db.session.commit()
+            current_app.logger.info(f"投稿成功: Article ID {art.id}, User: {art.user_id}, Site: {site.url} -> {art.posted_url}")
+            return art.posted_url or "success"
+        else:
+            raise HTTPError(f"ステータスコード {response.status_code}")
+    except Exception as e:
+        current_app.logger.error(f"記事の作成に失敗: Article ID {art.id}, User: {art.user_id}, Site: {site.url}, エラー: {str(e)}")
+        # 投稿失敗時にステータスを "error" に変更
+        art.status = "error"
+        db.session.commit()
+        return f"Error: {str(e)}"
+
 
 # デザイン調整
 def _decorate_html(content: str) -> str:
