@@ -186,9 +186,20 @@ def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
     nickname = site.name[:10]
 
     try:
-        res = asyncio.run(_signup_internal(email, token, password, nickname))
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            res = new_loop.run_until_complete(_signup_internal(email, token, password, nickname))
+            new_loop.close()
+        else:
+            res = asyncio.run(_signup_internal(email, token, password, nickname))
     except Exception as e:
-        logger.exception("[LD-Signup] failed: %s", e)
+        logger.error("[LD-Signup] failed: %s", str(e))
         raise
 
     new_account = ExternalBlogAccount(
