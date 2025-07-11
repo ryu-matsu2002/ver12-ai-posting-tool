@@ -2104,82 +2104,83 @@ def dashboard(username):
     if current_user.username != username:
         abort(403)
 
-    # 記事統計
-    article_stats = db.session.query(
-        func.count(Article.id).label("total"),
-        func.sum(case((Article.status == "done", 1), else_=0)).label("done"),
-        func.sum(case((Article.status == "posted", 1), else_=0)).label("posted"),
-        func.sum(case((Article.status == "error", 1), else_=0)).label("error"),
-        func.sum(case((Article.status.in_(["pending", "gen"]), 1), else_=0)).label("generating")
-    ).filter(Article.user_id == current_user.id).first()
-
-    g.total_articles = article_stats.total
-    g.done           = article_stats.done
-    g.posted         = article_stats.posted
-    g.error          = article_stats.error
-    g.generating     = article_stats.generating
-
-    # ユーザー情報
     user = current_user
+
+    # 🔸 記事統計（SQL1）
+    article_stats = db.session.query(
+        func.count(Article.id),
+        func.sum(case((Article.status == "done", 1), else_=0)),
+        func.sum(case((Article.status == "posted", 1), else_=0)),
+        func.sum(case((Article.status == "error", 1), else_=0)),
+        func.sum(case((Article.status.in_(["pending", "gen"]), 1), else_=0)),
+    ).filter(Article.user_id == user.id).first()
+
+    g.total_articles = article_stats[0]
+    g.done = article_stats[1]
+    g.posted = article_stats[2]
+    g.error = article_stats[3]
+    g.generating = article_stats[4]
+
+    # 🔸 プラン別クォータ取得（SQL2）
     quotas = UserSiteQuota.query.filter_by(user_id=user.id).all()
 
-    # プラン別にデータ構築（used をリアルタイムで取得）
+    # 🔸 サイト使用状況を一括取得（SQL3）
+    site_counts = db.session.query(
+        Site.plan_type,
+        func.count(Site.id)
+    ).filter(Site.user_id == user.id).group_by(Site.plan_type).all()
+    site_count_map = dict(site_counts)
+
+    # 🔸 ログを一括取得（SQL4）
+    all_logs = SiteQuotaLog.query.filter_by(user_id=user.id).order_by(SiteQuotaLog.created_at.desc()).all()
+    log_map = defaultdict(list)
+    for log in all_logs:
+        log_map[log.plan_type].append(log)
+
+    # 🔸 プラン別構成
     plans = {}
     for q in quotas:
-        plan_type = q.plan_type
-        used = Site.query.filter_by(user_id=user.id, plan_type=plan_type).count()  # 🔄 used をリアルタイム算出
+        used = site_count_map.get(q.plan_type, 0)
         total = q.total_quota or 0
         remaining = max(total - used, 0)
-
-        logs = SiteQuotaLog.query.filter_by(user_id=user.id, plan_type=plan_type).order_by(SiteQuotaLog.created_at.desc()).all()
-
-        plans[plan_type] = {
+        plans[q.plan_type] = {
             "used": used,
             "total": total,
             "remaining": remaining,
-            "logs": logs
+            "logs": log_map[q.plan_type]
         }
 
-    # 全体の合計（カード用）もリアルタイムで
     total_quota = sum(q.total_quota for q in quotas)
-    used_quota = sum([Site.query.filter_by(user_id=user.id, plan_type=q.plan_type).count() for q in quotas])
+    used_quota = sum(site_count_map.get(q.plan_type, 0) for q in quotas)
     remaining_quota = max(total_quota - used_quota, 0)
 
-    # ────────────── 🔥 ランキング用データ集計 ──────────────
+    # 🔸 ランキング用（SQL5）
     excluded_user_ids = [1, 2, 14]
-    users = User.query.filter(~User.id.in_(excluded_user_ids))\
-                      .options(selectinload(User.sites))\
-                      .all()
+    ranking_data = db.session.query(
+        User,
+        func.count(Site.id),
+        func.sum(Site.impressions),
+        func.sum(Site.clicks)
+    ).outerjoin(Site).filter(~User.id.in_(excluded_user_ids))\
+     .group_by(User.id).all()
+
     rankings = []
-
-    for u in users:
-        sites = u.sites
-        site_count = len(sites)
-        total_impressions = sum(s.impressions or 0 for s in sites)
-        total_clicks = sum(s.clicks or 0 for s in sites)
-
+    for user_obj, site_count, impressions, clicks in ranking_data:
         rankings.append({
-            "user": u,
-            "site_count": site_count,
-            "impressions": total_impressions,
-            "clicks": total_clicks
+            "user": user_obj,
+            "site_count": site_count or 0,
+            "impressions": impressions or 0,
+            "clicks": clicks or 0
         })
 
-    # 🔄 順位付け処理
     for key in ["site_count", "impressions", "clicks"]:
         sorted_list = sorted(rankings, key=lambda x: x[key], reverse=True)
         for rank, item in enumerate(sorted_list, start=1):
             item[f"{key}_rank"] = rank
 
-    # 🏅 総合スコア：順位の合計（順位が低い＝上位）
     for item in rankings:
-        item["total_score"] = (
-            item["site_count_rank"] +
-            item["impressions_rank"] +
-            item["clicks_rank"]
-        )
+        item["total_score"] = item["site_count_rank"] + item["impressions_rank"] + item["clicks_rank"]
 
-    # 総合順位で並び替え
     rankings.sort(key=lambda x: x["total_score"])
 
     return render_template(
@@ -2193,8 +2194,9 @@ def dashboard(username):
         posted=g.posted,
         error=g.error,
         plans=plans,
-        rankings=rankings  # 🔥 新たにテンプレートへ渡す
+        rankings=rankings
     )
+
 
 # ─────────── Error Details
 from app.models import Error  # ← Error モデルを追加
