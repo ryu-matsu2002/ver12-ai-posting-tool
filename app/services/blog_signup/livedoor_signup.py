@@ -31,7 +31,7 @@ from app.enums import BlogType
 from app.models import ExternalBlogAccount
 from app.services.blog_signup.crypto_utils import encrypt
 from app.services.livedoor.llm_helper import extract_form_fields
-from app.services.mail_utils.mail_gw import create_inbox, poll_latest_link
+from app.services.mail_utils.mail_gw import create_inbox, poll_latest_link as gw_poll_latest_link
 from app.services.captcha_solver import solve  # ←★ 追加
 
 logger = logging.getLogger(__name__)
@@ -140,7 +140,7 @@ async def _signup_internal(
         loop = asyncio.get_running_loop()
         link = await loop.run_in_executor(
             None,
-            poll_latest_link,
+            gw_poll_latest_link,  # ← 明示的に mail_gw.py のものだけを使う
             token,
             r"https://member\.livedoor\.com/register/.*",
             180
