@@ -152,7 +152,11 @@ async def _signup_internal(
         await page.goto(link, timeout=30_000)
 
         # 3) 自動リダイレクトを待つ
-        await page.wait_for_url(re.compile(r"https://blog\.livedoor\.com/.*"), timeout=60_000)
+        import re as regex  # ← 別名で re を再定義してみてもよい
+
+        pattern = regex.compile(r"https://blog\.livedoor\.com/.*")
+        await page.wait_for_url(lambda url: bool(pattern.match(url)), timeout=60_000)
+
 
         # 4) blog_id
         m = re.search(r"https://(.+?)\.blogcms\.jp", page.url)
