@@ -4,7 +4,7 @@
 mail.tm API helper
 ──────────────────────────────
 create_inbox()       → (email, jwt)
-poll_latest_link()   → 最初に見つけた URL を返す
+poll_latest_link_dummy()   → 最初に見つけた URL を返す
 ──────────────────────────────
 """
 
@@ -90,7 +90,7 @@ def create_inbox() -> tuple[str, str]:
     return email, jwt
 
 
-def poll_latest_link(
+def poll_latest_link_dummy(
     jwt: str,
     sender_like: str | None = "@livedoor",
     timeout: int = 180,
