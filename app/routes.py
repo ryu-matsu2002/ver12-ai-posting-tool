@@ -2154,34 +2154,6 @@ def dashboard(username):
     used_quota = sum(site_count_map.get(q.plan_type, 0) for q in quotas)
     remaining_quota = max(total_quota - used_quota, 0)
 
-    # 🔸 ランキング用（SQL5）
-    excluded_user_ids = [1, 2, 14]
-    ranking_data = db.session.query(
-        User,
-        func.count(Site.id),
-        func.sum(Site.impressions),
-        func.sum(Site.clicks)
-    ).outerjoin(Site).filter(~User.id.in_(excluded_user_ids))\
-     .group_by(User.id).all()
-
-    rankings = []
-    for user_obj, site_count, impressions, clicks in ranking_data:
-        rankings.append({
-            "user": user_obj,
-            "site_count": site_count or 0,
-            "impressions": impressions or 0,
-            "clicks": clicks or 0
-        })
-
-    for key in ["site_count", "impressions", "clicks"]:
-        sorted_list = sorted(rankings, key=lambda x: x[key], reverse=True)
-        for rank, item in enumerate(sorted_list, start=1):
-            item[f"{key}_rank"] = rank
-
-    for item in rankings:
-        item["total_score"] = item["site_count_rank"] + item["impressions_rank"] + item["clicks_rank"]
-
-    rankings.sort(key=lambda x: x["total_score"])
 
     return render_template(
         "dashboard.html",
@@ -2194,7 +2166,6 @@ def dashboard(username):
         posted=g.posted,
         error=g.error,
         plans=plans,
-        rankings=rankings
     )
 
 
