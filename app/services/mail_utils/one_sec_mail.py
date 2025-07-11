@@ -35,7 +35,7 @@ def create_inbox() -> tuple[str, None]:
     return f"{name}@{domain}", None     # token は不要
 
 # ------------------------------------------------- main
-def poll_latest_link(
+def poll_latest_link_sec(
     address: str,
     pattern: str = r"https://member\.livedoor\.com/register/.*",
     timeout: int = 180,

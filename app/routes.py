@@ -3428,39 +3428,59 @@ def external_seo_sites():
         ExternalBlogAccount, BlogType
     )
     from sqlalchemy.orm import selectinload
+    from sqlalchemy import func
 
+    # 1. サイトと外部ジョブを一括取得（selectinloadでN+1回避）
     sites = (Site.query
              .filter_by(user_id=current_user.id)
              .options(selectinload(Site.external_jobs))
              .all())
 
-    # ── key = (site_id, blog) のマップに変更 ─────────────────────
+    # 2. job_map を事前に初期化
     job_map = {}
+
+    # 3. 必要な (site_id, blog_type) のセットを収集
+    key_set = set()
     for s in sites:
         for job in s.external_jobs:
-            # status=archived はスキップ
             if job.status == "archived":
                 continue
-            key = (s.id, job.blog_type.value.lower())   # 例: (3, 'note')
+            key = (s.id, job.blog_type.value.lower())
+            key_set.add((s.id, job.blog_type))
+            job_map[key] = job  # 後で posted_cnt を埋める
 
-            # 進捗カウントをブログ種別で集計
-            posted_cnt = (ExternalArticleSchedule.query
-                          .join(ExternalBlogAccount,
-                                ExternalArticleSchedule.blog_account_id == ExternalBlogAccount.id)
-                          .filter(ExternalBlogAccount.site_id == s.id,
-                                  ExternalBlogAccount.blog_type == job.blog_type,
-                                  ExternalArticleSchedule.status == "posted")
-                          .count())
-            job.posted_cnt = posted_cnt
+    # 4. 一括で posted_cnt を取得
+    posted_counts = (
+        db.session.query(
+            ExternalBlogAccount.site_id,
+            ExternalBlogAccount.blog_type,
+            func.count(ExternalArticleSchedule.id)
+        )
+        .join(ExternalArticleSchedule,
+              ExternalArticleSchedule.blog_account_id == ExternalBlogAccount.id)
+        .filter(ExternalArticleSchedule.status == "posted",
+                ExternalBlogAccount.site_id.in_([sid for sid, _ in key_set]),
+                ExternalBlogAccount.blog_type.in_([bt for _, bt in key_set]))
+        .group_by(ExternalBlogAccount.site_id, ExternalBlogAccount.blog_type)
+        .all()
+    )
 
-            job_map[key] = job   # ← (site, blog) → job
+    # 5. job_map に posted_cnt を設定
+    for site_id, blog_type, cnt in posted_counts:
+        key = (site_id, blog_type.value.lower())
+        if key in job_map:
+            job_map[key].posted_cnt = cnt
+
+    # 6. 何も該当しなかったものには 0 を入れておく
+    for job in job_map.values():
+        if not hasattr(job, "posted_cnt"):
+            job.posted_cnt = 0
 
     return render_template(
         "external_sites.html",
-        sites    = sites,
-        job_map  = job_map
+        sites=sites,
+        job_map=job_map
     )
-
 
 # -----------------------------------------------------------------
 # 外部SEO: 開始ボタン → ジョブ生成 & 進捗パネル返却

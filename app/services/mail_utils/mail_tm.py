@@ -79,7 +79,7 @@ def create_inbox() -> tuple[str, str]:
     return email, jwt
 
 
-def poll_latest_link(
+def poll_latest_link_tm(
     jwt: str,
     sender_like: str | None = "@note.com",
     timeout: int = 180,
