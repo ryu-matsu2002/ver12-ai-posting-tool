@@ -35,7 +35,7 @@ def create_inbox() -> tuple[str, str]:
         jwt = cli.post("/token", json={"address": addr, "password": pwd}).json()["token"]
         return addr, jwt       # jwt は Bearer 認証で使用
 
-def poll_latest_link(
+def poll_latest_link_gw(
     jwt: str,
     pattern: str = r"https://member\.livedoor\.com/register/.*",
     timeout: int = 180
