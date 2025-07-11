@@ -2147,11 +2147,13 @@ def dashboard(username):
 
     # ────────────── 🔥 ランキング用データ集計 ──────────────
     excluded_user_ids = [1, 2, 14]
-    users = User.query.filter(~User.id.in_(excluded_user_ids)).all()
+    users = User.query.filter(~User.id.in_(excluded_user_ids))\
+                      .options(selectinload(User.sites))\
+                      .all()
     rankings = []
 
     for u in users:
-        sites = Site.query.filter_by(user_id=u.id).all()
+        sites = u.sites
         site_count = len(sites)
         total_impressions = sum(s.impressions or 0 for s in sites)
         total_clicks = sum(s.clicks or 0 for s in sites)
