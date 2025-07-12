@@ -44,27 +44,60 @@ async def poll_latest_link_gw(
     pattern: str = r"https://member\.livedoor\.com/register/.*",
     timeout: int = 180
 ) -> str | None:
-    logging.info("✅ poll_latest_link_gw が呼び出されました")  # ← ログ追加
+    """
+    メールボックスを定期的にポーリングし、指定のリンクパターンが含まれる認証リンクを探す。
+    """
+    logger = logging.getLogger(__name__)
+    logger.info("✅ poll_latest_link_gw が呼び出されました")
 
-    stop = time.time() + timeout
-    hdr  = {"Authorization": f"Bearer {jwt}", "User-Agent": USER_AGENT}
+    deadline = time.time() + timeout
+    headers = {
+        "Authorization": f"Bearer {jwt}",
+        "User-Agent": USER_AGENT
+    }
 
-    # 非同期クライアントで再構成
-    async with httpx.AsyncClient(base_url=BASE, headers=hdr, timeout=20) as cli:
-        while time.time() < stop:
-            res1 = await cli.get("/messages")
-            msgs = res1.json()["hydra:member"]
+    try:
+        async with httpx.AsyncClient(base_url=BASE, headers=headers, timeout=20) as client:
+            while time.time() < deadline:
+                try:
+                    res1 = await client.get("/messages")
+                    res1.raise_for_status()
+                    data = res1.json()
+                    messages = data.get("hydra:member", [])
 
-            if msgs:
-                mid = msgs[0]["id"]
-                res2 = await cli.get(f"/messages/{mid}")
-                body = res2.json()["html"][0]
+                    for msg in messages:
+                        if msg.get("seen"):
+                            continue
+                        mid = msg.get("id")
+                        if not mid:
+                            continue
 
-                if (m := re.search(pattern, body)):
-                    return m.group(0)
+                        res2 = await client.get(f"/messages/{mid}")
+                        res2.raise_for_status()
+                        detail = res2.json()
 
-            await asyncio.sleep(5)  # ← 非同期sleep
+                        html_raw = detail.get("html")
+                        if isinstance(html_raw, list):
+                            html_content = html_raw[0] if html_raw else ""
+                        elif isinstance(html_raw, str):
+                            html_content = html_raw
+                        else:
+                            logger.warning("⚠️ html フィールドが不正な形式: %s", type(html_raw))
+                            continue
 
-    logging.error("[mail.gw] verification link not found")
+                        match = re.search(pattern, html_content)
+                        if match:
+                            link = match.group(0)
+                            logger.info("✅ 認証リンクを検出: %s", link)
+                            return link
+
+                except Exception as e:
+                    logger.warning(f"[mail.gw] メール取得中に例外発生: {e}")
+
+                await asyncio.sleep(5)
+
+    except Exception as e:
+        logger.error(f"[mail.gw] クライアント接続中に致命的エラー: {e}")
+
+    logger.warning("⏰ poll_latest_link_gw: 認証リンクが見つからないままタイムアウト")
     return None
-
