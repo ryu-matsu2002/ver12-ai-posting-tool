@@ -52,6 +52,7 @@ def create_app() -> Flask:
         "max_overflow": int(os.getenv("MAX_OVERFLOW", 100)),
         "pool_timeout": int(os.getenv("POOL_TIMEOUT", 60)),
         "pool_recycle": 1800,  # ✅ 追加（切断予防）
+        "pool_pre_ping": True,  # ✅ この行を追加！
     }
 
     # ─── 拡張をバインド ───────────────────────
