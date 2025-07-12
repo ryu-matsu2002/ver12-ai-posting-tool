@@ -43,11 +43,14 @@ def create_inbox() -> tuple[str, str]:
 # 非同期関数に変更
 # app/services/mail_utils/mail_gw.py の修正後
 
+# 🔁 修正済: poll_latest_link_gw（正しい非同期ジェネレーター）
+
+
 async def poll_latest_link_gw(
     jwt: str,
     pattern: str = r"https://member\.livedoor\.com/register/.*",
     timeout: int = 180
-) -> AsyncGenerator[str, None]:  # ← ✅ 修正
+) -> AsyncGenerator[str, None]:
     logger = logging.getLogger(__name__)
     logger.info("✅ poll_latest_link_gw が呼び出されました")
 
@@ -63,8 +66,7 @@ async def poll_latest_link_gw(
                 try:
                     res1 = await client.get("/messages")
                     res1.raise_for_status()
-                    data = res1.json()
-                    messages = data.get("hydra:member", [])
+                    messages = res1.json().get("hydra:member", [])
 
                     for msg in messages:
                         if msg.get("seen"):
@@ -76,8 +78,9 @@ async def poll_latest_link_gw(
                         res2 = await client.get(f"/messages/{mid}")
                         res2.raise_for_status()
                         detail = res2.json()
-
                         html_raw = detail.get("html")
+
+                        html_content = ""
                         if isinstance(html_raw, list):
                             html_content = html_raw[0] if html_raw else ""
                         elif isinstance(html_raw, str):
@@ -90,8 +93,8 @@ async def poll_latest_link_gw(
                         if match:
                             link = match.group(0)
                             logger.info("✅ 認証リンクを検出: %s", link)
-                            yield link   # ← ✅ 修正ポイント
-                            return       # 検出後は終了
+                            yield link  # ✅ yield に変更
+                            return
 
                 except Exception as e:
                     logger.warning(f"[mail.gw] メール取得中に例外発生: {e}")
@@ -103,4 +106,5 @@ async def poll_latest_link_gw(
 
     logger.warning("⏰ poll_latest_link_gw: 認証リンクが見つからないままタイムアウト")
     return
+
 
