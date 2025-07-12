@@ -138,7 +138,11 @@ async def _signup_internal(
             raise RuntimeError(f"送信後に成功メッセージが無い → {bad}")
 
         # 2) 認証リンク
-        link = await poll_latest_link_gw(token, r"https://member\.livedoor\.com/register/.*", 180)
+        link = None
+        async for l in poll_latest_link_gw(token, r"https://member\.livedoor\.com/register/.*", 180):
+            link = l
+            break
+
 
         if not link:
             await browser.close()
