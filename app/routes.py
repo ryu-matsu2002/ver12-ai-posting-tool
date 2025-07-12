@@ -32,7 +32,7 @@ import threading
 import datetime
 from .image_utils import fetch_featured_image  # ← ✅ 正しい
 from collections import defaultdict
-from sqlalchemy import func
+
 
 
 from .article_generator import (
@@ -729,6 +729,9 @@ def admin_users():
     if not current_user.is_admin:
         abort(403)
 
+    from sqlalchemy import func
+    from collections import defaultdict    
+
     # 🔷 ユーザー一覧を一括取得
     users = User.query.order_by(User.id).all()
 
@@ -742,9 +745,7 @@ def admin_users():
         db.session.query(Article.user_id, func.count(Article.id))
         .group_by(Article.user_id)
         .all()
-    )
-
-    from sqlalchemy import func
+    )    
 
     # ✅【高速化】UserSiteQuota を一括取得（クエリ1回）
     quota_rows = db.session.query(
@@ -761,7 +762,6 @@ def admin_users():
     ).group_by(Site.user_id, Site.plan_type).all()
 
     # ✅【高速化】辞書化してすぐアクセスできるように整形
-    from collections import defaultdict
 
     # user_id → plan_type → total_quota
     user_quota_map = defaultdict(dict)
