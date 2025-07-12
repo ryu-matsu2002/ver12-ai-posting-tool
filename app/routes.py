@@ -32,6 +32,7 @@ import threading
 import datetime
 from .image_utils import fetch_featured_image  # ← ✅ 正しい
 from collections import defaultdict
+from sqlalchemy import func
 
 
 from .article_generator import (
