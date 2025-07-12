@@ -11,6 +11,8 @@ from __future__ import annotations
 import secrets, string, time, re, logging, httpx, html
 from bs4 import BeautifulSoup
 import asyncio 
+from collections.abc import AsyncGenerator  # これを先頭の import に追加
+
 
 BASE = "https://api.mail.gw"
 USER_AGENT = "Mozilla/5.0 (SEO-Bot)"
@@ -39,14 +41,13 @@ def create_inbox() -> tuple[str, str]:
 
 
 # 非同期関数に変更
+# app/services/mail_utils/mail_gw.py の修正後
+
 async def poll_latest_link_gw(
     jwt: str,
     pattern: str = r"https://member\.livedoor\.com/register/.*",
     timeout: int = 180
-) -> str | None:
-    """
-    メールボックスを定期的にポーリングし、指定のリンクパターンが含まれる認証リンクを探す。
-    """
+) -> AsyncGenerator[str, None]:  # ← ✅ 修正
     logger = logging.getLogger(__name__)
     logger.info("✅ poll_latest_link_gw が呼び出されました")
 
@@ -89,7 +90,8 @@ async def poll_latest_link_gw(
                         if match:
                             link = match.group(0)
                             logger.info("✅ 認証リンクを検出: %s", link)
-                            return link
+                            yield link   # ← ✅ 修正ポイント
+                            return       # 検出後は終了
 
                 except Exception as e:
                     logger.warning(f"[mail.gw] メール取得中に例外発生: {e}")
@@ -100,4 +102,5 @@ async def poll_latest_link_gw(
         logger.error(f"[mail.gw] クライアント接続中に致命的エラー: {e}")
 
     logger.warning("⏰ poll_latest_link_gw: 認証リンクが見つからないままタイムアウト")
-    return None
+    return
+
