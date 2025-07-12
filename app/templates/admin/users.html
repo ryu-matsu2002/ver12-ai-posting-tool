@@ -58,7 +58,7 @@
         </td>
 
         <!-- 記事数 -->
-        <td class="px-2 py-2">{{ u.articles|length }}</td>
+        <td class="px-2 py-2">{{ article_counts.get(u.id, 0) }}</td>
 
         <!-- 登録サイト / プラン -->
         <td class="px-2 py-2 text-sm leading-6">

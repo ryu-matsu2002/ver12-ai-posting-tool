@@ -736,6 +736,13 @@ def admin_users():
     prompt_count  = PromptTemplate.query.count()
     article_count = Article.query.count()
 
+    # ✅ 各ユーザーごとの記事数を一括取得（N+1解消）
+    user_article_counts = dict(
+        db.session.query(Article.user_id, func.count(Article.id))
+        .group_by(Article.user_id)
+        .all()
+    )
+
     from sqlalchemy import func
 
     # ✅【高速化】UserSiteQuota を一括取得（クエリ1回）
@@ -801,7 +808,8 @@ def admin_users():
         article_count=article_count,
         site_quota_summary=user_quota_summary,
         user_count=len(users),
-        stuck_counts=stuck_counts
+        stuck_counts=stuck_counts,
+        article_counts=user_article_counts
     )
 
 
@@ -2132,10 +2140,14 @@ def dashboard(username):
     site_count_map = dict(site_counts)
 
     # 🔸 ログを一括取得（SQL4）
-    all_logs = SiteQuotaLog.query.filter_by(user_id=user.id).order_by(SiteQuotaLog.created_at.desc()).all()
+    # 🔸 ログを軽量取得（各プラン最大10件まで）
     log_map = defaultdict(list)
-    for log in all_logs:
-        log_map[log.plan_type].append(log)
+    for plan in set([q.plan_type for q in quotas]):
+        logs = SiteQuotaLog.query.filter_by(user_id=user.id, plan_type=plan) \
+            .order_by(SiteQuotaLog.created_at.desc()) \
+            .limit(10).all()
+        log_map[plan] = logs
+
 
     # 🔸 プラン別構成
     plans = {}
