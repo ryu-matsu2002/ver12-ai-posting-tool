@@ -6,10 +6,11 @@ create_inbox()       -> (email, jwt)
 poll_latest_link()   -> URL or None
 ──────────────────────────────
 """
-import asyncio 
+
 from __future__ import annotations
 import secrets, string, time, re, logging, httpx, html
 from bs4 import BeautifulSoup
+import asyncio 
 
 BASE = "https://api.mail.gw"
 USER_AGENT = "Mozilla/5.0 (SEO-Bot)"
