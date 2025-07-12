@@ -6,6 +6,7 @@ create_inbox()       -> (email, jwt)
 poll_latest_link()   -> URL or None
 ──────────────────────────────
 """
+import asyncio 
 from __future__ import annotations
 import secrets, string, time, re, logging, httpx, html
 from bs4 import BeautifulSoup
@@ -35,21 +36,34 @@ def create_inbox() -> tuple[str, str]:
         jwt = cli.post("/token", json={"address": addr, "password": pwd}).json()["token"]
         return addr, jwt       # jwt は Bearer 認証で使用
 
-def poll_latest_link_gw(
+
+# 非同期関数に変更
+async def poll_latest_link_gw(
     jwt: str,
     pattern: str = r"https://member\.livedoor\.com/register/.*",
     timeout: int = 180
 ) -> str | None:
+    logging.info("✅ poll_latest_link_gw が呼び出されました")  # ← ログ追加
+
     stop = time.time() + timeout
     hdr  = {"Authorization": f"Bearer {jwt}", "User-Agent": USER_AGENT}
-    with _client() as cli:
+
+    # 非同期クライアントで再構成
+    async with httpx.AsyncClient(base_url=BASE, headers=hdr, timeout=20) as cli:
         while time.time() < stop:
-            msgs = cli.get("/messages", headers=hdr).json()["hydra:member"]
+            res1 = await cli.get("/messages")
+            msgs = res1.json()["hydra:member"]
+
             if msgs:
-                mid  = msgs[0]["id"]
-                body = cli.get(f"/messages/{mid}", headers=hdr).json()["html"][0]
+                mid = msgs[0]["id"]
+                res2 = await cli.get(f"/messages/{mid}")
+                body = res2.json()["html"][0]
+
                 if (m := re.search(pattern, body)):
                     return m.group(0)
-            time.sleep(5)
+
+            await asyncio.sleep(5)  # ← 非同期sleep
+
     logging.error("[mail.gw] verification link not found")
     return None
+
