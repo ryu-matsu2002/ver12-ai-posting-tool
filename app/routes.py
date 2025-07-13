@@ -850,34 +850,32 @@ def admin_quota_edit(uid):
     form = QuotaUpdateForm()
 
     if form.validate_on_submit():
-        selected_plan_type = form.plan_type.data  # ← これが画面に表示される名前
+        plan_type = form.plan_type.data
         count = form.count.data
 
-        # ✅ 保存用の plan_type は特別処理あり
-        stored_plan_type = "TCCメンバー" if user.id == 16 else selected_plan_type
-
         # クォータ取得 or 作成
-        quota = UserSiteQuota.query.filter_by(user_id=user.id, plan_type=stored_plan_type).first()
+        quota = UserSiteQuota.query.filter_by(user_id=user.id, plan_type=plan_type).first()
         if not quota:
-            quota = UserSiteQuota(user_id=user.id, plan_type=stored_plan_type, total_quota=0, used_quota=0)
+            quota = UserSiteQuota(user_id=user.id, plan_type=plan_type, total_quota=0, used_quota=0)
             db.session.add(quota)
 
         quota.total_quota += count
 
         log = SiteQuotaLog(
             user_id=user.id,
-            plan_type=stored_plan_type,
+            plan_type=plan_type,
             site_count=count,
             reason="管理者手動追加",
-            created_at=datetime.datetime.utcnow()
+            created_at = datetime.datetime.utcnow()  # ← import datetime のまま使う場合
         )
         db.session.add(log)
         db.session.commit()
 
-        flash(f"✅ {selected_plan_type}プランに{count}枠追加しました", "success")
+        flash(f"✅ {plan_type}プランに{count}枠追加しました", "success")
         return redirect(url_for("admin.admin_users"))
 
     return render_template("admin/quota_edit.html", user=user, form=form)
+
 
 
 @admin_bp.post("/admin/user/<int:uid>/toggle-special")
@@ -1102,7 +1100,7 @@ def accounting():
             continue
         if quota.plan_type == "business":
             business_total += quota.total_quota
-        elif user.is_special_access:
+        elif user.is_special_access or user.id == 16:
             tcc_1000_total += quota.total_quota
         else:
             tcc_3000_total += quota.total_quota
