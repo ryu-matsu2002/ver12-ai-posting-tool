@@ -703,7 +703,6 @@ def admin_users():
         User.last_name,
         User.email,
         User.is_special_access,
-        User.has_tcc_access,
         User.created_at
     ).order_by(User.id).all()
 
