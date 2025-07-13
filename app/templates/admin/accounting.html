@@ -40,11 +40,6 @@
           <tr class="hover:bg-gray-50">
             <td class="py-3 px-4 font-semibold">TCC研究生（@3,000）</td>
             <td class="py-3 px-4 text-blue-700 font-bold" id="cnt-student">
-              <select id="uid-student" class="border rounded text-sm px-2 py-1">
-                {% for u in student_users %}
-                  <option value="{{ u.id }}">{{ u.last_name }} {{ u.first_name }} (ID:{{ u.id }})</option>
-                {% endfor %}
-              </select>
               <span>{{ breakdown.unpurchased.count }}</span> 件
             </td>
             <td class="py-3 px-4 text-green-700 font-bold" id="ryu-student">¥{{ breakdown.unpurchased.ryu | comma }}</td>
@@ -55,11 +50,6 @@
           <tr class="hover:bg-gray-50">
             <td class="py-3 px-4 font-semibold">TCCメンバー（@1,000）</td>
             <td class="py-3 px-4 text-blue-700 font-bold" id="cnt-member">
-              <select id="uid-member" class="border rounded text-sm px-2 py-1">
-                {% for u in member_users %}
-                  <option value="{{ u.id }}">{{ u.last_name }} {{ u.first_name }} (ID:{{ u.id }})</option>
-                {% endfor %}
-              </select>
               <span>{{ breakdown.purchased.count }}</span> 件
             </td>
             <td class="py-3 px-4 text-green-700 font-bold" id="ryu-member">¥{{ breakdown.purchased.ryu | comma }}</td>
@@ -70,11 +60,6 @@
           <tr class="hover:bg-gray-50">
             <td class="py-3 px-4 font-semibold">事業用プラン（@20,000/月）</td>
             <td class="py-3 px-4 text-blue-700 font-bold" id="cnt-business">
-              <select id="uid-business" class="border rounded text-sm px-2 py-1">
-                {% for u in business_users %}
-                  <option value="{{ u.id }}">{{ u.last_name }} {{ u.first_name }} (ID:{{ u.id }})</option>
-                {% endfor %}
-              </select>
               <span>{{ breakdown.business.count }}</span> 件
             </td>
             <td class="py-3 px-4 text-green-700 font-bold" id="ryu-business">¥{{ breakdown.business.ryu | comma }}</td>
