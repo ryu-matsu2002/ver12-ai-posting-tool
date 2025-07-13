@@ -426,41 +426,9 @@ def admin_dashboard():
         flash("このページにはアクセスできません。", "error")
         return redirect(url_for("main.dashboard", username=current_user.username))
 
-    user_count    = User.query.count()
-    site_count    = Site.query.count()
-    prompt_count  = PromptTemplate.query.count()
-    article_count = Article.query.count()
-    users = User.query.all()
-
-    missing_count_map = {}
-
-    for user in users:
-        articles = Article.query.filter(
-            Article.user_id == user.id,
-            Article.status.in_(["done", "posted", "error"]),
-        ).all()
-
-        missing = []
-        for a in articles:
-            url = a.image_url
-
-            if not url or url.strip() in ["", "None"]:
-                missing.append(a)
-
-            elif url.startswith("/static/images/"):
-                fname = url.replace("/static/images/", "")
-                path = os.path.abspath(os.path.join("app", "static", "images", fname))
-                if not fname or not exists(path) or getsize(path) == 0:
-                    missing.append(a)
-
-            elif url.startswith("http"):
-                # 外部URLは期限切れの可能性があるため復元対象とする（HEADリクエストは行わない）
-                missing.append(a)
-
-        # 全ユーザーを記録（missing=0でも）
-        missing_count_map[user.id] = len(missing)
-
+    # ✅ 重い画像チェック処理を削除して即リダイレクト
     return redirect(url_for("admin.admin_users"))
+
 
 @admin_bp.route("/admin/prompts")
 @login_required
@@ -728,88 +696,83 @@ def admin_users():
     if not current_user.is_admin:
         abort(403)
 
-    from collections import defaultdict    
+    # ✅ 必要最低限のユーザー情報のみ取得（集計はJSでAjax取得）
+    users = db.session.query(
+        User.id,
+        User.first_name,
+        User.last_name,
+        User.email,
+        User.is_special_access,
+        User.has_tcc_access,
+        User.created_at
+    ).order_by(User.id).all()
 
-    # 🔷 ユーザー一覧を一括取得
-    users = User.query.order_by(User.id).all()
-
-    # 🔷 サイト / プロンプト / 記事 の全体統計
+    # ✅ 全体統計だけはテンプレートにそのまま渡す（以前と同じ）
     site_count    = Site.query.count()
     prompt_count  = PromptTemplate.query.count()
     article_count = Article.query.count()
 
-    # ✅ 各ユーザーごとの記事数を一括取得（N+1解消）
-    user_article_counts = dict(
-        db.session.query(Article.user_id, func.count(Article.id))
-        .group_by(Article.user_id)
-        .all()
-    )    
-
-    # ✅【高速化】UserSiteQuota を一括取得（クエリ1回）
-    quota_rows = db.session.query(
-        UserSiteQuota.user_id,
-        UserSiteQuota.plan_type,
-        UserSiteQuota.total_quota
-    ).all()
-
-    # ✅【高速化】Site 使用数を user_id × plan_type で一括取得（クエリ1回）
-    site_counts = db.session.query(
-        Site.user_id,
-        Site.plan_type,
-        func.count(Site.id)
-    ).group_by(Site.user_id, Site.plan_type).all()
-
-    # ✅【高速化】辞書化してすぐアクセスできるように整形
-
-    # user_id → plan_type → total_quota
-    user_quota_map = defaultdict(dict)
-    for user_id, plan_type, total_quota in quota_rows:
-        user_quota_map[user_id][plan_type] = total_quota or 0
-
-    # user_id → plan_type → used_count
-    used_site_map = defaultdict(dict)
-    for user_id, plan_type, count in site_counts:
-        used_site_map[user_id][plan_type] = count
-
-    # ✅【高速化】ユーザーごとの quota サマリを構築（SQLなし）
-    user_quota_summary = {}
-
-    for user in users:
-        summary = {}
-        plans = user_quota_map.get(user.id, {})
-        for plan_type, total in plans.items():
-            used = used_site_map.get(user.id, {}).get(plan_type, 0)
-            remaining = max(total - used, 0)
-            summary[plan_type] = {
-                "used": used,
-                "total": total,
-                "remaining": remaining
-            }
-        user_quota_summary[user.id] = summary
-
-    # ✅ 追加: 各ユーザーごとの途中記事数（status: pending または gen）を一括取得
-    stuck_counts = dict(
-        db.session.query(
-            Article.user_id,
-            func.count(Article.id)
-        )
-        .filter(Article.status.in_(["pending", "gen"]))
-        .group_by(Article.user_id)
-        .all()
-    )
-
-    # ✅ テンプレートへ渡す
+    # ✅ 一括取得していたデータはここでは渡さない（JS側でAPI経由に切り替える）
     return render_template(
         "admin/users.html",
         users=users,
         site_count=site_count,
         prompt_count=prompt_count,
         article_count=article_count,
-        site_quota_summary=user_quota_summary,
-        user_count=len(users),
-        stuck_counts=stuck_counts,
-        article_counts=user_article_counts
+        user_count=len(users)
+        # 🚫 以下の3つはテンプレートから削除または非同期表示に切り替える前提
+        # site_quota_summary=user_quota_summary,
+        # stuck_counts=stuck_counts,
+        # article_counts=user_article_counts
     )
+
+@admin_bp.route("/api/admin/user_stats/<int:user_id>")
+@login_required
+def api_user_stats(user_id):
+    if not current_user.is_admin:
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    from collections import defaultdict
+
+    # 🔸 記事数
+    total_articles = db.session.query(func.count(Article.id)).filter_by(user_id=user_id).scalar()
+
+    # 🔸 途中記事（pending / gen）
+    stuck_articles = db.session.query(func.count(Article.id)).filter(
+        Article.user_id == user_id,
+        Article.status.in_(["pending", "gen"])
+    ).scalar()
+
+    # 🔸 サイト枠（UserSiteQuota と Site 使用数の差）
+    quota_rows = db.session.query(
+        UserSiteQuota.plan_type,
+        UserSiteQuota.total_quota
+    ).filter_by(user_id=user_id).all()
+
+    site_counts = db.session.query(
+        Site.plan_type,
+        func.count(Site.id)
+    ).filter_by(user_id=user_id).group_by(Site.plan_type).all()
+
+    # 整形：plan_type → { used, total, remaining }
+    summary = {}
+    used_map = {pt: c for pt, c in site_counts}
+
+    for plan_type, total_quota in quota_rows:
+        used = used_map.get(plan_type, 0)
+        remaining = max(total_quota - used, 0)
+        summary[plan_type] = {
+            "used": used,
+            "total": total_quota,
+            "remaining": remaining
+        }
+
+    return jsonify({
+        "article_count": total_articles,
+        "stuck_count": stuck_articles,
+        "quota_summary": summary
+    })
+
 
 
 @admin_bp.route("/admin/user/<int:uid>")
@@ -1455,48 +1418,6 @@ def admin_login_as(user_id):
     return redirect(url_for("main.dashboard", username=current_user.username))
 
 
-@admin_bp.post("/admin/fix-missing-images")
-@login_required
-def fix_missing_images():
-    if not current_user.is_admin:
-        abort(403)
-
-    from app.image_utils import fetch_featured_image
-    import re, os
-
-    updated = 0
-    articles = Article.query.filter(
-        Article.status.in_(["done", "posted"])
-    ).all()
-
-    for art in articles:
-        url = art.image_url or ""
-        is_missing = (
-            not url
-            or url == "None"
-            or not url.strip()
-            or url.endswith("/")  # 不完全URL
-            or ("/static/images/" in url and not os.path.exists(f"app{url}"))  # ローカルにファイルなし
-            or ("/static/images/" in url and os.path.getsize(f"app{url}") == 0)  # サイズ0の破損画像
-        )
-
-        if not is_missing:
-            continue
-
-        match = re.search(r"<h2\b[^>]*>(.*?)</h2>", art.body or "", re.IGNORECASE)
-        first_h2 = match.group(1) if match else ""
-        query = f"{art.keyword} {first_h2}".strip()
-        title = art.title or art.keyword or "記事"
-        try:
-            art.image_url = fetch_featured_image(query, title=title, body=art.body)
-            updated += 1
-        except Exception as e:
-            current_app.logger.warning(f"[画像復元失敗] Article ID: {art.id}, Error: {e}")
-
-    db.session.commit()
-    flash(f"{updated} 件のアイキャッチ画像を復元しました。", "success")
-    return redirect(url_for("admin.admin_dashboard"))
-
 
 
 @admin_bp.route("/admin/delete_user/<int:user_id>", methods=["POST"])
@@ -1567,57 +1488,6 @@ def admin_gsc_sites():
 
     return render_template("admin/gsc_sites.html", user_site_data=user_site_data)
 
-
-# ─────────── 管理者専用：アイキャッチ一括復元（ユーザー単位）
-@admin_bp.route("/refresh-images/<int:user_id>")
-@login_required
-def refresh_images(user_id):
-    if not current_user.is_admin:
-        flash("管理者権限が必要です。", "danger")
-        return redirect(url_for("main.dashboard", username=current_user.username))
-
-    import re
-    from app.image_utils import fetch_featured_image, DEFAULT_IMAGE_URL
-    from app import db
-
-    restored = 0
-    failed = 0
-
-    articles = Article.query.filter(
-        Article.user_id == user_id,
-        Article.status.in_(["done", "posted"]),
-        (Article.image_url.is_(None)) | (Article.image_url == "") | (Article.image_url == "None")
-    ).all()
-
-    print(f"=== 対象記事数: {len(articles)}")
-
-    for art in articles:
-        try:
-            match = re.search(r"<h2[^>]*>(.*?)</h2>", art.body or "", re.IGNORECASE)
-            first_h2 = match.group(1) if match else ""
-            query = f"{art.keyword} {first_h2}".strip() or art.title or art.keyword or "記事 アイキャッチ"
-            title = art.title or art.keyword or "記事"
-
-            print(f"🟡 記事ID={art.id}, クエリ='{query}'")
-
-            new_url = fetch_featured_image(query, title=title)
-
-            if new_url and new_url != DEFAULT_IMAGE_URL:
-                art.image_url = new_url
-                restored += 1
-                print(f"✅ 復元成功 → {new_url}")
-            else:
-                failed += 1
-                print(f"❌ 復元失敗（DEFAULT_IMAGE_URL）")
-
-        except Exception as e:
-            failed += 1
-            print(f"🔥 Exception: {e}")
-            continue
-
-    db.session.commit()
-    flash(f"✅ 復元完了: {restored} 件 / ❌ 失敗: {failed} 件", "info")
-    return redirect(url_for("admin.admin_dashboard"))
 
 @admin_bp.get("/admin/user/<int:uid>/stuck-articles")
 @login_required

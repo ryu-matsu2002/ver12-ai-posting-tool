@@ -103,7 +103,7 @@
         <span class="material-icons align-middle mr-2">link</span>Search Console連携
       </a>
       {% if current_user.is_authenticated and current_user.is_admin %}
-      <a href="{{ url_for('admin.admin_dashboard') }}"
+      <a href="{{ url_for('admin.admin_users') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full text-yellow-300 font-semibold">
         <span class="material-icons align-middle mr-2">admin_panel_settings</span>管理者ページ
       </a>
