@@ -690,11 +690,31 @@ def delete_genre(genre_id):
     return redirect(url_for("admin.manage_genres"))
 
 
-@admin_bp.route("/admin/users")
+@admin_bp.route("/admin/users", methods=["GET", "POST"])  # ✅ POST対応を追加
 @login_required
 def admin_users():
     if not current_user.is_admin:
         abort(403)
+
+    # ✅ サイト枠追加リクエスト処理（POSTで来たときのみ）
+    if request.method == "POST":
+        if request.form.get("action") == "increase_quota":
+            user_id = int(request.form.get("user_id"))
+            plan_type = request.form.get("plan_type")
+
+            # ✅ 該当ユーザー＆プランの枠を取得 or 作成
+            quota = UserSiteQuota.query.filter_by(user_id=user_id, plan_type=plan_type).first()
+            if quota:
+                quota.total_quota += 1
+            else:
+                quota = UserSiteQuota(user_id=user_id, plan_type=plan_type, total_quota=1)
+                db.session.add(quota)
+
+            db.session.commit()
+            flash("サイト枠を +1 しました", "success")
+
+            # ✅ ページをリロード（GETに戻す）
+            return redirect(url_for("admin.admin_users"))
 
     # ✅ 必要最低限のユーザー情報のみ取得（集計はJSでAjax取得）
     users = db.session.query(
@@ -702,6 +722,7 @@ def admin_users():
         User.first_name,
         User.last_name,
         User.email,
+        User.is_admin,
         User.is_special_access,
         User.created_at
     ).order_by(User.id).all()
@@ -711,7 +732,6 @@ def admin_users():
     prompt_count  = PromptTemplate.query.count()
     article_count = Article.query.count()
 
-    # ✅ 一括取得していたデータはここでは渡さない（JS側でAPI経由に切り替える）
     return render_template(
         "admin/users.html",
         users=users,
@@ -719,11 +739,8 @@ def admin_users():
         prompt_count=prompt_count,
         article_count=article_count,
         user_count=len(users)
-        # 🚫 以下の3つはテンプレートから削除または非同期表示に切り替える前提
-        # site_quota_summary=user_quota_summary,
-        # stuck_counts=stuck_counts,
-        # article_counts=user_article_counts
     )
+
 
 @admin_bp.route("/api/admin/user_stats/<int:user_id>")
 @login_required

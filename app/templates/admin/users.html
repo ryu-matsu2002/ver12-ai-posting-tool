@@ -127,7 +127,10 @@ document.addEventListener("DOMContentLoaded", function () {
               // ✅ サイト枠追加ボタンも表示
               quotaEl.innerHTML += `
                 プラン：${label}／登録済み：<strong>${q.used}</strong>／残り：<strong>${q.remaining}</strong>
-                <form method="post" action="/admin/increase_quota/${userId}/${plan}" class="inline ml-2">
+                <form method="post" action="/admin/users" class="inline ml-2">
+                  <input type="hidden" name="action" value="increase_quota">
+                  <input type="hidden" name="user_id" value="${userId}">
+                  <input type="hidden" name="plan_type" value="${plan}">
                   <button class="px-1 py-0.5 text-xs bg-blue-100 hover:bg-blue-200 text-blue-800 rounded border border-blue-300">＋サイト枠追加</button>
                 </form><br>
               `;
