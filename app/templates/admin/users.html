@@ -5,6 +5,28 @@
 <div class="p-6">
   <h1 class="text-2xl font-bold mb-6">🧑‍💼 ユーザーごとの記事一覧</h1>
 
+
+  <!-- ✅ 統計カード（4枚に拡張） -->
+  <div class="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
+    <div class="bg-white shadow rounded p-4 text-center">
+      <div class="text-sm text-gray-500 mb-1">登録ユーザー数</div>
+      <div class="text-2xl font-bold text-blue-600">{{ user_count }}</div>
+    </div>
+    <div class="bg-white shadow rounded p-4 text-center">
+      <div class="text-sm text-gray-500 mb-1">登録サイト数</div>
+      <div class="text-2xl font-bold text-green-600">{{ site_count }}</div>
+    </div>
+    <div class="bg-white shadow rounded p-4 text-center">
+      <div class="text-sm text-gray-500 mb-1">保存プロンプト数</div>
+      <div class="text-2xl font-bold text-yellow-500">{{ prompt_count }}</div>
+    </div>
+    <div class="bg-white shadow rounded p-4 text-center">
+      <div class="text-sm text-gray-500 mb-1">総記事数</div>
+      <div class="text-2xl font-bold text-purple-600">{{ article_count }}</div>
+    </div>
+  </div>
+
+
   <!-- ✅ ユーザー一覧テーブル -->
   <table class="w-full text-left table-auto bg-white shadow rounded">
     <thead class="bg-gray-100 text-gray-700">
