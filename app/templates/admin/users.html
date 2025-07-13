@@ -5,26 +5,6 @@
 <div class="p-6">
   <h1 class="text-2xl font-bold mb-6">🧑‍💼 ユーザーごとの記事一覧</h1>
 
-  <!-- ✅ 統計カード -->
-  <div class="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
-    <div class="bg-white shadow rounded p-4 text-center">
-      <div class="text-sm text-gray-500 mb-1">登録ユーザー数</div>
-      <div class="text-2xl font-bold text-blue-600">{{ user_count }}</div>
-    </div>
-    <div class="bg-white shadow rounded p-4 text-center">
-      <div class="text-sm text-gray-500 mb-1">登録サイト数</div>
-      <div class="text-2xl font-bold text-green-600">{{ site_count }}</div>
-    </div>
-    <div class="bg-white shadow rounded p-4 text-center">
-      <div class="text-sm text-gray-500 mb-1">保存プロンプト数</div>
-      <div class="text-2xl font-bold text-yellow-500">{{ prompt_count }}</div>
-    </div>
-    <div class="bg-white shadow rounded p-4 text-center">
-      <div class="text-sm text-gray-500 mb-1">総記事数</div>
-      <div class="text-2xl font-bold text-purple-600">{{ article_count }}</div>
-    </div>
-  </div>
-
   <!-- ✅ ユーザー一覧テーブル -->
   <table class="w-full text-left table-auto bg-white shadow rounded">
     <thead class="bg-gray-100 text-gray-700">
@@ -57,27 +37,20 @@
           {{ u.last_name }} {{ u.first_name }}
         </td>
 
-        <!-- 記事数 -->
-        <td class="px-2 py-2">{{ article_counts.get(u.id, 0) }}</td>
+        <!-- 記事数（後でJSで埋める） -->
+        <td class="px-2 py-2">
+          <span id="article-count-{{ u.id }}">読み込み中...</span>
+        </td>
 
-        <!-- 登録サイト / プラン -->
+        <!-- サイト枠（JSで埋める） -->
         <td class="px-2 py-2 text-sm leading-6">
-          {% if site_quota_summary[u.id] %}
-            {% for plan_name, q in site_quota_summary[u.id].items() %}
-              {% set label = "アフィリエイト用" if plan_name == "affiliate" else "事業用" if plan_name == "business" else plan_name %}
-              プラン：{{ label }}／登録済み：<strong>{{ q.used }}</strong>／残り：<strong>{{ q.remaining }}</strong>
-              <a href="{{ url_for('admin.admin_quota_edit', uid=u.id) }}"
-                 class="inline-block mt-1 px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded hover:bg-blue-200 ml-2">
-                ＋ サイト枠追加
-              </a><br>
-            {% endfor %}
-          {% else %}
-            <span class="text-gray-500">プランなし</span>
-            <a href="{{ url_for('admin.admin_quota_edit', uid=u.id) }}"
-               class="inline-block mt-1 px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded hover:bg-blue-200 ml-2">
-              ＋ サイト枠追加
-            </a>
-          {% endif %}
+          <div id="quota-summary-{{ u.id }}">
+            <span class="text-gray-400">読み込み中...</span>
+          </div>
+          <a href="{{ url_for('admin.admin_quota_edit', uid=u.id) }}"
+             class="inline-block mt-1 px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded hover:bg-blue-200">
+            ＋ サイト枠追加
+          </a>
         </td>
 
         <!-- 決済ページアクセス権 -->
@@ -96,13 +69,6 @@
 
         <!-- 操作 -->
         <td class="px-2 py-2 space-x-2 whitespace-nowrap">
-          {% if stuck_counts.get(u.id, 0) > 0 %}
-            <a href="{{ url_for('admin.stuck_articles', uid=u.id) }}"
-               class="px-2 py-1 bg-yellow-100 hover:bg-yellow-200 text-yellow-800 text-sm rounded">
-              ⏳ 途中記事
-            </a>
-          {% endif %}
-
           <form action="{{ url_for('admin.admin_login_as', user_id=u.id) }}" method="post" class="inline">
             <button type="submit" class="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white text-sm rounded">
               ログイン
@@ -123,4 +89,34 @@
     </tbody>
   </table>
 </div>
+
+<!-- ✅ 非同期データ取得スクリプト -->
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    const userList = JSON.parse('{{ users|tojson|safe }}');
+    userList.forEach(u => {
+      fetch(`/api/admin/user_stats/${u.id}`)
+        .then(res => res.json())
+        .then(data => {
+          // 記事数
+          document.getElementById(`article-count-${u.id}`).textContent = data.article_count || "0";
+
+          // サイト枠
+          const summary = data.quota_summary || {};
+          const container = document.getElementById(`quota-summary-${u.id}`);
+          container.innerHTML = "";
+
+          if (Object.keys(summary).length === 0) {
+            container.innerHTML = '<span class="text-gray-500">プランなし</span>';
+          } else {
+            for (const [plan, q] of Object.entries(summary)) {
+              const label = plan === "affiliate" ? "アフィリエイト用" : plan === "business" ? "事業用" : plan;
+              const line = `プラン：${label}／登録済み：<strong>${q.used}</strong>／残り：<strong>${q.remaining}</strong><br>`;
+              container.innerHTML += line;
+            }
+          }
+        });
+    });
+  });
+</script>
 {% endblock %}
