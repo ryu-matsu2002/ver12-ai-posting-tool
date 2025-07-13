@@ -35,15 +35,21 @@
           </tr>
         </thead>
         <tbody class="text-gray-800 text-lg">
+
           <!-- ▼ TCC研究生 -->
           <tr class="hover:bg-gray-50">
             <td class="py-3 px-4 font-semibold">TCC研究生（@3,000）</td>
             <td class="py-3 px-4 text-blue-700 font-bold" id="cnt-student">
-              <button class="px-2 bg-gray-200 rounded mr-1" onclick="adjustQuota('student', -1)">－</button>
+              <select id="uid-student" class="border rounded text-sm px-2 py-1">
+                {% for u in student_users %}
+                  <option value="{{ u.id }}">{{ u.last_name }} {{ u.first_name }} (ID:{{ u.id }})</option>
+                {% endfor %}
+              </select>
+              <button onclick="adjustQuota('uid-student', -1)" class="ml-2 px-2 bg-gray-200 rounded">－</button>
               <span>{{ breakdown.unpurchased.count }}</span> 件
-              <button class="px-2 bg-gray-200 rounded ml-1" onclick="adjustQuota('student', 1)">＋</button>
+              <button onclick="adjustQuota('uid-student', 1)" class="ml-1 px-2 bg-gray-200 rounded">＋</button>
             </td>
-            <td class="py-3 px-4 text-green-700 font-bold"  id="ryu-student">¥{{ breakdown.unpurchased.ryu | comma }}</td>
+            <td class="py-3 px-4 text-green-700 font-bold" id="ryu-student">¥{{ breakdown.unpurchased.ryu | comma }}</td>
             <td class="py-3 px-4 text-purple-700 font-bold" id="take-student">¥{{ breakdown.unpurchased.take | comma }}</td>
           </tr>
 
@@ -51,11 +57,16 @@
           <tr class="hover:bg-gray-50">
             <td class="py-3 px-4 font-semibold">TCCメンバー（@1,000）</td>
             <td class="py-3 px-4 text-blue-700 font-bold" id="cnt-member">
-              <button class="px-2 bg-gray-200 rounded mr-1" onclick="adjustQuota('member', -1)">－</button>
+              <select id="uid-member" class="border rounded text-sm px-2 py-1">
+                {% for u in member_users %}
+                  <option value="{{ u.id }}">{{ u.last_name }} {{ u.first_name }} (ID:{{ u.id }})</option>
+                {% endfor %}
+              </select>
+              <button onclick="adjustQuota('uid-member', -1)" class="ml-2 px-2 bg-gray-200 rounded">－</button>
               <span>{{ breakdown.purchased.count }}</span> 件
-              <button class="px-2 bg-gray-200 rounded ml-1" onclick="adjustQuota('member', 1)">＋</button>
+              <button onclick="adjustQuota('uid-member', 1)" class="ml-1 px-2 bg-gray-200 rounded">＋</button>
             </td>
-            <td class="py-3 px-4 text-green-700 font-bold"  id="ryu-member">¥{{ breakdown.purchased.ryu | comma }}</td>
+            <td class="py-3 px-4 text-green-700 font-bold" id="ryu-member">¥{{ breakdown.purchased.ryu | comma }}</td>
             <td class="py-3 px-4 text-purple-700 font-bold" id="take-member">¥{{ breakdown.purchased.take | comma }}</td>
           </tr>
 
@@ -63,27 +74,33 @@
           <tr class="hover:bg-gray-50">
             <td class="py-3 px-4 font-semibold">事業用プラン（@20,000/月）</td>
             <td class="py-3 px-4 text-blue-700 font-bold" id="cnt-business">
-              <button class="px-2 bg-gray-200 rounded mr-1" onclick="adjustQuota('business', -1)">－</button>
+              <select id="uid-business" class="border rounded text-sm px-2 py-1">
+                {% for u in business_users %}
+                  <option value="{{ u.id }}">{{ u.last_name }} {{ u.first_name }} (ID:{{ u.id }})</option>
+                {% endfor %}
+              </select>
+              <button onclick="adjustQuota('uid-business', -1)" class="ml-2 px-2 bg-gray-200 rounded">－</button>
               <span>{{ breakdown.business.count }}</span> 件
-              <button class="px-2 bg-gray-200 rounded ml-1" onclick="adjustQuota('business', 1)">＋</button>
+              <button onclick="adjustQuota('uid-business', 1)" class="ml-1 px-2 bg-gray-200 rounded">＋</button>
             </td>
-            <td class="py-3 px-4 text-green-700 font-bold"  id="ryu-business">¥{{ breakdown.business.ryu | comma }}</td>
+            <td class="py-3 px-4 text-green-700 font-bold" id="ryu-business">¥{{ breakdown.business.ryu | comma }}</td>
             <td class="py-3 px-4 text-purple-700 font-bold" id="take-business">¥{{ breakdown.business.take | comma }}</td>
           </tr>
 
           <!-- ▼ 合計 -->
           <tr class="bg-gray-50 border-t font-bold">
             <td class="py-3 px-4">合計</td>
-            <td class="py-3 px-4 text-blue-700"   id="cnt-total">{{ breakdown.total.count }} 件</td>
-            <td class="py-3 px-4 text-green-800"  id="ryu-total">¥{{ breakdown.total.ryu | comma }}</td>
+            <td class="py-3 px-4 text-blue-700" id="cnt-total">{{ breakdown.total.count }} 件</td>
+            <td class="py-3 px-4 text-green-800" id="ryu-total">¥{{ breakdown.total.ryu | comma }}</td>
             <td class="py-3 px-4 text-purple-800" id="take-total">¥{{ breakdown.total.take | comma }}</td>
           </tr>
+
         </tbody>
       </table>
     </div>
   </div>
 
-  <!-- 🏦 入金状況など（以下元コードそのまま） -->
+  <!-- 🏦 入金状況 -->
   <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
     <div class="bg-white border rounded-lg shadow-md p-6">
       <h3 class="text-lg font-bold text-gray-700 mb-4">💰 龍之介の入金状況</h3>
@@ -91,6 +108,7 @@
       <p class="mb-2 text-gray-600">💸 残り受取額：<span class="font-bold text-red-600">{{ remaining | comma }} 円</span></p>
     </div>
 
+    <!-- 📝 入金フォーム -->
     <div class="bg-white border rounded-lg shadow-md p-6">
       <h3 class="text-lg font-bold text-gray-700 mb-4">📝 龍之介の入金を記録</h3>
       <form method="POST">
@@ -114,7 +132,7 @@
     </div>
   </div>
 
-  <!-- 🔗 ユーザー別購入履歴リンク -->
+  <!-- 🔗 ユーザー別履歴リンク -->
   <div class="mb-10 text-right">
     <a href="{{ url_for('admin.accounting_details') }}"
        class="inline-block bg-blue-600 text-white text-sm font-semibold px-4 py-2 rounded hover:bg-blue-700 shadow">
@@ -122,7 +140,7 @@
     </a>
   </div>
 
-  <!-- 📜 入金履歴一覧（元コード通り） -->
+  <!-- 📜 入金履歴一覧 -->
   <div class="bg-white border rounded-lg shadow-md">
     <div class="p-4 border-b bg-gray-50 rounded-t">
       <h3 class="text-lg font-bold text-gray-700">📜 龍之介の入金履歴</h3>
@@ -152,37 +170,27 @@
   </div>
 </div>
 
-<!-- 🔧 JS 部分：件数・金額リアルタイム更新 -->
+<!-- 🔧 JS：ユーザーごとの枠数を調整 -->
 <script>
-/* 3 桁カンマ */
-const fmt = n => n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+function adjustQuota(selectId, delta) {
+  const uid = parseInt(document.getElementById(selectId).value);
+  if (!uid) {
+    alert("ユーザーが正しく選択されていません。");
+    return;
+  }
 
-function adjustQuota(category, delta) {
   fetch("/admin/accounting/adjust", {
     method: "POST",
-    credentials: "include",           // ←★ これを追加
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ category, delta })
+    body: JSON.stringify({ uid, delta })
   })
   .then(r => r.ok ? r.json() : Promise.reject(r))
   .then(d => {
-    // 件数セル
-    document.querySelector("#cnt-student span").innerText  = d.student.count;
-    document.querySelector("#cnt-member span").innerText   = d.member.count;
-    document.querySelector("#cnt-business span").innerText = d.business.count;
-    document.getElementById("cnt-total").innerText         = d.total.count + " 件";
-
-    // 取り分セル
-    document.getElementById("ryu-student").innerText   = "¥" + fmt(d.student.ryu);
-    document.getElementById("take-student").innerText  = "¥" + fmt(d.student.take);
-    document.getElementById("ryu-member").innerText    = "¥" + fmt(d.member.ryu);
-    document.getElementById("take-member").innerText   = "¥" + fmt(d.member.take);
-    document.getElementById("ryu-business").innerText  = "¥" + fmt(d.business.ryu);
-    document.getElementById("take-business").innerText = "¥" + fmt(d.business.take);
-    document.getElementById("ryu-total").innerText     = "¥" + fmt(d.total.ryu);
-    document.getElementById("take-total").innerText    = "¥" + fmt(d.total.take);
+    alert(d.message || "✅ 調整完了");
+    location.reload();
   })
-  .catch(() => alert("更新に失敗しました"));
+  .catch(() => alert("⚠️ 更新に失敗しました"));
 }
 </script>
 {% endblock %}

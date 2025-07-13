@@ -1062,9 +1062,11 @@ def accounting():
     if not current_user.is_admin:
         abort(403)
 
+    from sqlalchemy.orm import selectinload
+
     selected_month = request.args.get("month", "all")
 
-    # ✅ 入金フォーム処理
+    # ✅ 入金フォーム処理（POST）
     form = RyunosukeDepositForm()
     if form.validate_on_submit():
         new_deposit = RyunosukeDeposit(
@@ -1082,58 +1084,52 @@ def accounting():
         db.func.coalesce(db.func.sum(RyunosukeDeposit.amount), 0)
     ).scalar()
 
-    # ✅ breakdown 表ロジック（全ユーザーを集計・管理者除外）
-    def calculate_financials():
-        users = User.query.all()
+    # ✅ 全ユーザー＆関連情報を一括取得（N+1解消）
+    users = User.query.options(
+        selectinload(User.site_quota),
+        selectinload(User.sites)
+    ).filter(User.is_admin == False).all()
 
-        tcc_1000_total = 0     # TCC決済ページあり（\u00a51,000）
-        tcc_3000_total = 0     # TCC決済ページなし（\u00a53,000）
-        business_total = 0     # 事業用プラン（\u00a520,000/月）
+    # ✅ 集計：サイト枠の分類
+    tcc_1000_total = 0
+    tcc_3000_total = 0
+    business_total = 0
 
-        for user in users:
-            if user.is_admin:
-                continue  # 管理者は除外
+    for user in users:
+        quota = user.site_quota
+        if not quota or quota.total_quota == 0:
+            continue
+        if quota.plan_type == "business":
+            business_total += quota.total_quota
+        elif user.is_special_access:
+            tcc_1000_total += quota.total_quota
+        else:
+            tcc_3000_total += quota.total_quota
 
-            site_quota = user.site_quota
-            total_quota = site_quota.total_quota if site_quota else 0
+    breakdown = {
+        "unpurchased": {
+            "count": tcc_3000_total,
+            "ryu": tcc_3000_total * 1000,
+            "take": tcc_3000_total * 2000,
+        },
+        "purchased": {
+            "count": tcc_1000_total,
+            "ryu": 0,
+            "take": tcc_1000_total * 1000,
+        },
+        "business": {
+            "count": business_total,
+            "ryu": business_total * 16000,
+            "take": business_total * 4000,
+        },
+        "total": {
+            "count": tcc_3000_total + tcc_1000_total + business_total,
+            "ryu": tcc_3000_total * 1000 + business_total * 16000,
+            "take": tcc_3000_total * 2000 + tcc_1000_total * 1000 + business_total * 4000,
+        },
+    }
 
-            if total_quota == 0:
-                continue
-
-            if site_quota and site_quota.plan_type == "business":
-                business_total += total_quota
-            elif user.is_special_access:
-                tcc_1000_total += total_quota
-            else:
-                tcc_3000_total += total_quota
-
-        return {
-            "unpurchased": {
-                "count": tcc_3000_total,
-                "ryu": tcc_3000_total * 1000,
-                "take": tcc_3000_total * 2000,
-            },
-            "purchased": {
-                "count": tcc_1000_total,
-                "ryu": 0,
-                "take": tcc_1000_total * 1000,
-            },
-            "business": {
-                "count": business_total,
-                "ryu": business_total * 16000,
-                "take": business_total * 4000,
-            },
-            "total": {
-                "count": tcc_3000_total + tcc_1000_total + business_total,
-                "ryu": tcc_3000_total * 1000 + business_total * 16000,
-                "take": tcc_3000_total * 2000 + tcc_1000_total * 1000 + business_total * 4000,
-            },
-        }
-
-    breakdown = calculate_financials()
-
-    # ✅ 月別内訳（TCC未購入者、かつ管理者を除外）＋created_atによる分類を追加
-    tcc_disabled_users = User.query.filter_by(is_special_access=False).all()
+    # ✅ 月別のサイト登録状況（TCC未購入のみ）
     site_data_by_month = defaultdict(lambda: {
         "site_count": 0,
         "ryunosuke_income": 0,
@@ -1141,11 +1137,10 @@ def accounting():
     })
     all_months_set = set()
 
-    for user in tcc_disabled_users:
-        if user.is_admin:
+    for user in users:
+        if user.is_special_access:
             continue
-
-        for site in user.sites:  # ✅ 各ユーザーのサイトごとに処理
+        for site in user.sites:
             if not site.created_at:
                 continue
             month_key = site.created_at.strftime("%Y-%m")
@@ -1155,7 +1150,6 @@ def accounting():
                 site_data_by_month[month_key]["ryunosuke_income"] += 1000
                 site_data_by_month[month_key]["takeshi_income"] += 2000
 
-    # ✅ 月選択と表示データ分岐
     filtered_data = (
         site_data_by_month if selected_month == "all"
         else {
@@ -1170,20 +1164,30 @@ def accounting():
     deposit_logs = RyunosukeDeposit.query.order_by(RyunosukeDeposit.deposit_date.desc()).all()
     all_months = sorted(all_months_set, reverse=True)
 
+    # ✅ 対象ユーザーの分類
+    student_users = User.query.filter_by(is_admin=False, is_special_access=False).all()
+    member_users = User.query.filter_by(is_admin=False, is_special_access=True).all()
+    business_users = (
+        User.query.join(UserSiteQuota)
+        .filter(User.is_admin == False, UserSiteQuota.plan_type == "business")
+        .all()
+    )
+
     return render_template(
         "admin/accounting.html",
-        site_data_by_month=dict(sorted(filtered_data.items())),
-        total_count=breakdown["unpurchased"]["count"],
-        total_ryunosuke=breakdown["unpurchased"]["ryu"],
-        total_takeshi=breakdown["unpurchased"]["take"],
-        selected_month=selected_month,
-        all_months=all_months,
         form=form,
         paid_total=paid_total,
         remaining=breakdown["unpurchased"]["ryu"] - paid_total,
+        site_data_by_month=dict(sorted(filtered_data.items())),
+        selected_month=selected_month,
+        all_months=all_months,
         deposit_logs=deposit_logs,
-        breakdown=breakdown
+        breakdown=breakdown,
+        student_users=student_users,
+        member_users=member_users,
+        business_users=business_users
     )
+
 
 
 @admin_bp.route("/admin/accounting/details", methods=["GET"])
@@ -1234,45 +1238,49 @@ def adjust_quota():
     if not current_user.is_admin:
         abort(403)
 
-    from flask import jsonify, request
+    from flask import request, jsonify
 
-    data      = request.get_json()
-    category  = data.get("category")
-    delta     = int(data.get("delta", 0))
-    if category not in ["student", "member", "business"]:
-        return jsonify({"error": "Invalid category"}), 400
+    data = request.get_json()
 
-    # 対象ユーザー取得
-    query = User.query.filter_by(is_admin=False)
-    if category == "student":
-        query = query.filter_by(is_special_access=False)
-    elif category == "member":
-        query = query.filter_by(is_special_access=True)
-    else:
-        query = query.join(UserSiteQuota).filter(UserSiteQuota.plan_type == "business")
+    try:
+        uid = int(data.get("uid"))
+        delta = int(data.get("delta", 0))
+    except (ValueError, TypeError):
+        return jsonify({"error": "uid または delta の形式が不正です"}), 400
 
-    target = query.join(UserSiteQuota).first()
-    if not target or not target.site_quota:
+    if delta == 0:
+        return jsonify({"error": "delta は 0 以外で指定してください"}), 400
+
+    user = User.query.filter_by(id=uid, is_admin=False).first()
+    if not user or not user.site_quota:
         return jsonify({"error": "対象ユーザーが見つかりません"}), 404
 
-    # 件数調整
-    q = target.site_quota
-    q.total_quota = max(q.total_quota + delta, 0)
+    quota = user.site_quota
+    quota.total_quota = max(quota.total_quota + delta, 0)
+
+    # ログ記録
+    log = SiteQuotaLog(
+        user_id=user.id,
+        plan_type=quota.plan_type,
+        site_count=delta,
+        reason="管理者手動調整",
+        created_at=datetime.utcnow()
+    )
+    db.session.add(log)
     db.session.commit()
 
-    # ─── 集計を再計算 ───
+    # ✅ 集計再構築
     stu_cnt = mem_cnt = biz_cnt = 0
     for u in User.query.filter_by(is_admin=False).all():
         sq = u.site_quota
-        cnt = sq.total_quota if sq else 0
-        if cnt == 0:
+        if not sq or sq.total_quota == 0:
             continue
-        if sq and sq.plan_type == "business":
-            biz_cnt += cnt
+        if sq.plan_type == "business":
+            biz_cnt += sq.total_quota
         elif u.is_special_access:
-            mem_cnt += cnt
+            mem_cnt += sq.total_quota
         else:
-            stu_cnt += cnt
+            stu_cnt += sq.total_quota
 
     PRICES = {
         "student":  {"ryu": 1000,  "take": 2000},
@@ -1280,30 +1288,29 @@ def adjust_quota():
         "business": {"ryu": 16000, "take": 4000},
     }
 
-    def calc(cat_cnt, cat_key):
+    def calc(cnt, key):
         return {
-            "count": cat_cnt,
-            "ryu":  cat_cnt * PRICES[cat_key]["ryu"],
-            "take": cat_cnt * PRICES[cat_key]["take"],
+            "count": cnt,
+            "ryu": cnt * PRICES[key]["ryu"],
+            "take": cnt * PRICES[key]["take"],
         }
 
     res_student  = calc(stu_cnt, "student")
     res_member   = calc(mem_cnt, "member")
     res_business = calc(biz_cnt, "business")
 
-    total_cnt  = stu_cnt + mem_cnt + biz_cnt
-    total_ryu  = res_student["ryu"]  + res_member["ryu"]  + res_business["ryu"]
-    total_take = res_student["take"] + res_member["take"] + res_business["take"]
+    res_total = {
+        "count": stu_cnt + mem_cnt + biz_cnt,
+        "ryu":   res_student["ryu"] + res_member["ryu"] + res_business["ryu"],
+        "take":  res_student["take"] + res_member["take"] + res_business["take"]
+    }
 
     return jsonify({
         "student":  res_student,
         "member":   res_member,
         "business": res_business,
-        "total": {
-            "count": total_cnt,
-            "ryu":   total_ryu,
-            "take":  total_take,
-        },
+        "total":    res_total,
+        "message": f"✅ {user.last_name} {user.first_name} に {delta:+} 件 調整しました"
     })
 
 
@@ -1811,6 +1818,7 @@ def admin_rankings():
 
     else:
         return jsonify({"error": "不正なランキングタイプです"}), 400
+
 
 
 
