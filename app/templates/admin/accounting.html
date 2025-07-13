@@ -45,9 +45,7 @@
                   <option value="{{ u.id }}">{{ u.last_name }} {{ u.first_name }} (ID:{{ u.id }})</option>
                 {% endfor %}
               </select>
-              <button onclick="adjustQuota('uid-student', -1)" class="ml-2 px-2 bg-gray-200 rounded">－</button>
               <span>{{ breakdown.unpurchased.count }}</span> 件
-              <button onclick="adjustQuota('uid-student', 1)" class="ml-1 px-2 bg-gray-200 rounded">＋</button>
             </td>
             <td class="py-3 px-4 text-green-700 font-bold" id="ryu-student">¥{{ breakdown.unpurchased.ryu | comma }}</td>
             <td class="py-3 px-4 text-purple-700 font-bold" id="take-student">¥{{ breakdown.unpurchased.take | comma }}</td>
@@ -62,9 +60,7 @@
                   <option value="{{ u.id }}">{{ u.last_name }} {{ u.first_name }} (ID:{{ u.id }})</option>
                 {% endfor %}
               </select>
-              <button onclick="adjustQuota('uid-member', -1)" class="ml-2 px-2 bg-gray-200 rounded">－</button>
               <span>{{ breakdown.purchased.count }}</span> 件
-              <button onclick="adjustQuota('uid-member', 1)" class="ml-1 px-2 bg-gray-200 rounded">＋</button>
             </td>
             <td class="py-3 px-4 text-green-700 font-bold" id="ryu-member">¥{{ breakdown.purchased.ryu | comma }}</td>
             <td class="py-3 px-4 text-purple-700 font-bold" id="take-member">¥{{ breakdown.purchased.take | comma }}</td>
@@ -79,9 +75,7 @@
                   <option value="{{ u.id }}">{{ u.last_name }} {{ u.first_name }} (ID:{{ u.id }})</option>
                 {% endfor %}
               </select>
-              <button onclick="adjustQuota('uid-business', -1)" class="ml-2 px-2 bg-gray-200 rounded">－</button>
               <span>{{ breakdown.business.count }}</span> 件
-              <button onclick="adjustQuota('uid-business', 1)" class="ml-1 px-2 bg-gray-200 rounded">＋</button>
             </td>
             <td class="py-3 px-4 text-green-700 font-bold" id="ryu-business">¥{{ breakdown.business.ryu | comma }}</td>
             <td class="py-3 px-4 text-purple-700 font-bold" id="take-business">¥{{ breakdown.business.take | comma }}</td>
