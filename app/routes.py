@@ -713,11 +713,10 @@ def admin_users():
             db.session.commit()
             flash("サイト枠を +1 しました", "success")
 
-            # ✅ ページをリロード（GETに戻す）
             return redirect(url_for("admin.admin_users"))
 
-    # ✅ 必要最低限のユーザー情報のみ取得（集計はJSでAjax取得）
-    users = db.session.query(
+    # ✅ 必要最低限のユーザー情報のみ取得（→ Row形式 → dict形式に変換）
+    raw_users = db.session.query(
         User.id,
         User.first_name,
         User.last_name,
@@ -727,14 +726,26 @@ def admin_users():
         User.created_at
     ).order_by(User.id).all()
 
-    # ✅ 全体統計だけはテンプレートにそのまま渡す（以前と同じ）
+    users = [
+        {
+            "id": u.id,
+            "first_name": u.first_name,
+            "last_name": u.last_name,
+            "email": u.email,
+            "is_admin": u.is_admin,
+            "is_special_access": u.is_special_access,
+            "created_at": u.created_at.strftime("%Y-%m-%d %H:%M")
+        }
+        for u in raw_users
+    ]
+
     site_count    = Site.query.count()
     prompt_count  = PromptTemplate.query.count()
     article_count = Article.query.count()
 
     return render_template(
         "admin/users.html",
-        users=users,
+        users=users,  # ← JSONシリアライズ可能な形式に修正済み
         site_count=site_count,
         prompt_count=prompt_count,
         article_count=article_count,
