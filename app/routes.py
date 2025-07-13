@@ -13,6 +13,8 @@ from pytz import timezone
 from sqlalchemy import asc, nulls_last
 from sqlalchemy.orm import selectinload
 
+from sqlalchemy import func
+
 from . import db
 from .models import User, Article, PromptTemplate, Site, Keyword, Genre
 from .forms import (
@@ -488,7 +490,7 @@ def admin_gsc_status():
         abort(403)
 
     from app.models import Site, Article, User, GSCConfig
-    from sqlalchemy import func, case
+    from sqlalchemy import case
 
     # 各サイトの投稿数・GSC設定を取得
     results = (
@@ -560,7 +562,6 @@ def log_stream():
 @login_required
 def api_usage():
     from app.models import TokenUsageLog, User
-    from sqlalchemy import func
     from datetime import datetime
     # 日別集計（過去30日）
     today = datetime.utcnow().date()
@@ -602,7 +603,6 @@ def api_usage():
 @login_required
 def revenue_summary():
     from app.models import PaymentLog, User
-    from sqlalchemy import func
     from datetime import datetime
     # 今月の開始日を取得（UTC）
     today = datetime.utcnow()
@@ -639,7 +639,6 @@ def revenue_summary():
 @login_required
 def revenue_graph():
     from app.models import PaymentLog
-    from sqlalchemy import func
     from datetime import datetime, timedelta
 
     # 過去12ヶ月分の月次集計
@@ -729,7 +728,6 @@ def admin_users():
     if not current_user.is_admin:
         abort(403)
 
-    from sqlalchemy import func
     from collections import defaultdict    
 
     # 🔷 ユーザー一覧を一括取得
@@ -852,28 +850,31 @@ def admin_quota_edit(uid):
     form = QuotaUpdateForm()
 
     if form.validate_on_submit():
-        plan_type = form.plan_type.data
+        selected_plan_type = form.plan_type.data  # ← これが画面に表示される名前
         count = form.count.data
 
+        # ✅ 保存用の plan_type は特別処理あり
+        stored_plan_type = "TCCメンバー" if user.id == 16 else selected_plan_type
+
         # クォータ取得 or 作成
-        quota = UserSiteQuota.query.filter_by(user_id=user.id, plan_type=plan_type).first()
+        quota = UserSiteQuota.query.filter_by(user_id=user.id, plan_type=stored_plan_type).first()
         if not quota:
-            quota = UserSiteQuota(user_id=user.id, plan_type=plan_type, total_quota=0, used_quota=0)
+            quota = UserSiteQuota(user_id=user.id, plan_type=stored_plan_type, total_quota=0, used_quota=0)
             db.session.add(quota)
 
         quota.total_quota += count
 
         log = SiteQuotaLog(
             user_id=user.id,
-            plan_type=plan_type,
+            plan_type=stored_plan_type,
             site_count=count,
             reason="管理者手動追加",
-            created_at = datetime.datetime.utcnow()  # ← import datetime のまま使う場合
+            created_at=datetime.datetime.utcnow()
         )
         db.session.add(log)
         db.session.commit()
 
-        flash(f"✅ {plan_type}プランに{count}枠追加しました", "success")
+        flash(f"✅ {selected_plan_type}プランに{count}枠追加しました", "success")
         return redirect(url_for("admin.admin_users"))
 
     return render_template("admin/quota_edit.html", user=user, form=form)
@@ -905,7 +906,7 @@ def admin_sites():
         flash("このページにはアクセスできません。", "error")
         return redirect(url_for("main.dashboard", username=current_user.username))
 
-    from sqlalchemy import func, case, literal
+    from sqlalchemy import case, literal
     from app.models import Site, Article, User, Genre, GSCConfig
     from collections import defaultdict
 
@@ -1675,7 +1676,7 @@ def regenerate_user_stuck_articles(uid):
 
 from flask import Blueprint, request, jsonify, Response
 from flask_login import login_required, current_user
-from sqlalchemy import func, desc, asc
+from sqlalchemy import  desc, asc
 from datetime import datetime, timedelta  # ✅ 修正
 from app import db
 from app.models import User, Site, Article
@@ -2111,7 +2112,7 @@ def root_redirect():
 
 # ─────────── Dashboard
 from app.models import UserSiteQuota, Article, SiteQuotaLog, Site, User  # ← User を追加
-from sqlalchemy import func, case
+from sqlalchemy import case
 from flask import g
 from collections import defaultdict
 
@@ -3038,7 +3039,7 @@ def log_sites(username):
     if current_user.username != username:
         abort(403)
 
-    from sqlalchemy import func, case
+    from sqlalchemy import case
     from app.models import Genre
 
     # GETパラメータ
@@ -3420,7 +3421,6 @@ def external_seo_sites():
         ExternalBlogAccount, BlogType
     )
     from sqlalchemy.orm import selectinload
-    from sqlalchemy import func
 
     # 1. サイトと外部ジョブを一括取得（selectinloadでN+1回避）
     sites = (Site.query
