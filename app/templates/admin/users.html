@@ -39,7 +39,8 @@
     </thead>
     <tbody>
       {% for u in users %}
-      <tr class="border-b hover:bg-gray-50" data-user-id="{{ u.id }}">
+      <tr class="border-b hover:bg-gray-50">
+        <!-- ID + 詳細 -->
         <td class="px-2 py-2 whitespace-nowrap">
           {{ u.id }}
           <a href="{{ url_for('admin.admin_user_detail', uid=u.id) }}"
@@ -48,22 +49,38 @@
           </a>
         </td>
 
+        <!-- 名前 + 管理者ラベル -->
         <td class="px-2 py-2">
           {% if u.is_admin %}
-            <!-- ✅ 管理者バッジ -->
             <span class="text-xs px-2 py-1 bg-red-100 text-red-700 border border-red-300 rounded mr-1">🛡 管理者</span>
           {% endif %}
           {{ u.last_name }} {{ u.first_name }}
         </td>
 
-        <td class="px-2 py-2">
-          <span id="article-count-{{ u.id }}">読み込み中...</span>
+        <!-- 記事数 -->
+        <td class="px-2 py-2">{{ article_counts.get(u.id, 0) }}</td>
+
+        <!-- 登録サイト / プラン -->
+        <td class="px-2 py-2 text-sm leading-6">
+          {% if site_quota_summary[u.id] %}
+            {% for plan_name, q in site_quota_summary[u.id].items() %}
+              {% set label = "アフィリエイト用" if plan_name == "affiliate" else "事業用" if plan_name == "business" else plan_name %}
+              プラン：{{ label }}／登録済み：<strong>{{ q.used }}</strong>／残り：<strong>{{ q.remaining }}</strong>
+              <a href="{{ url_for('admin.admin_quota_edit', uid=u.id) }}"
+                 class="inline-block mt-1 px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded hover:bg-blue-200 ml-2">
+                ＋ サイト枠追加
+              </a><br>
+            {% endfor %}
+          {% else %}
+            <span class="text-gray-500">プランなし</span>
+            <a href="{{ url_for('admin.admin_quota_edit', uid=u.id) }}"
+               class="inline-block mt-1 px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded hover:bg-blue-200 ml-2">
+              ＋ サイト枠追加
+            </a>
+          {% endif %}
         </td>
 
-        <td class="px-2 py-2 text-sm leading-6" id="quota-summary-{{ u.id }}">
-          読み込み中...
-        </td>
-
+        <!-- 決済ページアクセス権 -->
         <td class="px-2 py-2">
           {% if u.is_special_access %}
             <span class="text-green-600 font-semibold">✅ 有効</span>
@@ -77,8 +94,15 @@
           </form>
         </td>
 
-        <td class="px-2 py-2 space-x-2 whitespace-nowrap" id="stuck-actions-{{ u.id }}">
-          <!-- JS側で途中記事ボタン挿入 -->
+        <!-- 操作 -->
+        <td class="px-2 py-2 space-x-2 whitespace-nowrap">
+          {% if stuck_counts.get(u.id, 0) > 0 %}
+            <a href="{{ url_for('admin.stuck_articles', uid=u.id) }}"
+               class="px-2 py-1 bg-yellow-100 hover:bg-yellow-200 text-yellow-800 text-sm rounded">
+              ⏳ 途中記事
+            </a>
+          {% endif %}
+
           <form action="{{ url_for('admin.admin_login_as', user_id=u.id) }}" method="post" class="inline">
             <button type="submit" class="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white text-sm rounded">
               ログイン
@@ -99,61 +123,4 @@
     </tbody>
   </table>
 </div>
-
-<!-- ✅ Ajaxで統計情報を読み込む -->
-<script>
-document.addEventListener("DOMContentLoaded", function () {
-  const rows = document.querySelectorAll("tr[data-user-id]");
-  rows.forEach(row => {
-    const userId = row.dataset.userId;
-
-    fetch(`/api/admin/user_stats/${userId}`)
-      .then(res => res.json())
-      .then(data => {
-        const countEl = document.getElementById(`article-count-${userId}`);
-        if (countEl) countEl.textContent = data.article_count || 0;
-
-        const quotaEl = document.getElementById(`quota-summary-${userId}`);
-        if (quotaEl) {
-          const summary = data.quota_summary || {};
-          if (Object.keys(summary).length === 0) {
-            quotaEl.innerHTML = `<span class="text-gray-500">プランなし</span>`;
-          } else {
-            quotaEl.innerHTML = "";
-            for (const [plan, q] of Object.entries(summary)) {
-              const label = plan === "affiliate" ? "アフィリエイト用" :
-                            plan === "business" ? "事業用" : plan;
-
-              // ✅ サイト枠追加ボタンも表示
-              quotaEl.innerHTML += `
-                プラン：${label}／登録済み：<strong>${q.used}</strong>／残り：<strong>${q.remaining}</strong>
-                <form method="post" action="/admin/users" class="inline ml-2">
-                  <input type="hidden" name="action" value="increase_quota">
-                  <input type="hidden" name="user_id" value="${userId}">
-                  <input type="hidden" name="plan_type" value="${plan}">
-                  <button class="px-1 py-0.5 text-xs bg-blue-100 hover:bg-blue-200 text-blue-800 rounded border border-blue-300">＋サイト枠追加</button>
-                </form><br>
-              `;
-            }
-          }
-        }
-
-        const stuck = data.stuck_count || 0;
-        const actionsEl = document.getElementById(`stuck-actions-${userId}`);
-        if (stuck > 0 && actionsEl) {
-          const btn = document.createElement("a");
-          btn.href = `/admin/user/${userId}/stuck-articles`;
-          btn.textContent = "⏳ 途中記事";
-          btn.className = "px-2 py-1 bg-yellow-100 hover:bg-yellow-200 text-yellow-800 text-sm rounded mr-2";
-          actionsEl.prepend(btn);
-        }
-      })
-      .catch(err => {
-        console.error(`ユーザーID ${userId} の統計読み込みに失敗`, err);
-        document.getElementById(`article-count-${userId}`).textContent = "取得失敗";
-        document.getElementById(`quota-summary-${userId}`).textContent = "取得失敗";
-      });
-  });
-});
-</script>
 {% endblock %}
