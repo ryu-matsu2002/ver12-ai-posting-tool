@@ -734,7 +734,7 @@ def admin_users():
             "email": u.email,
             "is_admin": u.is_admin,
             "is_special_access": u.is_special_access,
-            "created_at": u.created_at.strftime("%Y-%m-%d %H:%M")
+            "created_at": u.created_at.strftime("%Y-%m-%d %H:%M") if u.created_at else "不明"
         }
         for u in raw_users
     ]
