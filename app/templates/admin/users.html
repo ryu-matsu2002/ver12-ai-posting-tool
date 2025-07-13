@@ -5,7 +5,7 @@
 <div class="p-6">
   <h1 class="text-2xl font-bold mb-6">🧑‍💼 ユーザーごとの記事一覧</h1>
 
-  <!-- ✅ 統計カード（4枚） -->
+  <!-- ✅ 統計カード -->
   <div class="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
     <div class="bg-white shadow rounded p-4 text-center">
       <div class="text-sm text-gray-500 mb-1">登録ユーザー数</div>
@@ -39,7 +39,6 @@
     </thead>
     <tbody>
       {% for u in users %}
-      <!-- 🔧 修正点: ユーザーIDをdata属性に追加 -->
       <tr class="border-b hover:bg-gray-50" data-user-id="{{ u.id }}">
         <td class="px-2 py-2 whitespace-nowrap">
           {{ u.id }}
@@ -51,17 +50,16 @@
 
         <td class="px-2 py-2">
           {% if u.is_admin %}
+            <!-- ✅ 管理者バッジ -->
             <span class="text-xs px-2 py-1 bg-red-100 text-red-700 border border-red-300 rounded mr-1">🛡 管理者</span>
           {% endif %}
           {{ u.last_name }} {{ u.first_name }}
         </td>
 
-        <!-- 🔧 修正点: 記事数をAjaxで動的読み込み -->
         <td class="px-2 py-2">
           <span id="article-count-{{ u.id }}">読み込み中...</span>
         </td>
 
-        <!-- 🔧 修正点: プラン情報をAjaxで後から埋め込む -->
         <td class="px-2 py-2 text-sm leading-6" id="quota-summary-{{ u.id }}">
           読み込み中...
         </td>
@@ -79,9 +77,8 @@
           </form>
         </td>
 
-        <!-- 🔧 修正点: stuckカウントボタンはJSで制御可能 -->
         <td class="px-2 py-2 space-x-2 whitespace-nowrap" id="stuck-actions-{{ u.id }}">
-          <!-- JS側で必要に応じて ⏳ 途中記事ボタンを挿入 -->
+          <!-- JS側で途中記事ボタン挿入 -->
           <form action="{{ url_for('admin.admin_login_as', user_id=u.id) }}" method="post" class="inline">
             <button type="submit" class="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white text-sm rounded">
               ログイン
@@ -103,9 +100,9 @@
   </table>
 </div>
 
-<!-- 🔧 修正点: 統計情報をAjaxで読み込むJS -->
+<!-- ✅ Ajaxで統計情報を読み込む -->
 <script>
-document.addEventListener("DOMContentLoaded", function() {
+document.addEventListener("DOMContentLoaded", function () {
   const rows = document.querySelectorAll("tr[data-user-id]");
   rows.forEach(row => {
     const userId = row.dataset.userId;
@@ -113,11 +110,9 @@ document.addEventListener("DOMContentLoaded", function() {
     fetch(`/api/admin/user_stats/${userId}`)
       .then(res => res.json())
       .then(data => {
-        // 記事数
         const countEl = document.getElementById(`article-count-${userId}`);
         if (countEl) countEl.textContent = data.article_count || 0;
 
-        // サイト枠・プラン
         const quotaEl = document.getElementById(`quota-summary-${userId}`);
         if (quotaEl) {
           const summary = data.quota_summary || {};
@@ -128,12 +123,18 @@ document.addEventListener("DOMContentLoaded", function() {
             for (const [plan, q] of Object.entries(summary)) {
               const label = plan === "affiliate" ? "アフィリエイト用" :
                             plan === "business" ? "事業用" : plan;
-              quotaEl.innerHTML += `プラン：${label}／登録済み：<strong>${q.used}</strong>／残り：<strong>${q.remaining}</strong><br>`;
+
+              // ✅ サイト枠追加ボタンも表示
+              quotaEl.innerHTML += `
+                プラン：${label}／登録済み：<strong>${q.used}</strong>／残り：<strong>${q.remaining}</strong>
+                <form method="post" action="/admin/increase_quota/${userId}/${plan}" class="inline ml-2">
+                  <button class="px-1 py-0.5 text-xs bg-blue-100 hover:bg-blue-200 text-blue-800 rounded border border-blue-300">＋サイト枠追加</button>
+                </form><br>
+              `;
             }
           }
         }
 
-        // 途中記事ボタン（条件付き）
         const stuck = data.stuck_count || 0;
         const actionsEl = document.getElementById(`stuck-actions-${userId}`);
         if (stuck > 0 && actionsEl) {
