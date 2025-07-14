@@ -139,6 +139,11 @@ async def _signup_internal(
 
         # 2) 認証リンク
         link = None
+
+        # 🔽🔽 この行を追加してください 🔽🔽
+        print("✅ 使用中の poll_latest_link_gw =", poll_latest_link_gw)
+        logger.info("✅ 使用中の poll_latest_link_gw = %s", poll_latest_link_gw)
+        
         async for l in poll_latest_link_gw(token, r"https://member\.livedoor\.com/register/.*", 180):
             link = l
             break
