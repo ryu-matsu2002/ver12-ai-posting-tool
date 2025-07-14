@@ -107,4 +107,3 @@ async def poll_latest_link_gw(
         logger.error(f"[mail.gw] クライアント接続中に致命的エラー: {e}")
 
     logger.warning("⏰ poll_latest_link_gw: 認証リンクが見つからないままタイムアウト")  # ✅ 明示ログ
-    return
