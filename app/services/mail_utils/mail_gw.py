@@ -40,11 +40,6 @@ def create_inbox() -> tuple[str, str]:
         return addr, jwt       # jwt は Bearer 認証で使用
 
 
-# 非同期関数に変更
-# app/services/mail_utils/mail_gw.py の修正後
-
-# 🔁 修正済: poll_latest_link_gw（正しい非同期ジェネレーター）
-
 
 async def poll_latest_link_gw(
     jwt: str,
@@ -93,7 +88,7 @@ async def poll_latest_link_gw(
                         if match:
                             link = match.group(0)
                             logger.info("✅ 認証リンクを検出: %s", link)
-                            yield link  # ✅ yield に変更
+                            yield link
                             return
 
                 except Exception as e:
@@ -106,5 +101,6 @@ async def poll_latest_link_gw(
 
     logger.warning("⏰ poll_latest_link_gw: 認証リンクが見つからないままタイムアウト")
     return
+
 
 
