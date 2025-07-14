@@ -13,7 +13,7 @@ from pytz import timezone
 from sqlalchemy import asc, nulls_last
 from sqlalchemy.orm import selectinload
 
-from sqlalchemy import func
+from app.extensions import func
 
 from . import db
 from .models import User, Article, PromptTemplate, Site, Keyword, Genre
@@ -1052,6 +1052,7 @@ def accounting():
         abort(403)
 
     from sqlalchemy.orm import selectinload
+    from sqlalchemy import func
 
     selected_month = request.args.get("month", "all")
 
@@ -1073,16 +1074,20 @@ def accounting():
         db.func.coalesce(db.func.sum(RyunosukeDeposit.amount), 0)
     ).scalar()
 
-    # ✅ 全ユーザー＆関連情報を一括取得（N+1解消）
+    # ✅ 全ユーザー＆関連情報を一括取得（N+1回避）
     users = User.query.options(
         selectinload(User.site_quota),
         selectinload(User.sites)
     ).filter(User.is_admin == False).all()
 
-    # ✅ 集計：サイト枠の分類
+    # ✅ ユーザー分類＆サイト枠合計
     tcc_1000_total = 0
     tcc_3000_total = 0
     business_total = 0
+
+    student_users = []
+    member_users = []
+    business_users = []
 
     for user in users:
         quota = user.site_quota
@@ -1090,11 +1095,15 @@ def accounting():
             continue
         if quota.plan_type == "business":
             business_total += quota.total_quota
+            business_users.append(user)
         elif user.is_special_access or user.id == 16:
             tcc_1000_total += quota.total_quota
+            member_users.append(user)
         else:
             tcc_3000_total += quota.total_quota
+            student_users.append(user)
 
+    # ✅ 集計結果（現状の構成は完全維持）
     breakdown = {
         "unpurchased": {
             "count": tcc_3000_total,
@@ -1118,27 +1127,28 @@ def accounting():
         },
     }
 
-    # ✅ 月別のサイト登録状況（TCC未購入のみ）
-    site_data_by_month = defaultdict(lambda: {
-        "site_count": 0,
-        "ryunosuke_income": 0,
-        "takeshi_income": 0
-    })
+    # ✅ サイト登録データを月別にSQLで直接集計（超高速）
+    site_data_raw = db.session.query(
+        func.date_trunc("month", Site.created_at).label("month"),
+        func.count(Site.id)
+    ).join(User).filter(
+        User.is_admin == False,
+        User.is_special_access == False  # ← TCC研究生（3,000円）のみ
+    ).group_by(func.date_trunc("month", Site.created_at)).all()
+
+    site_data_by_month = {}
     all_months_set = set()
 
-    for user in users:
-        if user.is_special_access:
-            continue
-        for site in user.sites:
-            if not site.created_at:
-                continue
-            month_key = site.created_at.strftime("%Y-%m")
-            all_months_set.add(month_key)
-            if selected_month == "all" or selected_month == month_key:
-                site_data_by_month[month_key]["site_count"] += 1
-                site_data_by_month[month_key]["ryunosuke_income"] += 1000
-                site_data_by_month[month_key]["takeshi_income"] += 2000
+    for month_obj, count in site_data_raw:
+        month_key = month_obj.strftime("%Y-%m")
+        all_months_set.add(month_key)
+        site_data_by_month[month_key] = {
+            "site_count": count,
+            "ryunosuke_income": count * 1000,
+            "takeshi_income": count * 2000
+        }
 
+    # ✅ 選択月のみ表示 or 全表示
     filtered_data = (
         site_data_by_month if selected_month == "all"
         else {
@@ -1150,18 +1160,11 @@ def accounting():
         }
     )
 
+    # ✅ 入金履歴と月一覧（変化なし）
     deposit_logs = RyunosukeDeposit.query.order_by(RyunosukeDeposit.deposit_date.desc()).all()
     all_months = sorted(all_months_set, reverse=True)
 
-    # ✅ 対象ユーザーの分類
-    student_users = User.query.filter_by(is_admin=False, is_special_access=False).all()
-    member_users = User.query.filter_by(is_admin=False, is_special_access=True).all()
-    business_users = (
-        User.query.join(UserSiteQuota)
-        .filter(User.is_admin == False, UserSiteQuota.plan_type == "business")
-        .all()
-    )
-
+    # ✅ テンプレートへ渡す（現状維持）
     return render_template(
         "admin/accounting.html",
         form=form,
@@ -1178,7 +1181,6 @@ def accounting():
     )
 
 
-
 @admin_bp.route("/admin/accounting/details", methods=["GET"])
 @login_required
 def accounting_details():
@@ -1186,40 +1188,45 @@ def accounting_details():
         abort(403)
 
     from flask import request
-    from sqlalchemy import extract
+    from sqlalchemy import extract, func
 
     selected_month = request.args.get("month", "all")
 
-    # ✅ 全 SiteQuotaLog を対象に（管理者も含む）
-    logs_query = SiteQuotaLog.query
+    # ✅ 月一覧を抽出（NULLを除外して高速に）
+    all_months_raw = db.session.query(
+        func.date_trunc("month", SiteQuotaLog.created_at)
+    ).filter(SiteQuotaLog.created_at != None).distinct().all()
 
-    # ✅ 月別フィルタ（例：2025-06）
-    if selected_month != "all":
-        year, month = selected_month.split("-")
-        logs_query = logs_query.filter(
-            extract("year", SiteQuotaLog.created_at) == int(year),
-            extract("month", SiteQuotaLog.created_at) == int(month)
-        )
-
-    # ✅ 購入日が新しい順に並べ替え
-    logs = logs_query.order_by(SiteQuotaLog.created_at.desc()).all()
-
-    # ✅ 月フィルター選択用：全ログから年月を抽出（降順）
     all_months = sorted(
-        {
-            log.created_at.strftime("%Y-%m")
-            for log in SiteQuotaLog.query.all()
-            if log.created_at
-        },
+        {month[0].strftime("%Y-%m") for month in all_months_raw},
         reverse=True
     )
 
+    # ✅ 月フィルタに応じてログ抽出
+    logs_query = SiteQuotaLog.query.filter(SiteQuotaLog.created_at != None)
+
+    if selected_month != "all":
+        try:
+            year, month = selected_month.split("-")
+            logs_query = logs_query.filter(
+                extract("year", SiteQuotaLog.created_at) == int(year),
+                extract("month", SiteQuotaLog.created_at) == int(month)
+            )
+        except Exception:
+            flash("不正な月形式です", "error")
+            return redirect(url_for("admin.accounting_details"))
+
+    # ✅ 並び順（新しい順）
+    logs = logs_query.order_by(SiteQuotaLog.created_at.desc()).all()
+
+    # ✅ テンプレートへ渡す（変化なし）
     return render_template(
         "admin/accounting_details.html",
         logs=logs,
         selected_month=selected_month,
         all_months=all_months
     )
+
 
 @admin_bp.route("/admin/accounting/adjust", methods=["POST"])
 @login_required

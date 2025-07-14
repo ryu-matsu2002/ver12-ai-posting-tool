@@ -8,7 +8,7 @@ from difflib import SequenceMatcher
 import pytz
 from flask import current_app
 from openai import OpenAI, BadRequestError
-from sqlalchemy import func
+from app.extensions import func
 from threading import Event
 from .image_utils import fetch_featured_image, fetch_featured_image_from_body  # ← 追加
 from . import db
