@@ -6,13 +6,13 @@ create_inbox()       -> (email, jwt)
 poll_latest_link()   -> URL or None
 ──────────────────────────────
 """
-
 from __future__ import annotations
 import secrets, string, time, re, logging, httpx, html
 from bs4 import BeautifulSoup
 import asyncio 
-from collections.abc import AsyncGenerator  # これを先頭の import に追加
+from collections.abc import AsyncGenerator
 
+logger = logging.getLogger(__name__)  # ← ✅ logger をモジュールスコープに統一
 
 BASE = "https://api.mail.gw"
 USER_AGENT = "Mozilla/5.0 (SEO-Bot)"
@@ -40,14 +40,13 @@ def create_inbox() -> tuple[str, str]:
         return addr, jwt       # jwt は Bearer 認証で使用
 
 
-
+# --------------------------------------------------------- polling
 async def poll_latest_link_gw(
     jwt: str,
     pattern: str = r"https://member\.livedoor\.com/register/.*",
     timeout: int = 180
 ) -> AsyncGenerator[str, None]:
-    logger = logging.getLogger(__name__)
-    logger.info("✅ poll_latest_link_gw が呼び出されました")
+    logger.info("✅ poll_latest_link_gw が呼び出されました")  # ✅ 追加ログ
 
     deadline = time.time() + timeout
     headers = {
@@ -57,11 +56,17 @@ async def poll_latest_link_gw(
 
     try:
         async with httpx.AsyncClient(base_url=BASE, headers=headers, timeout=20) as client:
+            poll_count = 0
             while time.time() < deadline:
+                poll_count += 1
+                logger.info(f"🔄 ポーリング試行 {poll_count} 回目")  # ✅ 追加ログ
+
                 try:
                     res1 = await client.get("/messages")
                     res1.raise_for_status()
                     messages = res1.json().get("hydra:member", [])
+
+                    logger.info(f"📨 取得メール件数: {len(messages)}")  # ✅ 追加ログ
 
                     for msg in messages:
                         if msg.get("seen"):
@@ -69,6 +74,8 @@ async def poll_latest_link_gw(
                         mid = msg.get("id")
                         if not mid:
                             continue
+
+                        logger.info(f"🆕 新規メールID: {mid} 件名: {msg.get('subject')}")  # ✅ 追加ログ
 
                         res2 = await client.get(f"/messages/{mid}")
                         res2.raise_for_status()
@@ -87,7 +94,7 @@ async def poll_latest_link_gw(
                         match = re.search(pattern, html_content)
                         if match:
                             link = match.group(0)
-                            logger.info("✅ 認証リンクを検出: %s", link)
+                            logger.info("✅ 認証リンクを検出: %s", link)  # ✅ ログ強化
                             yield link
                             return
 
@@ -99,8 +106,5 @@ async def poll_latest_link_gw(
     except Exception as e:
         logger.error(f"[mail.gw] クライアント接続中に致命的エラー: {e}")
 
-    logger.warning("⏰ poll_latest_link_gw: 認証リンクが見つからないままタイムアウト")
+    logger.warning("⏰ poll_latest_link_gw: 認証リンクが見つからないままタイムアウト")  # ✅ 明示ログ
     return
-
-
-
