@@ -140,8 +140,11 @@ async def _signup_internal(
         # 2) 認証リンク
         link = None
 
+        # ✅ poll_latest_link_gw の正体を確認するログ
+        logger.info("✅ poll_latest_link_gw の参照先: %s", poll_latest_link_gw)
+        logger.info("✅ poll_latest_link_gw の型: %s", type(poll_latest_link_gw))
+
         # 🔽🔽 この行を追加してください 🔽🔽
-        print("✅ 使用中の poll_latest_link_gw =", poll_latest_link_gw)
         logger.info("✅ 使用中の poll_latest_link_gw = %s", poll_latest_link_gw)
         
         async for l in poll_latest_link_gw(token, r"https://member\.livedoor\.com/register/.*", 180):
