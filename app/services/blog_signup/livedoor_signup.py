@@ -1,198 +1,34 @@
 """
-ライブドアブログ アカウント自動登録
+ライブドアブログ アカウント自動登録（AIエージェント仕様）
 ==================================
-* Playwright でフォーム入力 → 仮登録メール受信 → 本登録 → API キー取得
-* 使い捨てメール: mail.gw（create_inbox で発行）
-* 取得した API Key／Blog ID を ExternalBlogAccount に保存
-*
-* 2025-07-09 改訂:
-*  - CAPTCHA 画像を自前OCRで自動入力（captcha_solver.solve）
-*  - 送信直後に URL／タイトル／成功メッセージを検証
-*  - クリック出来ない場合に HTML／PNG を /tmp に保存
-*  - 詳細ログを強化しデバッグ容易化
+* Playwright + AIエージェントでフォーム入力 → 仮登録 → メール確認 → 本登録
+* CAPTCHA対応, 成功判定, API Key 抽出も含む
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import string
-import random
-import re
 import time
-from pathlib import Path
-from typing import Dict, List, Optional
-
-import requests
-from playwright.async_api import async_playwright, Page
-from playwright.async_api import TimeoutError as PwTimeout
+import random
+import string
 
 from app import db
 from app.enums import BlogType
 from app.models import ExternalBlogAccount
+from app.services.mail_utils.mail_gw import create_inbox
 from app.services.blog_signup.crypto_utils import encrypt
-from app.services.livedoor.llm_helper import extract_form_fields
-from app.services.mail_utils.mail_gw import create_inbox, poll_latest_link_gw
-from app.services.captcha_solver import solve
+
+# ✅ AIエージェント実行関数をインポート
+from app.services.agent.livedoor_agent import run_livedoor_signup
 
 logger = logging.getLogger(__name__)
 
-SIGNUP_URL = "https://member.livedoor.com/register/input"
-SUCCESS_PATTERNS: List[str] = [
-    "メールを送信しました",
-    "仮登録",
-    "仮登録メールをお送りしました"  # ← ✅ 新しく追加！
-]
-
-import string
 
 def generate_safe_id(n=10) -> str:
     """半角英小文字 + 数字 + アンダーバー のみで構成されたID"""
     chars = string.ascii_lowercase + string.digits + "_"
     return ''.join(random.choices(chars, k=n))
-
-
-async def _fill_form_with_llm(page: Page, hints: Dict[str, str]) -> None:
-    html = await page.content()
-    mapping = extract_form_fields(html)
-    logger.info("🧠 フィールド推論結果: %s", mapping)
-    for field in mapping:
-        sel = field["selector"]
-        label = field["label"]
-        value = hints.get(label, "")
-        if not value:
-            logger.info("⚠️ 値が未設定のフィールド: %s", label)
-            continue
-        try:
-            await page.fill(sel, value)
-            logger.info("✅ フィールド '%s' に値 '%s' を入力しました", sel, value)
-        except Exception as e:
-            logger.warning("⚠️ fill失敗 label='%s' selector='%s' → %s", label, sel, str(e))
-
-
-async def _signup_internal(
-    email: str,
-    token: str,
-    password: str,
-    nickname: str,
-) -> Dict[str, str]:
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
-        )
-        page = await browser.new_page()
-
-        await page.goto(SIGNUP_URL, timeout=30_000)
-
-        await page.fill("input[name='livedoor_id']", nickname)
-        await page.fill("input[name='password']", password)
-        await page.fill("input[name='password2']", password)
-        await page.fill("input[name='email']", email)
-        logger.info("✅ 正しいセレクタで全フィールドに入力完了（email=%s, id=%s）", email, nickname)
-
-        success = False
-        if await page.is_visible("img[src*='captcha']"):
-            for attempt in range(3):
-                img_bytes = await page.locator("img[src*='captcha']").screenshot()
-                text = solve(img_bytes)
-                await page.fill("input[name='captcha']", text)
-                logger.info("[LD-Signup] solve captcha try%d='%s'", attempt + 1, text)
-
-                clicked = False
-                for sel in [
-                    "input[type='submit'][value*='ユーザー情報を登録']",
-                    "input[type='submit']",
-                    "button:has-text('確認メール')",
-                    "button.c-btn--primary",
-                ]:
-                    if await page.is_visible(sel):
-                        try:
-                            await page.click(sel, timeout=5_000)
-                            clicked = True
-                            break
-                        except:
-                            continue
-
-                await page.wait_for_load_state("networkidle")
-                content = await page.content()
-
-                if "画像認証が正しくありません" not in content and "ご入力いただいた内容に不備があります" not in content:
-                    success = True
-                    break
-
-                if await page.is_visible("img[src*='captcha']"):
-                    await page.click("img[src*='captcha']")
-                    await page.wait_for_timeout(1500)
-
-        if not success and await page.is_visible("img[src*='captcha']"):
-            html = Path("/tmp/ld_signup_captcha_failed.html")
-            html.write_text(await page.content(), encoding="utf-8")
-            await browser.close()
-            raise RuntimeError(f"画像認証に3回連続で失敗しました → {html}")
-
-        await page.wait_for_load_state("networkidle")
-        clicked = False
-        for sel in [
-            "input[type='submit'][value*='ユーザー情報を登録']",
-            "input[type='submit']",
-            "button:has-text('確認メール')",
-            "button.c-btn--primary",
-        ]:
-            if await page.is_visible(sel):
-                try:
-                    await page.click(sel, timeout=5_000)
-                    clicked = True
-                    break
-                except:
-                    continue
-        if not clicked:
-            html = Path("/tmp/ld_signup_debug.html")
-            png = Path("/tmp/ld_signup_debug.png")
-            html.write_text(await page.content(), encoding="utf-8")
-            await page.screenshot(path=str(png), full_page=True)
-            await browser.close()
-            raise RuntimeError(f"送信ボタンが押せず失敗。HTML:{html} PNG:{png}")
-
-        await page.wait_for_load_state("networkidle")
-        logger.info("[LD-Signup] after submit url=%s title=%s", page.url, await page.title())
-
-        content = await page.content()
-        if not any(pat in content for pat in SUCCESS_PATTERNS):
-            bad = Path("/tmp/ld_signup_post_submit.html")
-            bad.write_text(content, encoding="utf-8")
-            await browser.close()
-            raise RuntimeError(f"送信後に成功メッセージが無い → {bad}")
-
-        link = None
-        async for l in poll_latest_link_gw(token, r"https://member\.livedoor\.com/register/.*", 180):
-            link = l
-            break
-
-        if not link:
-            await browser.close()
-            raise RuntimeError("メール認証リンクが取得できません")
-        logger.info("[LD-Signup] verification link=%s", link)
-        await page.goto(link, timeout=30_000)
-
-        import re as regex
-        pattern = regex.compile(r"https://blog\.livedoor\.com/.*")
-        await page.wait_for_url(lambda url: bool(pattern.match(url)), timeout=60_000)
-
-        m = re.search(r"https://(.+?)\.blogcms\.jp", page.url)
-        if not m:
-            await browser.close()
-            raise RuntimeError("blog_id が抽出できませんでした")
-        blog_id = m.group(1)
-
-        await page.goto("https://blog.livedoor.com/settings/api", timeout=30_000)
-        if await page.is_visible("text=APIキーを生成"):
-            await page.click("text=APIキーを生成")
-            await page.wait_for_selector("input[name='apikey']")
-        api_key = await page.input_value("input[name='apikey']")
-
-        await browser.close()
-        return {"blog_id": blog_id, "api_key": api_key}
 
 
 def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
@@ -209,14 +45,16 @@ def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
     logger.info("[LD-Signup] disposable email = %s", email)
 
     password = "Ld" + str(int(time.time()))
-    nickname = generate_safe_id(10)  # ← livedoorが受け入れるID文字列に変更
+    nickname = generate_safe_id(10)
 
     try:
-        res = asyncio.run(_signup_internal(email, token, password, nickname))
+        # ✅ AIエージェントを使ったサインアップ処理
+        res = asyncio.run(run_livedoor_signup(email, token, nickname, password))
     except Exception as e:
         logger.error("[LD-Signup] failed: %s", str(e))
         raise
 
+    # DB登録
     new_account = ExternalBlogAccount(
         site_id=site.id,
         blog_type=BlogType.LIVEDOOR,
