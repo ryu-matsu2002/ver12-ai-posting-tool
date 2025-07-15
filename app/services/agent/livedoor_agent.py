@@ -87,3 +87,8 @@ class LivedoorAgent(BlogAgent):
             finally:
                 await browser.close()
                 agent_logger.log(self.job_id, "finished", "Livedoor登録処理が完了し、ブラウザを閉じました")
+
+# livedoor_agent.py の末尾に以下を追加
+async def run_livedoor_signup(job_id: int, email: str, password: str, nickname: str):
+    agent = LivedoorAgent(job_id=job_id, email=email, password=password, nickname=nickname)
+    await agent.run()
