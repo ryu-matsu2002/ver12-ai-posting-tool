@@ -63,7 +63,7 @@
     {% if job.logs %}
       <div class="text-xs text-gray-800 bg-gray-50 p-2 rounded max-h-40 overflow-y-auto">
         <ul class="space-y-1">
-          {% for log in job.logs.order_by(log.timestamp.desc()).limit(10) %}
+          {% for log in job.logs.order_by(ExternalSEOJobLog.timestamp.desc()).limit(10) %}
             <li>
               🕒 {{ log.timestamp.strftime('%H:%M:%S') }}
               <strong>{{ log.step }}</strong> — {{ log.message }}
