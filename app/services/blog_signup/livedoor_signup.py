@@ -82,6 +82,9 @@ async def _signup_internal(
         await page.fill("input[name='password2']", password)
         await page.fill("input[name='email']", email)
         logger.info("✅ 正しいセレクタで全フィールドに入力完了（email=%s, id=%s）", email, nickname)
+        # 🔧 NEW: 利用規約チェック
+        await page.check("input[name='agreement']")
+        logger.info("✅ 正しいセレクタで全フィールドに入力完了（email=%s, id=%s）", email, nickname)
 
         # ✅ CAPTCHAがある場合は自動で解く（自作AI使用）
         success = False
