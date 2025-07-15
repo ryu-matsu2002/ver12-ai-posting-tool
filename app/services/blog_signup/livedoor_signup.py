@@ -146,7 +146,12 @@ async def _signup_internal(
 
         # 🔽🔽 この行を追加してください 🔽🔽
         logger.info("✅ 使用中の poll_latest_link_gw = %s", poll_latest_link_gw)
-        
+        import inspect
+
+        logger.info("💡 poll_latest_link_gw type: %s", type(poll_latest_link_gw))
+        logger.info("💡 poll_latest_link_gw is async generator: %s", inspect.isasyncgenfunction(poll_latest_link_gw))
+        logger.info("💡 poll_latest_link_gw() is async generator object: %s", inspect.isasyncgen(poll_latest_link_gw(token)))
+
         async for l in poll_latest_link_gw(token, r"https://member\.livedoor\.com/register/.*", 180):
             link = l
             break
