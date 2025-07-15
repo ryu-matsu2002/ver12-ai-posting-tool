@@ -77,15 +77,13 @@ async def _signup_internal(
         # 1) フォームへ遷移
         await page.goto(SIGNUP_URL, timeout=30_000)
 
-        await _fill_form_with_llm(
-            page,
-            {
-                "メールアドレス": email,
-                "パスワード": password,
-                "パスワード(確認)": password,
-                "ニックネーム": nickname,
-            },
-        )
+        # 🔧 フィールドに手動で入力（推論は使わない）
+        await page.fill("input[name='email']", email)
+        await page.fill("input[name='password']", password)
+        await page.fill("input[name='password2']", password)
+        await page.fill("input[name='nickname']", nickname)
+        logger.info("✅ 手動で全フィールドに入力完了（email=%s, nickname=%s）", email, nickname)
+
 
         # 画像CAPTCHAがある場合は自動で解く
         if await page.is_visible("img[src*='captcha']"):
