@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import string
 import random
 import re
 import time
@@ -43,6 +44,12 @@ SUCCESS_PATTERNS: List[str] = [
     "仮登録メールをお送りしました"  # ← ✅ 新しく追加！
 ]
 
+import string
+
+def generate_safe_id(n=10) -> str:
+    """半角英小文字 + 数字 + アンダーバー のみで構成されたID"""
+    chars = string.ascii_lowercase + string.digits + "_"
+    return ''.join(random.choices(chars, k=n))
 
 
 async def _fill_form_with_llm(page: Page, hints: Dict[str, str]) -> None:
@@ -202,7 +209,7 @@ def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
     logger.info("[LD-Signup] disposable email = %s", email)
 
     password = "Ld" + str(int(time.time()))
-    nickname = site.name[:10]
+    nickname = generate_safe_id(10)  # ← livedoorが受け入れるID文字列に変更
 
     try:
         res = asyncio.run(_signup_internal(email, token, password, nickname))
