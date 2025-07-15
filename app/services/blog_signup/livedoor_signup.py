@@ -52,6 +52,7 @@ async def _fill_form_with_llm(page: Page, hints: Dict[str, str]) -> None:
             continue
         try:
             await page.fill(sel, value)
+            logger.info("✅ フィールド '%s' に値 '%s' を入力しました", sel, value)  # ← ★ログを追加
         except Exception:
             logger.warning("failed to fill %s (%s)", field["label"], sel)
 
