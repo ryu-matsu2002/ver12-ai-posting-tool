@@ -2,15 +2,17 @@
 
 import logging
 from abc import ABC, abstractmethod
+from typing import Optional  # ← ✅ 追加
 
 logger = logging.getLogger(__name__)
 
 class BlogAgent(ABC):
-    def __init__(self, site, email, password, nickname):
+    def __init__(self, site, email, password, nickname, job_id: Optional[int] = None):  # ✅ job_id追加
         self.site = site  # Siteオブジェクト（SQLAlchemyなど）
         self.email = email
         self.password = password
         self.nickname = nickname
+        self.job_id = job_id  # ✅ job_idを保存
 
     @abstractmethod
     async def run(self):
