@@ -18,6 +18,8 @@ from app.enums import BlogType
 from app.models import ExternalBlogAccount
 from app.services.mail_utils.mail_gw import create_inbox, poll_latest_link_gw
 from app.services.blog_signup.crypto_utils import encrypt
+from app.services.agent.livedoor_agent import LivedoorAgent
+
 
 # ✅ AIエージェント実行関数をインポート
 from app.services.agent.livedoor_agent import run_livedoor_signup
@@ -49,7 +51,7 @@ def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
 
     try:
         # ✅ AIエージェントを使ったサインアップ処理
-        res = asyncio.run(run_livedoor_signup(email, token, nickname, password))
+        res = asyncio.run(run_livedoor_signup(site, email, token, nickname, password))
     except Exception as e:
         logger.error("[LD-Signup] failed: %s", str(e))
         raise
@@ -73,3 +75,13 @@ def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
 
 def signup(site, email_seed: str = "ld"):
     return register_blog_account(site, email_seed=email_seed)
+
+async def run_livedoor_signup(site, email, token, nickname, password, job_id=None):
+    agent = LivedoorAgent(
+        site=site,
+        email=email,
+        password=password,
+        nickname=nickname
+    )
+    agent.job_id = job_id  # オプション：ログ用
+    return await agent.run()
