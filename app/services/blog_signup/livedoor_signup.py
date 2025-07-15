@@ -37,7 +37,12 @@ from app.services.captcha_solver import solve
 logger = logging.getLogger(__name__)
 
 SIGNUP_URL = "https://member.livedoor.com/register/input"
-SUCCESS_PATTERNS: List[str] = ["メールを送信しました", "仮登録"]
+SUCCESS_PATTERNS: List[str] = [
+    "メールを送信しました",
+    "仮登録",
+    "仮登録メールをお送りしました"  # ← ✅ 新しく追加！
+]
+
 
 
 async def _fill_form_with_llm(page: Page, hints: Dict[str, str]) -> None:
