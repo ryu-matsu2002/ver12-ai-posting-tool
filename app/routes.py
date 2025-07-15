@@ -3320,7 +3320,7 @@ def delete_genre(username, genre_id):
 def external_seo_sites():
     from app.models import (
         Site, ExternalSEOJob, ExternalArticleSchedule,
-        ExternalBlogAccount, BlogType
+        ExternalBlogAccount, BlogType, ExternalSEOJobLog
     )
     from sqlalchemy.orm import selectinload
 
@@ -3373,7 +3373,8 @@ def external_seo_sites():
     return render_template(
         "external_sites.html",
         sites=sites,
-        job_map=job_map
+        job_map=job_map,
+        ExternalSEOJobLog=ExternalSEOJobLog  # ← ✅ 追加
     )
 
 # -----------------------------------------------------------------
