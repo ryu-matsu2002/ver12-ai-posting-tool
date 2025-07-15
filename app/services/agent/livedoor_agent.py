@@ -1,7 +1,7 @@
 # app/services/agent/livedoor_agent.py
 
 from .base_agent import BlogAgent
-from app.mail_utils.mail_gw import create_inbox, poll_latest_link_gw
+from app.services.mail_utils.mail_gw import create_inbox, poll_latest_link_gw
 from app.services.captcha_solver import solve  # ← 独自AI CAPTCHA解読
 from pathlib import Path
 import asyncio
