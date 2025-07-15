@@ -131,7 +131,8 @@ async def _signup_internal(
         logger.info("[LD-Signup] after submit url=%s title=%s", page.url, await page.title())
 
         # 成功文言チェック
-        if not any(pat in await page.content() for pat in SUCCESS_PATTERNS):
+        content = await page.content()
+        if not any(pat in content for pat in SUCCESS_PATTERNS):
             bad = Path("/tmp/ld_signup_post_submit.html")
             bad.write_text(await page.content(), encoding="utf-8")
             await browser.close()
