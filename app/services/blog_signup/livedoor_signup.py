@@ -77,15 +77,14 @@ async def _signup_internal(
         # 1) フォームへ遷移
         await page.goto(SIGNUP_URL, timeout=30_000)
 
-        # 🔧 フィールドに手動で入力（推論は使わない）
-        await page.fill("input[name='email']", email)
+        # 🔧 livedoor に合わせて正しい name 指定で手動入力（nickname→IDとして使用）
+        await page.fill("input[name='livedoor_id']", nickname)
         await page.fill("input[name='password']", password)
         await page.fill("input[name='password2']", password)
-        await page.fill("input[name='nickname']", nickname)
-        logger.info("✅ 手動で全フィールドに入力完了（email=%s, nickname=%s）", email, nickname)
+        await page.fill("input[name='email']", email)
+        logger.info("✅ 正しいセレクタで全フィールドに入力完了（email=%s, id=%s）", email, nickname)
 
-
-        # 画像CAPTCHAがある場合は自動で解く
+        # CAPTCHAがある場合は自動で解く
         if await page.is_visible("img[src*='captcha']"):
             for attempt in range(3):  # 最大3回
                 img_bytes = await page.locator("img[src*='captcha']").screenshot()
@@ -106,7 +105,7 @@ async def _signup_internal(
                 # 失敗 → 画像をクリックしてリフレッシュして再挑戦
                 await page.click("img[src*='captcha']")
 
-        # ---- CAPTCHA が無い or 入力済み状態で送信ボタン確実クリック ----
+        # ---- CAPTCHAが無い or すでに入力済みなら送信ボタンを押す ----
         await page.wait_for_load_state("networkidle")
         clicked = False
         for sel in [
@@ -144,22 +143,16 @@ async def _signup_internal(
         # 2) 認証リンク
         link = None
 
-        # ✅ poll_latest_link_gw の正体を確認するログ
+        # ✅ poll_latest_link_gw のデバッグログ
         logger.info("✅ poll_latest_link_gw の参照先: %s", poll_latest_link_gw)
         logger.info("✅ poll_latest_link_gw の型: %s", type(poll_latest_link_gw))
-
-        # 🔽🔽 この行を追加してください 🔽🔽
-        logger.info("✅ 使用中の poll_latest_link_gw = %s", poll_latest_link_gw)
         import inspect
-
-        logger.info("💡 poll_latest_link_gw type: %s", type(poll_latest_link_gw))
         logger.info("💡 poll_latest_link_gw is async generator: %s", inspect.isasyncgenfunction(poll_latest_link_gw))
         logger.info("💡 poll_latest_link_gw() is async generator object: %s", inspect.isasyncgen(poll_latest_link_gw(token)))
 
         async for l in poll_latest_link_gw(token, r"https://member\.livedoor\.com/register/.*", 180):
             link = l
             break
-
 
         if not link:
             await browser.close()
@@ -168,13 +161,11 @@ async def _signup_internal(
         await page.goto(link, timeout=30_000)
 
         # 3) 自動リダイレクトを待つ
-        import re as regex  # ← 別名で re を再定義してみてもよい
-
+        import re as regex
         pattern = regex.compile(r"https://blog\.livedoor\.com/.*")
         await page.wait_for_url(lambda url: bool(pattern.match(url)), timeout=60_000)
 
-
-        # 4) blog_id
+        # 4) blog_id 抽出
         m = re.search(r"https://(.+?)\.blogcms\.jp", page.url)
         if not m:
             await browser.close()
@@ -190,6 +181,7 @@ async def _signup_internal(
 
         await browser.close()
         return {"blog_id": blog_id, "api_key": api_key}
+
 
 # ──────────────────────────────────────────────────────────────
 def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
