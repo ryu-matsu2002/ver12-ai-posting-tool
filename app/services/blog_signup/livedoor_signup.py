@@ -60,7 +60,6 @@ async def _fill_form_with_llm(page: Page, hints: Dict[str, str]) -> None:
             logger.warning("⚠️ fill失敗 label='%s' selector='%s' → %s", label, sel, str(e))
 
 
-# ──────────────────────────────────────────────────────────────
 async def _signup_internal(
     email: str,
     token: str,
@@ -84,28 +83,52 @@ async def _signup_internal(
         await page.fill("input[name='email']", email)
         logger.info("✅ 正しいセレクタで全フィールドに入力完了（email=%s, id=%s）", email, nickname)
 
-        # CAPTCHAがある場合は自動で解く
+        # ✅ CAPTCHAがある場合は自動で解く（自作AI使用）
+        success = False
         if await page.is_visible("img[src*='captcha']"):
-            for attempt in range(3):  # 最大3回
+            for attempt in range(3):  # 最大3回試行
                 img_bytes = await page.locator("img[src*='captcha']").screenshot()
                 text = solve(img_bytes)
                 await page.fill("input[name='captcha']", text)
                 logger.info("[LD-Signup] solve captcha try%d='%s'", attempt + 1, text)
 
-                # 送信ボタン押下
-                if await page.is_visible("input[type='submit']"):
-                    await page.click("input[type='submit']")
-                else:
-                    await page.click("button.c-btn--primary")
+                # 送信ボタンクリック
+                clicked = False
+                for sel in [
+                    "input[type='submit'][value*='ユーザー情報を登録']",
+                    "input[type='submit']",
+                    "button:has-text('確認メール')",
+                    "button.c-btn--primary",
+                ]:
+                    if await page.is_visible(sel):
+                        try:
+                            await page.click(sel, timeout=5_000)
+                            clicked = True
+                            break
+                        except:
+                            continue
 
-                # 成功判定：エラーメッセージが空
                 await page.wait_for_load_state("networkidle")
-                if not await page.is_visible("#captcha_msg:not(:empty)"):
-                    break   # 成功
-                # 失敗 → 画像をクリックしてリフレッシュして再挑戦
-                await page.click("img[src*='captcha']")
+                content = await page.content()
 
-        # ---- CAPTCHAが無い or すでに入力済みなら送信ボタンを押す ----
+                # CAPTCHA失敗文言が無い = 成功と判定
+                if "画像認証が正しくありません" not in content and "ご入力いただいた内容に不備があります" not in content:
+                    success = True
+                    break
+
+                # 失敗 → CAPTCHA画像を更新して再挑戦
+                if await page.is_visible("img[src*='captcha']"):
+                    await page.click("img[src*='captcha']")
+                    await page.wait_for_timeout(1500)  # 再描画待ち
+
+        # 3回失敗したらエラーにする
+        if not success and await page.is_visible("img[src*='captcha']"):
+            html = Path("/tmp/ld_signup_captcha_failed.html")
+            html.write_text(await page.content(), encoding="utf-8")
+            await browser.close()
+            raise RuntimeError(f"画像認証に3回連続で失敗しました → {html}")
+
+        # ---- CAPTCHAが無い or 成功済なら送信ボタン押下（保険） ----
         await page.wait_for_load_state("networkidle")
         clicked = False
         for sel in [
@@ -119,8 +142,8 @@ async def _signup_internal(
                     await page.click(sel, timeout=5_000)
                     clicked = True
                     break
-                except PwTimeout:
-                    pass
+                except:
+                    continue
         if not clicked:
             html = Path("/tmp/ld_signup_debug.html")
             png  = Path("/tmp/ld_signup_debug.png")
@@ -132,18 +155,16 @@ async def _signup_internal(
         await page.wait_for_load_state("networkidle")
         logger.info("[LD-Signup] after submit url=%s title=%s", page.url, await page.title())
 
-        # 成功文言チェック
+        # ✅ 成功文言チェック
         content = await page.content()
         if not any(pat in content for pat in SUCCESS_PATTERNS):
             bad = Path("/tmp/ld_signup_post_submit.html")
-            bad.write_text(await page.content(), encoding="utf-8")
+            bad.write_text(content, encoding="utf-8")
             await browser.close()
             raise RuntimeError(f"送信後に成功メッセージが無い → {bad}")
 
-        # 2) 認証リンク
+        # 2) 認証リンク取得
         link = None
-
-        # ✅ poll_latest_link_gw のデバッグログ
         logger.info("✅ poll_latest_link_gw の参照先: %s", poll_latest_link_gw)
         logger.info("✅ poll_latest_link_gw の型: %s", type(poll_latest_link_gw))
         import inspect
@@ -181,6 +202,7 @@ async def _signup_internal(
 
         await browser.close()
         return {"blog_id": blog_id, "api_key": api_key}
+
 
 
 # ──────────────────────────────────────────────────────────────
