@@ -45,16 +45,20 @@ async def _fill_form_with_llm(page: Page, hints: Dict[str, str]) -> None:
     """GPT で推定したセレクタに値を流し込む"""
     html = await page.content()
     mapping = extract_form_fields(html)
+    logger.info("🧠 フィールド推論結果: %s", mapping)
     for field in mapping:
         sel = field["selector"]
-        value = hints.get(field["label"], "")
+        label = field["label"]
+        value = hints.get(label, "")
         if not value:
+            logger.info("⚠️ 値が未設定のフィールド: %s", label)
             continue
         try:
             await page.fill(sel, value)
-            logger.info("✅ フィールド '%s' に値 '%s' を入力しました", sel, value)  # ← ★ログを追加
-        except Exception:
-            logger.warning("failed to fill %s (%s)", field["label"], sel)
+            logger.info("✅ フィールド '%s' に値 '%s' を入力しました", sel, value)
+        except Exception as e:
+            logger.warning("⚠️ fill失敗 label='%s' selector='%s' → %s", label, sel, str(e))
+
 
 # ──────────────────────────────────────────────────────────────
 async def _signup_internal(
