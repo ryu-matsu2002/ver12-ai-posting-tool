@@ -384,6 +384,20 @@ class ExternalSEOJob(db.Model):
     "Site",
     back_populates="external_jobs"   # ← ここを back_populates に
     )
+    # ExternalSEOJob にリレーションを追加
+    logs = db.relationship("ExternalSEOJobLog", back_populates="job", lazy="dynamic")
+
 
     def __repr__(self) -> str:
         return f"<SEOJob site={self.site_id} status={self.status} step={self.step}>"
+
+class ExternalSEOJobLog(db.Model):
+    __tablename__ = "external_seo_job_logs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    job_id = db.Column(db.Integer, db.ForeignKey("external_seo_jobs.id"), nullable=False)
+    step = db.Column(db.String(64))
+    message = db.Column(db.Text)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+
+    job = db.relationship("ExternalSEOJob", back_populates="logs")
