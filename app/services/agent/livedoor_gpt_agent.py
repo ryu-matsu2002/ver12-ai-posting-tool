@@ -26,7 +26,6 @@ class LivedoorAgent:
                 logger.info("[LD-Agent] 🚀 Livedoor登録ページにアクセスします")
                 await page.goto("https://member.livedoor.com/register/input", timeout=30_000)
 
-                # ✅ セレクタ取得の保護（ログ出力つき）
                 try:
                     logger.info("[LD-Agent] livedoor_id のセレクタ取得を試みます")
                     await page.wait_for_selector("#livedoor_id", timeout=10000)
@@ -51,7 +50,6 @@ class LivedoorAgent:
 
                 await asyncio.sleep(1.5)
 
-                # ✅ 登録ボタン状態確認（＋デバッグ情報出力）
                 logger.info("[LD-Agent] 登録ボタンの状態確認開始")
                 try:
                     await page.wait_for_selector('input[type="submit"]', timeout=10000)
@@ -60,7 +58,6 @@ class LivedoorAgent:
                     logger.info(f"[LD-Agent] 登録ボタン: visible={visible}, enabled={enabled}")
                 except Exception as submit_check_err:
                     logger.error(f"[LD-Agent] 登録ボタンの確認に失敗: {submit_check_err}")
-
                     try:
                         html = await page.content()
                         logger.warning(f"[LD-Agent][DEBUG] submitボタン取得失敗時HTML:\n{html[:1000]}")
@@ -70,7 +67,6 @@ class LivedoorAgent:
                         logger.warning(f"[LD-Agent][DEBUG] スクショまたはHTML保存失敗: {e}")
                     raise
 
-                # ✅ 登録ボタンをクリック（または fallback）
                 try:
                     await page.eval_on_selector('input[type="submit"]', "el => el.scrollIntoView()")
                     await asyncio.sleep(0.5)
@@ -80,7 +76,7 @@ class LivedoorAgent:
                     logger.warning(f"[LD-Agent] submitボタンのクリックに失敗、form.submit() に切り替え: {e}")
                     await page.eval_on_selector('form[action="/register/input"]', "form => form.submit()")
 
-                # ✅ CAPTCHA
+                # ✅ CAPTCHA処理
                 await page.wait_for_selector("#captcha-img", timeout=10000)
                 captcha_url = await page.get_attribute("#captcha-img", "src")
                 logger.info(f"[LD-Agent] CAPTCHA画像URL: {captcha_url}")
@@ -140,7 +136,6 @@ class LivedoorAgent:
                 await page.goto(verification_url, timeout=30_000)
                 await asyncio.sleep(2)
 
-                # ✅ 登録完了
                 api_key = "dummy-api-key"
                 blog_id = self.nickname
 
