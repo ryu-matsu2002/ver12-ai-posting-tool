@@ -95,3 +95,13 @@ async def run_livedoor_signup(site, email, token, nickname, password) -> dict:
 
         finally:
             await browser.close()
+
+# app/services/agent/livedoor_gpt_agent.py
+
+class LivedoorAgent:
+    def __init__(self, site):
+        self.site = site
+
+    async def run(self):
+        print(f"[仮実行] LivedoorAgent 実行中（site_id={self.site.id}）")
+        return {"status": "not_implemented"}
