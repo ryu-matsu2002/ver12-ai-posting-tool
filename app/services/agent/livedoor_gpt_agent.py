@@ -60,9 +60,8 @@ class LivedoorAgent:
                     logger.error(f"[LD-Agent] 登録ボタンの確認に失敗: {submit_check_err}")
                     try:
                         html = await page.content()
-                        logger.warning(f"[LD-Agent][DEBUG] submitボタン取得失敗時HTML:\n{html[:1000]}")
                         await page.screenshot(path="/tmp/ld_submit_fail.png", full_page=True)
-                        logger.warning("[LD-Agent][DEBUG] スクリーンショット保存済み: /tmp/ld_submit_fail.png")
+                        logger.warning(f"[LD-Agent][DEBUG] submitボタン取得失敗時HTML:\n{html[:1000]}")
                     except Exception as e:
                         logger.warning(f"[LD-Agent][DEBUG] スクショまたはHTML保存失敗: {e}")
                     raise
@@ -76,8 +75,13 @@ class LivedoorAgent:
                     logger.warning(f"[LD-Agent] submitボタンのクリックに失敗、form.submit() に切り替え: {e}")
                     await page.eval_on_selector('form[action="/register/input"]', "form => form.submit()")
 
-                # ✅ CAPTCHA処理
-                await page.wait_for_selector("#captcha-img", timeout=10000)
+                try:
+                    await page.wait_for_selector("#captcha-img", timeout=10000)
+                except Exception as captcha_load_err:
+                    logger.error(f"[LD-Agent] CAPTCHA画像の読み込みに失敗: {captcha_load_err}")
+                    await page.screenshot(path="/tmp/ld_captcha_load_fail.png", full_page=True)
+                    raise
+
                 captcha_url = await page.get_attribute("#captcha-img", "src")
                 logger.info(f"[LD-Agent] CAPTCHA画像URL: {captcha_url}")
                 img_response = await page.request.get(f"https://member.livedoor.com{captcha_url}")
@@ -92,13 +96,11 @@ class LivedoorAgent:
 
                 try:
                     html = await page.content()
-                    logger.warning(f"[LD-Agent][DEBUG] CAPTCHA送信直前のHTML:\n{html[:1000]}")
                     await page.screenshot(path="/tmp/ld_captcha_screen.png", full_page=True)
-                    logger.warning("[LD-Agent][DEBUG] スクリーンショット保存済み: /tmp/ld_captcha_screen.png")
+                    logger.warning(f"[LD-Agent][DEBUG] CAPTCHA送信直前のHTML:\n{html[:1000]}")
                 except Exception as debug_e:
-                    logger.warning(f"[LD-Agent][DEBUG] スクリーンショットまたはHTML取得に失敗: {debug_e}")
+                    logger.warning(f"[LD-Agent][DEBUG] CAPTCHAデバッグ用スクショまたはHTML取得失敗: {debug_e}")
 
-                # ✅ 完了ボタン処理
                 try:
                     await page.wait_for_selector("#commit-button", timeout=15000)
                     is_visible = await page.is_visible("#commit-button")
@@ -113,23 +115,30 @@ class LivedoorAgent:
 
                 except Exception as click_error:
                     logger.warning(f"[LD-Agent] commit-buttonクリック失敗: {click_error}")
+                    await page.screenshot(path="/tmp/ld_commit_fail.png", full_page=True)
                     logger.info("[LD-Agent] form.submit() を試行")
                     await page.eval_on_selector('form[action="/register/confirm"]', "form => form.submit()")
 
                 await asyncio.sleep(2)
                 content = await page.content()
                 if "ご登録ありがとうございます" not in content:
+                    await page.screenshot(path="/tmp/ld_registration_incomplete.png", full_page=True)
                     raise RuntimeError("登録完了画面が表示されませんでした")
 
                 logger.info("[LD-Agent] ✅ 登録成功、メール認証を待機します")
 
-                # ✅ メール認証リンク取得
                 verification_url = None
-                async for link in poll_latest_link_gw(self.token, r"https://member\.livedoor\.com/register/.*", timeout=180):
-                    verification_url = link
-                    break
+                try:
+                    async for link in poll_latest_link_gw(self.token, r"https://member\.livedoor\.com/register/.*", timeout=180):
+                        verification_url = link
+                        break
+                except Exception as poll_err:
+                    await page.screenshot(path="/tmp/ld_verification_poll_fail.png", full_page=True)
+                    logger.error(f"[LD-Agent] 認証リンク取得中にエラー: {poll_err}")
+                    raise
 
                 if not verification_url:
+                    await page.screenshot(path="/tmp/ld_verification_url_none.png", full_page=True)
                     raise RuntimeError("認証リンクの取得に失敗しました")
 
                 logger.info(f"[LD-Agent] 認証リンクへ移動: {verification_url}")
