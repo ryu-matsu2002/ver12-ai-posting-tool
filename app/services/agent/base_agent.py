@@ -1,26 +1,47 @@
-# app/services/agent/base_agent.py
+# app/services/agents/base_agent.py
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Optional  # ← ✅ 追加
+from playwright.async_api import Page
+from app.services.ai_executor import ask_gpt_for_actions
 
 logger = logging.getLogger(__name__)
 
-class BlogAgent(ABC):
-    def __init__(self, site, email, password, nickname, job_id: Optional[int] = None):  # ✅ job_id追加
-        self.site = site  # Siteオブジェクト（SQLAlchemyなど）
-        self.email = email
-        self.password = password
-        self.nickname = nickname
-        self.job_id = job_id  # ✅ job_idを保存
+class GPTAgentBase(ABC):
+    def __init__(self, page: Page, html: str, goal: str, values: dict):
+        self.page = page
+        self.html = html
+        self.goal = goal
+        self.values = values
 
-    @abstractmethod
     async def run(self):
-        """エージェント本体処理。サブクラスで実装。"""
-        raise NotImplementedError("BlogAgent.run() はオーバーライド必須です")
+        """
+        GPTにHTMLと目標・値を渡して、指示を受け取り、ページ上で実行する
+        """
+        logger.info(f"[GPTAgent] 🎯 目標: {self.goal}")
 
-    async def log_info(self, message: str):
-        logger.info(f"[Agent:{self.__class__.__name__}] {message}")
+        actions = await ask_gpt_for_actions(
+            html=self.html,
+            goal=self.goal,
+            values=self.values
+        )
 
-    async def log_error(self, message: str):
-        logger.error(f"[Agent:{self.__class__.__name__}] {message}")
+        for step in actions:
+            action = step.get("action")
+            selector = step.get("selector")
+            value = step.get("value", "")
+
+            try:
+                if action == "fill":
+                    actual_value = self.values.get(value, value)
+                    await self.page.fill(selector, actual_value)
+                    logger.info(f"[GPTAgent] 入力: {selector} = {actual_value}")
+
+                elif action == "click":
+                    await self.page.click(selector)
+                    logger.info(f"[GPTAgent] クリック: {selector}")
+
+                await self.page.wait_for_timeout(1500)
+
+            except Exception as e:
+                logger.warning(f"[GPTAgent] ⚠️ 実行失敗: {action} {selector}: {e}")

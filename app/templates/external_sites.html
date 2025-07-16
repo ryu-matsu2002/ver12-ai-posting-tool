@@ -11,21 +11,20 @@
 </h2>
 
 {% for s in sites %}
-  <div id="site-card-{{ s.id }}" class="border rounded p-4 mb-4">
+  <div id="site-card-wrapper-{{ s.id }}" class="border rounded p-4 mb-4 bg-white shadow-sm">
     <!-- サイト名 & URL -->
     <div class="mb-2">
       <div class="font-semibold truncate max-w-xs">{{ s.name }}</div>
       <a href="{{ s.url }}" class="text-blue-600 text-sm break-all" target="_blank">{{ s.url }}</a>
     </div>
 
-    <!-- Livedoor だけ操作ボタン／進捗 -->
-    <div class="flex flex-wrap gap-2 mt-2">
-      {% set b = 'livedoor' %}
-      {% set key      = (s.id, b) %}
-      {% set job      = job_map.get(key) %}
-      {% set site_id  = s.id %}
-      {% set blog     = b %}
-      {% include "_job_progress.html" %}
+    <!-- 🔁 すべてのブログタイプ（livedoor / note / hatena ...）を列挙 -->
+    <div class="flex flex-wrap gap-2 mt-3">
+      {% for b in ["livedoor", "note", "hatena"] %}
+        {% set site_id = s.id %}
+        {% set blog    = b %}
+        {% include "_job_progress.html" %}
+      {% endfor %}
     </div>
   </div>
 {% endfor %}

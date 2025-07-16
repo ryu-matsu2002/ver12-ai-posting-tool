@@ -1,72 +1,62 @@
-# -*- coding: utf-8 -*-
+# app/services/blog_signup/hatena_signup.py
+
 """
-Hatena Blog - 新規アカウント自動登録
-===============================================
-signup_hatena_account(acct) -> {"ok":True}|{"ok":False,"error":...}
-* email / password / nickname は ExternalBlogAccount 側で生成済み前提
+はてなブログ アカウント自動登録（GPTエージェント仕様）
 """
 
-from __future__ import annotations
-import json, logging, random, string, time
-from datetime import datetime
-from pathlib import Path
-from typing import Dict
-
-from playwright.async_api import async_playwright, TimeoutError as PWTimeout
-
-from .. import db
+import logging
+import time
+import random
+import string
+import asyncio
 from app.models import ExternalBlogAccount
+from app.enums import BlogType
+from app import db
+from app.services.mail_utils.mail_gw import create_inbox
+from app.services.blog_signup.crypto_utils import encrypt
+from app.services.agents.hatena_gpt_agent import run_hatena_signup
 
-# -----------------------------------------------------------------------------
-URL_REGISTER = "https://www.hatena.ne.jp/register"
-URL_DASH     = "https://blog.hatena.ne.jp/dashboard"      # ログイン後リダイレクト先
+logger = logging.getLogger(__name__)
 
-def _rand(n:int=6) -> str:
-    return "".join(random.choices(string.ascii_lowercase+string.digits,k=n))
+def generate_safe_id(n=10):
+    chars = string.ascii_lowercase + string.digits + "_"
+    return ''.join(random.choices(chars, k=n))
 
-# -----------------------------------------------------------------------------
-async def signup_hatena_account(acct: ExternalBlogAccount) -> Dict[str,str|bool]:
-    log = logging.getLogger("hatena_signup")
-    log.info("▶ START id=%s mail=%s", acct.id, acct.email)
+def register_blog_account(site, email_seed="htn") -> ExternalBlogAccount:
+    import nest_asyncio
+    nest_asyncio.apply()
+
+    account = ExternalBlogAccount.query.filter_by(
+        site_id=site.id, blog_type=BlogType.HATENA
+    ).first()
+    if account:
+        return account
+
+    email, token = create_inbox()
+    logger.info("[HTN-Signup] disposable email = %s", email)
+
+    password = "Ht" + str(int(time.time()))
+    nickname = generate_safe_id(10)
 
     try:
-        async with async_playwright() as p:
-            br = await p.chromium.launch(headless=True, args=["--no-sandbox"])
-            ctx = await br.new_context(locale="ja-JP")
-            pg  = await ctx.new_page()
+        asyncio.run(run_hatena_signup(email, nickname, password))
+    except Exception as e:
+        logger.error("[HTN-Signup] failed: %s", str(e))
+        raise
 
-            # 1) 登録ページ
-            await pg.goto(URL_REGISTER, timeout=30_000)
-            await pg.fill("input[name='mail']", acct.email)
-            await pg.fill("input[name='password']", acct.password)
-            await pg.fill("input[name='password_confirmation']", acct.password)
-            await pg.fill("input[name='display_name']", acct.nickname or f"user-{_rand()}")
-            # 利用規約チェック
-            if await pg.locator("input[name='agreement']").count():
-                await pg.check("input[name='agreement']")
-            await pg.click("button[type='submit']")
-            # → 完全新規の場合メール認証待ちページへ遷移
-            await pg.wait_for_load_state("networkidle")
+    new_account = ExternalBlogAccount(
+        site_id=site.id,
+        blog_type=BlogType.HATENA,
+        email=email,
+        username=nickname,
+        password=password,
+        atompub_key_enc=None,
+        api_post_enabled=False,
+        nickname=nickname
+    )
+    db.session.add(new_account)
+    db.session.commit()
+    return new_account
 
-            # 2) そのままダッシュボードへアクセスし cookie 生成
-            await pg.goto(URL_DASH, timeout=30_000)
-
-            # 3) storage_state 保存
-            state_dir = Path("storage_states"); state_dir.mkdir(exist_ok=True)
-            state_path = state_dir / f"hatena_{acct.id}.json"
-            state_path.write_text(json.dumps(await ctx.storage_state(), ensure_ascii=False))
-
-            # 4) DB 更新
-            acct.cookie_path = str(state_path)
-            acct.status      = "active"
-            acct.created_at  = datetime.utcnow()
-            db.session.commit()
-
-            await br.close()
-
-        log.info("✅ SUCCESS id=%s", acct.id)
-        return {"ok": True}
-
-    except (PWTimeout, Exception) as e:          # すべて捕捉して呼び出し側へ返す
-        log.error("❌ FAILED id=%s %s", acct.id, e)
-        return {"ok": False, "error": str(e)}
+def signup(site, email_seed="htn"):
+    return register_blog_account(site, email_seed=email_seed)

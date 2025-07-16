@@ -1,76 +1,31 @@
 {# --------------------------------------------------------------------- #}
 {#  _job_progress.html                                                   #}
-{#  1 サイト × 1 ブログの進捗ウィジェット                               #}
-{#  期待変数: site_id, blog, job                                         #}
+{#  AIエージェント用（ジョブモデルなし）                                #}
+{#  期待変数: site_id, blog                                              #}
 {# --------------------------------------------------------------------- #}
 
 {% set blog_label  = blog|capitalize %}
 {% set card_id     = "site-card-" ~ site_id %}
-{% set in_progress = job is not none and job.step in ['signup', 'generate', 'post'] %}
 
-<div id="{{ card_id }}"
-     hx-get="{{ url_for('main.external_seo_job_status', site_id=site_id, blog=blog) }}"
-     hx-trigger="every 5s"
-     hx-swap="outerHTML"
-     class="border p-4 rounded shadow-sm bg-white">
+<div id="{{ card_id }}" class="border p-4 rounded shadow-sm bg-white">
 
   <div class="flex items-center justify-between mb-2">
     <div class="font-bold text-gray-800">{{ blog_label }} 外部SEO</div>
 
-    {% if job is none %}
-      <button
-        class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
-        hx-post="{{ url_for('main.start_external_seo') }}"
-        hx-vals='{"site_id":"{{ site_id }}","blog":"{{ blog }}"}'
-        hx-target="#{{ card_id }}"
-        hx-swap="outerHTML">
-        開始
-      </button>
-
-    {% elif in_progress %}
-      <span class="text-sm text-gray-700">📤 投稿進捗 {{ job.posted_cnt }} / {{ job.article_cnt }}</span>
-    {% elif job.status == 'error' %}
-      <button
-        class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded"
-        hx-post="{{ url_for('main.start_external_seo') }}"
-        hx-vals='{"site_id":"{{ site_id }}","blog":"{{ blog }}"}'
-        hx-target="#{{ card_id }}"
-        hx-swap="outerHTML">
-        再試行（エラー）
-      </button>
-    {% else %}
-      <a
-        href="{{ url_for('main.external_site_blogs', site_id=site_id) }}"
-        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded">
-        ブログ一覧へ
-      </a>
-    {% endif %}
+    {# 🚀 SEO未開始時：開始ボタンを表示 #}
+    <button
+      class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
+      hx-post="{{ url_for('main.start_external_seo') }}"
+      hx-vals='{"site_id":"{{ site_id }}","blog":"{{ blog }}"}'
+      hx-target="#{{ card_id }}"
+      hx-swap="outerHTML">
+      開始
+    </button>
   </div>
 
-  {% if job %}
-    <div class="flex items-center space-x-2 mb-2">
-      <span class="text-xs px-2 py-1 rounded 
-        {% if job.step == 'signup' %}bg-yellow-100 text-yellow-800
-        {% elif job.step == 'generate' %}bg-blue-100 text-blue-800
-        {% elif job.step == 'post' %}bg-purple-100 text-purple-800
-        {% else %}bg-gray-100 text-gray-800{% endif %}">
-        {{ job.step }}
-      </span>
-      <span class="text-xs text-gray-500">{{ job.status }}</span>
-    </div>
+  <div class="text-sm text-gray-600">
+    AIエージェントが{{ blog_label }}でアカウント登録を試みます。
+    処理には30秒前後かかる場合があります。
+  </div>
 
-    {# 🔍 進捗ログ一覧表示 #}
-    {% if job.logs %}
-      <div class="text-xs text-gray-800 bg-gray-50 p-2 rounded max-h-40 overflow-y-auto">
-        <ul class="space-y-1">
-          {% for log in job.logs.order_by(ExternalSEOJobLog.timestamp.desc()).limit(10) %}
-            <li>
-              🕒 {{ log.timestamp.strftime('%H:%M:%S') }}
-              <strong>{{ log.step }}</strong> — {{ log.message }}
-            </li>
-          {% endfor %}
-        </ul>
-      </div>
-    {% endif %}
-  {% endif %}
 </div>

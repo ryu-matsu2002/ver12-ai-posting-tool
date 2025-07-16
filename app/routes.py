@@ -3377,9 +3377,6 @@ def external_seo_sites():
         ExternalSEOJobLog=ExternalSEOJobLog  # ← ✅ 追加
     )
 
-# -----------------------------------------------------------------
-# 外部SEO: 開始ボタン → ジョブ生成 & 進捗パネル返却
-# -----------------------------------------------------------------
 @bp.post("/external/start")
 @login_required
 def start_external_seo() -> "Response":
@@ -3388,68 +3385,60 @@ def start_external_seo() -> "Response":
 
         site_id=<数字>&blog=<文字列>
 
-    を受け取り、対応するジョブをバックエンドへ enqueue する。
-
-    - **LIVEDOOR**   → まず Playwright でアカウント作成 & AtomPubキー発行
-                       (`enqueue_livedoor_signup`)
-    - **NOTE / HATENA / AMEBA / SEESAA …** など
-                       → 既存ロジック (`enqueue_external_seo`)
-    - パラメータ不足・BlogType 不正・権限不足は 400 / 404 / 403
-    - HTMX リクエストなら `_job_progress.html` を返して
-      サイトカード内のボタンを進捗パネルに置き換える。
+    を受け取り、GPTベースのAIエージェントでアカウント作成を即時実行する。
+    - blog=note → run_note_signup()
+    - blog=hatena → run_hatena_signup()
+    - blog=livedoor → run_livedoor_signup()
     """
     from flask import request, abort, jsonify, render_template
-    from app.models import BlogType, Site
-    from app.tasks  import (
-        enqueue_external_seo,
-        enqueue_livedoor_signup,     # ★ Livedoor 専用
+    from app.models import Site
+    from app.enums import BlogType  # BlogType Enum
+    from app.services.blog_signup import (
+        note_signup,
+        hatena_signup,
+        livedoor_signup,
     )
 
-    # ----------------------------------------------------------------
-    # 1. パラメータ取得
-    # ----------------------------------------------------------------
     site_id = request.form.get("site_id", type=int)
-    blog    = (request.form.get("blog") or "").lower()
+    blog = (request.form.get("blog") or "").lower()
 
     if not site_id or not blog:
         return "site_id と blog は必須です", 400
 
-    # BlogType へ変換（Enum 不一致なら 400）
+    # BlogType Enum変換（存在しないblogなら400）
     try:
         blog_type = BlogType(blog)
     except ValueError:
         return "不正なブログタイプ", 400
 
-    # ----------------------------------------------------------------
-    # 2. サイト所有権チェック（管理者はスキップ）
-    # ----------------------------------------------------------------
+    # サイト取得と所有権チェック（管理者はスキップ）
     site = Site.query.get_or_404(site_id)
     if (not current_user.is_admin) and (site.user_id != current_user.id):
         abort(403)
 
-    # ----------------------------------------------------------------
-    # 3. ジョブをキューへ投入
-    # ----------------------------------------------------------------
-    if blog_type == BlogType.LIVEDOOR:
-        # Playwright での ID 登録 → ブログ作成 → APIキー発行
-        enqueue_livedoor_signup(site_id)
-    else:
-        # NOTE / HATENA / AMEBA など従来フロー
-        enqueue_external_seo(site_id=site_id, blog_type=blog_type)
+    # --- 🎯 GPTエージェントの実行 ---
+    try:
+        if blog_type == BlogType.NOTE:
+            note_signup.signup(site)
+        elif blog_type == BlogType.HATENA:
+            hatena_signup.signup(site)
+        elif blog_type == BlogType.LIVEDOOR:
+            livedoor_signup.signup(site)
+        else:
+            return f"未対応のブログ: {blog}", 400
+    except Exception as e:
+        return f"AIエージェント失敗: {str(e)}", 500
 
-    # ----------------------------------------------------------------
-    # 4. レスポンス
-    # ----------------------------------------------------------------
+    # HTMX対応
     if request.headers.get("HX-Request"):
-        # HTMX: 進捗カードだけ差し替え
         return render_template(
             "_job_progress.html",
             site_id=site_id,
-            blog   =blog_type.value,
-            job    =None   # 新規ジョブなのでまだ存在しない
+            blog=blog_type.value,
+            job=None
         )
-    # 通常 POST: JSON を返す
-    return jsonify(status="queued")
+    return jsonify(status="success")
+
 
 
 # -----------------------------------------------------------------
