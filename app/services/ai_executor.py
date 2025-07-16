@@ -2,11 +2,15 @@
 
 import os
 import json
+import logging
 from openai import OpenAI
 
 # ✅ OpenAI設定（.envから読み込み）
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+# ✅ ロガー
+logger = logging.getLogger(__name__)
 
 async def ask_gpt_for_actions(html: str, goal: str, values: dict) -> list[dict]:
     """
@@ -51,8 +55,15 @@ async def ask_gpt_for_actions(html: str, goal: str, values: dict) -> list[dict]:
             messages=[{"role": "user", "content": prompt}],
             temperature=0.4,
         )
+
         content = response.choices[0].message.content.strip()
+        logger.info("[AI-Executor] GPT応答: %s", content[:300])  # 念のため先頭300文字まで
+
+        if not content:
+            raise RuntimeError("[AI-Executor] GPT応答が空でした（content is empty）")
+
         return json.loads(content)
 
     except Exception as e:
+        logger.error(f"[AI-Executor] GPT呼び出し失敗: {str(e)}")
         raise RuntimeError(f"[AI-Executor] GPT呼び出し失敗: {str(e)}")
