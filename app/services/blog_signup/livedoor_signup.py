@@ -18,11 +18,8 @@ from app.enums import BlogType
 from app.models import ExternalBlogAccount
 from app.services.mail_utils.mail_gw import create_inbox, poll_latest_link_gw
 from app.services.blog_signup.crypto_utils import encrypt
-from app.services.agent.livedoor_agent import LivedoorAgent
+from app.services.agent.livedoor_gpt_agent import LivedoorAgent
 
-
-# ✅ AIエージェント実行関数をインポート
-from app.services.agent.livedoor_agent import run_livedoor_signup
 
 logger = logging.getLogger(__name__)
 

@@ -2,7 +2,7 @@
 
 import logging
 from playwright.async_api import async_playwright
-from app.services.agents.base_agent import GPTAgentBase
+from app.services.agent.base_agent import GPTAgentBase
 
 logger = logging.getLogger(__name__)
 
