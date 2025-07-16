@@ -52,16 +52,28 @@ class LivedoorAgent:
 
                 # 入力して「完了」ボタンを押す
                 await page.fill("#captcha", captcha_text)
+                logger.info("[LD-Agent] CAPTCHAを入力完了")  # ✅ 追加
                 await asyncio.sleep(1)
 
-                html = await page.content()
-                logger.warning(f"[LD-Agent][DEBUG] CAPTCHA送信直前のHTML:\n{html[:1000]}")
-                await page.screenshot(path="/tmp/ld_captcha_screen.png", full_page=True)
-                logger.warning("[LD-Agent][DEBUG] スクリーンショット保存済み: /tmp/ld_captcha_screen.png")
+                try:
+                    html = await page.content()
+                    logger.warning(f"[LD-Agent][DEBUG] CAPTCHA送信直前のHTML:\n{html[:1000]}")
+                    await page.screenshot(path="/tmp/ld_captcha_screen.png", full_page=True)
+                    logger.warning("[LD-Agent][DEBUG] スクリーンショット保存済み: /tmp/ld_captcha_screen.png")
+                except Exception as debug_e:
+                    logger.warning(f"[LD-Agent][DEBUG] スクリーンショットまたはHTML取得に失敗: {debug_e}")
 
-                await page.wait_for_selector("#commit-button", timeout=15000)
-                await page.click("#commit-button")
-                logger.info("[LD-Agent] 完了ボタンをクリック")
+
+                try:
+                    await page.wait_for_selector("#commit-button", timeout=15000)
+                    is_enabled = await page.is_enabled("#commit-button")
+                    logger.info(f"[LD-Agent] commit-button is_enabled: {is_enabled}")
+                    await page.click("#commit-button")
+                    logger.info("[LD-Agent] 完了ボタンをクリック")
+                except Exception as click_error:
+                    logger.warning(f"[LD-Agent] commit-buttonクリック失敗: {click_error}")
+                    logger.info("[LD-Agent] form.submit() を試行")
+                    await page.eval_on_selector('form[action="/register/confirm"]', "form => form.submit()")
 
                 # 仮登録成功判定（2枚目の画面）
                 await asyncio.sleep(2)
