@@ -60,7 +60,6 @@ class LivedoorAgent:
                     logger.info(f"[LD-Agent] 登録ボタン: visible={visible}, enabled={enabled}")
                 except Exception as submit_check_err:
                     logger.error(f"[LD-Agent] 登録ボタンの確認に失敗: {submit_check_err}")
-
                     try:
                         html = await page.content()
                         logger.warning(f"[LD-Agent][DEBUG] submitボタン取得失敗時HTML:\n{html[:1000]}")
@@ -80,9 +79,9 @@ class LivedoorAgent:
                     logger.warning(f"[LD-Agent] submitボタンのクリックに失敗、form.submit() に切り替え: {e}")
                     await page.eval_on_selector('form[action="/register/input"]', "form => form.submit()")
 
-                # ✅ CAPTCHA
-                await page.wait_for_selector("#captcha-img", timeout=10000)
-                captcha_url = await page.get_attribute("#captcha-img", "src")
+                # ✅ CAPTCHAポップアップ待機
+                await page.wait_for_selector('img[src*="/captcha"]', timeout=10000)
+                captcha_url = await page.get_attribute('img[src*="/captcha"]', "src")
                 logger.info(f"[LD-Agent] CAPTCHA画像URL: {captcha_url}")
                 img_response = await page.request.get(f"https://member.livedoor.com{captcha_url}")
                 img_bytes = await img_response.body()
@@ -90,7 +89,7 @@ class LivedoorAgent:
                 captcha_text = solve(img_bytes)
                 logger.info(f"[LD-Agent] CAPTCHA判定結果: {captcha_text}")
 
-                await page.fill("#captcha", captcha_text)
+                await page.fill('input[name="captcha_value"]', captcha_text)
                 logger.info("[LD-Agent] CAPTCHAを入力完了")
                 await asyncio.sleep(1)
 
@@ -104,19 +103,19 @@ class LivedoorAgent:
 
                 # ✅ 完了ボタン処理
                 try:
-                    await page.wait_for_selector("#commit-button", timeout=15000)
-                    is_visible = await page.is_visible("#commit-button")
-                    is_enabled = await page.is_enabled("#commit-button")
-                    logger.info(f"[LD-Agent] commit-button visible={is_visible}, enabled={is_enabled}")
+                    await page.wait_for_selector('button:has-text("完了")', timeout=15000)
+                    is_visible = await page.is_visible('button:has-text("完了")')
+                    is_enabled = await page.is_enabled('button:has-text("完了")')
+                    logger.info(f"[LD-Agent] 完了ボタン: visible={is_visible}, enabled={is_enabled}")
 
                     if is_visible and is_enabled:
-                        await page.click("#commit-button")
+                        await page.click('button:has-text("完了")')
                         logger.info("[LD-Agent] 完了ボタンをクリック")
                     else:
-                        raise Exception("commit-button が無効 or 非表示")
+                        raise Exception("完了ボタンが無効 or 非表示")
 
                 except Exception as click_error:
-                    logger.warning(f"[LD-Agent] commit-buttonクリック失敗: {click_error}")
+                    logger.warning(f"[LD-Agent] 完了ボタンクリック失敗: {click_error}")
                     logger.info("[LD-Agent] form.submit() を試行")
                     await page.eval_on_selector('form[action="/register/confirm"]', "form => form.submit()")
 
@@ -140,7 +139,7 @@ class LivedoorAgent:
                 await page.goto(verification_url, timeout=30_000)
                 await asyncio.sleep(2)
 
-                # ✅ 登録完了
+                # ✅ 登録完了（仮APIキー）
                 api_key = "dummy-api-key"
                 blog_id = self.nickname
 
