@@ -78,7 +78,8 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
         site=site,
         email=email,
         password=password,
-        nickname=nickname
+        nickname=nickname,
+        token=token  # ← これを追加
     )
     agent.job_id = job_id  # オプション：ログ用
     return await agent.run()
