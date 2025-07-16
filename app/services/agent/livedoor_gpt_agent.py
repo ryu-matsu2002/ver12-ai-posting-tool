@@ -1,5 +1,3 @@
-# app/services/agent/livedoor_gpt_agent.py
-
 import asyncio
 import logging
 from playwright.async_api import async_playwright
@@ -13,7 +11,7 @@ class LivedoorAgent:
         self.site = site
         self.email = email
         self.password = password
-        self.nickname = nickname
+        self.nickname = nickname  # → ユーザーIDとして使う
         self.token = token
         self.job_id = None
 
@@ -27,29 +25,22 @@ class LivedoorAgent:
                 logger.info("[LD-Agent] 🚀 Livedoor登録ページにアクセスします")
                 await page.goto("https://member.livedoor.com/register/input", timeout=30_000)
 
-                # ✅ GPTを使わず、事前定義の操作を実行
-                actions = [
-                    {"action": "fill", "selector": 'input[name="mail"]', "value": self.email},
-                    {"action": "fill", "selector": 'input[name="password"]', "value": self.password},
-                    {"action": "fill", "selector": 'input[name="nickname"]', "value": self.nickname},
-                    {"action": "click", "selector": 'input[type="submit"]'}
-                ]
+                # ✅ セレクタが存在するまで待機して入力
+                await page.wait_for_selector("#livedoor_id", timeout=10000)
+                await page.fill("#livedoor_id", self.nickname)
+                logger.info(f"[LD-Agent] 入力: livedoor_id = {self.nickname}")
 
-                for step in actions:
-                    action = step["action"]
-                    selector = step["selector"]
-                    value = step.get("value")
+                await page.fill("#password", self.password)
+                await page.fill("#password2", self.password)
+                logger.info(f"[LD-Agent] 入力: password (2回)")
 
-                    if action == "fill":
-                        await page.fill(selector, value)
-                        logger.info(f"[LD-Agent] 入力: {selector} = {value}")
+                await page.fill("#email", self.email)
+                logger.info(f"[LD-Agent] 入力: email = {self.email}")
 
-                    elif action == "click":
-                        await page.wait_for_selector(selector, timeout=10000)
-                        await page.click(selector)
-                        logger.info(f"[LD-Agent] クリック: {selector}")
+                await asyncio.sleep(1.5)
 
-                    await asyncio.sleep(1.5)
+                await page.click('input[type="submit"]')
+                logger.info(f"[LD-Agent] 登録ボタンをクリック")
 
                 await asyncio.sleep(3)
 
@@ -59,6 +50,7 @@ class LivedoorAgent:
 
                 logger.info("[LD-Agent] ✅ 仮登録成功。メール認証を待機します...")
 
+                # ✅ 認証リンク取得
                 verification_url = None
                 async for link in poll_latest_link_gw(self.token, r"https://member\.livedoor\.com/register/.*", timeout=180):
                     verification_url = link
@@ -71,6 +63,7 @@ class LivedoorAgent:
                 await page.goto(verification_url, timeout=30_000)
                 await asyncio.sleep(2)
 
+                # ✅ 登録完了（APIキーは後で対応）
                 api_key = "dummy-api-key"
                 blog_id = self.nickname
 
