@@ -51,7 +51,7 @@ class LivedoorAgent:
 
                 await asyncio.sleep(1.5)
 
-                # ✅ 登録ボタン状態確認
+                # ✅ 登録ボタン状態確認（＋デバッグ情報出力）
                 logger.info("[LD-Agent] 登録ボタンの状態確認開始")
                 try:
                     await page.wait_for_selector('input[type="submit"]', timeout=10000)
@@ -60,6 +60,14 @@ class LivedoorAgent:
                     logger.info(f"[LD-Agent] 登録ボタン: visible={visible}, enabled={enabled}")
                 except Exception as submit_check_err:
                     logger.error(f"[LD-Agent] 登録ボタンの確認に失敗: {submit_check_err}")
+
+                    try:
+                        html = await page.content()
+                        logger.warning(f"[LD-Agent][DEBUG] submitボタン取得失敗時HTML:\n{html[:1000]}")
+                        await page.screenshot(path="/tmp/ld_submit_fail.png", full_page=True)
+                        logger.warning("[LD-Agent][DEBUG] スクリーンショット保存済み: /tmp/ld_submit_fail.png")
+                    except Exception as e:
+                        logger.warning(f"[LD-Agent][DEBUG] スクショまたはHTML保存失敗: {e}")
                     raise
 
                 # ✅ 登録ボタンをクリック（または fallback）
