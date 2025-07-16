@@ -52,7 +52,7 @@ class LivedoorAgent:
 
                 logger.info("[LD-Agent] 登録ボタンの状態確認開始")
                 try:
-                    await page.wait_for_selector('input[type="submit"]', timeout=10000)
+                    await page.wait_for_selector('input[value="ユーザー情報を登録"]', timeout=10000)
                     visible = await page.is_visible('input[type="submit"]')
                     enabled = await page.is_enabled('input[type="submit"]')
                     logger.info(f"[LD-Agent] 登録ボタン: visible={visible}, enabled={enabled}")
@@ -69,7 +69,7 @@ class LivedoorAgent:
                 try:
                     await page.eval_on_selector('input[type="submit"]', "el => el.scrollIntoView()")
                     await asyncio.sleep(0.5)
-                    await page.click('input[type="submit"]')
+                    await page.click('input[value="ユーザー情報を登録"]')
                     logger.info("[LD-Agent] 登録ボタンをクリック")
                 except Exception as e:
                     logger.warning(f"[LD-Agent] submitボタンのクリックに失敗、form.submit() に切り替え: {e}")
