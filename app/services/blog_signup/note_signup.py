@@ -22,6 +22,13 @@ def generate_safe_id(n=10):
     chars = string.ascii_lowercase + string.digits + "_"
     return ''.join(random.choices(chars, k=n))
 
+# app/services/blog_signup/note_signup.py
+
+async def signup_note_account(site, job_id=None):
+    """Noteブログの仮登録用ダミー関数（実装予定）"""
+    return {"status": "not_implemented"}
+
+
 def register_blog_account(site, email_seed="note") -> ExternalBlogAccount:
     import nest_asyncio
     nest_asyncio.apply()
