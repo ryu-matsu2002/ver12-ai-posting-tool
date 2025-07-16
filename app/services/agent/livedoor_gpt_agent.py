@@ -8,12 +8,17 @@ from app.services.captcha_solver import solve
 
 logger = logging.getLogger(__name__)
 
-
 def ensure_valid_livedoor_id(nickname: str) -> str:
+    # 半角英数字のみ・20文字以内
+    nickname = ''.join(c for c in nickname if c.isalnum())[:20]
+    # 3文字未満なら補う
+    while len(nickname) < 3:
+        nickname += random.choice(string.ascii_lowercase + string.digits)
+    # 先頭が英字でなければ置き換え
     if not nickname[0].isalpha():
-        prefix = random.choice(string.ascii_lowercase)
-        return prefix + nickname
+        nickname = random.choice(string.ascii_lowercase) + nickname[1:]
     return nickname
+
 
 
 class LivedoorAgent:
