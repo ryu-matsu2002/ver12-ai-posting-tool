@@ -14,7 +14,7 @@ from app.enums import BlogType
 from app import db
 from app.services.mail_utils.mail_gw import create_inbox
 from app.services.blog_signup.crypto_utils import encrypt
-from app.services.agents.note_gpt_agent import run_note_signup
+from app.services.agent.note_gpt_agent import run_note_signup
 
 logger = logging.getLogger(__name__)
 
