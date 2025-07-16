@@ -53,6 +53,12 @@ class LivedoorAgent:
                 # 入力して「完了」ボタンを押す
                 await page.fill("#captcha", captcha_text)
                 await asyncio.sleep(1)
+
+                html = await page.content()
+                logger.warning(f"[LD-Agent][DEBUG] CAPTCHA送信直前のHTML:\n{html[:1000]}")
+                await page.screenshot(path="/tmp/ld_captcha_screen.png", full_page=True)
+                logger.warning("[LD-Agent][DEBUG] スクリーンショット保存済み: /tmp/ld_captcha_screen.png")
+
                 await page.wait_for_selector("#commit-button", timeout=15000)
                 await page.click("#commit-button")
                 logger.info("[LD-Agent] 完了ボタンをクリック")
