@@ -64,12 +64,19 @@ class LivedoorAgent:
                     logger.warning(f"[LD-Agent][DEBUG] スクリーンショットまたはHTML取得に失敗: {debug_e}")
 
 
+                # 🔧 完了ボタンを押す or fallback
                 try:
                     await page.wait_for_selector("#commit-button", timeout=15000)
+                    is_visible = await page.is_visible("#commit-button")
                     is_enabled = await page.is_enabled("#commit-button")
-                    logger.info(f"[LD-Agent] commit-button is_enabled: {is_enabled}")
-                    await page.click("#commit-button")
-                    logger.info("[LD-Agent] 完了ボタンをクリック")
+                    logger.info(f"[LD-Agent] commit-button visible={is_visible}, enabled={is_enabled}")
+
+                    if is_visible and is_enabled:
+                        await page.click("#commit-button")
+                        logger.info("[LD-Agent] 完了ボタンをクリック")
+                    else:
+                        raise Exception("commit-button が無効 or 非表示")
+
                 except Exception as click_error:
                     logger.warning(f"[LD-Agent] commit-buttonクリック失敗: {click_error}")
                     logger.info("[LD-Agent] form.submit() を試行")
