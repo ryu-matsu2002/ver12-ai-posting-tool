@@ -3,6 +3,8 @@ import logging
 from playwright.async_api import async_playwright
 from app.services.mail_utils.mail_gw import poll_latest_link_gw
 from app.services.captcha_solver import solve
+from app.services.captcha_solver.save_failed import save_failed_captcha_image
+
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +86,7 @@ class LivedoorAgent:
                 captcha_fail_patterns = ["正しくありません", "再度入力", "認証コードが間違っています", "入力し直してください"]
                 if any(pat in content for pat in captcha_fail_patterns):
                     await page.screenshot(path="/tmp/ld_captcha_fail_detected.png", full_page=True)
+                    save_failed_captcha_image("/tmp/ld_captcha_screen.png", reason="bad_prediction")
                     logger.error("[LD-Agent] CAPTCHA入力が失敗した可能性があります")
                     raise RuntimeError("CAPTCHA認証に失敗した可能性があります")
 
@@ -96,6 +99,7 @@ class LivedoorAgent:
                 if not any(pat in content or pat in current_url for pat in success_patterns):
                     await page.screenshot(path="/tmp/ld_registration_incomplete.png", full_page=True)
                     await page.screenshot(path="/tmp/ld_post_submit_debug.png", full_page=True)
+                    save_failed_captcha_image("/tmp/ld_captcha_screen.png", reason="submit_fail")
                     logger.warning(f"[LD-Agent][DEBUG] 登録失敗時のHTML:\n{content[:1000]}")
                     raise RuntimeError("登録完了画面が表示されませんでした")
 
