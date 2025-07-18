@@ -36,20 +36,21 @@ class SimpleCRNN(nn.Module):
     def __init__(self):
         super().__init__()
         self.cnn = nn.Sequential(
-            nn.Conv2d(1, 32, 3, 1, 1), nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.Conv2d(32, 64, 3, 1, 1), nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.Conv2d(64, 128, 3, 1, 1), nn.ReLU(),
-            nn.MaxPool2d(3),
-            nn.AdaptiveAvgPool2d((1, 5)),   # 1×5
+            nn.Conv2d(1, 32, 3, 1, 1), nn.ReLU(), nn.MaxPool2d(2, 2),
+            nn.Conv2d(32, 64, 3, 1, 1), nn.ReLU(), nn.MaxPool2d(2, 2),
+            nn.Conv2d(64, 128, 3, 1, 1), nn.ReLU(), nn.MaxPool2d(2, 2)
         )
-        self.fc = nn.Linear(128, N_CLASS)
+        self.rnn = nn.LSTM(128 * 7, 128, num_layers=2, bidirectional=True, batch_first=True)
+        self.fc = nn.Linear(128 * 2, 47)  # 47 = len(CHARS)
 
-    def forward(self, x):                   # [B,1,60,200]
-        f = self.cnn(x)                     # [B,128,1,5]
-        f = f.squeeze(2).permute(0, 2, 1)   # [B,5,128]
-        return self.fc(f)                   # [B,5,47]
+    def forward(self, x):
+        x = self.cnn(x)
+        b, c, h, w = x.size()
+        x = x.permute(0, 3, 1, 2)
+        x = x.view(b, w, c * h)
+        x, _ = self.rnn(x)
+        x = self.fc(x)
+        return x
 
 # ── 1 回だけロード ────────────────────────────────
 MODEL_PATH = Path("models/captcha_crnn.pth")
