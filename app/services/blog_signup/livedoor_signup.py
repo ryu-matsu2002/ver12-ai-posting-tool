@@ -90,9 +90,13 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
             await page.goto("https://member.livedoor.com/register/input")
 
             # フォーム入力
+            await page.wait_for_selector('input[name="nickname"]', timeout=10000)
             await page.fill("#register_id", nickname)
+            await page.wait_for_selector('input[name="nickname"]', timeout=10000)
             await page.fill("#register_pw", password)
+            await page.wait_for_selector('input[name="nickname"]', timeout=10000)
             await page.fill("#register_pw2", password)
+            await page.wait_for_selector('input[name="nickname"]', timeout=10000)
             await page.fill("#register_mail", email)
 
             # CAPTCHA取得と推論
