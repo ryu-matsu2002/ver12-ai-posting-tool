@@ -29,6 +29,14 @@ def generate_safe_id(n=10) -> str:
     chars = string.ascii_lowercase + string.digits + "_"
     return ''.join(random.choices(chars, k=n))
 
+def generate_strong_password(nickname: str, length: int = 12) -> str:
+    chars = string.ascii_letters + string.digits
+    while True:
+        password = ''.join(random.choices(chars, k=length))
+        if nickname.lower() not in password.lower():  # ← ✅ IDが含まれていないことを保証
+            return password
+
+
 
 def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
     import nest_asyncio
@@ -43,8 +51,8 @@ def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
     email, token = create_inbox()
     logger.info("[LD-Signup] disposable email = %s", email)
 
-    password = "Ld" + str(int(time.time()))
     nickname = generate_safe_id(10)
+    password = generate_strong_password(nickname)
 
     try:
         # ✅ AIエージェントを使ったサインアップ処理
