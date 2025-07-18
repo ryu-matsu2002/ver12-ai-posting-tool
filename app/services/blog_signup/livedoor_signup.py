@@ -74,31 +74,29 @@ def signup(site, email_seed: str = "ld"):
     return register_blog_account(site, email_seed=email_seed)
 
 
-# ...（前略は変更なし）...
-
 async def run_livedoor_signup(site, email, token, nickname, password, job_id=None):
     from playwright.async_api import async_playwright, TimeoutError
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context()
+
+        # ✅ User-Agent を指定して bot ブロックを緩和
+        context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         page = await context.new_page()
 
         try:
             await page.goto("https://member.livedoor.com/register/input")
-            assert "register/input" in page.url  # ✅ ページ遷移が正しいかチェック
+            await page.wait_for_timeout(5000)  # ✅ JSレンダリング待機
 
-            # ✅ CAPTCHA欄を最大15秒待機（テキストではなく要素に変更）
-            try:
-                await page.wait_for_selector("#captcha_text", timeout=15000)
-            except TimeoutError:
-                html_path = "/tmp/ld_captcha_timeout.html"
-                img_path = "/tmp/ld_captcha_timeout.png"
-                content = await page.content()
-                Path(html_path).write_text(content, encoding="utf-8")
+            # ✅ CAPTCHA文言のHTML確認でBotブロックも検知
+            html = await page.content()
+            if "画像に表示されている文字を入力してください" not in html:
+                html_path = "/tmp/ld_captcha_text_missing.html"
+                img_path = "/tmp/ld_captcha_text_missing.png"
+                Path(html_path).write_text(html, encoding="utf-8")
                 await page.screenshot(path=img_path, full_page=True)
-                logger.error(f"[LD-Signup] CAPTCHAタイムアウト → HTML: {html_path}, IMG: {img_path}")
-                raise RuntimeError("CAPTCHA入力欄が見つかりません（タイムアウト）")
+                logger.error(f"[LD-Signup] CAPTCHA画面が表示されません → HTML: {html_path}, IMG: {img_path}")
+                raise RuntimeError("CAPTCHA画面が表示されません（Bot対策の可能性）")
 
             # ✅ CAPTCHA画像スクリーンショット
             captcha_path = "/tmp/ld_captcha_screen.png"
@@ -112,14 +110,14 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
             # CAPTCHA入力欄に入力
             await page.fill("#captcha_text", solved_text)
 
-            # その他フォーム自動入力（簡易）
+            # その他フォーム自動入力
             await page.fill("#email", email)
             await page.fill("#password", password)
             await page.fill("#password-confirmation", password)
             await page.fill("#nickname", nickname)
             await page.click("#commit-button")
 
-            # CAPTCHA成功チェック
+            # ✅ 成功判定用の2秒待機
             await page.wait_for_timeout(2000)
             content = await page.content()
 
@@ -158,4 +156,3 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
 
         finally:
             await browser.close()
-
