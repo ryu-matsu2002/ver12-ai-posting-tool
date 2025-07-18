@@ -52,25 +52,32 @@ class LivedoorAgent:
                 submit_button_selector = 'input[type="submit"]'
 
                 # CAPTCHA画像取得と解読
+                # CAPTCHA画像の取得と保存
                 captcha_url = await page.get_attribute(captcha_img_selector, "src")
                 logger.info(f"[LD-Agent] CAPTCHA画像URL: {captcha_url}")
                 img_response = await page.request.get(f"https://member.livedoor.com{captcha_url}")
                 img_bytes = await img_response.body()
 
-                captcha_text = solve(img_bytes)
-                logger.info(f"[LD-Agent] CAPTCHA解読結果: {captcha_text}")
-
                 # CAPTCHAスクリーンショット（入力前）
                 await page.screenshot(path="/tmp/ld_captcha_screen.png", full_page=True)
 
-                if not captcha_text:
-                    save_failed_captcha_image("/tmp/ld_captcha_screen.png", reason="captcha_empty")
-                    logger.error("[LD-Agent] ❌ CAPTCHA解読に失敗（空の結果）")
-                    raise RuntimeError("CAPTCHAが空です")
+                # CAPTCHA解読とログ
+                try:
+                    captcha_text = solve(img_bytes)
+                    logger.info(f"[LD-Agent] CAPTCHA解読結果: {captcha_text}")
+                except Exception as e:
+                    save_failed_captcha_image("/tmp/ld_captcha_screen.png", reason="solve_exception")
+                    logger.error(f"[LD-Agent] CAPTCHA解読時に例外発生: {e}")
+                    raise RuntimeError("CAPTCHA解読に失敗しました")
 
+                # 解読結果が空 or 不正な場合も保存
+                if not captcha_text or len(captcha_text.strip()) < 4:
+                    save_failed_captcha_image("/tmp/ld_captcha_screen.png", reason="captcha_empty_or_short")
+                    logger.error("[LD-Agent] ❌ CAPTCHA解読に失敗（空または短すぎ）")
+                    raise RuntimeError("CAPTCHAが空または短すぎます")
+
+                # CAPTCHA入力して送信
                 await page.fill(captcha_input_selector, captcha_text)
-
-                # 「完了」ボタンをクリック
                 await page.wait_for_selector(submit_button_selector, timeout=10000)
                 await page.click(submit_button_selector)
                 logger.info("[LD-Agent] CAPTCHA完了ボタンをクリック")
@@ -79,9 +86,10 @@ class LivedoorAgent:
                 content = await page.content()
                 current_url = page.url
 
+                # 失敗パターン確認
                 fail_patterns = ["正しくありません", "認証コードが間違っています", "入力し直してください"]
                 if any(pat in content for pat in fail_patterns):
-                    save_failed_captcha_image("/tmp/ld_captcha_screen.png", reason="captcha_fail")
+                    save_failed_captcha_image("/tmp/ld_captcha_screen.png", reason="captcha_fail_pattern")
                     await page.screenshot(path="/tmp/ld_captcha_failed.png", full_page=True)
                     logger.error("[LD-Agent] ❌ CAPTCHA失敗と判定されました")
                     raise RuntimeError("CAPTCHA認証に失敗しました")
