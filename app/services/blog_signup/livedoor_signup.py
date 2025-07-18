@@ -29,13 +29,14 @@ def generate_safe_id(n=10) -> str:
     chars = string.ascii_lowercase + string.digits + "_"
     return ''.join(random.choices(chars, k=n))
 
+
+# ✅ 修正ポイント: IDが含まれない強力なパスワードを生成
 def generate_strong_password(nickname: str, length: int = 12) -> str:
     chars = string.ascii_letters + string.digits
     while True:
         password = ''.join(random.choices(chars, k=length))
-        if nickname.lower() not in password.lower():  # ← ✅ IDが含まれていないことを保証
+        if nickname.lower() not in password.lower():
             return password
-
 
 
 def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
@@ -52,16 +53,14 @@ def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
     logger.info("[LD-Signup] disposable email = %s", email)
 
     nickname = generate_safe_id(10)
-    password = generate_strong_password(nickname)
+    password = generate_strong_password(nickname)  # ✅ 修正ポイント: 安全なパスワード生成
 
     try:
-        # ✅ AIエージェントを使ったサインアップ処理
         res = asyncio.run(run_livedoor_signup(site, email, token, nickname, password))
     except Exception as e:
         logger.error("[LD-Signup] failed: %s", str(e))
         raise
 
-    # DB登録
     new_account = ExternalBlogAccount(
         site_id=site.id,
         blog_type=BlogType.LIVEDOOR,
@@ -94,7 +93,7 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
             await page.goto("https://member.livedoor.com/register/input")
             assert "register/input" in page.url
 
-            # ✅ CAPTCHA欄の存在を確認し、ある場合だけ解く（なければスキップ）
+            # ✅ 修正ポイント: CAPTCHAが存在する場合のみ処理
             captcha = await page.query_selector("#captcha_text")
             if captcha:
                 logger.info("[LD-Signup] CAPTCHAが表示されているため解読開始")
@@ -118,7 +117,7 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
                 await page.fill("#password", password)
 
                 logger.info(f"[LD-Signup] パスワード確認を入力: {password}")
-                await page.fill("#password2", password)  # ← ✅ 修正済みポイント
+                await page.fill("#password2", password)  # ✅ 修正ポイント: #password2 に確実に入力
 
                 logger.info(f"[LD-Signup] メールアドレスを入力: {email}")
                 await page.fill("#email", email)
