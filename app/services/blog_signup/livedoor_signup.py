@@ -86,11 +86,9 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
 
         try:
             await page.goto("https://member.livedoor.com/register/input")
+            assert "register/input" in page.url  # ✅ ページ遷移が正しいかチェック
 
-            # ✅ まず補助的にテキスト出現を待つ（最大15秒）
-            await page.wait_for_selector("text=画像に表示されている文字を入力してください", timeout=15000)
-
-            # ✅ CAPTCHA欄を最大15秒待機
+            # ✅ CAPTCHA欄を最大15秒待機（テキストではなく要素に変更）
             try:
                 await page.wait_for_selector("#captcha_text", timeout=15000)
             except TimeoutError:
