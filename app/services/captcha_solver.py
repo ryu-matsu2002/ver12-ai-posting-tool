@@ -6,6 +6,8 @@ import torchvision.transforms as transforms
 from PIL import Image
 from pathlib import Path
 import logging
+import io
+from typing import Union
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +43,7 @@ class CRNN(nn.Module):
         x = self.fc(x)
         return x  # [B, W, num_classes + 1]
 
-# ── 推論関数 ──────────────────────────────
+# ── 推論準備 ──────────────────────────────
 transform = transforms.Compose([
     transforms.Grayscale(),
     transforms.Resize((IMG_HEIGHT, IMG_WIDTH)),
@@ -54,7 +56,8 @@ model = CRNN(len(CHARS)).to(device)
 model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
 model.eval()
 
-def decode(outputs):
+# ── CTCデコード ────────────────────────────
+def decode(outputs: torch.Tensor) -> str:
     """CTCデコード（重複除去＆blank除去）"""
     pred = outputs.argmax(dim=2).squeeze(0).tolist()
     decoded = []
@@ -65,15 +68,29 @@ def decode(outputs):
         last = p
     return ''.join(decoded)
 
-def solve(image_path: str) -> str:
+# ── CAPTCHA解読（image path または bytes） ───────
+def solve(image: Union[str, bytes]) -> str:
+    """
+    CAPTCHA画像を解読する。
+    :param image: ファイルパス（str）または画像バイト列（bytes）
+    :return: 解読された文字列（失敗時は""）
+    """
     try:
-        image = Image.open(image_path).convert("RGB")
-        image = transform(image).unsqueeze(0).to(device)  # [1, C, H, W]
+        if isinstance(image, str):
+            pil_image = Image.open(image).convert("RGB")
+        elif isinstance(image, bytes):
+            pil_image = Image.open(io.BytesIO(image)).convert("RGB")
+        else:
+            raise ValueError("Invalid image input")
+
+        image_tensor = transform(pil_image).unsqueeze(0).to(device)  # [1, C, H, W]
         with torch.no_grad():
-            outputs = model(image)
+            outputs = model(image_tensor)
         result = decode(outputs.cpu())
+
         logger.info(f"[CAPTCHA Solver] result = {result}")
         return result
+
     except Exception as e:
         logger.warning(f"[CAPTCHA Solver] failed: {e}")
         return ""

@@ -1,25 +1,30 @@
+# app/services/captcha_solver/save_failed.py
+
 import os
 from datetime import datetime
-from pathlib import Path
 from shutil import copyfile
 
-FAILED_DIR = Path("captcha_data/failed")
-FAILED_DIR.mkdir(parents=True, exist_ok=True)
+SAVE_DIR = "captcha_failed"
+os.makedirs(SAVE_DIR, exist_ok=True)
 
-def save_failed_captcha_image(img_path: str, reason: str = "unknown") -> str:
+def save_failed_captcha_image(image_path: str, reason: str = "unknown") -> str:
     """
-    失敗したCAPTCHA画像を指定ディレクトリに保存。
-    :param img_path: 元画像のパス
-    :param reason: 失敗理由タグ（例: bad_prediction / submit_fail など）
-    :return: 保存先パス
+    CAPTCHA失敗画像を保存する（コピーして分類）。
+    :param image_path: 保存元の画像ファイルパス
+    :param reason: 失敗理由タグ（例："captcha_fail", "mail_fail"）
+    :return: 保存先ファイル名（パス付き）
     """
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    suffix = Path(img_path).suffix or ".png"
-    dest_name = f"{timestamp}_{reason}{suffix}"
-    dest_path = FAILED_DIR / dest_name
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    index = 1
+    while True:
+        filename = f"{SAVE_DIR}/ld_{timestamp}_{reason}_{index}.png"
+        if not os.path.exists(filename):
+            break
+        index += 1
 
-    if Path(img_path).exists():
-        copyfile(img_path, dest_path)
-        return str(dest_path)
-    else:
+    try:
+        copyfile(image_path, filename)
+        return filename
+    except Exception as e:
+        print(f"[save_failed] 保存に失敗: {e}")
         return ""

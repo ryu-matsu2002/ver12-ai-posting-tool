@@ -48,8 +48,8 @@ class LivedoorAgent:
                 logger.info("[LD-Agent] CAPTCHAポップアップを検出します")
                 await page.wait_for_selector("img[src^='/register/captcha']", timeout=15000)
                 captcha_img_selector = "img[src^='/register/captcha']"
-                captcha_input_selector = 'input[type="text"]'
-                complete_button_selector = '#commit-button'
+                captcha_input_selector = '#captcha'
+                submit_button_selector = 'input[type="submit"]'
 
                 # CAPTCHA画像取得と解読
                 captcha_url = await page.get_attribute(captcha_img_selector, "src")
@@ -59,17 +59,22 @@ class LivedoorAgent:
 
                 captcha_text = solve(img_bytes)
                 logger.info(f"[LD-Agent] CAPTCHA解読結果: {captcha_text}")
-                await page.fill(captcha_input_selector, captcha_text)
 
-                # CAPTCHAスクリーンショット（前）
+                # CAPTCHAスクリーンショット（入力前）
                 await page.screenshot(path="/tmp/ld_captcha_screen.png", full_page=True)
 
+                if not captcha_text:
+                    save_failed_captcha_image("/tmp/ld_captcha_screen.png", reason="captcha_empty")
+                    logger.error("[LD-Agent] ❌ CAPTCHA解読に失敗（空の結果）")
+                    raise RuntimeError("CAPTCHAが空です")
+
+                await page.fill(captcha_input_selector, captcha_text)
+
                 # 「完了」ボタンをクリック
-                await page.wait_for_selector(complete_button_selector, timeout=10000)
-                await page.click(complete_button_selector)
+                await page.wait_for_selector(submit_button_selector, timeout=10000)
+                await page.click(submit_button_selector)
                 logger.info("[LD-Agent] CAPTCHA完了ボタンをクリック")
 
-                # 完了後の確認
                 await asyncio.sleep(2)
                 content = await page.content()
                 current_url = page.url
