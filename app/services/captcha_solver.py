@@ -23,24 +23,28 @@ class CRNN(nn.Module):
     def __init__(self, num_classes: int):
         super().__init__()
         self.cnn = nn.Sequential(
-            nn.Conv2d(1, 32, 3, 1, 1),  # 入力: 1ch → 32ch
+            nn.Conv2d(1, 32, 3, 1, 1),
             nn.ReLU(),
             nn.MaxPool2d(2, 2),  # 80x30
             nn.Conv2d(32, 64, 3, 1, 1),
             nn.ReLU(),
             nn.MaxPool2d(2, 2),  # 40x15
+            nn.Conv2d(64, 128, 3, 1, 1),  # ←✅ 追加
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),  # 20x7
         )
-        self.rnn = nn.LSTM(64 * 15, 128, num_layers=2, bidirectional=True, batch_first=True)
-        self.fc = nn.Linear(128 * 2, num_classes + 1)  # +1 for CTC blank
+        self.rnn = nn.LSTM(128 * 7, 128, num_layers=2, bidirectional=True, batch_first=True)
+        self.fc = nn.Linear(128 * 2, num_classes + 1)
 
     def forward(self, x):
-        x = self.cnn(x)  # [B, C, H, W]
+        x = self.cnn(x)
         b, c, h, w = x.size()
-        x = x.permute(0, 3, 1, 2)  # [B, W, C, H]
-        x = x.view(b, w, c * h)    # [B, W, C*H]
+        x = x.permute(0, 3, 1, 2)
+        x = x.view(b, w, c * h)
         x, _ = self.rnn(x)
         x = self.fc(x)
-        return x  # [B, W, num_classes + 1]
+        return x
+
 
 # ── 推論準備 ──────────────────────────────
 transform = transforms.Compose([
