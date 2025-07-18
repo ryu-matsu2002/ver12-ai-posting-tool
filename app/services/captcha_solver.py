@@ -1,5 +1,3 @@
-# app/services/captcha_solver.py
-
 import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
@@ -7,6 +5,7 @@ from PIL import Image
 from pathlib import Path
 import logging
 import io
+import datetime
 from typing import Union
 
 logger = logging.getLogger(__name__)
@@ -56,6 +55,19 @@ model = CRNN(len(CHARS)).to(device)
 model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
 model.eval()
 
+# ── 失敗画像保存関数 ─────────────────────
+def save_failed_captcha_image(image_bytes: bytes, suffix: str = "fail"):
+    """CAPTCHA失敗画像を保存（学習/分析用）"""
+    try:
+        dt = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = Path("captcha_failed") / f"ld_{suffix}_{dt}.png"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(image_bytes)
+        logger.info(f"[CAPTCHA Solver] 失敗画像を保存: {path}")
+    except Exception as e:
+        logger.warning(f"[CAPTCHA Solver] 画像保存失敗: {e}")
+
 # ── CTCデコード ────────────────────────────
 def decode(outputs: torch.Tensor) -> str:
     """CTCデコード（重複除去＆blank除去）"""
@@ -69,16 +81,20 @@ def decode(outputs: torch.Tensor) -> str:
     return ''.join(decoded)
 
 # ── CAPTCHA解読（image path または bytes） ───────
-def solve(image: Union[str, bytes]) -> str:
+def solve(image: Union[str, bytes], save_on_fail: bool = True) -> str:
     """
     CAPTCHA画像を解読する。
     :param image: ファイルパス（str）または画像バイト列（bytes）
+    :param save_on_fail: True の場合、失敗時に画像を保存する
     :return: 解読された文字列（失敗時は""）
     """
     try:
+        image_bytes = None
+
         if isinstance(image, str):
             pil_image = Image.open(image).convert("RGB")
         elif isinstance(image, bytes):
+            image_bytes = image
             pil_image = Image.open(io.BytesIO(image)).convert("RGB")
         else:
             raise ValueError("Invalid image input")
@@ -89,8 +105,18 @@ def solve(image: Union[str, bytes]) -> str:
         result = decode(outputs.cpu())
 
         logger.info(f"[CAPTCHA Solver] result = {result}")
+
+        # ✔ 失敗条件を明確化（文字数が5文字未満など）
+        if not result or len(result) != MAX_LEN:
+            if image_bytes and save_on_fail:
+                save_failed_captcha_image(image_bytes, suffix="lenerr")
+            return ""
+
         return result
 
     except Exception as e:
         logger.warning(f"[CAPTCHA Solver] failed: {e}")
+        # ✔ 失敗時に画像を保存
+        if isinstance(image, bytes) and save_on_fail:
+            save_failed_captcha_image(image, suffix="exception")
         return ""
