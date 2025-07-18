@@ -2,7 +2,7 @@
 ライブドアブログ アカウント自動登録（AIエージェント仕様）
 ==================================
 * Playwright + AIエージェントでフォーム入力 → 仮登録 → メール確認 → 本登録
-* CAPTCHA対応（任意対応へ変更）, 成功判定, API Key 抽出も含む
+* CAPTCHA対応, 成功判定, API Key 抽出も含む
 """
 
 from __future__ import annotations
@@ -19,12 +19,13 @@ from app.models import ExternalBlogAccount
 from app.services.mail_utils.mail_gw import create_inbox, poll_latest_link_gw
 from app.services.blog_signup.crypto_utils import encrypt
 from app.services.agent.livedoor_gpt_agent import LivedoorAgent
-from app.services.captcha_solver import solve  # ✅ AI CAPTCHAソルバ
+from app.services.captcha_solver import solve
 
 logger = logging.getLogger(__name__)
 
 
 def generate_safe_id(n=10) -> str:
+    """半角英小文字 + 数字 + アンダーバー のみで構成されたID"""
     chars = string.ascii_lowercase + string.digits + "_"
     return ''.join(random.choices(chars, k=n))
 
@@ -46,11 +47,13 @@ def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
     nickname = generate_safe_id(10)
 
     try:
+        # ✅ AIエージェントを使ったサインアップ処理
         res = asyncio.run(run_livedoor_signup(site, email, token, nickname, password))
     except Exception as e:
         logger.error("[LD-Signup] failed: %s", str(e))
         raise
 
+    # DB登録
     new_account = ExternalBlogAccount(
         site_id=site.id,
         blog_type=BlogType.LIVEDOOR,
@@ -71,8 +74,6 @@ def signup(site, email_seed: str = "ld"):
     return register_blog_account(site, email_seed=email_seed)
 
 
-# ...（省略されたインポート・他関数）...
-
 async def run_livedoor_signup(site, email, token, nickname, password, job_id=None):
     from playwright.async_api import async_playwright, TimeoutError
 
@@ -85,41 +86,47 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
             await page.goto("https://member.livedoor.com/register/input")
             assert "register/input" in page.url
 
-            # ✅ CAPTCHA入力欄が表示されていれば解く
-            try:
-                await page.wait_for_selector("#captcha_text", timeout=5000)
+            # ✅ CAPTCHA欄の存在を確認し、ある場合だけ解く（なければスキップ）
+            captcha = await page.query_selector("#captcha_text")
+            if captcha:
+                logger.info("[LD-Signup] CAPTCHAが表示されているため解読開始")
                 captcha_path = "/tmp/ld_captcha_screen.png"
                 await page.screenshot(path=captcha_path)
                 logger.info(f"[LD-Signup] CAPTCHA画像を保存: {captcha_path}")
+
                 solved_text = solve(captcha_path)
                 logger.info(f"[LD-Signup] solve()の推測: '{solved_text}'")
+
                 await page.fill("#captcha_text", solved_text)
-            except TimeoutError:
+            else:
                 logger.info("[LD-Signup] CAPTCHAが非表示のためスキップ")
 
-            # ✅ 各要素を順番に待機してから入力
-            for selector, value, label in [
-                ("#email", email, "メールアドレス"),
-                ("#password", password, "パスワード"),
-                ("#password-confirmation", password, "パスワード確認"),
-                ("#nickname", nickname, "ニックネーム")
-            ]:
-                try:
-                    await page.wait_for_selector(selector, timeout=5000)
-                    await page.fill(selector, value)
-                    logger.info(f"[LD-Signup] {label}を入力: {value}")
-                except TimeoutError:
-                    content = await page.content()
-                    fail_path = "/tmp/ld_signup_fill_error.html"
-                    Path(fail_path).write_text(content, encoding="utf-8")
-                    logger.error(f"[LD-Signup] ❌ {label}の入力失敗 → HTML保存: {fail_path}")
-                    raise RuntimeError(f"{label}の入力に失敗しました")
+            # ✅ 入力欄に順次入力
+            try:
+                logger.info(f"[LD-Signup] ニックネーム（ID）を入力: {nickname}")
+                await page.fill("#nickname", nickname)
 
-            # ✅ 送信
+                logger.info(f"[LD-Signup] パスワードを入力: {password}")
+                await page.fill("#password", password)
+
+                logger.info(f"[LD-Signup] パスワード確認を入力: {password}")
+                await page.fill("#password2", password)  # ← ✅ 修正済みポイント
+
+                logger.info(f"[LD-Signup] メールアドレスを入力: {email}")
+                await page.fill("#email", email)
+
+            except Exception as e:
+                err_path = "/tmp/ld_signup_fill_error.html"
+                Path(err_path).write_text(await page.content(), encoding="utf-8")
+                logger.error(f"[LD-Signup] ❌ パスワード確認の入力失敗 → HTML保存: {err_path}")
+                raise RuntimeError("パスワード確認の入力に失敗しました")
+
+            # ✅ 登録ボタンをクリック
             await page.click("#commit-button")
             await page.wait_for_timeout(2000)
             content = await page.content()
 
+            # ✅ 成功パターンで判定
             success_patterns = [
                 "メールを送信しました",
                 "仮登録",
@@ -131,14 +138,14 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
                 logger.error(f"[LD-Signup] CAPTCHA失敗または入力エラー → HTML保存: {fail_path}")
                 raise RuntimeError("CAPTCHA失敗または入力エラー")
 
-            # ✅ メールリンク
+            # ✅ メール確認リンク取得
             link = await poll_latest_link_gw(token=token)
             logger.info(f"[LD-Signup] メールリンク取得: {link}")
 
             await page.goto(link)
             await page.wait_for_timeout(1000)
 
-            # ✅ Agentに委譲
+            # ✅ LivedoorAgentで本登録完了
             agent = LivedoorAgent(
                 site=site,
                 email=email,
