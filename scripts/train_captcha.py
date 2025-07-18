@@ -33,6 +33,7 @@ CHAR2IDX = {c: i for i, c in enumerate(CHARS)}
 IDX2CHAR = CHARS
 BLANK_IDX = len(CHARS)  # CTC用 blank
 
+
 # ─── モデル定義（CRNN + CTC対応） ─────
 class CRNN(nn.Module):
     def __init__(self, num_classes: int):
@@ -40,9 +41,10 @@ class CRNN(nn.Module):
         self.cnn = nn.Sequential(
             nn.Conv2d(1, 32, 3, 1, 1), nn.ReLU(), nn.MaxPool2d(2, 2),  # 80x30
             nn.Conv2d(32, 64, 3, 1, 1), nn.ReLU(), nn.MaxPool2d(2, 2), # 40x15
+            nn.Conv2d(64, 128, 3, 1, 1), nn.ReLU(), nn.MaxPool2d(2, 2) # 20x7
         )
-        self.rnn = nn.LSTM(64 * 15, 128, num_layers=2, bidirectional=True, batch_first=True)
-        self.fc  = nn.Linear(128 * 2, num_classes + 1)  # +1 for blank
+        self.rnn = nn.LSTM(128 * 7, 128, num_layers=2, bidirectional=True, batch_first=True)
+        self.fc  = nn.Linear(128 * 2, num_classes + 1)  # 256 → +1 for blank
 
     def forward(self, x):
         x = self.cnn(x)                      # [B, C, H, W]
@@ -52,6 +54,7 @@ class CRNN(nn.Module):
         x, _ = self.rnn(x)
         x = self.fc(x)
         return x  # [B, W, num_classes+1]
+
 
 # ─── Dataset定義 ──────────────────────
 class CaptchaDataset(Dataset):
