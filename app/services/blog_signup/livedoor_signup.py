@@ -12,14 +12,14 @@ import logging
 import time
 import random
 import string
-
+from pathlib import Path  # ✅ PathでHTML保存するために必要
 from app import db
 from app.enums import BlogType
 from app.models import ExternalBlogAccount
 from app.services.mail_utils.mail_gw import create_inbox, poll_latest_link_gw
 from app.services.blog_signup.crypto_utils import encrypt
 from app.services.agent.livedoor_gpt_agent import LivedoorAgent
-
+from app.services.captcha_solver import solve  # ✅ CAPTCHA AI導入
 
 logger = logging.getLogger(__name__)
 
@@ -73,13 +73,74 @@ def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
 def signup(site, email_seed: str = "ld"):
     return register_blog_account(site, email_seed=email_seed)
 
+
 async def run_livedoor_signup(site, email, token, nickname, password, job_id=None):
-    agent = LivedoorAgent(
-        site=site,
-        email=email,
-        password=password,
-        nickname=nickname,
-        token=token  # ← これを追加
-    )
-    agent.job_id = job_id  # オプション：ログ用
-    return await agent.run()
+    from playwright.async_api import async_playwright
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context()
+        page = await context.new_page()
+
+        try:
+            await page.goto("https://member.livedoor.com/register/input")
+            await page.wait_for_selector("#captcha_text", timeout=5000)
+
+            # ✅ CAPTCHA画像スクリーンショット
+            captcha_path = "/tmp/ld_captcha_screen.png"
+            await page.screenshot(path=captcha_path)
+            logger.info(f"[LD-Signup] CAPTCHA画像を保存: {captcha_path}")
+
+            # ✅ solve()で推論
+            solved_text = solve(captcha_path)
+            logger.info(f"[LD-Signup] solve()の推測: '{solved_text}'")
+
+            # CAPTCHA入力欄に入力
+            await page.fill("#captcha_text", solved_text)
+
+            # その他フォーム自動入力（簡易）
+            await page.fill("#email", email)
+            await page.fill("#password", password)
+            await page.fill("#password-confirmation", password)
+            await page.fill("#nickname", nickname)
+            await page.click("#commit-button")
+
+            # CAPTCHA成功チェック
+            await page.wait_for_timeout(2000)
+            content = await page.content()
+
+            success_patterns = [
+                "メールを送信しました",
+                "仮登録",
+                "仮登録メールをお送りしました"
+            ]
+            if not any(pat in content for pat in success_patterns):
+                fail_path = "/tmp/ld_signup_post_submit.html"
+                Path(fail_path).write_text(content, encoding="utf-8")
+                logger.error(f"[LD-Signup] CAPTCHA失敗 → HTML保存: {fail_path}")
+                raise RuntimeError("CAPTCHA失敗または入力エラー")
+
+            # ✅ メールから本登録リンク取得
+            link = await poll_latest_link_gw(token=token)
+            logger.info(f"[LD-Signup] メールリンク取得: {link}")
+
+            await page.goto(link)
+            await page.wait_for_timeout(1000)
+
+            # ✅ LivedoorAgentへ委譲
+            agent = LivedoorAgent(
+                site=site,
+                email=email,
+                password=password,
+                nickname=nickname,
+                token=token
+            )
+            agent.job_id = job_id
+            return await agent.run()
+
+        except Exception as e:
+            logger.exception(f"[LD-Signup] run_livedoor_signup 失敗: {e}")
+            raise
+
+        finally:
+            await browser.close()
