@@ -74,8 +74,10 @@ def signup(site, email_seed: str = "ld"):
     return register_blog_account(site, email_seed=email_seed)
 
 
+# ...（前略は変更なし）...
+
 async def run_livedoor_signup(site, email, token, nickname, password, job_id=None):
-    from playwright.async_api import async_playwright
+    from playwright.async_api import async_playwright, TimeoutError
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -84,7 +86,21 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
 
         try:
             await page.goto("https://member.livedoor.com/register/input")
-            await page.wait_for_selector("#captcha_text", timeout=5000)
+
+            # ✅ まず補助的にテキスト出現を待つ（最大15秒）
+            await page.wait_for_selector("text=画像に表示されている文字を入力してください", timeout=15000)
+
+            # ✅ CAPTCHA欄を最大15秒待機
+            try:
+                await page.wait_for_selector("#captcha_text", timeout=15000)
+            except TimeoutError:
+                html_path = "/tmp/ld_captcha_timeout.html"
+                img_path = "/tmp/ld_captcha_timeout.png"
+                content = await page.content()
+                Path(html_path).write_text(content, encoding="utf-8")
+                await page.screenshot(path=img_path, full_page=True)
+                logger.error(f"[LD-Signup] CAPTCHAタイムアウト → HTML: {html_path}, IMG: {img_path}")
+                raise RuntimeError("CAPTCHA入力欄が見つかりません（タイムアウト）")
 
             # ✅ CAPTCHA画像スクリーンショット
             captcha_path = "/tmp/ld_captcha_screen.png"
@@ -144,3 +160,4 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
 
         finally:
             await browser.close()
+
