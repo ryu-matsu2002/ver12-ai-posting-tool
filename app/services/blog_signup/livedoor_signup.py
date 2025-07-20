@@ -163,6 +163,7 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
                 logger.error(f"[LD-Signup] CAPTCHA失敗 ➜ HTML: {error_html}, PNG: {error_png}")
                 raise RuntimeError("CAPTCHA突破失敗")
 
+            
             logger.info("[LD-Signup] CAPTCHA突破成功")
 
             # ✅ メール確認リンク取得
@@ -182,15 +183,30 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
 
             html = await page.content()
             if "ブログURL" not in html:
+                fail_html = f"/tmp/ld_final_fail_{timestamp}.html"
+                fail_png  = f"/tmp/ld_final_fail_{timestamp}.png"
+                Path(fail_html).write_text(html, encoding="utf-8")
+                await page.screenshot(path=fail_png)
+                logger.error(f"[LD-Signup] 確認リンク遷移後の失敗 ➜ HTML: {fail_html}, PNG: {fail_png}")
                 raise RuntimeError("確認リンク遷移後に失敗")
 
             blog_id = await page.input_value("#livedoor_blog_id")
             api_key = await page.input_value("#atompub_key")
 
+            logger.info(f"[LD-Signup] 登録成功: blog_id={blog_id}")
+
+            # ✅ 成功時にもログ保存（任意）
+            success_html = f"/tmp/ld_success_{timestamp}.html"
+            success_png  = f"/tmp/ld_success_{timestamp}.png"
+            Path(success_html).write_text(html, encoding="utf-8")
+            await page.screenshot(path=success_png)
+            logger.info(f"[LD-Signup] 成功スクリーンショット保存: {success_html}, {success_png}")
+
             return {
                 "blog_id": blog_id,
                 "api_key": api_key
             }
+
 
         finally:
             await browser.close()
