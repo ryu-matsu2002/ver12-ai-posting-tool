@@ -31,6 +31,13 @@ def generate_safe_id(n=10) -> str:
     chars = string.ascii_lowercase + string.digits + "_"
     return ''.join(random.choices(chars, k=n))
 
+def generate_safe_password(n=12) -> str:
+    chars = string.ascii_letters + string.digits + "-_%$#"
+    while True:
+        password = ''.join(random.choices(chars, k=n))
+        if any(c in "-_%$#" for c in password):  # 記号を必ず含む
+            return password
+
 
 def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
     import nest_asyncio
@@ -48,7 +55,7 @@ def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
     logger.info("[LD-Signup] disposable email = %s", email)
 
     # パスワードは一意に
-    password = "Ld" + str(int(time.time()))
+    password = generate_safe_password()
     nickname = generate_safe_id(10)
 
     try:
@@ -89,15 +96,25 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
         try:
             await page.goto("https://member.livedoor.com/register/input")
 
-            # フォーム入力
-            await page.wait_for_selector('input[name="nickname"]', timeout=10000)
-            await page.fill("#register_id", nickname)
-            await page.wait_for_selector('input[name="nickname"]', timeout=10000)
-            await page.fill("#register_pw", password)
-            await page.wait_for_selector('input[name="nickname"]', timeout=10000)
-            await page.fill("#register_pw2", password)
-            await page.wait_for_selector('input[name="nickname"]', timeout=10000)
-            await page.fill("#register_mail", email)
+            # ✅ 正しいセレクタでフォーム入力（2025年7月時点）
+            await page.wait_for_selector('input[name="id"]', timeout=10000)
+
+            logger.info(f"[LD-Signup] 入力: id = {nickname}")
+            await page.fill('input[name="id"]', nickname)
+
+            logger.info(f"[LD-Signup] 入力: password = {password}")
+            await page.fill('input[name="password"]', password)
+
+            logger.info(f"[LD-Signup] 入力: password2 = {password}")
+            await page.fill('input[name="password2"]', password)
+
+            logger.info(f"[LD-Signup] 入力: email = {email}")
+            await page.fill('input[name="email"]', email)
+
+            # ✅ 「ユーザー情報を登録」ボタンをクリックしてCAPTCHAページへ遷移
+            logger.info("[LD-Signup] ユーザー情報を登録ボタンをクリック")
+            await page.click('input[value="ユーザー情報を登録"]')
+            await page.wait_for_selector("#captcha_img", timeout=10000)
 
             # CAPTCHA取得と推論
             captcha_element = await page.wait_for_selector("#captcha_img")
@@ -113,8 +130,13 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
             captcha_text = solve(captcha_bytes)
             logger.info(f"[LD-Signup] CAPTCHA推論結果: {captcha_text}")
 
+            # CAPTCHAの入力
+            logger.info(f"[LD-Signup] CAPTCHA入力欄に入力: {captcha_text}")
             await page.fill("#captcha", captcha_text)
-            await page.click("#commit-button")
+
+            # 完了ボタンをクリック
+            logger.info("[LD-Signup] 完了ボタンをクリック")
+            await page.click('input[id="commit-button"]')
             await page.wait_for_timeout(2000)
 
             html = await page.content()
