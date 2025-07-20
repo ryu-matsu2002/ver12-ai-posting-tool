@@ -27,9 +27,12 @@ from playwright.async_api import async_playwright
 logger = logging.getLogger(__name__)
 
 def generate_safe_id(n=10) -> str:
-    """半角英小文字 + 数字 + アンダーバー のみで構成されたID"""
+    """先頭英字 + 半角英小文字 + 数字 + アンダーバー"""
     chars = string.ascii_lowercase + string.digits + "_"
-    return ''.join(random.choices(chars, k=n))
+    first_char = random.choice(string.ascii_lowercase)  # 先頭は英字に固定
+    rest = ''.join(random.choices(chars, k=n - 1))
+    return first_char + rest
+
 
 def generate_safe_password(n=12) -> str:
     chars = string.ascii_letters + string.digits + "-_%$#"
