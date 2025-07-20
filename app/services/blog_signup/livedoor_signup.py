@@ -125,16 +125,17 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
 
             # ✅ CAPTCHAページ検出
             try:
-                logger.info(f"[LD-Signup] CAPTCHAページに遷移中... 現在のURL: {page.url}")
-                await page.wait_for_selector("#captcha_img", timeout=20000)
+                # CAPTCHA画像が表示されるまで待つ（10秒）
+                await page.wait_for_selector("#captcha-img", timeout=10000)
             except Exception as e:
-                html_path = f"/tmp/ld_captcha_fail_{timestamp}.html"
-                png_path = f"/tmp/ld_captcha_fail_{timestamp}.png"
                 html = await page.content()
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                html_path = f"/tmp/ld_captcha_fail_{timestamp}.html"
+                img_path = f"/tmp/ld_captcha_fail_{timestamp}.png"
                 Path(html_path).write_text(html, encoding="utf-8")
-                await page.screenshot(path=png_path)
-                logger.error(f"[LD-Signup] CAPTCHA画像の表示待機に失敗 ➜ HTML: {html_path}, PNG: {png_path}")
-                raise RuntimeError("CAPTCHA画像の表示に失敗（タイムアウト）") from e
+                await page.screenshot(path=img_path)
+                logger.error(f"[LD-Signup] CAPTCHA画像の表示に失敗 ➜ HTML: {html_path}, PNG: {img_path}")
+                raise RuntimeError("CAPTCHA画像の表示に失敗（#captcha-img が見つかりません）")
 
             captcha_element = await page.wait_for_selector("#captcha_img")
             captcha_bytes = await captcha_element.screenshot()
