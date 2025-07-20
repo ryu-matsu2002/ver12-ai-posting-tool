@@ -96,7 +96,7 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
         try:
             await page.goto("https://member.livedoor.com/register/input")
             try:
-                await page.wait_for_selector('input[name="id"]', timeout=20000, state="visible")
+                await page.wait_for_selector('input[name="livedoor_id"]', timeout=10000)
             except Exception as e:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 html_path = f"/tmp/ld_wait_fail_{timestamp}.html"
@@ -109,7 +109,7 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
 
 
             logger.info(f"[LD-Signup] 入力: id = {nickname}")
-            await page.fill('input[name="id"]', nickname)
+            await page.fill('input[name="livedoor_id"]', nickname)
 
             logger.info(f"[LD-Signup] 入力: password = {password}")
             await page.fill('input[name="password"]', password)
