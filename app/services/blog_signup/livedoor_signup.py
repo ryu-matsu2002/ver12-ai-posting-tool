@@ -96,12 +96,13 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
 
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
         try:
             await page.goto("https://member.livedoor.com/register/input")
             try:
                 await page.wait_for_selector('input[name="livedoor_id"]', timeout=10000)
             except Exception as e:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 html_path = f"/tmp/ld_wait_fail_{timestamp}.html"
                 png_path = f"/tmp/ld_wait_fail_{timestamp}.png"
                 html = await page.content()
@@ -110,29 +111,23 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
                 logger.error(f"[LD-Signup] ID入力欄の表示待機に失敗 ➜ HTML: {html_path}, Screenshot: {png_path}")
                 raise RuntimeError("ID入力欄の読み込みに失敗（タイムアウト）") from e
 
-
             logger.info(f"[LD-Signup] 入力: id = {nickname}")
             await page.fill('input[name="livedoor_id"]', nickname)
-
             logger.info(f"[LD-Signup] 入力: password = {password}")
             await page.fill('input[name="password"]', password)
-
             logger.info(f"[LD-Signup] 入力: password2 = {password}")
             await page.fill('input[name="password2"]', password)
-
             logger.info(f"[LD-Signup] 入力: email = {email}")
             await page.fill('input[name="email"]', email)
 
-            # ✅ 「ユーザー情報を登録」ボタンをクリックしてCAPTCHAページへ遷移
             logger.info("[LD-Signup] ユーザー情報を登録ボタンをクリック")
             await page.click('input[value="ユーザー情報を登録"]')
-            
-            # ✅ CAPTCHAページへの遷移と検出
+
+            # ✅ CAPTCHAページ検出
             try:
                 logger.info(f"[LD-Signup] CAPTCHAページに遷移中... 現在のURL: {page.url}")
                 await page.wait_for_selector("#captcha_img", timeout=20000)
             except Exception as e:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 html_path = f"/tmp/ld_captcha_fail_{timestamp}.html"
                 png_path = f"/tmp/ld_captcha_fail_{timestamp}.png"
                 html = await page.content()
@@ -141,12 +136,8 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
                 logger.error(f"[LD-Signup] CAPTCHA画像の表示待機に失敗 ➜ HTML: {html_path}, PNG: {png_path}")
                 raise RuntimeError("CAPTCHA画像の表示に失敗（タイムアウト）") from e
 
-            # CAPTCHA取得と推論
             captcha_element = await page.wait_for_selector("#captcha_img")
             captcha_bytes = await captcha_element.screenshot()
-
-            # ✅ 保存＆ログ出力
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             captcha_path = f"/tmp/captcha_{timestamp}.png"
             with open(captcha_path, "wb") as f:
                 f.write(captcha_bytes)
@@ -154,12 +145,8 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
 
             captcha_text = solve(captcha_bytes)
             logger.info(f"[LD-Signup] CAPTCHA推論結果: {captcha_text}")
-
-            # CAPTCHAの入力
-            logger.info(f"[LD-Signup] CAPTCHA入力欄に入力: {captcha_text}")
             await page.fill("#captcha", captcha_text)
 
-            # 完了ボタンをクリック
             logger.info("[LD-Signup] 完了ボタンをクリック")
             await page.click('input[id="commit-button"]')
             await page.wait_for_timeout(2000)
@@ -167,7 +154,7 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
             html = await page.content()
             current_url = page.url
 
-            # ✅ 成功判定（仮登録完了 or register/done）
+            # ✅ 仮登録成功判定
             if "仮登録メール" not in html and not current_url.endswith("/register/done"):
                 error_html = f"/tmp/ld_signup_failed_{timestamp}.html"
                 error_png  = f"/tmp/ld_signup_failed_{timestamp}.png"
@@ -178,10 +165,16 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
 
             logger.info("[LD-Signup] CAPTCHA突破成功")
 
-            # ✅ メールから確認リンクを取得
+            # ✅ メール確認リンク取得
             logger.info("[LD-Signup] メール確認中...")
             url = await poll_latest_link_gw(token)
             if not url:
+                html = await page.content()
+                err_html = f"/tmp/ld_email_link_fail_{timestamp}.html"
+                err_png  = f"/tmp/ld_email_link_fail_{timestamp}.png"
+                Path(err_html).write_text(html, encoding="utf-8")
+                await page.screenshot(path=err_png)
+                logger.error(f"[LD-Signup] メールリンク取得失敗 ➜ HTML: {err_html}, PNG: {err_png}")
                 raise RuntimeError("確認メールリンクが取得できません")
 
             await page.goto(url)
@@ -191,7 +184,6 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
             if "ブログURL" not in html:
                 raise RuntimeError("確認リンク遷移後に失敗")
 
-            # ✅ APIキーの抽出
             blog_id = await page.input_value("#livedoor_blog_id")
             api_key = await page.input_value("#atompub_key")
 
