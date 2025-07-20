@@ -95,9 +95,18 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
 
         try:
             await page.goto("https://member.livedoor.com/register/input")
+            try:
+                await page.wait_for_selector('input[name="id"]', timeout=20000, state="visible")
+            except Exception as e:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                html_path = f"/tmp/ld_wait_fail_{timestamp}.html"
+                png_path = f"/tmp/ld_wait_fail_{timestamp}.png"
+                html = await page.content()
+                Path(html_path).write_text(html, encoding="utf-8")
+                await page.screenshot(path=png_path)
+                logger.error(f"[LD-Signup] ID入力欄の表示待機に失敗 ➜ HTML: {html_path}, Screenshot: {png_path}")
+                raise RuntimeError("ID入力欄の読み込みに失敗（タイムアウト）") from e
 
-            # ✅ 正しいセレクタでフォーム入力（2025年7月時点）
-            await page.wait_for_selector('input[name="id"]', timeout=10000)
 
             logger.info(f"[LD-Signup] 入力: id = {nickname}")
             await page.fill('input[name="id"]', nickname)
