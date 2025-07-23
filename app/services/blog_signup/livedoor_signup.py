@@ -92,6 +92,7 @@ def signup(site, email_seed: str = "ld"):
 # ──────────────────────────────────────────────
 from datetime import datetime
 from pathlib import Path
+import os  # ✅ 追加
 
 # CAPTCHA画像の保存先ディレクトリ
 CAPTCHA_SAVE_DIR = Path("static/captchas")
@@ -127,7 +128,11 @@ async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> 
         filepath = CAPTCHA_SAVE_DIR / filename
 
         image_bytes = await captcha_element.screenshot()
-        filepath.write_bytes(image_bytes)
+        # ✅ ファイルを安全に保存（flush + fsync を使う）
+        with open(filepath, "wb") as f:
+            f.write(image_bytes)
+            f.flush()
+            os.fsync(f.fileno())  # ← 必ずファイルに書き込む
 
         await browser.close()
 
