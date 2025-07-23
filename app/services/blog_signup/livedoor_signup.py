@@ -118,8 +118,8 @@ async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> 
         await page.click('input[value="ユーザー情報を登録"]')
 
         # CAPTCHA画像の表示を待機
-        await page.wait_for_selector("#captcha_img", timeout=10000)
-        captcha_element = await page.query_selector("#captcha_img")
+        await page.wait_for_selector("#captcha-img", timeout=10000)
+        captcha_element = await page.query_selector("#captcha-img")
 
         # CAPTCHA画像を保存（ファイル名を記録）
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
