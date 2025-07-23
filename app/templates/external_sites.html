@@ -75,5 +75,12 @@
   function closeCaptcha() {
     document.getElementById("captchaModal").classList.add("hidden");
   }
+
+  // ✅ これを追加（グローバル定義が必要）
+  function handleCaptchaClick(button) {
+    const siteId = button.getAttribute("data-site-id");
+    const blog   = button.getAttribute("data-blog");
+    openCaptchaModal(siteId, blog);
+  }
 </script>
 {% endblock %}
