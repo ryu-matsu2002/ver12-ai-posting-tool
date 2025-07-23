@@ -39,12 +39,3 @@
   </div>
 
 </div>
-
-{# ✅ JS関数はテンプレートの一番下 or 親テンプレートで読み込んでもOK #}
-<script>
-  function handleCaptchaClick(button) {
-    const siteId = button.getAttribute("data-site-id");
-    const blog   = button.getAttribute("data-blog");
-    openCaptchaModal(siteId, blog);
-  }
-</script>

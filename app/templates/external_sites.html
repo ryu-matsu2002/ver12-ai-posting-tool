@@ -43,33 +43,37 @@
 
 
 {% endblock %}
+
+{% block scripts %}
 <script>
   function openCaptchaModal(siteId, blogType) {
-  const data = new URLSearchParams();
-  data.append("site_id", siteId);
-  data.append("blog", blogType);
-  data.append("email", "test@example.com");
+    const data = new URLSearchParams();
+    data.append("site_id", siteId);
+    data.append("blog", blogType);
+    data.append("email", "test@example.com");
 
-  fetch("/prepare_captcha", {
-    method: "POST",
-    headers: {"Content-Type": "application/x-www-form-urlencoded"},
-    body: data
-  })
-  .then(response => response.json())
-  .then(data => {
-    if (data.captcha_url) {
-      document.getElementById("captchaImage").src = data.captcha_url;
-      document.getElementById("captchaModal").classList.remove("hidden");
-    } else {
-      alert("CAPTCHA画像の取得に失敗しました");
-    }
-  })
-  .catch(err => {
-    alert("CAPTCHA取得中にエラーが発生しました");
-    console.error(err);
-  });
-}
+    fetch("/prepare_captcha", {
+      method: "POST",
+      headers: {"Content-Type": "application/x-www-form-urlencoded"},
+      body: data
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.captcha_url) {
+        document.getElementById("captchaImage").src = data.captcha_url;
+        document.getElementById("captchaModal").classList.remove("hidden");
+      } else {
+        alert("CAPTCHA画像の取得に失敗しました");
+      }
+    })
+    .catch(err => {
+      alert("CAPTCHA取得中にエラーが発生しました");
+      console.error(err);
+    });
+  }
+
   function closeCaptcha() {
     document.getElementById("captchaModal").classList.add("hidden");
   }
 </script>
+{% endblock %}
