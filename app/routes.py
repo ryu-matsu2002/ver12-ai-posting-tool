@@ -1782,7 +1782,8 @@ def admin_captcha_label_update():
     except Exception as e:
         flash(f"ラベル更新失敗: {e}", "danger")
 
-    return redirect(url_for("admin_captcha_dataset"))
+    return redirect(url_for("admin.admin_captcha_dataset"))
+
 
 
 
