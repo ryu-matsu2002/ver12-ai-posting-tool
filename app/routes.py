@@ -1784,6 +1784,16 @@ def admin_captcha_label_update():
 
     return redirect(url_for("admin.admin_captcha_dataset"))
 
+@admin_bp.route("/admin/captcha-dataset", methods=["GET"])
+@login_required
+def admin_captcha_dataset():
+    from pathlib import Path
+    from flask import render_template
+
+    dataset_dir = Path("data/captcha_dataset")
+    image_files = sorted([f.name for f in dataset_dir.glob("*.png")])
+
+    return render_template("admin/captcha_dataset.html", image_files=image_files)
 
 
 
