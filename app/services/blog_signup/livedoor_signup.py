@@ -14,7 +14,7 @@ import random
 import string
 from datetime import datetime
 from pathlib import Path
-
+from flask import url_for
 from app import db
 from app.enums import BlogType
 from app.models import ExternalBlogAccount
@@ -133,7 +133,7 @@ async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> 
 
         # ✅ URLとファイル名の両方を返却（後続でセッションや学習保存に利用）
         return {
-            "image_url": f"/static/captchas/{filename}",
+            "image_url": url_for("static", filename=f"captchas/{filename}", _external=True),
             "image_filename": filename,
         }
 

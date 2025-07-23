@@ -3798,8 +3798,8 @@ def prepare_captcha():
 
     # CAPTCHA画像生成（dictを受け取るよう変更）
     result = asyncio.run(prepare_livedoor_captcha(email, nickname, password))
-    captcha_url = result.get("image_url")
     image_filename = result.get("image_filename")
+    captcha_url = url_for("static", filename=f"captchas/{image_filename}", _external=True)
 
     # セッション保存
     session["captcha_email"] = email
@@ -3820,33 +3820,42 @@ def submit_captcha():
     from app.models import Site
     from app.utils.captcha_dataset_utils import save_captcha_label_pair
     import asyncio
+    import logging
+    from flask import flash
 
-    # CAPTCHA入力値
-    captcha_text = request.form.get("captcha_text")
+    captcha_text   = request.form.get("captcha_text")
     image_filename = session.get("captcha_image_filename")
 
-    # ✅ CAPTCHA画像＋ラベル保存（学習用）
     if captcha_text and image_filename:
         save_captcha_label_pair(image_filename, captcha_text)
 
-    # セッションから必要情報を取り出す
-    email     = session.get("captcha_email")
-    nickname  = session.get("captcha_nickname")
-    password  = session.get("captcha_password")
-    token     = session.get("captcha_token")
-    site_id   = session.get("captcha_site_id")
-    blog      = session.get("captcha_blog")
+    email    = session.get("captcha_email")
+    nickname = session.get("captcha_nickname")
+    password = session.get("captcha_password")
+    token    = session.get("captcha_token")
+    site_id  = session.get("captcha_site_id")
+    blog     = session.get("captcha_blog")
 
     if not all([email, nickname, password, token, site_id, blog]):
-        return "セッション情報が不足しています", 400
+        flash("セッション情報が不足しています。再度やり直してください。", "warning")
+        return redirect(url_for("main.external_seo_index"))
 
     site = Site.query.get(site_id)
     if not site:
-        return "対象のサイトが見つかりません", 404
+        flash("対象のサイトが見つかりません。", "warning")
+        return redirect(url_for("main.external_seo_index"))
 
-    # CAPTCHA突破含めた登録処理（ユーザー入力を使用）
     try:
         result = asyncio.run(run_livedoor_signup(site, email, token, nickname, password, captcha_text))
-        return redirect(url_for("main.external_seo_index"))
+        flash("外部ブログアカウントの登録に成功しました！", "success")
     except Exception as e:
-        return f"登録中にエラーが発生しました: {e}", 500
+        logging.exception("[submit_captcha] CAPTCHA突破中にエラー")
+        flash("CAPTCHA突破に失敗しました。もう一度お試しください。", "danger")
+    finally:
+        # ✅ セッション初期化
+        for key in list(session.keys()):
+            if key.startswith("captcha_"):
+                session.pop(key)
+
+    return redirect(url_for("main.external_seo_index"))
+
