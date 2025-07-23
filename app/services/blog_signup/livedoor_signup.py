@@ -87,11 +87,61 @@ def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
 def signup(site, email_seed: str = "ld"):
     return register_blog_account(site, email_seed=email_seed)
 
+# ──────────────────────────────────────────────
+# ✅ CAPTCHA画像の取得・保存だけ行う関数（ステップ①②＋学習用対応）
+# ──────────────────────────────────────────────
+from datetime import datetime
+from pathlib import Path
+
+# CAPTCHA画像の保存先ディレクトリ
+CAPTCHA_SAVE_DIR = Path("static/captchas")
+CAPTCHA_SAVE_DIR.mkdir(parents=True, exist_ok=True)
+
+async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> dict:
+    """
+    CAPTCHA画像を取得して保存し、ファイルURLとファイル名を返す（/static/captchas/...）
+    → CAPTCHA突破AIの学習データにも利用可能な構成
+    """
+    from playwright.async_api import async_playwright
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        page = await browser.new_page()
+
+        await page.goto("https://member.livedoor.com/register/input")
+
+        # 入力フォームを最低限埋める
+        await page.fill('input[name="livedoor_id"]', nickname)
+        await page.fill('input[name="password"]', password)
+        await page.fill('input[name="password2"]', password)
+        await page.fill('input[name="email"]', email)
+        await page.click('input[value="ユーザー情報を登録"]')
+
+        # CAPTCHA画像の表示を待機
+        await page.wait_for_selector("#captcha_img", timeout=10000)
+        captcha_element = await page.query_selector("#captcha_img")
+
+        # CAPTCHA画像を保存（ファイル名を記録）
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"captcha_{nickname}_{timestamp}.png"
+        filepath = CAPTCHA_SAVE_DIR / filename
+
+        image_bytes = await captcha_element.screenshot()
+        filepath.write_bytes(image_bytes)
+
+        await browser.close()
+
+        # ✅ URLとファイル名の両方を返却（後続でセッションや学習保存に利用）
+        return {
+            "image_url": f"/static/captchas/{filename}",
+            "image_filename": filename,
+        }
+
 
 # ──────────────────────────────────────────────
 # ✅ CAPTCHA突破 + スクリーンショット付きサインアップ処理
 # ──────────────────────────────────────────────
-async def run_livedoor_signup(site, email, token, nickname, password, job_id=None):
+async def run_livedoor_signup(site, email, token, nickname, password, captcha_text: str | None = None, job_id=None):
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
@@ -144,9 +194,15 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
                 f.write(captcha_bytes)
             logger.info(f"[LD-Signup] CAPTCHA画像保存: {captcha_path}")
 
-            captcha_text = solve(captcha_bytes)
-            logger.info(f"[LD-Signup] CAPTCHA推論結果: {captcha_text}")
+            
+            if captcha_text:
+                logger.info(f"[LD-Signup] CAPTCHA手入力: {captcha_text}")
+            else:
+                captcha_text = solve(captcha_bytes)
+                logger.info(f"[LD-Signup] CAPTCHA自動推論: {captcha_text}")
+
             await page.fill("#captcha", captcha_text)
+
 
             logger.info("[LD-Signup] 完了ボタンをクリック")
             await page.click('input[id="commit-button"]')

@@ -61,23 +61,14 @@ class CaptchaDataset(Dataset):
     def __init__(self):
         self.records = []
 
-        # 通常の学習データ
-        if CSV_PATH.exists():
-            with CSV_PATH.open(encoding="utf-8") as f:
-                rdr = csv.DictReader(f)
-                for row in rdr:
-                    label = row["label"].strip()
-                    if len(label) == 5 and all(c in CHAR2IDX for c in label):
-                        self.records.append((IMG_DIR / row["filename"], label))
-
-        # 失敗データ（captcha_failed/ld_*.png）
-        if FAILED_DIR.exists():
-            for path in FAILED_DIR.glob("ld_*.png"):
-                m = re.search(r"ld_([ぁ-ん]{5})", path.stem)
-                if m:
-                    label = m.group(1)
-                    if all(c in CHAR2IDX for c in label):
-                        self.records.append((path, label))
+        # ✅ data/captcha_dataset/*.png + .txt を読み込む
+        dataset_dir = Path("data/captcha_dataset")
+        for img_path in dataset_dir.glob("*.png"):
+            txt_path = img_path.with_suffix(".txt")
+            if txt_path.exists():
+                label = txt_path.read_text(encoding="utf-8").strip()
+                if len(label) == 5 and all(c in CHAR2IDX for c in label):
+                    self.records.append((img_path, label))
 
         self.transform = transforms.Compose([
             transforms.Grayscale(),
@@ -85,6 +76,7 @@ class CaptchaDataset(Dataset):
             transforms.ToTensor(),
             transforms.Normalize((0.5,), (0.5,))
         ])
+
 
     def __len__(self): return len(self.records)
 

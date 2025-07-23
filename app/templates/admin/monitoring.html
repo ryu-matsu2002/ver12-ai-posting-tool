@@ -1,0 +1,30 @@
+{% extends "base_admin.html" %}
+{% block title %}システム監視{% endblock %}
+
+{% block content %}
+<div class="p-6">
+  <h1 class="text-2xl font-bold mb-4">🔧 システム監視ページ</h1>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div class="bg-white rounded-xl shadow p-4">
+      <h2 class="text-lg font-semibold mb-2">🧠 メモリ使用率</h2>
+      <p class="text-xl text-blue-600">{{ memory }}%</p>
+    </div>
+
+    <div class="bg-white rounded-xl shadow p-4">
+      <h2 class="text-lg font-semibold mb-2">⚙️ CPU負荷</h2>
+      <p class="text-xl text-green-600">{{ cpu }}</p>
+    </div>
+
+    <div class="bg-white rounded-xl shadow p-4 md:col-span-2">
+      <h2 class="text-lg font-semibold mb-2">🔁 最終再起動時刻</h2>
+      <p class="text-md">{{ last_restart }}</p>
+    </div>
+
+    <div class="bg-white rounded-xl shadow p-4 md:col-span-2">
+      <h2 class="text-lg font-semibold mb-2">📜 再起動ログ（直近）</h2>
+      <pre class="bg-gray-100 p-2 rounded text-sm overflow-x-auto whitespace-pre-wrap">{{ restart_logs }}</pre>
+    </div>
+  </div>
+</div>
+{% endblock %}

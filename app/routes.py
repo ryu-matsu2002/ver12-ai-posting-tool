@@ -1,5 +1,7 @@
 from __future__ import annotations
 from datetime import timedelta
+import logging
+logger = logging.getLogger(__name__)
 
 from flask import (
     Blueprint, render_template, redirect, url_for,
@@ -1731,6 +1733,57 @@ def admin_ranking_page():
     if not current_user.is_admin:
         return redirect(url_for("main.dashboard", username=current_user.username))
     return render_template("admin/ranking_page.html")
+
+
+from app.utils.monitor import (
+    get_memory_usage,
+    get_cpu_load,
+    get_latest_restart_log,
+    get_last_restart_time
+)
+
+
+# 監視ページ
+@admin_bp.route("/admin/monitoring")
+@login_required
+def admin_monitoring():
+    if not current_user.is_admin:
+        return "アクセス拒否", 403
+
+    memory = get_memory_usage()
+    cpu = get_cpu_load()
+    restart_logs = get_latest_restart_log()
+    last_restart = get_last_restart_time()
+
+    return render_template("admin/monitoring.html",
+                           memory=memory,
+                           cpu=cpu,
+                           restart_logs=restart_logs,
+                           last_restart=last_restart)
+
+
+@admin_bp.route("/admin/captcha-dataset", methods=["POST"])
+@login_required
+def admin_captcha_label_update():
+    from pathlib import Path
+
+    image_file = request.form.get("image_file")
+    new_label = request.form.get("label", "").strip()
+
+    if not image_file or not new_label:
+        return "無効な入力", 400
+
+    dataset_dir = Path("data/captcha_dataset")
+    txt_path = dataset_dir / Path(image_file).with_suffix(".txt")
+
+    try:
+        txt_path.write_text(new_label, encoding="utf-8")
+        flash(f"{image_file} のラベルを更新しました。", "success")
+    except Exception as e:
+        flash(f"ラベル更新失敗: {e}", "danger")
+
+    return redirect(url_for("admin_captcha_dataset"))
+
 
 
 # ────────────── キーワード ──────────────
@@ -3706,3 +3759,83 @@ def external_site_blogs(site_id):
                            site=site,
                            accts=accts,
                            decrypt=decrypt)
+
+@bp.route("/prepare_captcha", methods=["POST"])
+@login_required
+def prepare_captcha():
+    from app.services.blog_signup.livedoor_signup import (
+        prepare_livedoor_captcha, generate_safe_id, generate_safe_password
+    )
+    from app.services.mail_utils.mail_gw import create_inbox
+    from app.models import Site
+    import asyncio
+
+    site_id = request.form.get("site_id", type=int)
+    blog = request.form.get("blog")  # 例: livedoor
+
+    if not site_id or not blog:
+        return jsonify({"error": "site_id または blog が指定されていません"}), 400
+
+    site = Site.query.get(site_id)
+    if not site:
+        return jsonify({"error": "site が見つかりません"}), 404
+
+    email = f"{generate_safe_id()}@test.com"
+    nickname = generate_safe_id()
+    password = generate_safe_password()
+    _, token = create_inbox()
+
+    # CAPTCHA画像生成（dictを受け取るよう変更）
+    result = asyncio.run(prepare_livedoor_captcha(email, nickname, password))
+    captcha_url = result.get("image_url")
+    image_filename = result.get("image_filename")
+
+    # セッション保存
+    session["captcha_email"] = email
+    session["captcha_nickname"] = nickname
+    session["captcha_password"] = password
+    session["captcha_token"] = token
+    session["captcha_site_id"] = site_id
+    session["captcha_blog"] = blog
+    session["captcha_image_filename"] = image_filename  # ✅ NEW: 学習用保存に必要
+
+    return jsonify({"captcha_url": captcha_url})
+
+
+@bp.route("/submit_captcha", methods=["POST"])
+@login_required
+def submit_captcha():
+    from app.services.blog_signup.livedoor_signup import run_livedoor_signup
+    from app.models import Site
+    from app.utils.captcha_dataset_utils import save_captcha_label_pair
+    import asyncio
+
+    # CAPTCHA入力値
+    captcha_text = request.form.get("captcha_text")
+    image_filename = session.get("captcha_image_filename")
+
+    # ✅ CAPTCHA画像＋ラベル保存（学習用）
+    if captcha_text and image_filename:
+        save_captcha_label_pair(image_filename, captcha_text)
+
+    # セッションから必要情報を取り出す
+    email     = session.get("captcha_email")
+    nickname  = session.get("captcha_nickname")
+    password  = session.get("captcha_password")
+    token     = session.get("captcha_token")
+    site_id   = session.get("captcha_site_id")
+    blog      = session.get("captcha_blog")
+
+    if not all([email, nickname, password, token, site_id, blog]):
+        return "セッション情報が不足しています", 400
+
+    site = Site.query.get(site_id)
+    if not site:
+        return "対象のサイトが見つかりません", 404
+
+    # CAPTCHA突破含めた登録処理（ユーザー入力を使用）
+    try:
+        result = asyncio.run(run_livedoor_signup(site, email, token, nickname, password, captcha_text))
+        return redirect(url_for("main.external_seo_index"))
+    except Exception as e:
+        return f"登録中にエラーが発生しました: {e}", 500

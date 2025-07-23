@@ -13,14 +13,24 @@
     <div class="font-bold text-gray-800">{{ blog_label }} 外部SEO</div>
 
     {# 🚀 SEO未開始時：開始ボタンを表示 #}
-    <button
-      class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
-      hx-post="{{ url_for('main.start_external_seo') }}"
-      hx-vals='{"site_id":"{{ site_id }}","blog":"{{ blog }}"}'
-      hx-target="#{{ card_id }}"
-      hx-swap="outerHTML">
-      開始
-    </button>
+    {% if blog == "livedoor" %}
+      <button
+        class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
+        data-site-id="{{ site_id }}"
+        data-blog="{{ blog }}"
+        onclick="handleCaptchaClick(this)">
+        開始
+      </button>
+    {% else %}
+      <button
+        class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
+        hx-post="{{ url_for('main.start_external_seo') }}"
+        hx-vals='{"site_id":"{{ site_id }}","blog":"{{ blog }}"}'
+        hx-target="#{{ card_id }}"
+        hx-swap="outerHTML">
+        開始
+      </button>
+    {% endif %}
   </div>
 
   <div class="text-sm text-gray-600">
@@ -29,3 +39,12 @@
   </div>
 
 </div>
+
+{# ✅ JS関数はテンプレートの一番下 or 親テンプレートで読み込んでもOK #}
+<script>
+  function handleCaptchaClick(button) {
+    const siteId = button.getAttribute("data-site-id");
+    const blog   = button.getAttribute("data-blog");
+    openCaptchaModal(siteId, blog);
+  }
+</script>

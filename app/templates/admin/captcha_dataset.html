@@ -1,0 +1,40 @@
+{% extends "base_admin.html" %}
+{% block title %}CAPTCHA データセット一覧{% endblock %}
+
+{% block content %}
+<h2 class="text-2xl font-bold mb-6">🧠 CAPTCHA 学習データセット</h2>
+
+<table class="w-full text-sm border border-gray-300">
+  <thead>
+    <tr class="bg-gray-100">
+      <th class="p-2">画像</th>
+      <th class="p-2">現在のラベル</th>
+      <th class="p-2">新しいラベル</th>
+      <th class="p-2">保存</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for entry in entries %}
+    <tr class="border-t">
+      <td class="p-2">
+        <img src="{{ entry.image_url }}" alt="captcha" class="h-12">
+      </td>
+      <td class="p-2 text-gray-600">
+        {{ entry.label }}
+      </td>
+      <td class="p-2">
+        <form method="POST" action="{{ url_for('admin_captcha_label_update') }}">
+          <input type="hidden" name="image_file" value="{{ entry.image_file }}">
+          <input type="text" name="label" value="{{ entry.label }}" class="border p-1 w-40">
+      </td>
+      <td class="p-2">
+          <button type="submit" class="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700">
+            更新
+          </button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
