@@ -42,9 +42,11 @@
       {% for b in ["livedoor"] %}
         {% set site_id = s.id %}
         {% set blog    = b %}
-        {% include "_job_progress.html" with site=s, blog=b %}
+        {% set site    = s %}
+        {% include "_job_progress.html" %}
       {% endfor %}
     </div>
+
 
   </div>
 {% endfor %}
