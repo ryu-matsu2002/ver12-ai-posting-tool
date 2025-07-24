@@ -91,15 +91,14 @@
 
         <!-- 操作 -->
 
-        <!-- 🔄 再生成ボタン -->
-        <form method="POST"
-              action="{{ url_for('admin.regenerate_user_stuck_articles', uid=u.id) }}"
-              class="inline">
-          <button type="submit"
-                  class="px-2 py-1 bg-yellow-500 hover:bg-yellow-600 text-white text-sm rounded">
-            🔄 途中記事再生成
-          </button>
-        </form>
+         <!-- 操作 -->
+        <td class="px-2 py-2 space-x-2 whitespace-nowrap">
+          {% if stuck_counts.get(u.id, 0) > 0 %}
+            <a href="{{ url_for('admin.stuck_articles', uid=u.id) }}"
+               class="px-2 py-1 bg-yellow-100 hover:bg-yellow-200 text-yellow-800 text-sm rounded">
+              ⏳ 途中記事
+            </a>
+          {% endif %}
 
         <td class="px-2 py-2 space-x-2 whitespace-nowrap">
           <form action="{{ url_for('admin.admin_login_as', user_id=u.id) }}" method="post" class="inline">
