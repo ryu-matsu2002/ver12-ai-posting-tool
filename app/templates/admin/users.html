@@ -90,6 +90,17 @@
         </td>
 
         <!-- 操作 -->
+
+        <!-- 🔄 再生成ボタン -->
+        <form method="POST"
+              action="{{ url_for('admin.regenerate_user_stuck_articles', uid=u.id) }}"
+              class="inline">
+          <button type="submit"
+                  class="px-2 py-1 bg-yellow-500 hover:bg-yellow-600 text-white text-sm rounded">
+            🔄 途中記事再生成
+          </button>
+        </form>
+
         <td class="px-2 py-2 space-x-2 whitespace-nowrap">
           <form action="{{ url_for('admin.admin_login_as', user_id=u.id) }}" method="post" class="inline">
             <button type="submit" class="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white text-sm rounded">
