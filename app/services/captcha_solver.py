@@ -54,16 +54,23 @@ model.eval()
 
 # ── 失敗画像保存関数 ─────────────────────
 def save_failed_captcha_image(image_bytes: bytes, suffix: str = "fail"):
-    """CAPTCHA失敗画像を保存（学習/分析用）"""
+    """CAPTCHA失敗画像を保存（学習/分析/表示用）"""
     try:
         dt = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        path = Path("captcha_failed") / f"ld_{suffix}_{dt}.png"
-        path.parent.mkdir(parents=True, exist_ok=True)
+        save_dir = Path("app/static/captchas")  # ✅ Flaskから参照可能な場所
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        filename = f"ld_{suffix}_{dt}.png"
+        path = save_dir / filename
+
         with open(path, "wb") as f:
             f.write(image_bytes)
+
         logger.info(f"[CAPTCHA Solver] 失敗画像を保存: {path}")
+
     except Exception as e:
         logger.warning(f"[CAPTCHA Solver] 画像保存失敗: {e}")
+
 
 # ── CTCデコード ────────────────────────────
 def decode(outputs: torch.Tensor) -> str:
