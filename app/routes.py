@@ -3163,53 +3163,25 @@ def delete_article(id):
     flash("記事を削除しました", "success")
     return redirect(url_for(".log", username=current_user.username, site_id=art.site_id))
 
-@bp.post("/article/<int:id>/retry")
+# app/routes.py
+
+@bp.route("/<username>/articles/<int:id>/retry", methods=["POST"])
 @login_required
-def retry_article(id: int):
+def retry_article(username, id):
+    # 認可チェック：他ユーザーの記事は再生成できない
     art = Article.query.get_or_404(id)
-    if art.user_id != current_user.id:
+    if art.user_id != current_user.id or username != current_user.username:
         abort(403)
 
-    # ユーザーに紐づくプロンプトを取得（最初の1件）
-    prompt = PromptTemplate.query.filter_by(user_id=current_user.id).first()
-    if not prompt:
-        flash("プロンプトテンプレートが見つかりません。先にプロンプトを作成してください。", "danger")
-        return redirect(url_for(".prompts"))
+    # ステータスと進捗を初期化してキューに戻す
+    art.status = "pending"
+    art.progress = 0
+    art.updated_at = datetime.utcnow()
+    db.session.commit()
 
-    try:
-        # ✅ タイトル生成（失敗時に例外を出すよう _unique_title() 側で調整済み）
-        title = _unique_title(art.keyword, prompt.title_pt)
-        if not title or title.strip() == "":
-            raise ValueError("タイトルの生成に失敗しました")
+    flash("記事を再生成キューに戻しました。しばらくお待ちください。", "success")
+    return redirect(url_for("main.view_articles", username=username))
 
-        # ✅ アウトライン + 本文生成
-        body = _compose_body(art.keyword, prompt.body_pt)
-        if not body or body.strip() == "":
-            raise ValueError("本文の生成に失敗しました")
-
-        # ✅ アイキャッチ画像（optional）
-        match = re.search(r"<h2\b[^>]*>(.*?)</h2>", body or "", re.IGNORECASE)
-        first_h2 = match.group(1) if match else ""
-        query = f"{art.keyword} {first_h2}".strip()
-        image_url = fetch_featured_image(query)
-
-        # ✅ 正常なデータとして保存
-        art.title = title
-        art.body = body
-        art.image_url = image_url
-        art.status = "done"
-        art.progress = 100
-        art.updated_at = datetime.utcnow()
-        db.session.commit()
-
-        flash("記事の再生成が完了しました", "success")
-
-    except Exception as e:
-        db.session.rollback()
-        logging.exception(f"[再生成失敗] article_id={id} keyword={art.keyword} error={e}")
-        flash("記事の再生成に失敗しました", "danger")
-
-    return redirect(url_for(".log", site_id=art.site_id))
 
 @bp.post("/articles/bulk-delete")
 @login_required
