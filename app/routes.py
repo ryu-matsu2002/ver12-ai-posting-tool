@@ -3864,5 +3864,6 @@ def submit_captcha():
             if key.startswith("captcha_"):
                 session.pop(key)
 
-    return redirect(url_for("main.external_seo_index"))
+    return redirect(url_for("main.external_seo_sites"))
+
 
