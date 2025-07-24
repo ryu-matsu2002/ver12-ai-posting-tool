@@ -745,13 +745,24 @@ def admin_users():
     prompt_count  = PromptTemplate.query.count()
     article_count = Article.query.count()
 
+    # ✅ ここに追加
+    stuck_counts = dict(
+        db.session.query(
+            Article.user_id,
+            func.count()
+        ).filter(
+            Article.status.in_(["pending", "gen"])
+        ).group_by(Article.user_id).all()
+    )
+
     return render_template(
         "admin/users.html",
         users=users,  # ← JSONシリアライズ可能な形式に修正済み
         site_count=site_count,
         prompt_count=prompt_count,
         article_count=article_count,
-        user_count=len(users)
+        user_count=len(users),
+        stuck_counts=stuck_counts
     )
 
 
