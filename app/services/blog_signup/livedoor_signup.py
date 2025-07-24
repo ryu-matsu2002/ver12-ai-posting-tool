@@ -193,11 +193,17 @@ async def run_livedoor_signup(site, email, token, nickname, password, captcha_te
                 raise RuntimeError("CAPTCHA画像の表示に失敗（#captcha-img が見つかりません）")
 
             captcha_element = await page.wait_for_selector("#captcha_img")
-            captcha_bytes = await captcha_element.screenshot()
-            captcha_path = f"/tmp/captcha_{timestamp}.png"
+            CAPTCHA_SAVE_DIR = Path("static/captchas")
+            CAPTCHA_SAVE_DIR.mkdir(parents=True, exist_ok=True)
+            filename = f"captcha_{nickname}_{timestamp}.png"
+            captcha_path = CAPTCHA_SAVE_DIR / filename
+            captcha_bytes = await captcha_element.screenshot()  # ✅ ← 追加！
+
             with open(captcha_path, "wb") as f:
                 f.write(captcha_bytes)
+
             logger.info(f"[LD-Signup] CAPTCHA画像保存: {captcha_path}")
+
 
             
             if captcha_text:

@@ -1801,10 +1801,33 @@ def admin_captcha_dataset():
     from pathlib import Path
     from flask import render_template
 
+    # ✅ 学習用データ
     dataset_dir = Path("data/captcha_dataset")
-    image_files = sorted([f.name for f in dataset_dir.glob("*.png")])
+    dataset_entries = []
+    for path in sorted(dataset_dir.glob("*.png")):
+        label_path = path.with_suffix(".txt")
+        label = label_path.read_text(encoding="utf-8").strip() if label_path.exists() else ""
+        dataset_entries.append({
+            "image_file": path.name,
+            "image_url": url_for('static', filename=f"../data/captcha_dataset/{path.name}"),
+            "label": label
+        })
 
-    return render_template("admin/captcha_dataset.html", image_files=image_files)
+    # ✅ 本番保存失敗画像（app/static/captchas）
+    captchas_dir = Path("app/static/captchas")
+    captcha_entries = []
+    for path in sorted(captchas_dir.glob("*.png")):
+        captcha_entries.append({
+            "image_file": path.name,
+            "image_url": url_for('static', filename=f"captchas/{path.name}"),
+            "label": "（未設定）"
+        })
+
+    # ✅ 結合してテンプレートへ渡す
+    entries = dataset_entries + captcha_entries
+
+    return render_template("admin/captcha_dataset.html", entries=entries)
+
 
 
 
