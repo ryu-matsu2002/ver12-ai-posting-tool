@@ -95,8 +95,11 @@ from pathlib import Path
 import os  # ✅ 追加
 
 # CAPTCHA画像の保存先ディレクトリ
-CAPTCHA_SAVE_DIR = Path("static/captchas")
+from flask import current_app
+
+CAPTCHA_SAVE_DIR = Path(current_app.root_path) / "static" / "captchas"
 CAPTCHA_SAVE_DIR.mkdir(parents=True, exist_ok=True)
+
 
 async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> dict:
     """
