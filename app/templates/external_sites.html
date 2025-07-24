@@ -4,6 +4,25 @@
 {% block content %}
 <h2 class="text-2xl font-bold mb-6 flex items-center justify-between">
   🚀 外部SEO | サイト一覧
+
+  <!-- ✅ flashメッセージ表示 -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    <div class="mb-4 space-y-2">
+      {% for category, message in messages %}
+        <div class="px-4 py-2 rounded text-white
+                    {% if category == 'success' %} bg-green-600
+                    {% elif category == 'danger' %} bg-red-600
+                    {% elif category == 'warning' %} bg-yellow-500 text-black
+                    {% else %} bg-gray-600
+                    {% endif %}">
+          {{ message }}
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endwith %}
+
   <a href="{{ url_for('main.my_blog_accounts') }}"
      class="text-sm px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded">
     外部ブログアカウント一覧
@@ -18,14 +37,15 @@
       <a href="{{ s.url }}" class="text-blue-600 text-sm break-all" target="_blank">{{ s.url }}</a>
     </div>
 
-    <!-- 🔁 すべてのブログタイプ（livedoor / note / hatena ...）を列挙 -->
+    <!-- 🔁 一旦 livedoor のみ表示（note / hatena は非対応） -->
     <div class="flex flex-wrap gap-2 mt-3">
-      {% for b in ["livedoor", "note", "hatena"] %}
+      {% for b in ["livedoor"] %}
         {% set site_id = s.id %}
         {% set blog    = b %}
         {% include "_job_progress.html" %}
       {% endfor %}
     </div>
+
   </div>
 {% endfor %}
 <!-- ✅ CAPTCHA入力モーダル -->

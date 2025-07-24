@@ -43,7 +43,7 @@ def create_inbox() -> tuple[str, str]:
 # --------------------------------------------------------- polling
 async def poll_latest_link_gw(
     jwt: str,
-    pattern: str = r"https://member\.livedoor\.com/register/.*",
+    pattern: str = r"https://member\.livedoor\.com/email_auth/commit/[a-zA-Z0-9]+",  # ✅ 修正ここ
     timeout: int = 180
 ) -> AsyncGenerator[str, None]:
     logger.info("✅ poll_latest_link_gw が呼び出されました")  # ✅ 追加ログ

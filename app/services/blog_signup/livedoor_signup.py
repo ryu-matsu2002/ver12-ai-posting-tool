@@ -237,8 +237,18 @@ async def run_livedoor_signup(site, email, token, nickname, password, captcha_te
             logger.info("[LD-Signup] CAPTCHA突破成功")
 
             # ✅ メール確認リンク取得
+            # ✅ メール確認リンク取得
             logger.info("[LD-Signup] メール確認中...")
-            url = await poll_latest_link_gw(token)
+            url = None
+            max_attempts = 3
+
+            for i in range(max_attempts):
+                url = await poll_latest_link_gw(token)
+                if url:
+                    break
+            logger.warning(f"[LD-Signup] メールリンクがまだ取得できません（試行{i+1}/{max_attempts}）")
+            await asyncio.sleep(5)
+
             if not url:
                 html = await page.content()
                 err_html = f"/tmp/ld_email_link_fail_{timestamp}.html"
@@ -246,19 +256,25 @@ async def run_livedoor_signup(site, email, token, nickname, password, captcha_te
                 Path(err_html).write_text(html, encoding="utf-8")
                 await page.screenshot(path=err_png)
                 logger.error(f"[LD-Signup] メールリンク取得失敗 ➜ HTML: {err_html}, PNG: {err_png}")
-                raise RuntimeError("確認メールリンクが取得できません")
+                raise RuntimeError("確認メールリンクが取得できません（リトライ上限に到達）")
+
 
             await page.goto(url)
             await page.wait_for_timeout(2000)
 
+            # ✅ HTMLを取得し、必要な値を安全に取得
             html = await page.content()
-            if "ブログURL" not in html:
+            blog_id = await page.input_value("#livedoor_blog_id")
+            api_key = await page.input_value("#atompub_key")
+
+            if not blog_id or not api_key:
                 fail_html = f"/tmp/ld_final_fail_{timestamp}.html"
                 fail_png  = f"/tmp/ld_final_fail_{timestamp}.png"
                 Path(fail_html).write_text(html, encoding="utf-8")
                 await page.screenshot(path=fail_png)
                 logger.error(f"[LD-Signup] 確認リンク遷移後の失敗 ➜ HTML: {fail_html}, PNG: {fail_png}")
-                raise RuntimeError("確認リンク遷移後に失敗")
+                raise RuntimeError("確認リンク遷移後に必要な値が取得できません")
+
 
             blog_id = await page.input_value("#livedoor_blog_id")
             api_key = await page.input_value("#atompub_key")
@@ -274,7 +290,8 @@ async def run_livedoor_signup(site, email, token, nickname, password, captcha_te
 
             return {
                 "blog_id": blog_id,
-                "api_key": api_key
+                "api_key": api_key,
+                "captcha_success": True  # ✅ CAPTCHA突破成功フラグを追加！
             }
 
 

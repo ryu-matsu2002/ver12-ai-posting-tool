@@ -3854,16 +3854,23 @@ def submit_captcha():
 
     try:
         result = asyncio.run(run_livedoor_signup(site, email, token, nickname, password, captcha_text))
-        flash("外部ブログアカウントの登録に成功しました！", "success")
+
+        # ✅ CAPTCHA成功フラグに応じて表示変更
+        if result.get("captcha_success"):
+            flash("✅ CAPTCHA突破に成功し、仮登録メールを送信しました！", "success")
+        else:
+            flash("⚠ CAPTCHA突破の成否が不明です。手動でご確認ください。", "warning")
+
+        # ✅ 必要に応じて session に保存も可能（例: blog_id, api_key）
+        session["external_blog_info"] = result
+
     except Exception as e:
         logging.exception("[submit_captcha] CAPTCHA突破中にエラー")
-        flash("CAPTCHA突破に失敗しました。もう一度お試しください。", "danger")
+        flash("❌ CAPTCHA突破に失敗しました。もう一度お試しください。", "danger")
+
     finally:
-        # ✅ セッション初期化
         for key in list(session.keys()):
             if key.startswith("captcha_"):
                 session.pop(key)
 
     return redirect(url_for("main.external_seo_sites"))
-
-

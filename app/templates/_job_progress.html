@@ -1,41 +1,66 @@
 {# --------------------------------------------------------------------- #}
 {#  _job_progress.html                                                   #}
 {#  AIエージェント用（ジョブモデルなし）                                #}
-{#  期待変数: site_id, blog                                              #}
+{#  期待変数: site_id, blog, site（=s）                                  #}
 {# --------------------------------------------------------------------- #}
 
 {% set blog_label  = blog|capitalize %}
 {% set card_id     = "site-card-" ~ site_id %}
+{% set is_registered = blog in site.registered_blogs %}  {# ✅ 登録済みならTrue #}
 
 <div id="{{ card_id }}" class="border p-4 rounded shadow-sm bg-white">
 
   <div class="flex items-center justify-between mb-2">
     <div class="font-bold text-gray-800">{{ blog_label }} 外部SEO</div>
 
-    {# 🚀 SEO未開始時：開始ボタンを表示 #}
-    {% if blog == "livedoor" %}
+    {% if is_registered %}
+      <!-- ✅ 成功表示 -->
+      <div class="text-green-600 font-bold">✅ 登録済み</div>
+
+    {% elif blog == "livedoor" %}
+      <!-- ✅ livedoor: CAPTCHA用の手動ボタン -->
       <button
+        id="start-btn-{{ blog }}-{{ site_id }}"
         class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
         data-site-id="{{ site_id }}"
         data-blog="{{ blog }}"
         onclick="handleCaptchaClick(this)">
         開始
       </button>
+
     {% else %}
+      <!-- ✅ 他ブログ: HTMXで非同期実行（※ステータス変化対応） -->
       <button
+        id="start-btn-{{ blog }}-{{ site_id }}"
         class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
         hx-post="{{ url_for('main.start_external_seo') }}"
         hx-vals='{"site_id":"{{ site_id }}","blog":"{{ blog }}"}'
         hx-target="#{{ card_id }}"
-        hx-swap="outerHTML">
+        hx-swap="outerHTML"
+        onclick="setRunningStatus('{{ blog }}', '{{ site_id }}')"
         開始
       </button>
     {% endif %}
   </div>
 
-  <div class="text-sm text-gray-600">
+  <div class="text-sm text-gray-600" id="status-text-{{ blog }}-{{ site_id }}">
     AIエージェントが{{ blog_label }}でアカウント登録を試みます。
     処理には30秒前後かかる場合があります。
   </div>
 
 </div>
+
+<script>
+  function setRunningStatus(blog, siteId) {
+    const btn = document.getElementById(`start-btn-${blog}-${siteId}`);
+    const statusText = document.getElementById(`status-text-${blog}-${siteId}`);
+
+    if (btn) {
+      btn.outerHTML = `<div class="text-blue-600 font-bold">⏳ 実行中...</div>`;
+    }
+
+    if (statusText) {
+      statusText.innerText = "AIが登録を進めています。しばらくお待ちください...";
+    }
+  }
+</script>
