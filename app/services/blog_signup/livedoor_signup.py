@@ -140,11 +140,10 @@ async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> 
         await browser.close()
 
         # ✅ URLとファイル名の両方を返却（後続でセッションや学習保存に利用）
+        # prepare_livedoor_captcha の戻り値を変更
         return {
-            "image_url": url_for("static", filename=f"captchas/{filename}", _external=True),
-            "image_filename": filename,
+            "filename": filename  # URLはFlask側で作成
         }
-
 
 # ──────────────────────────────────────────────
 # ✅ CAPTCHA突破 + スクリーンショット付きサインアップ処理

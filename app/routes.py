@@ -3804,8 +3804,9 @@ def prepare_captcha():
 
     # CAPTCHA画像生成（dictを受け取るよう変更）
     result = asyncio.run(prepare_livedoor_captcha(email, nickname, password))
-    image_filename = result.get("image_filename")
+    image_filename = result.get("filename")
     captcha_url = url_for("static", filename=f"captchas/{image_filename}", _external=True)
+
 
     # セッション保存
     session["captcha_email"] = email
