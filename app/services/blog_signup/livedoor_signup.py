@@ -88,17 +88,17 @@ def signup(site, email_seed: str = "ld"):
     return register_blog_account(site, email_seed=email_seed)
 
 # ──────────────────────────────────────────────
-# ✅ CAPTCHA画像の取得・保存だけ行う関数（ステップ①②＋学習用対応）
+# ✅ CAPTCHA画像の取得・保存（base64形式 or 画像URL両対応）
 # ──────────────────────────────────────────────
 async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> dict:
     """
-    CAPTCHA画像を取得して保存し、ファイルURLとファイル名を返す
+    CAPTCHA画像を取得して保存し、ファイル名を返す（dataURL形式でもURL形式でも対応）
     """
     from playwright.async_api import async_playwright
-    import base64
     from flask import current_app
     from datetime import datetime
-    import os
+    import base64, os
+    from pathlib import Path
 
     CAPTCHA_SAVE_DIR = Path(current_app.root_path) / "static" / "captchas"
     CAPTCHA_SAVE_DIR.mkdir(parents=True, exist_ok=True)
@@ -115,34 +115,24 @@ async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> 
         await page.fill('input[name="email"]', email)
         await page.click('input[value="ユーザー情報を登録"]')
 
-        # CAPTCHA画像の表示を待機
+        # CAPTCHA表示を待つ
         await page.wait_for_selector("#captcha-img", timeout=10000)
 
-        # ✅ CAPTCHA画像のbase64を取得
-        data_url = await page.eval_on_selector("#captcha-img", "el => el.src")
-
-        if not data_url.startswith("data:image/png;base64,"):
-            raise RuntimeError("CAPTCHA画像の取得に失敗しました")
-
-        base64_data = data_url.split(",", 1)[1]
-        image_bytes = base64.b64decode(base64_data)
-
-        # ファイル保存
+        # ファイル名生成
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"captcha_{nickname}_{timestamp}.png"
         filepath = CAPTCHA_SAVE_DIR / filename
 
-        with open(filepath, "wb") as f:
-            f.write(image_bytes)
-            f.flush()
-            os.fsync(f.fileno())
+        try:
+            # ✅ CAPTCHA画像要素のスクリーンショットとして保存（URL形式でもOK）
+            captcha_element = page.locator("#captcha-img")
+            await captcha_element.screenshot(path=str(filepath))
+        except Exception as e:
+            await browser.close()
+            raise RuntimeError("CAPTCHA画像の取得に失敗しました") from e
 
         await browser.close()
-
-        return {
-            "filename": filename
-        }
-
+        return {"filename": filename}
 
 # ──────────────────────────────────────────────
 # ✅ CAPTCHA突破 + スクリーンショット付きサインアップ処理
