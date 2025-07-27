@@ -90,24 +90,18 @@ def signup(site, email_seed: str = "ld"):
 # ──────────────────────────────────────────────
 # ✅ CAPTCHA画像の取得・保存だけ行う関数（ステップ①②＋学習用対応）
 # ──────────────────────────────────────────────
-from datetime import datetime
-from pathlib import Path
-import os  # ✅ 追加
-
-# CAPTCHA画像の保存先ディレクトリ
-from flask import current_app
-
-CAPTCHA_SAVE_DIR = Path(current_app.root_path) / "static" / "captchas"
-CAPTCHA_SAVE_DIR.mkdir(parents=True, exist_ok=True)
-
-
 async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> dict:
     """
-    CAPTCHA画像を取得して保存し、ファイルURLとファイル名を返す（/static/captchas/...）
-    → CAPTCHA突破AIの学習データにも利用可能な構成
+    CAPTCHA画像を取得して保存し、ファイルURLとファイル名を返す
     """
     from playwright.async_api import async_playwright
     import base64
+    from flask import current_app
+    from datetime import datetime
+    import os
+
+    CAPTCHA_SAVE_DIR = Path(current_app.root_path) / "static" / "captchas"
+    CAPTCHA_SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -124,7 +118,7 @@ async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> 
         # CAPTCHA画像の表示を待機
         await page.wait_for_selector("#captcha-img", timeout=10000)
 
-        # ✅ JavaScriptからdataURL(base64)を取得
+        # ✅ CAPTCHA画像のbase64を取得
         data_url = await page.eval_on_selector("#captcha-img", "el => el.src")
 
         if not data_url.startswith("data:image/png;base64,"):
@@ -133,7 +127,7 @@ async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> 
         base64_data = data_url.split(",", 1)[1]
         image_bytes = base64.b64decode(base64_data)
 
-        # 保存先パスを作成
+        # ファイル保存
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"captcha_{nickname}_{timestamp}.png"
         filepath = CAPTCHA_SAVE_DIR / filename
