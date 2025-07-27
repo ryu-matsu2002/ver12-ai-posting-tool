@@ -3788,7 +3788,7 @@ def prepare_captcha():
     import asyncio
     import logging
 
-    logger = logging.getLogger(__name__)  # ✅ ロガー追加
+    logger = logging.getLogger(__name__)
 
     site_id = request.form.get("site_id", type=int)
     blog = request.form.get("blog")  # 例: livedoor
@@ -3805,9 +3805,21 @@ def prepare_captcha():
     password = generate_safe_password()
     _, token = create_inbox()
 
-    # ✅ CAPTCHA画像生成（安全なエラーハンドリング付き）
+    # ✅ CAPTCHA画像生成（非同期処理対応＋エラーハンドリング）
     try:
-        result = asyncio.run(prepare_livedoor_captcha(email, nickname, password))
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # FlaskやJupyterなど既存イベントループが走っている場合の処理
+                import nest_asyncio
+                nest_asyncio.apply()
+                result = loop.run_until_complete(prepare_livedoor_captcha(email, nickname, password))
+            else:
+                result = loop.run_until_complete(prepare_livedoor_captcha(email, nickname, password))
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            result = loop.run_until_complete(prepare_livedoor_captcha(email, nickname, password))
     except Exception as e:
         logger.exception("[prepare_captcha] CAPTCHA生成で例外が発生")
         return jsonify({"error": "CAPTCHAの準備に失敗しました"}), 500
