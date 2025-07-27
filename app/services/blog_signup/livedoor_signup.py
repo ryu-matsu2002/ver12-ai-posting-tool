@@ -149,6 +149,7 @@ async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> 
             "filename": filename
         }
 
+
 # ──────────────────────────────────────────────
 # ✅ CAPTCHA突破 + スクリーンショット付きサインアップ処理
 # ──────────────────────────────────────────────
