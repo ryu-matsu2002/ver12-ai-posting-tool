@@ -3786,6 +3786,9 @@ def prepare_captcha():
     from app.services.mail_utils.mail_gw import create_inbox
     from app.models import Site
     import asyncio
+    import logging
+
+    logger = logging.getLogger(__name__)  # ✅ ロガー追加
 
     site_id = request.form.get("site_id", type=int)
     blog = request.form.get("blog")  # 例: livedoor
@@ -3802,20 +3805,28 @@ def prepare_captcha():
     password = generate_safe_password()
     _, token = create_inbox()
 
-    # CAPTCHA画像生成（dictを受け取るよう変更）
-    result = asyncio.run(prepare_livedoor_captcha(email, nickname, password))
-    image_filename = result.get("filename")
+    # ✅ CAPTCHA画像生成（安全なエラーハンドリング付き）
+    try:
+        result = asyncio.run(prepare_livedoor_captcha(email, nickname, password))
+    except Exception as e:
+        logger.exception("[prepare_captcha] CAPTCHA生成で例外が発生")
+        return jsonify({"error": "CAPTCHAの準備に失敗しました"}), 500
+
+    if not result or "filename" not in result:
+        logger.error("[prepare_captcha] CAPTCHA生成結果が不正またはファイル名なし")
+        return jsonify({"error": "CAPTCHA画像の取得に失敗しました"}), 500
+
+    image_filename = result["filename"]
     captcha_url = url_for("static", filename=f"captchas/{image_filename}", _external=True)
 
-
-    # セッション保存
+    # ✅ セッション保存
     session["captcha_email"] = email
     session["captcha_nickname"] = nickname
     session["captcha_password"] = password
     session["captcha_token"] = token
     session["captcha_site_id"] = site_id
     session["captcha_blog"] = blog
-    session["captcha_image_filename"] = image_filename  # ✅ NEW: 学習用保存に必要
+    session["captcha_image_filename"] = image_filename  # ✅ CAPTCHA学習にも使えるように保存
 
     return jsonify({"captcha_url": captcha_url})
 
