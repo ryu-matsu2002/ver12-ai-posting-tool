@@ -6,22 +6,22 @@
   🚀 外部SEO | サイト一覧
 
   <!-- ✅ flashメッセージ表示 -->
-{% with messages = get_flashed_messages(with_categories=true) %}
-  {% if messages %}
-    <div class="mb-4 space-y-2">
-      {% for category, message in messages %}
-        <div class="px-4 py-2 rounded text-white
-                    {% if category == 'success' %} bg-green-600
-                    {% elif category == 'danger' %} bg-red-600
-                    {% elif category == 'warning' %} bg-yellow-500 text-black
-                    {% else %} bg-gray-600
-                    {% endif %}">
-          {{ message }}
-        </div>
-      {% endfor %}
-    </div>
-  {% endif %}
-{% endwith %}
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="mb-4 space-y-2">
+        {% for category, message in messages %}
+          <div class="px-4 py-2 rounded text-white
+                      {% if category == 'success' %} bg-green-600
+                      {% elif category == 'danger' %} bg-red-600
+                      {% elif category == 'warning' %} bg-yellow-500 text-black
+                      {% else %} bg-gray-600
+                      {% endif %}">
+            {{ message }}
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
 
   <a href="{{ url_for('main.my_blog_accounts') }}"
      class="text-sm px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded">
@@ -46,29 +46,29 @@
         {% include "_job_progress.html" %}
       {% endfor %}
     </div>
-
-
   </div>
 {% endfor %}
+
 <!-- ✅ CAPTCHA入力モーダル -->
 <div id="captchaModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
   <div class="bg-white p-6 rounded-xl shadow-lg w-96 relative">
     <button onclick="closeCaptcha()" class="absolute top-2 right-2 text-gray-500 hover:text-gray-800">×</button>
     <h2 class="text-xl font-bold mb-4">CAPTCHA認証</h2>
     <img id="captchaImage" src="" alt="CAPTCHA画像" class="border mb-4 w-full h-auto">
-    <form method="POST" action="/submit_captcha">
+    <form id="captchaForm" onsubmit="submitCaptcha(event)">
       <input type="text" name="captcha_text" placeholder="画像の文字を入力" class="w-full border p-2 mb-4" required>
       <button type="submit" class="w-full bg-blue-600 text-white py-2 rounded">送信</button>
     </form>
   </div>
 </div>
-
-
 {% endblock %}
 
 {% block scripts %}
 <script>
   function openCaptchaModal(siteId, blogType) {
+    sessionStorage.setItem("currentSiteId", siteId);
+    sessionStorage.setItem("currentBlog", blogType);
+
     const data = new URLSearchParams();
     data.append("site_id", siteId);
     data.append("blog", blogType);
@@ -98,11 +98,55 @@
     document.getElementById("captchaModal").classList.add("hidden");
   }
 
-  // ✅ これを追加（グローバル定義が必要）
   function handleCaptchaClick(button) {
     const siteId = button.getAttribute("data-site-id");
-    const blog   = button.getAttribute("data-blog");
+    const blog = button.getAttribute("data-blog");
     openCaptchaModal(siteId, blog);
+  }
+
+  function submitCaptcha(event) {
+    event.preventDefault();
+
+    const form = document.getElementById("captchaForm");
+    const formData = new FormData(form);
+    const captchaText = formData.get("captcha_text");
+
+    fetch("/submit_captcha", {
+      method: "POST",
+      body: new URLSearchParams({ "captcha_text": captchaText })
+    })
+    .then(res => res.json())
+    .then(data => {
+      closeCaptcha();
+
+      const siteId = sessionStorage.getItem("currentSiteId");
+      const blog = sessionStorage.getItem("currentBlog");
+      const btn = document.querySelector(`button[data-site-id="${siteId}"][data-blog="${blog}"]`);
+
+      if (data.status === "captcha_failed") {
+        if (btn) {
+          btn.innerText = "❌ 再挑戦";
+          btn.disabled = false;
+          btn.classList.remove("bg-green-600");
+          btn.classList.add("bg-red-600");
+        }
+        alert("CAPTCHA突破に失敗しました。再度お試しください。");
+      } else if (data.status === "captcha_success") {
+        if (btn) {
+          btn.innerText = "✅ 実行済み";
+          btn.disabled = true;
+          btn.classList.remove("bg-green-600");
+          btn.classList.add("bg-green-500");
+        }
+        alert("CAPTCHA突破成功。仮登録メールを送信しました！");
+      } else {
+        alert("予期しない応答が返されました");
+      }
+    })
+    .catch(err => {
+      alert("CAPTCHA送信中にエラーが発生しました");
+      console.error(err);
+    });
   }
 </script>
 {% endblock %}

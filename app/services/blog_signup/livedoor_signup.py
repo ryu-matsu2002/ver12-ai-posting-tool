@@ -231,7 +231,13 @@ async def run_livedoor_signup(site, email, token, nickname, password, captcha_te
                 Path(error_html).write_text(html, encoding="utf-8")
                 await page.screenshot(path=error_png)
                 logger.error(f"[LD-Signup] CAPTCHA失敗 ➜ HTML: {error_html}, PNG: {error_png}")
-                raise RuntimeError("CAPTCHA突破失敗")
+    
+                return {
+                    "status": "captcha_failed",
+                    "error": "CAPTCHA突破失敗",
+                    "html_path": error_html,
+                    "png_path": error_png
+                }
 
             
             logger.info("[LD-Signup] CAPTCHA突破成功")

@@ -3828,7 +3828,7 @@ def submit_captcha():
     from app.utils.captcha_dataset_utils import save_captcha_label_pair
     import asyncio
     import logging
-    from flask import flash
+    from flask import jsonify, session, request
 
     captcha_text   = request.form.get("captcha_text")
     image_filename = session.get("captcha_image_filename")
@@ -3843,34 +3843,34 @@ def submit_captcha():
     site_id  = session.get("captcha_site_id")
     blog     = session.get("captcha_blog")
 
+    # ✅ セッション不足チェック
     if not all([email, nickname, password, token, site_id, blog]):
-        flash("セッション情報が不足しています。再度やり直してください。", "warning")
-        return redirect(url_for("main.external_seo_index"))
+        return jsonify({"status": "error", "message": "セッション情報が不足しています"}), 400
 
     site = Site.query.get(site_id)
     if not site:
-        flash("対象のサイトが見つかりません。", "warning")
-        return redirect(url_for("main.external_seo_index"))
+        return jsonify({"status": "error", "message": "対象サイトが存在しません"}), 404
 
     try:
         result = asyncio.run(run_livedoor_signup(site, email, token, nickname, password, captcha_text))
 
-        # ✅ CAPTCHA成功フラグに応じて表示変更
-        if result.get("captcha_success"):
-            flash("✅ CAPTCHA突破に成功し、仮登録メールを送信しました！", "success")
-        else:
-            flash("⚠ CAPTCHA突破の成否が不明です。手動でご確認ください。", "warning")
+        if result.get("status") == "captcha_failed":
+            logging.warning(f"[submit_captcha] CAPTCHA失敗: {result.get('html_path')}, {result.get('png_path')}")
+            return jsonify({"status": "captcha_failed", "message": "CAPTCHAが正しくありません"}), 200
 
-        # ✅ 必要に応じて session に保存も可能（例: blog_id, api_key）
-        session["external_blog_info"] = result
+        elif result.get("captcha_success"):
+            # 任意で session に保持
+            session["external_blog_info"] = result
+            return jsonify({"status": "captcha_success"}), 200
+
+        else:
+            return jsonify({"status": "unknown", "message": "CAPTCHAの結果が不明です"}), 200
 
     except Exception as e:
-        logging.exception("[submit_captcha] CAPTCHA突破中にエラー")
-        flash("❌ CAPTCHA突破に失敗しました。もう一度お試しください。", "danger")
+        logging.exception("[submit_captcha] CAPTCHA突破中に予期せぬエラー")
+        return jsonify({"status": "error", "message": "サーバーエラーが発生しました"}), 500
 
     finally:
         for key in list(session.keys()):
             if key.startswith("captcha_"):
                 session.pop(key)
-
-    return redirect(url_for("main.external_seo_sites"))
