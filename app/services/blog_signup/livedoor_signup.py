@@ -107,6 +107,7 @@ async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> 
     → CAPTCHA突破AIの学習データにも利用可能な構成
     """
     from playwright.async_api import async_playwright
+    import base64
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -114,7 +115,6 @@ async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> 
 
         await page.goto("https://member.livedoor.com/register/input")
 
-        # 入力フォームを最低限埋める
         await page.fill('input[name="livedoor_id"]', nickname)
         await page.fill('input[name="password"]', password)
         await page.fill('input[name="password2"]', password)
@@ -123,26 +123,30 @@ async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> 
 
         # CAPTCHA画像の表示を待機
         await page.wait_for_selector("#captcha-img", timeout=10000)
-        captcha_element = await page.query_selector("#captcha-img")
 
-        # CAPTCHA画像を保存（ファイル名を記録）
+        # ✅ JavaScriptからdataURL(base64)を取得
+        data_url = await page.eval_on_selector("#captcha-img", "el => el.src")
+
+        if not data_url.startswith("data:image/png;base64,"):
+            raise RuntimeError("CAPTCHA画像の取得に失敗しました")
+
+        base64_data = data_url.split(",", 1)[1]
+        image_bytes = base64.b64decode(base64_data)
+
+        # 保存先パスを作成
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"captcha_{nickname}_{timestamp}.png"
         filepath = CAPTCHA_SAVE_DIR / filename
 
-        image_bytes = await captcha_element.screenshot()
-        # ✅ ファイルを安全に保存（flush + fsync を使う）
         with open(filepath, "wb") as f:
             f.write(image_bytes)
             f.flush()
-            os.fsync(f.fileno())  # ← 必ずファイルに書き込む
+            os.fsync(f.fileno())
 
         await browser.close()
 
-        # ✅ URLとファイル名の両方を返却（後続でセッションや学習保存に利用）
-        # prepare_livedoor_captcha の戻り値を変更
         return {
-            "filename": filename  # URLはFlask側で作成
+            "filename": filename
         }
 
 # ──────────────────────────────────────────────
