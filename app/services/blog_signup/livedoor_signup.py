@@ -208,11 +208,12 @@ async def run_livedoor_signup(site, email, token, nickname, password, captcha_te
 
 
             
-            if captcha_text:
-                logger.info(f"[LD-Signup] CAPTCHA手入力: {captcha_text}")
+            if captcha_text:            
+                captcha_text = captcha_text.replace(" ", "").replace("　", "")  # 半角・全角スペースを除去
+                logger.info(f"[LD-Signup] CAPTCHA手入力（整形後）: {captcha_text}")
             else:
-                captcha_text = solve(captcha_bytes)
-                logger.info(f"[LD-Signup] CAPTCHA自動推論: {captcha_text}")
+                captcha_text = solve(captcha_bytes).replace(" ", "").replace("　", "")  # 自動推論も整形
+                logger.info(f"[LD-Signup] CAPTCHA自動推論（整形後）: {captcha_text}")
 
             await page.fill("#captcha", captcha_text)
 
