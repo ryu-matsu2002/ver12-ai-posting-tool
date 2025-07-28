@@ -23,6 +23,7 @@ from app.services.blog_signup.crypto_utils import encrypt
 from app.services.captcha_solver import solve
 
 from playwright.async_api import async_playwright
+from flask import current_app
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +101,6 @@ async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> 
     import base64, os, asyncio  # asyncioを追加
     from pathlib import Path
     import logging
-
     
 
     CAPTCHA_SAVE_DIR = Path(current_app.root_path) / "static" / "captchas"
@@ -195,18 +195,26 @@ async def run_livedoor_signup(site, email, token, nickname, password, captcha_te
                 logger.error(f"[LD-Signup] CAPTCHA画像の表示に失敗 ➜ HTML: {html_path}, PNG: {img_path}")
                 raise RuntimeError("CAPTCHA画像の表示に失敗（#captcha-img が見つかりません）")
 
+            # CAPTCHA画像保存処理（修正後）
             captcha_element = await page.wait_for_selector("#captcha-img")
-            CAPTCHA_SAVE_DIR = Path("static/captchas")
+
+            # ✅ Web公開される場所に保存する：app/static/captchas/
+            CAPTCHA_SAVE_DIR = Path(current_app.root_path) / "static" / "captchas"
             CAPTCHA_SAVE_DIR.mkdir(parents=True, exist_ok=True)
             filename = f"captcha_{nickname}_{timestamp}.png"
             captcha_path = CAPTCHA_SAVE_DIR / filename
-            captcha_bytes = await captcha_element.screenshot()  # ✅ ← 追加！
+            captcha_bytes = await captcha_element.screenshot()
 
-            with open(captcha_path, "wb") as f:
-                f.write(captcha_bytes)
+            try:
+                with open(captcha_path, "wb") as f:
+                    f.write(captcha_bytes)
 
-            logger.info(f"[LD-Signup] CAPTCHA画像保存: {captcha_path}")
-
+                # ✅ Webアクセス可能なパスもログ出力
+                web_path = f"/static/captchas/{filename}"
+                logger.info(f"[LD-Signup] CAPTCHA画像保存: {web_path}")
+            except Exception as e:
+                logger.error(f"[LD-Signup] CAPTCHA画像保存失敗: {e}")
+                raise
 
             
             # ✅ 変更後（手動入力が必須になる）：
