@@ -1,0 +1,163 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns="http://www.w3.org/1999/xhtml" xml:lang="ja" lang="ja"><head>
+	<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+	<title>livedoor - ユーザー登録</title>
+	<meta name="keywords" content="livedoor">
+	<meta name="description" content="livedoorへようこそ">
+	<meta http-equiv="Content-Style-Type" content="text/css">
+	<meta http-equiv="Content-Script-Type" content="text/javascript">
+	<meta name="verify-v1" content="1bivxaxGrLBSoWSu7qAOa0M36HWHyewW+8YqCFDlBZQ=">
+	<link rel="stylesheet" type="text/css" href="/common/css/login/login.css">
+	<link rel="stylesheet" type="text/css" href="/common/css/register/register.css">
+	<script type="text/javascript" src="/common/js/homepage.js"></script>
+	<script type="text/javascript" src="/common/js/jquery-1.6.2.min.js"></script>
+    
+
+</head>
+
+<body>
+<div id="headerWrapper" class="header wrapper">
+<div id="contentHeader" class="header wrapper">
+	<ul id="logo">
+	<li><a href="https://www.livedoor.com/" title="livedoor トップページ"><img src="/common/img/login/01/livedoor.gif?20230601" width="95" height="31" alt="livedoor"></a></li>
+	</ul>
+	<ul>
+	<li><a href="/info/" title="登録情報">登録情報</a></li>
+	<li><a href="https://support.livedoor.info/hc/ja/categories/9080945144719" title="ヘルプページ">ヘルプ</a></li>
+	<li><a href="https://www.livedoor.com/" title="livedoor トップページ">livedoor</a></li>
+	</ul>
+</div>
+
+</div>
+
+
+
+<script type="text/javascript" src="/common/js/localizer.js"></script>
+<script type="text/javascript" src="/common/js/locale/ja.js"></script>
+<script type="text/javascript" src="/common/js/register.js"></script>
+<script type="text/javascript">
+<!--
+$(document).ready(function() {
+    var register = new Register();
+    register.setupRegister();
+});
+//-->
+</script>
+
+<div id="mainContent" class="clearfix">
+
+
+<div class="registerbox clearfix">
+	<div class="registerbox_head"></div>
+	<div class="registerbox_body">
+	<p class="read">livedoor ユーザーの登録(無料)</p>
+	</div>
+	<div class="registerbox_foot"></div>
+</div>
+
+
+<div class="registerbox clearfix">
+	<div class="registerbox_head"></div>
+	<div class="registerbox_body clearfix">
+<form method="post" action="input" name="signupForm"><input type="hidden" name="_token" value="P7Ua33n3" style="">
+<div class="guidebox">
+
+
+
+
+</div>
+
+<input type="hidden" name=".sv" value="" style="">
+<input type="hidden" name="code" value="" style="">
+<input type="hidden" name="optin" value="0" style="">
+<table border="0" cellpadding="0" cellspacing="0" width="655" class="registerFormbox" style="border-top:none;">
+<tbody><tr>
+    <th valign="top"><label for="livedoor_id" class="iconon">livedoor ID</label></th>
+    <td colspan="2">
+    <input type="text" name="livedoor_id" value="" class="livedoorid" id="livedoor_id" tabindex="1" style="">
+    <span id="livedoor_id_msg" class="error"></span>
+    <span id="is_available" style="color: #00c;">取得可能です</span>
+    
+    <p class="attention">3〜20文字の半角英数字及びアンダーバー(_)<br>livedoor IDはブログのURLなどで使用されます(例：IDがstaffの場合 http://blog.livedoor.jp/staff/ など）</p>
+    <!-- <p class="attention">3〜20文字で入力してください。使用できる文字は、半角英字（小文字）・半角数字・アンダーバー(_)です。先頭は半角英字（小文字）を使用してください。<br />例) abc123、door555xyz</p> -->
+    </td>
+</tr>
+<tr>
+    <th valign="top"><label for="password" class="iconon">パスワード</label></th>
+    <td><input type="password" name="password" value="" class="pw" id="password" tabindex="2" style="">
+    <span id="password_msg" class="error"></span>
+  <!-- <p class="attention">8〜12文字で入力してください。使用できる文字は、半角英字（大文字および小文字）・半角数字・記号（「-」「_」「%」「$」「#」のみ）です。livedoor IDと同じものは使用できません。</p> -->
+    <p class="attention">8文字以上の半角英数字及び記号（「-」「_」「%」「$」「#」のみ）</p>
+    <input type="checkbox" name="show-password" class="show-password" value="1" id="show-password" style=""><label for="show-password">パスワードの入力内容を確認して入力する</label></td>
+</tr>
+
+<tr>
+    <th valign="top"><label for="password2" class="iconon">パスワード(確認) </label></th>
+    <td><input type="password" name="password2" value="" class="pw" id="password2" tabindex="3" style="">
+    <span id="password2_msg" class="error"></span>
+    <p class="attention">確認のため、再度パスワードの入力をお願いします。</p></td>
+</tr>
+
+<tr>
+    <th valign="top"><label for="email" class="iconon">メールアドレス</label></th>
+    <td><input type="text" name="email" value="" class="email" id="email" tabindex="4" style="">
+        <span id="email_msg" class="error"></span></td>
+</tr>
+
+
+</tbody></table>
+
+<div id="captcha-wrapper" style="position: absolute; display: block; top: 230px; left: 280px;">
+  <div id="close-button">×</div>
+  <div class="subtitlebox"><h2>不正取得防止のため、画像認証</h2></div>
+  <table border="0" cellpadding="0" cellspacing="0" width="655" class="registerFormbox">
+    <tbody><tr>
+      <th valign="top" class="nobr"><span class="iconoff">画像コード</span></th>
+      <td class="nobr"><img src="/register/captcha?t=1753618029524" alt="" id="captcha-img" class="captcha"><br><a style="font-size: 9px" href="#" id="captcha-reset">読みにくい場合はこちらをクリックして画像コードを変更します</a></td>
+    </tr>
+    <tr>
+      <th valign="top"><label for="captcha" class="iconon">画像コードの入力</label></th>
+      <td><input type="text" name="captcha" size="7" id="captcha" maxlength="5" style=""><br>
+      <p class="attention">上記に表示されている、少し見えにくい文字をひらがなで入力してください。</p>
+      <div id="captcha_msg" class="error">「画像コード」が一致しません</div>
+      </td>
+    </tr>
+  </tbody></table>
+  <div class="submitbox" style="display: block;"><input id="commit-button" type="submit" value="完了" style=""></div>
+</div>
+
+<div class="rulecheckbox">
+	<p>	上記のユーザー情報を登録することにより、利用規約及びプライバシーポリシーに同意されたこととなりますので、ご承諾の上、登録してください。<br>
+	  なお、ご登録のユーザー情報はサービスのご案内、プレゼントの送付などに利用します。<br>
+  ユーザーの同意なく株式会社ライブドア、および、パートナー企業以外に開示・提供は致しません。</p>
+  <ul>
+  <li><a href="https://www.livedoor.com/rules/" target="_blank">利用規約</a></li>
+    <li><a href="https://www.livedoor.com/privacy/" target="_blank">プライバシーポリシー</a></li>
+  </ul>
+</div>
+
+<div id="modal-background" style="width: 1280px; height: 787px; display: block;"></div>
+
+<div class="submitbox"><input type="submit" value="ユーザー情報を登録" tabindex="6" style=""></div>
+</form>
+	</div>
+	<div class="registerbox_foot"></div>
+</div>
+
+
+
+</div>
+
+<div id="footer" class="clearfix">
+<ul>
+<li><a href="https://www.livedoor.com/">livedoorトップ</a></li>
+<li><a href="https://www.livedoor.com/rules/">利用規約</a></li>
+<li><a href="https://www.livedoor.com/privacy/">プライバシーポリシー</a></li>
+</ul>
+
+<p>© livedoor</p>
+</div>
+
+
+
+
+</body></html>

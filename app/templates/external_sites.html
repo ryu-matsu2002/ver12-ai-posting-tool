@@ -72,7 +72,6 @@
     const data = new URLSearchParams();
     data.append("site_id", siteId);
     data.append("blog", blogType);
-    data.append("email", "test@example.com");
 
     fetch("/prepare_captcha", {
       method: "POST",
@@ -107,6 +106,17 @@
   function submitCaptcha(event) {
     event.preventDefault();
 
+    const siteId = sessionStorage.getItem("currentSiteId");
+    const blog = sessionStorage.getItem("currentBlog");
+    const btn = document.querySelector(`button[data-site-id="${siteId}"][data-blog="${blog}"]`);
+    if (btn) {
+      btn.innerText = "⏳ 登録中…";
+      btn.disabled = true;
+      btn.classList.remove("bg-green-600", "bg-red-600");
+      btn.classList.add("bg-gray-500");
+    }
+
+
     const form = document.getElementById("captchaForm");
     const formData = new FormData(form);
     const captchaText = formData.get("captcha_text");
@@ -139,6 +149,10 @@
           btn.classList.add("bg-green-500");
         }
         alert("CAPTCHA突破成功。仮登録メールを送信しました！");
+        setTimeout(() => {
+          window.location.href = "{{ url_for('main.my_blog_accounts') }}";
+        }, 1500);
+
       } else {
         alert("予期しない応答が返されました");
       }

@@ -283,6 +283,27 @@ async def run_livedoor_signup(site, email, token, nickname, password, captcha_te
             await page.screenshot(path=success_png)
             logger.info(f"[LD-Signup] 成功スクリーンショット保存: {success_html}, {success_png}")
 
+            # ✅ DB保存処理（次にあなたにコードを送っていただきます）
+            from app.models import ExternalBlogAccount
+            from app.services.blog_signup.crypto_utils import encrypt
+            from app import db
+            from app.enums import BlogType
+
+            account = ExternalBlogAccount(
+                site_id=site.id,
+                blog_type=BlogType.LIVEDOOR,
+                email=email,
+                username=blog_id,
+                password=password,
+                nickname=nickname,
+                livedoor_blog_id=blog_id,
+                atompub_key_enc=encrypt(api_key),
+            )
+            db.session.add(account)
+            db.session.commit()
+            logger.info(f"[LD-Signup] アカウントをDBに保存しました（id={account.id}）")
+
+
             return {
                 "blog_id": blog_id,
                 "api_key": api_key,
