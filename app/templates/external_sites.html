@@ -75,14 +75,19 @@
 
     fetch("/prepare_captcha", {
       method: "POST",
-      headers: {"Content-Type": "application/x-www-form-urlencoded"},
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: data
     })
     .then(response => response.json())
     .then(data => {
       if (data.captcha_url) {
-        document.getElementById("captchaImage").src = data.captcha_url;
+        const img = document.getElementById("captchaImage");
+        img.src = data.captcha_url + "?t=" + new Date().getTime();  // ✅ キャッシュ回避
         document.getElementById("captchaModal").classList.remove("hidden");
+
+        // モーダル開いたタイミングでフォーム初期化
+        const form = document.getElementById("captchaForm");
+        form.reset();
       } else {
         alert("CAPTCHA画像の取得に失敗しました");
       }
@@ -100,6 +105,13 @@
   function handleCaptchaClick(button) {
     const siteId = button.getAttribute("data-site-id");
     const blog = button.getAttribute("data-blog");
+
+    // ボタン状態変更：開始 → 登録中
+    button.disabled = true;
+    button.innerText = "📷 CAPTCHA取得中…";
+    button.classList.remove("bg-green-600", "bg-red-600");
+    button.classList.add("bg-gray-500");
+
     openCaptchaModal(siteId, blog);
   }
 
@@ -109,13 +121,13 @@
     const siteId = sessionStorage.getItem("currentSiteId");
     const blog = sessionStorage.getItem("currentBlog");
     const btn = document.querySelector(`button[data-site-id="${siteId}"][data-blog="${blog}"]`);
+
     if (btn) {
       btn.innerText = "⏳ 登録中…";
       btn.disabled = true;
       btn.classList.remove("bg-green-600", "bg-red-600");
       btn.classList.add("bg-gray-500");
     }
-
 
     const form = document.getElementById("captchaForm");
     const formData = new FormData(form);
@@ -129,15 +141,13 @@
     .then(data => {
       closeCaptcha();
 
-      const siteId = sessionStorage.getItem("currentSiteId");
-      const blog = sessionStorage.getItem("currentBlog");
       const btn = document.querySelector(`button[data-site-id="${siteId}"][data-blog="${blog}"]`);
 
       if (data.status === "captcha_failed") {
         if (btn) {
           btn.innerText = "❌ 再挑戦";
           btn.disabled = false;
-          btn.classList.remove("bg-green-600");
+          btn.classList.remove("bg-gray-500");
           btn.classList.add("bg-red-600");
         }
         alert("CAPTCHA突破に失敗しました。再度お試しください。");
@@ -145,21 +155,34 @@
         if (btn) {
           btn.innerText = "✅ 実行済み";
           btn.disabled = true;
-          btn.classList.remove("bg-green-600");
+          btn.classList.remove("bg-gray-500", "bg-red-600");
           btn.classList.add("bg-green-500");
         }
         alert("CAPTCHA突破成功。仮登録メールを送信しました！");
         setTimeout(() => {
           window.location.href = "{{ url_for('main.my_blog_accounts') }}";
         }, 1500);
-
       } else {
+        if (btn) {
+          btn.innerText = "⚠ 不明な応答";
+          btn.disabled = false;
+          btn.classList.remove("bg-gray-500");
+          btn.classList.add("bg-yellow-500", "text-black");
+        }
         alert("予期しない応答が返されました");
       }
     })
     .catch(err => {
       alert("CAPTCHA送信中にエラーが発生しました");
       console.error(err);
+
+      const btn = document.querySelector(`button[data-site-id="${siteId}"][data-blog="${blog}"]`);
+      if (btn) {
+        btn.innerText = "❌ 再挑戦";
+        btn.disabled = false;
+        btn.classList.remove("bg-gray-500");
+        btn.classList.add("bg-red-600");
+      }
     });
   }
 </script>

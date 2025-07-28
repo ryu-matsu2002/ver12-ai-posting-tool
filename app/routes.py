@@ -3788,6 +3788,7 @@ def prepare_captcha():
     import asyncio
     import logging
     from pathlib import Path
+    import time  # ✅ 追加
 
     site_id = request.form.get("site_id", type=int)
     blog = request.form.get("blog")  # 例: livedoor
@@ -3835,7 +3836,9 @@ def prepare_captcha():
         logger.error("[prepare_captcha] CAPTCHA画像ファイルが存在しないか空です: %s", image_filename)
         return jsonify({"error": "CAPTCHA画像の保存に失敗しました"}), 500
 
-    captcha_url = url_for("static", filename=f"captchas/{image_filename}", _external=True)
+    # ✅ キャッシュバスター（timestamp）付きURL
+    timestamp = int(time.time())
+    captcha_url = url_for("static", filename=f"captchas/{image_filename}", _external=True) + f"?v={timestamp}"
 
     # ✅ セッションに一連の登録情報を保存
     try:
