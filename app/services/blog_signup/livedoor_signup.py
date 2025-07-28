@@ -97,8 +97,11 @@ async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> 
     from playwright.async_api import async_playwright
     from flask import current_app
     from datetime import datetime
-    import base64, os
+    import base64, os, asyncio  # asyncioを追加
     from pathlib import Path
+    import logging
+
+    
 
     CAPTCHA_SAVE_DIR = Path(current_app.root_path) / "static" / "captchas"
     CAPTCHA_SAVE_DIR.mkdir(parents=True, exist_ok=True)
@@ -113,10 +116,15 @@ async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> 
         await page.fill('input[name="password"]', password)
         await page.fill('input[name="password2"]', password)
         await page.fill('input[name="email"]', email)
+
+        # ✅ 「ユーザー情報を登録」ボタンクリック → CAPTCHA表示ポップアップ出現
         await page.click('input[value="ユーザー情報を登録"]')
 
-        # CAPTCHA表示を待つ
-        await page.wait_for_selector("#captcha-img", timeout=10000)
+        # ✅ CAPTCHA画像ポップアップの表示を確実に待機（旧 #captcha-img 要素がvisibleになるまで）
+        await page.wait_for_selector("#captcha-img", state="visible", timeout=10000)
+
+        # ✅ 少し待ってからスクリーンショット（画像が切り替わることがあるため）
+        await asyncio.sleep(0.5)
 
         # ファイル名生成
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -124,15 +132,19 @@ async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> 
         filepath = CAPTCHA_SAVE_DIR / filename
 
         try:
-            # ✅ CAPTCHA画像要素のスクリーンショットとして保存（URL形式でもOK）
+            # ✅ CAPTCHA画像要素のスクリーンショットとして保存
             captcha_element = page.locator("#captcha-img")
             await captcha_element.screenshot(path=str(filepath))
+
+            logger.info(f"[LD-Signup] CAPTCHA画像保存完了: {filepath}")
         except Exception as e:
             await browser.close()
+            logger.error("[LD-Signup] CAPTCHA画像の取得に失敗しました", exc_info=True)
             raise RuntimeError("CAPTCHA画像の取得に失敗しました") from e
 
         await browser.close()
         return {"filename": filename}
+
 
 # ──────────────────────────────────────────────
 # ✅ CAPTCHA突破 + スクリーンショット付きサインアップ処理
