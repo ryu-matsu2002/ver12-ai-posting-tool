@@ -3866,7 +3866,8 @@ def submit_captcha():
     from app.utils.captcha_dataset_utils import save_captcha_label_pair
     import asyncio
     import logging
-    from flask import jsonify, session, request
+    from flask import jsonify, session, request, current_app  # ✅ 修正ポイント
+    from pathlib import Path  # ✅ 修正ポイント
 
     logger = logging.getLogger(__name__)
 
@@ -3886,6 +3887,9 @@ def submit_captcha():
     site_id  = session.get("captcha_site_id")
     blog     = session.get("captcha_blog")
 
+    # ✅ 修正ポイント: CAPTCHA画像の絶対パスを構築
+    captcha_image_path = Path(current_app.root_path) / "static" / "captchas" / image_filename
+
     # ✅ セッション不足チェック
     if not all([email, nickname, password, token, site_id, blog]):
         return jsonify({"status": "error", "message": "セッション情報が不足しています"}), 400
@@ -3902,17 +3906,26 @@ def submit_captcha():
                 import nest_asyncio
                 nest_asyncio.apply()
                 result = loop.run_until_complete(
-                    run_livedoor_signup(site, email, token, nickname, password, captcha_text)
+                    run_livedoor_signup(
+                        site, email, token, nickname, password, captcha_text,
+                        captcha_image_path=str(captcha_image_path)  # ✅ 修正ポイント: 画像パスを渡す
+                    )
                 )
             else:
                 result = loop.run_until_complete(
-                    run_livedoor_signup(site, email, token, nickname, password, captcha_text)
+                    run_livedoor_signup(
+                        site, email, token, nickname, password, captcha_text,
+                        captcha_image_path=str(captcha_image_path)  # ✅ 修正ポイント: 画像パスを渡す
+                    )
                 )
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             result = loop.run_until_complete(
-                run_livedoor_signup(site, email, token, nickname, password, captcha_text)
+                run_livedoor_signup(
+                    site, email, token, nickname, password, captcha_text,
+                    captcha_image_path=str(captcha_image_path)  # ✅ 修正ポイント: 画像パスを渡す
+                )
             )
 
         if result.get("status") == "captcha_failed":

@@ -93,15 +93,13 @@ def signup(site, email_seed: str = "ld"):
 # ──────────────────────────────────────────────
 async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> dict:
     """
-    CAPTCHA画像を取得して保存し、ファイル名を返す（dataURL形式でもURL形式でも対応）
+    CAPTCHA画像を取得して保存し、ファイル名・Webパス・絶対パスを返す
     """
     from playwright.async_api import async_playwright
     from flask import current_app
     from datetime import datetime
-    import base64, os, asyncio  # asyncioを追加
+    import asyncio
     from pathlib import Path
-    import logging
-    
 
     CAPTCHA_SAVE_DIR = Path(current_app.root_path) / "static" / "captchas"
     CAPTCHA_SAVE_DIR.mkdir(parents=True, exist_ok=True)
@@ -117,25 +115,17 @@ async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> 
         await page.fill('input[name="password2"]', password)
         await page.fill('input[name="email"]', email)
 
-        # ✅ 「ユーザー情報を登録」ボタンクリック → CAPTCHA表示ポップアップ出現
         await page.click('input[value="ユーザー情報を登録"]')
-
-        # ✅ CAPTCHA画像ポップアップの表示を確実に待機（旧 #captcha-img 要素がvisibleになるまで）
         await page.wait_for_selector("#captcha-img", state="visible", timeout=10000)
-
-        # ✅ 少し待ってからスクリーンショット（画像が切り替わることがあるため）
         await asyncio.sleep(0.5)
 
-        # ファイル名生成
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"captcha_{nickname}_{timestamp}.png"
         filepath = CAPTCHA_SAVE_DIR / filename
 
         try:
-            # ✅ CAPTCHA画像要素のスクリーンショットとして保存
             captcha_element = page.locator("#captcha-img")
             await captcha_element.screenshot(path=str(filepath))
-
             logger.info(f"[LD-Signup] CAPTCHA画像保存完了: {filepath}")
         except Exception as e:
             await browser.close()
@@ -143,13 +133,21 @@ async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> 
             raise RuntimeError("CAPTCHA画像の取得に失敗しました") from e
 
         await browser.close()
-        return {"filename": filename}
+
+        return {
+            "filename": filename,
+            "web_path": f"/static/captchas/{filename}",
+            "abs_path": str(filepath)
+        }
 
 
 # ──────────────────────────────────────────────
 # ✅ CAPTCHA突破 + スクリーンショット付きサインアップ処理
 # ──────────────────────────────────────────────
-async def run_livedoor_signup(site, email, token, nickname, password, captcha_text: str | None = None, job_id=None):
+async def run_livedoor_signup(site, email, token, nickname, password,
+                              captcha_text: str | None = None,
+                              job_id=None,
+                              captcha_image_path: str | None = None):
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
@@ -158,16 +156,7 @@ async def run_livedoor_signup(site, email, token, nickname, password, captcha_te
 
         try:
             await page.goto("https://member.livedoor.com/register/input")
-            try:
-                await page.wait_for_selector('input[name="livedoor_id"]', timeout=10000)
-            except Exception as e:
-                html_path = f"/tmp/ld_wait_fail_{timestamp}.html"
-                png_path = f"/tmp/ld_wait_fail_{timestamp}.png"
-                html = await page.content()
-                Path(html_path).write_text(html, encoding="utf-8")
-                await page.screenshot(path=png_path)
-                logger.error(f"[LD-Signup] ID入力欄の表示待機に失敗 ➜ HTML: {html_path}, Screenshot: {png_path}")
-                raise RuntimeError("ID入力欄の読み込みに失敗（タイムアウト）") from e
+            await page.wait_for_selector('input[name="livedoor_id"]', timeout=10000)
 
             logger.info(f"[LD-Signup] 入力: id = {nickname}")
             await page.fill('input[name="livedoor_id"]', nickname)
@@ -181,50 +170,20 @@ async def run_livedoor_signup(site, email, token, nickname, password, captcha_te
             logger.info("[LD-Signup] ユーザー情報を登録ボタンをクリック")
             await page.click('input[value="ユーザー情報を登録"]')
 
-            # ✅ CAPTCHAページ検出
-            try:
-                # CAPTCHA画像が表示されるまで待つ（10秒）
-                await page.wait_for_selector("#captcha-img", timeout=10000)
-            except Exception as e:
-                html = await page.content()
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                html_path = f"/tmp/ld_captcha_fail_{timestamp}.html"
-                img_path = f"/tmp/ld_captcha_fail_{timestamp}.png"
-                Path(html_path).write_text(html, encoding="utf-8")
-                await page.screenshot(path=img_path)
-                logger.error(f"[LD-Signup] CAPTCHA画像の表示に失敗 ➜ HTML: {html_path}, PNG: {img_path}")
-                raise RuntimeError("CAPTCHA画像の表示に失敗（#captcha-img が見つかりません）")
+            await page.wait_for_selector("#captcha-img", timeout=10000)
 
-            # CAPTCHA画像保存処理（修正後）
-            captcha_element = await page.wait_for_selector("#captcha-img")
+            # ✅ 修正点：再取得せず既存画像を利用
+            if not captcha_image_path or not Path(captcha_image_path).exists():
+                raise RuntimeError("CAPTCHA画像ファイルが見つかりません（画像固定モード）")
 
-            # ✅ Web公開される場所に保存する：app/static/captchas/
-            CAPTCHA_SAVE_DIR = Path(current_app.root_path) / "static" / "captchas"
-            CAPTCHA_SAVE_DIR.mkdir(parents=True, exist_ok=True)
-            filename = f"captcha_{nickname}_{timestamp}.png"
-            captcha_path = CAPTCHA_SAVE_DIR / filename
-            captcha_bytes = await captcha_element.screenshot()
+            logger.info(f"[LD-Signup] CAPTCHA画像を再取得せず、固定パスを使用: {captcha_image_path}")
 
-            try:
-                with open(captcha_path, "wb") as f:
-                    f.write(captcha_bytes)
-
-                # ✅ Webアクセス可能なパスもログ出力
-                web_path = f"/static/captchas/{filename}"
-                logger.info(f"[LD-Signup] CAPTCHA画像保存: {web_path}")
-            except Exception as e:
-                logger.error(f"[LD-Signup] CAPTCHA画像保存失敗: {e}")
-                raise
-
-            
-            # ✅ 変更後（手動入力が必須になる）：
             if not captcha_text:
-                raise RuntimeError("CAPTCHAが手動入力されていません（手動突破モードでは必須）")
+                raise RuntimeError("CAPTCHAが手動入力されていません（必須）")
+
             captcha_text = captcha_text.replace(" ", "").replace("　", "")
             logger.info(f"[LD-Signup] CAPTCHA手入力（整形後）: {captcha_text}")
-
             await page.fill("#captcha", captcha_text)
-
 
             logger.info("[LD-Signup] 完了ボタンをクリック")
             await page.click('input[id="commit-button"]')
@@ -333,3 +292,4 @@ async def run_livedoor_signup(site, email, token, nickname, password, captcha_te
 
         finally:
             await browser.close()
+            
