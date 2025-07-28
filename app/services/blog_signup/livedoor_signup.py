@@ -286,3 +286,15 @@ async def run_livedoor_signup(site, email, token, nickname, password,
 
         finally:
             await browser.close()
+
+async def run_livedoor_signup_step2(site, email, token, nickname, password,
+                                    captcha_text: str, captcha_image_path: str):
+    return await run_livedoor_signup(
+        site=site,
+        email=email,
+        token=token,
+        nickname=nickname,
+        password=password,
+        captcha_text=captcha_text,
+        captcha_image_path=captcha_image_path
+    )

@@ -3947,3 +3947,4 @@ def submit_captcha():
         for key in list(session.keys()):
             if key.startswith("captcha_"):
                 session.pop(key)
+
