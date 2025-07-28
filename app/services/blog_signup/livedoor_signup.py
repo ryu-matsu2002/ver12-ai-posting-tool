@@ -148,10 +148,15 @@ async def run_livedoor_signup(site, email, token, nickname, password,
                               captcha_text: str | None = None,
                               job_id=None,
                               captcha_image_path: str | None = None):
+    from app.models import ExternalBlogAccount
+    from app.services.blog_signup.crypto_utils import encrypt
+    from app.services.mail_utils.mail_gw import poll_latest_link_gw
+    from app import db
+    from app.enums import BlogType
+
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
-
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         try:
@@ -172,7 +177,10 @@ async def run_livedoor_signup(site, email, token, nickname, password,
 
             await page.wait_for_selector("#captcha-img", timeout=10000)
 
-            # ✅ 修正点：再取得せず既存画像を利用
+            # ✅ CAPTCHA画像のsrcを記録
+            captcha_img_src_before = await page.get_attribute("#captcha-img", "src")
+            logger.info(f"[LD-Signup] CAPTCHA画像のsrc: {captcha_img_src_before}")
+
             if not captcha_image_path or not Path(captcha_image_path).exists():
                 raise RuntimeError("CAPTCHA画像ファイルが見つかりません（画像固定モード）")
 
@@ -182,24 +190,29 @@ async def run_livedoor_signup(site, email, token, nickname, password,
                 raise RuntimeError("CAPTCHAが手動入力されていません（必須）")
 
             captcha_text = captcha_text.replace(" ", "").replace("　", "")
-            logger.info(f"[LD-Signup] CAPTCHA手入力（整形後）: {captcha_text}")
+            logger.info(f"[LD-Signup] CAPTCHA入力フィールドへ送信開始: {captcha_text}")
             await page.fill("#captcha", captcha_text)
 
-            logger.info("[LD-Signup] 完了ボタンをクリック")
+            # ⏱️ 時間ログ
+            start_submit = datetime.now()
+            logger.info(f"[LD-Signup] CAPTCHA入力完了、即完了ボタンをクリック")
             await page.click('input[id="commit-button"]')
+            end_submit = datetime.now()
+            logger.info(f"[LD-Signup] CAPTCHA入力→完了クリックまでの所要時間: {(end_submit - start_submit).total_seconds()}秒")
+
             await page.wait_for_timeout(2000)
 
             html = await page.content()
             current_url = page.url
 
-            # ✅ 仮登録成功判定
+            # ✅ CAPTCHA失敗判定
             if "仮登録メール" not in html and not current_url.endswith("/register/done"):
                 error_html = f"/tmp/ld_signup_failed_{timestamp}.html"
-                error_png  = f"/tmp/ld_signup_failed_{timestamp}.png"
+                error_png = f"/tmp/ld_signup_failed_{timestamp}.png"
                 Path(error_html).write_text(html, encoding="utf-8")
                 await page.screenshot(path=error_png)
                 logger.error(f"[LD-Signup] CAPTCHA失敗 ➜ HTML: {error_html}, PNG: {error_png}")
-    
+
                 return {
                     "status": "captcha_failed",
                     "error": "CAPTCHA突破失敗",
@@ -207,66 +220,49 @@ async def run_livedoor_signup(site, email, token, nickname, password,
                     "png_path": error_png
                 }
 
-            
             logger.info("[LD-Signup] CAPTCHA突破成功")
 
             # ✅ メール確認リンク取得
-            # ✅ メール確認リンク取得
             logger.info("[LD-Signup] メール確認中...")
             url = None
-            max_attempts = 3
-
-            for i in range(max_attempts):
+            for i in range(3):
                 url = await poll_latest_link_gw(token)
                 if url:
                     break
-            logger.warning(f"[LD-Signup] メールリンクがまだ取得できません（試行{i+1}/{max_attempts}）")
-            await asyncio.sleep(5)
+                logger.warning(f"[LD-Signup] メールリンクがまだ取得できません（試行{i+1}/3）")
+                await asyncio.sleep(5)
 
             if not url:
                 html = await page.content()
                 err_html = f"/tmp/ld_email_link_fail_{timestamp}.html"
-                err_png  = f"/tmp/ld_email_link_fail_{timestamp}.png"
+                err_png = f"/tmp/ld_email_link_fail_{timestamp}.png"
                 Path(err_html).write_text(html, encoding="utf-8")
                 await page.screenshot(path=err_png)
                 logger.error(f"[LD-Signup] メールリンク取得失敗 ➜ HTML: {err_html}, PNG: {err_png}")
                 raise RuntimeError("確認メールリンクが取得できません（リトライ上限に到達）")
 
-
             await page.goto(url)
             await page.wait_for_timeout(2000)
 
-            # ✅ HTMLを取得し、必要な値を安全に取得
             html = await page.content()
             blog_id = await page.input_value("#livedoor_blog_id")
             api_key = await page.input_value("#atompub_key")
 
             if not blog_id or not api_key:
                 fail_html = f"/tmp/ld_final_fail_{timestamp}.html"
-                fail_png  = f"/tmp/ld_final_fail_{timestamp}.png"
+                fail_png = f"/tmp/ld_final_fail_{timestamp}.png"
                 Path(fail_html).write_text(html, encoding="utf-8")
                 await page.screenshot(path=fail_png)
                 logger.error(f"[LD-Signup] 確認リンク遷移後の失敗 ➜ HTML: {fail_html}, PNG: {fail_png}")
                 raise RuntimeError("確認リンク遷移後に必要な値が取得できません")
 
-
-            blog_id = await page.input_value("#livedoor_blog_id")
-            api_key = await page.input_value("#atompub_key")
-
             logger.info(f"[LD-Signup] 登録成功: blog_id={blog_id}")
 
-            # ✅ 成功時にもログ保存（任意）
             success_html = f"/tmp/ld_success_{timestamp}.html"
-            success_png  = f"/tmp/ld_success_{timestamp}.png"
+            success_png = f"/tmp/ld_success_{timestamp}.png"
             Path(success_html).write_text(html, encoding="utf-8")
             await page.screenshot(path=success_png)
             logger.info(f"[LD-Signup] 成功スクリーンショット保存: {success_html}, {success_png}")
-
-            # ✅ DB保存処理（次にあなたにコードを送っていただきます）
-            from app.models import ExternalBlogAccount
-            from app.services.blog_signup.crypto_utils import encrypt
-            from app import db
-            from app.enums import BlogType
 
             account = ExternalBlogAccount(
                 site_id=site.id,
@@ -282,14 +278,11 @@ async def run_livedoor_signup(site, email, token, nickname, password,
             db.session.commit()
             logger.info(f"[LD-Signup] アカウントをDBに保存しました（id={account.id}）")
 
-
             return {
                 "blog_id": blog_id,
                 "api_key": api_key,
-                "captcha_success": True  # ✅ CAPTCHA突破成功フラグを追加！
+                "captcha_success": True
             }
-
 
         finally:
             await browser.close()
-            
