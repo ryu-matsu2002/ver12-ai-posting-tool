@@ -3447,7 +3447,7 @@ def external_seo_sites():
             ExternalBlogAccount.site_id,
             ExternalBlogAccount.blog_type
         )
-        .filter(ExternalBlogAccount.gui_captcha_completed == True,
+        .filter(ExternalBlogAccount.is_captcha_completed == True,
                 ExternalBlogAccount.site_id.in_([sid for sid, _ in key_set]),
                 ExternalBlogAccount.blog_type.in_([bt for _, bt in key_set]))
         .all()
