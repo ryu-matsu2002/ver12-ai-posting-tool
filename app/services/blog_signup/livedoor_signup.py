@@ -1,3 +1,5 @@
+
+
 """
 ライブドアブログ アカウント自動登録（AIエージェント仕様）
 ==================================
@@ -305,3 +307,90 @@ async def run_livedoor_signup_step2(site, email, token, nickname, password,
         captcha_text=captcha_text,
         captcha_image_path=captcha_image_path
     )
+
+# ✅ 新方式：GUI操作でCAPTCHAを手動入力 → /register/done を検知して再開
+async def run_livedoor_signup_gui(site, email, token, nickname, password):
+    from app.models import ExternalBlogAccount
+    from app.services.blog_signup.crypto_utils import encrypt
+    from app.services.mail_utils.mail_gw import poll_latest_link_gw
+    from app import db
+    from app.enums import BlogType
+    from datetime import datetime
+    from pathlib import Path
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    from playwright.async_api import async_playwright
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=False, slow_mo=100)
+        page = await browser.new_page()
+
+        try:
+            # Step1: ユーザー情報自動入力（メール・パスワードなど）
+            await page.goto("https://member.livedoor.com/register/input")
+            await page.fill('input[name="livedoor_id"]', nickname)
+            await page.fill('input[name="password"]', password)
+            await page.fill('input[name="password2"]', password)
+            await page.fill('input[name="email"]', email)
+
+            # CAPTCHAページへ（画像が表示される）
+            await page.click('input[value="ユーザー情報を登録"]')
+
+            print("🧠 CAPTCHA入力画面に遷移しました。手動で突破してください。")
+
+            # Step2: CAPTCHA突破後、成功画面への遷移を待機
+            await page.wait_for_url("**/register/done", timeout=300000)
+            print("✅ CAPTCHA突破が成功しました。登録完了画面に遷移しています。")
+
+            # Step3: メール確認リンク取得
+            logger.info("[LD-GUI] メール確認中...")
+            url = None
+            for i in range(3):
+                url = await poll_latest_link_gw(token)
+                if url:
+                    break
+                logger.warning(f"[LD-GUI] メールリンクが取得できません（試行{i+1}/3）")
+                await asyncio.sleep(5)
+
+            if not url:
+                raise RuntimeError("確認メールリンクが取得できません（最大リトライ）")
+
+            await page.goto(url)
+            await page.wait_for_timeout(2000)
+
+            # Step4: API Key取得
+            html = await page.content()
+            blog_id = await page.input_value("#livedoor_blog_id")
+            api_key = await page.input_value("#atompub_key")
+
+            if not blog_id or not api_key:
+                fail_html = f"/tmp/ld_gui_final_fail_{timestamp}.html"
+                fail_png = f"/tmp/ld_gui_final_fail_{timestamp}.png"
+                Path(fail_html).write_text(html, encoding="utf-8")
+                await page.screenshot(path=fail_png)
+                raise RuntimeError("API KeyまたはBlog IDが取得できません")
+
+            # DB保存
+            account = ExternalBlogAccount(
+                site_id=site.id,
+                blog_type=BlogType.LIVEDOOR,
+                email=email,
+                username=blog_id,
+                password=password,
+                nickname=nickname,
+                livedoor_blog_id=blog_id,
+                atompub_key_enc=encrypt(api_key),
+            )
+            db.session.add(account)
+            db.session.commit()
+
+            logger.info(f"[LD-GUI] 登録成功: blog_id={blog_id}")
+            return {
+                "status": "success",
+                "blog_id": blog_id,
+                "api_key": api_key,
+                "blog_url": f"https://blog.livedoor.jp/{blog_id}/"
+            }
+
+        finally:
+            await browser.close()

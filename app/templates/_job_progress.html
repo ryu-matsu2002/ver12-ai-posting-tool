@@ -6,41 +6,48 @@
 
 {% set blog_label  = blog|capitalize %}
 {% set card_id     = "site-card-" ~ site_id %}
-{% set is_registered = blog in site.registered_blogs %}  {# ✅ 登録済みならTrue #}
+{% set is_registered = blog in site.registered_blogs %}
 
 <div id="{{ card_id }}" class="border p-4 rounded shadow-sm bg-white">
 
   <div class="flex items-center justify-between mb-2">
     <div class="font-bold text-gray-800">{{ blog_label }} 外部SEO</div>
 
-    {% if is_registered %}
-      <!-- ✅ 成功表示 -->
-      <div class="text-green-600 font-bold">✅ 登録済み</div>
+    <div class="flex items-center space-x-2">
+      {% if is_registered %}
+        <!-- ✅ 成功表示 -->
+        <div class="text-green-600 font-bold">✅ 登録済み</div>
 
-    {% elif blog == "livedoor" %}
-      <!-- ✅ livedoor: CAPTCHA用の手動ボタン -->
-      <button
-        id="start-btn-{{ blog }}-{{ site_id }}"
-        class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
-        data-site-id="{{ site_id }}"
-        data-blog="{{ blog }}"
-        onclick="handleCaptchaClick(this)">
-        開始
-      </button>
+      {% elif blog == "livedoor" %}
+        <!-- ✅ livedoor: CAPTCHA用の手動ボタン -->
+        <button
+          id="start-btn-{{ blog }}-{{ site_id }}"
+          class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
+          data-site-id="{{ site_id }}"
+          data-blog="{{ blog }}"
+          onclick="handleCaptchaClick(this)">
+          開始
+        </button>
 
-    {% else %}
-      <!-- ✅ 他ブログ: HTMXで非同期実行（※ステータス変化対応） -->
-      <button
-        id="start-btn-{{ blog }}-{{ site_id }}"
-        class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
-        hx-post="{{ url_for('main.start_external_seo') }}"
-        hx-vals='{"site_id":"{{ site_id }}","blog":"{{ blog }}"}'
-        hx-target="#{{ card_id }}"
-        hx-swap="outerHTML"
-        onclick="setRunningStatus('{{ blog }}', '{{ site_id }}')"
-        開始
-      </button>
-    {% endif %}
+        {% if gui_statuses[(site_id, blog)] %}
+          <!-- ✅ CAPTCHA突破済みバッジ -->
+          <span class="text-xs bg-blue-600 text-white px-2 py-1 rounded">GUI突破済</span>
+        {% endif %}
+
+      {% else %}
+        <!-- ✅ 他ブログ: HTMXで非同期実行 -->
+        <button
+          id="start-btn-{{ blog }}-{{ site_id }}"
+          class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
+          hx-post="{{ url_for('main.start_external_seo') }}"
+          hx-vals='{"site_id":"{{ site_id }}","blog":"{{ blog }}"}'
+          hx-target="#{{ card_id }}"
+          hx-swap="outerHTML"
+          onclick="setRunningStatus('{{ blog }}', '{{ site_id }}')">
+          開始
+        </button>
+      {% endif %}
+    </div>
   </div>
 
   <div class="text-sm text-gray-600" id="status-text-{{ blog }}-{{ site_id }}">

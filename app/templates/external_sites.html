@@ -15,9 +15,7 @@
                       {% elif category == 'danger' %} bg-red-600
                       {% elif category == 'warning' %} bg-yellow-500 text-black
                       {% else %} bg-gray-600
-                      {% endif %}">
-            {{ message }}
-          </div>
+                      {% endif %}">{{ message }}</div>
         {% endfor %}
       </div>
     {% endif %}
@@ -32,19 +30,39 @@
 {% for s in sites %}
   <div id="site-card-wrapper-{{ s.id }}" class="border rounded p-4 mb-4 bg-white shadow-sm">
     <!-- サイト名 & URL -->
-    <div class="mb-2">
-      <div class="font-semibold truncate max-w-xs">{{ s.name }}</div>
-      <a href="{{ s.url }}" class="text-blue-600 text-sm break-all" target="_blank">{{ s.url }}</a>
+    <div class="mb-2 flex items-center justify-between">
+      <div>
+        <div class="font-semibold truncate max-w-xs">{{ s.name }}</div>
+        <a href="{{ s.url }}" class="text-blue-600 text-sm break-all" target="_blank">{{ s.url }}</a>
+      </div>
+
+      <!-- ✅ GUI成功済みバッジ（修正済み） -->
+      {% set key = (s.id, "livedoor") %}
+      {% if gui_statuses[key] %}
+        <div class="text-green-600 font-semibold text-sm bg-green-100 px-2 py-1 rounded">
+          ✅ 実行済み
+        </div>
+      {% endif %}
+
     </div>
 
-    <!-- 🔁 一旦 livedoor のみ表示（note / hatena は非対応） -->
+    <!-- 🔁 ブログタイプごとの処理（今は livedoor のみ） -->
     <div class="flex flex-wrap gap-2 mt-3">
       {% for b in ["livedoor"] %}
         {% set site_id = s.id %}
-        {% set blog    = b %}
-        {% set site    = s %}
+        {% set blog = b %}
+        {% set site = s %}
         {% include "_job_progress.html" %}
       {% endfor %}
+
+      <!-- ✅ 新GUI方式の登録ボタン -->
+      <form method="GET" action="{{ url_for('external.start_gui_signup') }}">
+        <input type="hidden" name="site_id" value="{{ s.id }}">
+        <button type="submit"
+                class="px-4 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded text-sm">
+          GUI方式で登録開始
+        </button>
+      </form>
     </div>
   </div>
 {% endfor %}
@@ -84,10 +102,7 @@
         const img = document.getElementById("captchaImage");
         img.src = data.captcha_url + "?t=" + new Date().getTime();  // ✅ キャッシュ回避
         document.getElementById("captchaModal").classList.remove("hidden");
-
-        // モーダル開いたタイミングでフォーム初期化
-        const form = document.getElementById("captchaForm");
-        form.reset();
+        document.getElementById("captchaForm").reset();
       } else {
         alert("CAPTCHA画像の取得に失敗しました");
       }
@@ -102,102 +117,87 @@
     document.getElementById("captchaModal").classList.add("hidden");
   }
 
-  function handleCaptchaClick(button) {
-    const siteId = button.getAttribute("data-site-id");
-    const blog = button.getAttribute("data-blog");
-
-    // ボタン状態変更：開始 → 登録中
-    button.disabled = true;
-    button.innerText = "📷 CAPTCHA取得中…";
-    button.classList.remove("bg-green-600", "bg-red-600");
-    button.classList.add("bg-gray-500");
-
-    openCaptchaModal(siteId, blog);
-  }
-
   function submitCaptcha(event) {
-  event.preventDefault();
+    event.preventDefault();
 
-  const siteId = sessionStorage.getItem("currentSiteId");
-  const blog = sessionStorage.getItem("currentBlog");
-  const btn = document.querySelector(`button[data-site-id="${siteId}"][data-blog="${blog}"]`);
-  const submitBtn = document.getElementById("captchaSubmitBtn");  // ✅ CAPTCHA送信ボタン取得
+    const siteId = sessionStorage.getItem("currentSiteId");
+    const blog = sessionStorage.getItem("currentBlog");
+    const btn = document.querySelector(`button[data-site-id="${siteId}"][data-blog="${blog}"]`);
+    const submitBtn = document.getElementById("captchaSubmitBtn");
 
-  // ✅ 送信ボタンを送信中の見た目に変更
-  if (submitBtn) {
-    submitBtn.innerText = "⏳ 送信中...";
-    submitBtn.disabled = true;
-    submitBtn.classList.remove("bg-blue-600");
-    submitBtn.classList.add("bg-gray-500");
-  }
-
-  const form = document.getElementById("captchaForm");
-  const formData = new FormData(form);
-  const captchaText = formData.get("captcha_text");
-
-  fetch("/submit_captcha", {
-    method: "POST",
-    body: new URLSearchParams({ "captcha_text": captchaText })
-  })
-  .then(res => res.json())
-  .then(data => {
-    // ✅ CAPTCHA送信完了後、ボタンの状態を元に戻す
     if (submitBtn) {
-      submitBtn.innerText = "送信";
-      submitBtn.disabled = false;
-      submitBtn.classList.remove("bg-gray-500");
-      submitBtn.classList.add("bg-blue-600");
+      submitBtn.innerText = "⏳ 送信中...";
+      submitBtn.disabled = true;
+      submitBtn.classList.remove("bg-blue-600");
+      submitBtn.classList.add("bg-gray-500");
     }
 
-    closeCaptcha();
+    const form = document.getElementById("captchaForm");
+    const formData = new FormData(form);
+    const captchaText = formData.get("captcha_text");
 
-    if (data.status === "captcha_failed") {
+    fetch("/submit_captcha", {
+      method: "POST",
+      body: new URLSearchParams({ "captcha_text": captchaText })
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (submitBtn) {
+        submitBtn.innerText = "送信";
+        submitBtn.disabled = false;
+        submitBtn.classList.remove("bg-gray-500");
+        submitBtn.classList.add("bg-blue-600");
+      }
+
+      closeCaptcha();
+
+      if (data.status === "captcha_failed") {
+        if (btn) {
+          btn.innerText = "❌ 再挑戦";
+          btn.disabled = false;
+          btn.classList.remove("bg-gray-500");
+          btn.classList.add("bg-red-600");
+        }
+        alert("CAPTCHA突破に失敗しました。再度お試しください。");
+      } else if (data.status === "captcha_success") {
+        if (btn) {
+          btn.innerText = "✅ 実行済み";
+          btn.disabled = true;
+          btn.classList.remove("bg-gray-500", "bg-red-600");
+          btn.classList.add("bg-green-500");
+        }
+        alert("CAPTCHA突破成功。仮登録メールを送信しました！");
+        setTimeout(() => {
+          window.location.href = "{{ url_for('main.my_blog_accounts') }}";
+        }, 1500);
+      } else {
+        if (btn) {
+          btn.innerText = "⚠ 不明な応答";
+          btn.disabled = false;
+          btn.classList.remove("bg-gray-500");
+          btn.classList.add("bg-yellow-500", "text-black");
+        }
+        alert("予期しない応答が返されました");
+      }
+    })
+    .catch(err => {
+      alert("CAPTCHA送信中にエラーが発生しました");
+      console.error(err);
+
+      if (submitBtn) {
+        submitBtn.innerText = "送信";
+        submitBtn.disabled = false;
+        submitBtn.classList.remove("bg-gray-500");
+        submitBtn.classList.add("bg-blue-600");
+      }
+
       if (btn) {
         btn.innerText = "❌ 再挑戦";
         btn.disabled = false;
         btn.classList.remove("bg-gray-500");
         btn.classList.add("bg-red-600");
       }
-      alert("CAPTCHA突破に失敗しました。再度お試しください。");
-    } else if (data.status === "captcha_success") {
-      if (btn) {
-        btn.innerText = "✅ 実行済み";
-        btn.disabled = true;
-        btn.classList.remove("bg-gray-500", "bg-red-600");
-        btn.classList.add("bg-green-500");
-      }
-      alert("CAPTCHA突破成功。仮登録メールを送信しました！");
-      setTimeout(() => {
-        window.location.href = "{{ url_for('main.my_blog_accounts') }}";
-      }, 1500);
-    } else {
-      if (btn) {
-        btn.innerText = "⚠ 不明な応答";
-        btn.disabled = false;
-        btn.classList.remove("bg-gray-500");
-        btn.classList.add("bg-yellow-500", "text-black");
-      }
-      alert("予期しない応答が返されました");
-    }
-  })
-  .catch(err => {
-    alert("CAPTCHA送信中にエラーが発生しました");
-    console.error(err);
-
-    if (submitBtn) {
-      submitBtn.innerText = "送信";
-      submitBtn.disabled = false;
-      submitBtn.classList.remove("bg-gray-500");
-      submitBtn.classList.add("bg-blue-600");
-    }
-
-    if (btn) {
-      btn.innerText = "❌ 再挑戦";
-      btn.disabled = false;
-      btn.classList.remove("bg-gray-500");
-      btn.classList.add("bg-red-600");
-    }
-  });
-}
+    });
+  }
 </script>
 {% endblock %}
