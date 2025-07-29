@@ -176,8 +176,6 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
             logger.info(f"[LD-Signup] 入力: livedoor_id={nickname}")
 
             await page.fill('input[name="password"]', password)
-            logger.info(f"[LD-Signup] 入力: password=***")
-
             await page.fill('input[name="password2"]', password)
             await page.fill('input[name="email"]', email)
             logger.info(f"[LD-Signup] 入力: email={email}")
@@ -185,21 +183,28 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
             await page.click('input[value="ユーザー情報を登録"]')
             logger.info("[LD-Signup] [ユーザー情報を登録] ボタンクリック")
 
-            # CAPTCHA画面突入後、ユーザー操作を待機
-            logger.info(f"[LD-Signup] CAPTCHA画面へ遷移中: 現在URL={page.url}")
-            logger.info("[LD-Signup] CAPTCHA入力待機中（最大180秒）")
-
-            for i in range(60):  # 最大3分間待機
+            # CAPTCHAページに遷移するのを検知し、停止
+            logger.info("[LD-Signup] CAPTCHAページへの遷移を確認中...")
+            for i in range(20):  # 最大60秒程度確認
                 await asyncio.sleep(3)
-                logger.debug(f"[LD-Signup] 待機中... ({(i+1)*3}秒経過), 現在URL: {page.url}")
+                logger.debug(f"[LD-Signup] URLチェック中... 現在: {page.url}")
+                if "captcha" in page.url or "register/captcha" in page.url:
+                    logger.info("[LD-Signup] CAPTCHAページに遷移しました。ユーザーの手動入力を待機します。")
+                    break
+
+            # CAPTCHA入力完了（/register/done）まで最大10分間待機
+            logger.info("[LD-Signup] CAPTCHA完了（/register/done）遷移を最大10分間待機します")
+            for i in range(120):  # 10分間チェック
+                await asyncio.sleep(5)
+                logger.debug(f"[LD-Signup] CAPTCHA待機中... {page.url}")
                 if page.url.endswith("/register/done"):
                     logger.info("[LD-Signup] CAPTCHA突破検知: /register/done に遷移済み")
                     break
             else:
-                logger.warning("[LD-Signup] CAPTCHA突破が未完了（/register/done への遷移なし）")
+                logger.warning("[LD-Signup] CAPTCHA突破未完了（/register/done に遷移せず）")
                 return {"status": "captcha_not_completed"}
 
-            # メール認証処理
+            # ✅ メール認証処理
             logger.info("[LD-Signup] メール認証リンク取得開始...")
             url = None
             for i in range(3):
@@ -273,6 +278,7 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
         finally:
             await browser.close()
             logger.info("[LD-Signup] ブラウザを閉じました")
+
 
 
 # ✅ CAPTCHA送信用ステップ2関数
