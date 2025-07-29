@@ -19,12 +19,13 @@
         <div class="text-green-600 font-bold">✅ 登録済み</div>
 
       {% elif blog == "livedoor" %}
-        <!-- ✅ livedoor: CAPTCHA用の手動ボタン -->
+        <!-- ✅ livedoor: CAPTCHA用の手動ボタン（修正済） -->
         <button
           id="start-btn-{{ blog }}-{{ site_id }}"
           class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
           data-site-id="{{ site_id }}"
           data-blog="{{ blog }}"
+          data-url="{{ url_for('main.start_gui_signup') }}"
           onclick="handleCaptchaClick(this)">
           開始
         </button>
@@ -69,5 +70,29 @@
     if (statusText) {
       statusText.innerText = "AIが登録を進めています。しばらくお待ちください...";
     }
+  }
+
+  function handleCaptchaClick(button) {
+    const siteId = button.getAttribute("data-site-id");
+    const blog = button.getAttribute("data-blog");
+    const url = button.getAttribute("data-url");
+
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ site_id: siteId, blog: blog })
+    }).then(response => {
+      if (response.ok) {
+        button.outerHTML = `<div class="text-blue-600 font-bold">⏳ 実行中...</div>`;
+        const statusText = document.getElementById(`status-text-${blog}-${siteId}`);
+        if (statusText) {
+          statusText.innerText = "AIが登録を進めています。しばらくお待ちください...";
+        }
+      } else {
+        alert("CAPTCHA登録処理に失敗しました。");
+      }
+    }).catch(() => {
+      alert("通信エラーが発生しました。");
+    });
   }
 </script>
