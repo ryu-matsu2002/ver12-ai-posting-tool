@@ -19,7 +19,7 @@
         <div class="text-green-600 font-bold">✅ 登録済み</div>
 
       {% elif blog == "livedoor" %}
-        <!-- ✅ livedoor: CAPTCHA用の手動ボタン（修正済） -->
+        <!-- ✅ livedoor: CAPTCHA用の手動ボタン -->
         <button
           id="start-btn-{{ blog }}-{{ site_id }}"
           class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
@@ -29,6 +29,7 @@
           onclick="handleCaptchaClick(this)">
           開始
         </button>
+
 
         {% if gui_statuses[(site_id, blog)] %}
           <!-- ✅ CAPTCHA突破済みバッジ -->
