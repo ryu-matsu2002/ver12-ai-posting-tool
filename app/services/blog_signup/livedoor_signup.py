@@ -153,10 +153,7 @@ from playwright.async_api import async_playwright
 logger = logging.getLogger(__name__)
 
 
-async def run_livedoor_signup(site, email, token, nickname, password,
-                              captcha_text: str | None = None,
-                              job_id=None,
-                              captcha_image_path: str | None = None):
+async def run_livedoor_signup(site, email, token, nickname, password, job_id=None):
     from app.models import ExternalBlogAccount
     from app.services.blog_signup.crypto_utils import encrypt
     from app.services.mail_utils.mail_gw import poll_latest_link_gw
@@ -164,7 +161,7 @@ async def run_livedoor_signup(site, email, token, nickname, password,
     from app.enums import BlogType
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(headless=False)  # ✅ ユーザーが操作できるように headless=False
         page = await browser.new_page()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -184,78 +181,18 @@ async def run_livedoor_signup(site, email, token, nickname, password,
             logger.info("[LD-Signup] ユーザー情報を登録ボタンをクリック")
             await page.click('input[value="ユーザー情報を登録"]')
 
-            await page.wait_for_selector("#captcha-img", timeout=10000)
-
-            # ✅ CAPTCHA画像のsrcを記録
-            captcha_img_src_before = await page.get_attribute("#captcha-img", "src")
-            logger.info(f"[LD-Signup] CAPTCHA画像のsrc: {captcha_img_src_before}")
-
-            # ✅ CAPTCHA画像をimg要素から直接保存
-            from uuid import uuid4
-            import base64
-
-            safe_id = uuid4().hex[:8]
-            captcha_image_path_default = f"/tmp/captcha_{safe_id}_{timestamp}.png"
-
-            # CAPTCHAの <img src="data:image/png;base64,..."> からBase64を直接取得
-            captcha_element = await page.wait_for_selector("#captcha-img", timeout=10000)
-            captcha_base64 = await captcha_element.evaluate("el => el.src")
-
-            if captcha_base64.startswith("data:image"):
-                header, b64data = captcha_base64.split(",", 1)
-                with open(captcha_image_path_default, "wb") as f:
-                    f.write(base64.b64decode(b64data))
-                logger.info(f"[LD-Signup] CAPTCHA画像をBase64から保存完了: {captcha_image_path_default}")
+            logger.info("[LD-Signup] CAPTCHA画面へ遷移中、ユーザー操作待機へ移行")
+            # ✅ CAPTCHAページでユーザー操作を待機（最大180秒）
+            for _ in range(60):
+                await asyncio.sleep(3)
+                if page.url.endswith("/register/done"):
+                    logger.info("[LD-Signup] CAPTCHA突破確認 (/register/done に遷移)")
+                    break
             else:
-                logger.warning(f"[LD-Signup] CAPTCHA画像がBase64形式ではありません: {captcha_base64}")
+                logger.warning("[LD-Signup] CAPTCHA突破が確認できませんでした")
+                return {"status": "captcha_not_completed"}
 
-
-
-            # Step 1のみを想定（画像保存して終了）
-            if not captcha_text:
-                logger.info("[LD-Signup] CAPTCHA解答が未指定のため、画像保存のみを行って終了します")
-                return {
-                    "status": "captcha_required",
-                    "captcha_path": captcha_image_path_default
-                }
-
-            # Step 2の場合：保存済み画像を使って送信処理へ進む
-            if not captcha_image_path or not Path(captcha_image_path).exists():
-                raise RuntimeError("CAPTCHA画像ファイルが見つかりません（画像固定モード）")
-
-            logger.info(f"[LD-Signup] CAPTCHA画像を再取得せず、固定パスを使用: {captcha_image_path}")
-            captcha_text = captcha_text.replace(" ", "").replace("　", "")
-            logger.info(f"[LD-Signup] CAPTCHA入力フィールドへ送信開始: {captcha_text}")
-            await page.fill("#captcha", captcha_text)
-
-            start_submit = datetime.now()
-            logger.info(f"[LD-Signup] CAPTCHA入力完了、即完了ボタンをクリック")
-            await page.click('input[id="commit-button"]')
-            end_submit = datetime.now()
-            logger.info(f"[LD-Signup] CAPTCHA入力→完了クリックまでの所要時間: {(end_submit - start_submit).total_seconds()}秒")
-
-            await page.wait_for_timeout(2000)
-            html = await page.content()
-            current_url = page.url
-
-            # CAPTCHA失敗判定
-            if not ("仮登録" in html or "確認メールを送信しました" in html or current_url.endswith("/register/done")):
-                error_html = f"/tmp/ld_signup_failed_{timestamp}.html"
-                error_png = f"/tmp/ld_signup_failed_{timestamp}.png"
-                Path(error_html).write_text(html, encoding="utf-8")
-                await page.screenshot(path=error_png)
-                logger.error(f"[LD-Signup] CAPTCHA失敗 ➜ HTML: {error_html}, PNG: {error_png}")
-
-                return {
-                    "status": "captcha_failed",
-                    "error": "CAPTCHA突破失敗",
-                    "html_path": error_html,
-                    "png_path": error_png
-                }
-
-            logger.info("[LD-Signup] CAPTCHA突破成功")
-
-            # メール確認リンク取得
+            # メール認証プロセス
             logger.info("[LD-Signup] メール確認中...")
             url = None
             for i in range(3):
@@ -310,39 +247,40 @@ async def run_livedoor_signup(site, email, token, nickname, password,
             db.session.add(account)
             db.session.commit()
             logger.info(f"[LD-Signup] アカウントをDBに保存しました（id={account.id}）")
-            
 
             return {
-                "status": "captcha_success",  # ✅ 追加：UIと通信する明示的な成功ステータス
-                "captcha_success": True,
+                "status": "signup_success",
                 "blog_id": blog_id,
                 "api_key": api_key,
                 "blog_url": f"https://blog.livedoor.jp/{blog_id}/",
                 "html_path": success_html,
                 "png_path": success_png
             }
-        except Exception as e:
-            # 例外詳細ログを記録してから再送出
-            err_trace_html = f"/tmp/ld_exception_{timestamp}.html"
-            err_trace_png = f"/tmp/ld_exception_{timestamp}.png"
-            try:
-                html = await page.content()
-                Path(err_trace_html).write_text(html, encoding="utf-8")
-                await page.screenshot(path=err_trace_png)
-                logger.error(f"[LD-Signup] 例外時スクリーンショット保存 ➜ HTML: {err_trace_html}, PNG: {err_trace_png}")
-            except Exception as inner:
-                logger.warning(f"[LD-Signup] 例外処理中のスクリーンショット保存にも失敗: {inner}")
 
-            logger.exception(f"[LD-Signup] CAPTCHA突破後の最終処理で例外発生: {e}")
-            raise  # エラーを再送出
+        except Exception as e:
+            logger.exception(f"[LD-Signup] 例外発生: {e}")
+            raise
 
         finally:
             await browser.close()
 
 
+
 # ✅ CAPTCHA送信用ステップ2関数
 async def run_livedoor_signup_step2(site, email, token, nickname, password,
                                     captcha_text: str, captcha_image_path: str):
+    from app.models import ExternalBlogAccount
+    from app import db
+
+    # CAPTCHA完了状態に更新
+    account = db.session.query(ExternalBlogAccount).filter_by(
+        site_id=site.id,
+        email=email
+    ).first()
+    if account:
+        account.is_captcha_completed = True
+        db.session.commit()
+
     return await run_livedoor_signup(
         site=site,
         email=email,

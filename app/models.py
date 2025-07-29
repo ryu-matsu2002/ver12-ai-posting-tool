@@ -337,6 +337,11 @@ class ExternalBlogAccount(db.Model):
     livedoor_blog_id  = db.Column(db.String(50),  nullable=True, index=True)
     atompub_key_enc   = db.Column(db.String(255), nullable=True)
     api_post_enabled  = db.Column(db.Boolean,     default=False, nullable=False)
+        # 🔸 CAPTCHA分離ステップ用のフラグとセッション識別子
+    is_captcha_completed = db.Column(db.Boolean, default=False, nullable=False)  # CAPTCHAが完了したか
+    captcha_session_id = db.Column(db.String(64), nullable=True, index=True)     # CAPTCHA対応中セッションの識別子（UUIDなど）
+    captcha_image_path = db.Column(db.String(255), nullable=True)                # 表示中のCAPTCHA画像のローカルパス
+
 
     site        = db.relationship("Site", backref="external_accounts")
     schedules   = db.relationship("ExternalArticleSchedule", backref="blog_account", cascade="all, delete-orphan")
