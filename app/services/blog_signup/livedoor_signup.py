@@ -228,7 +228,7 @@ async def run_livedoor_signup(site, email, token, nickname, password,
             current_url = page.url
 
             # CAPTCHA失敗判定
-            if "仮登録メール" not in html and not current_url.endswith("/register/done"):
+            if not ("仮登録" in html or "確認メールを送信しました" in html or current_url.endswith("/register/done")):
                 error_html = f"/tmp/ld_signup_failed_{timestamp}.html"
                 error_png = f"/tmp/ld_signup_failed_{timestamp}.png"
                 Path(error_html).write_text(html, encoding="utf-8")
