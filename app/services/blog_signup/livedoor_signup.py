@@ -144,6 +144,15 @@ async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> 
 # ──────────────────────────────────────────────
 # ✅ CAPTCHA突破 + スクリーンショット付きサインアップ処理
 # ──────────────────────────────────────────────
+from datetime import datetime
+from pathlib import Path
+import asyncio
+import logging
+from playwright.async_api import async_playwright
+
+logger = logging.getLogger(__name__)
+
+
 async def run_livedoor_signup(site, email, token, nickname, password,
                               captcha_text: str | None = None,
                               job_id=None,
@@ -181,19 +190,29 @@ async def run_livedoor_signup(site, email, token, nickname, password,
             captcha_img_src_before = await page.get_attribute("#captcha-img", "src")
             logger.info(f"[LD-Signup] CAPTCHA画像のsrc: {captcha_img_src_before}")
 
+            # ✅ CAPTCHA画像をimg要素から直接保存
+            captcha_element = await page.wait_for_selector("#captcha-img", timeout=10000)
+            captcha_image_path_default = f"/tmp/captcha_{token}_{timestamp}.png"
+            await captcha_element.screenshot(path=captcha_image_path_default)
+            logger.info(f"[LD-Signup] CAPTCHA画像を保存: {captcha_image_path_default}")
+
+            # Step 1のみを想定（画像保存して終了）
+            if not captcha_text:
+                logger.info("[LD-Signup] CAPTCHA解答が未指定のため、画像保存のみを行って終了します")
+                return {
+                    "status": "captcha_required",
+                    "captcha_path": captcha_image_path_default
+                }
+
+            # Step 2の場合：保存済み画像を使って送信処理へ進む
             if not captcha_image_path or not Path(captcha_image_path).exists():
                 raise RuntimeError("CAPTCHA画像ファイルが見つかりません（画像固定モード）")
 
             logger.info(f"[LD-Signup] CAPTCHA画像を再取得せず、固定パスを使用: {captcha_image_path}")
-
-            if not captcha_text:
-                raise RuntimeError("CAPTCHAが手動入力されていません（必須）")
-
             captcha_text = captcha_text.replace(" ", "").replace("　", "")
             logger.info(f"[LD-Signup] CAPTCHA入力フィールドへ送信開始: {captcha_text}")
             await page.fill("#captcha", captcha_text)
 
-            # ⏱️ 時間ログ
             start_submit = datetime.now()
             logger.info(f"[LD-Signup] CAPTCHA入力完了、即完了ボタンをクリック")
             await page.click('input[id="commit-button"]')
@@ -201,11 +220,10 @@ async def run_livedoor_signup(site, email, token, nickname, password,
             logger.info(f"[LD-Signup] CAPTCHA入力→完了クリックまでの所要時間: {(end_submit - start_submit).total_seconds()}秒")
 
             await page.wait_for_timeout(2000)
-
             html = await page.content()
             current_url = page.url
 
-            # ✅ CAPTCHA失敗判定
+            # CAPTCHA失敗判定
             if "仮登録メール" not in html and not current_url.endswith("/register/done"):
                 error_html = f"/tmp/ld_signup_failed_{timestamp}.html"
                 error_png = f"/tmp/ld_signup_failed_{timestamp}.png"
@@ -222,7 +240,7 @@ async def run_livedoor_signup(site, email, token, nickname, password,
 
             logger.info("[LD-Signup] CAPTCHA突破成功")
 
-            # ✅ メール確認リンク取得
+            # メール確認リンク取得
             logger.info("[LD-Signup] メール確認中...")
             url = None
             for i in range(3):
@@ -287,6 +305,8 @@ async def run_livedoor_signup(site, email, token, nickname, password,
         finally:
             await browser.close()
 
+
+# ✅ CAPTCHA送信用ステップ2関数
 async def run_livedoor_signup_step2(site, email, token, nickname, password,
                                     captcha_text: str, captcha_image_path: str):
     return await run_livedoor_signup(
