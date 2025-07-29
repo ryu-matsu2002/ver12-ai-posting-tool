@@ -191,13 +191,24 @@ async def run_livedoor_signup(site, email, token, nickname, password,
             logger.info(f"[LD-Signup] CAPTCHA画像のsrc: {captcha_img_src_before}")
 
             # ✅ CAPTCHA画像をimg要素から直接保存
-            # ✅ CAPTCHA画像をimg要素から直接保存（トークンを使わない）
-            captcha_element = await page.wait_for_selector("#captcha-img", timeout=10000)
             from uuid import uuid4
-            safe_id = uuid4().hex[:8]  # ファイル名が255文字を超えないよう短縮ID
+            import base64
+
+            safe_id = uuid4().hex[:8]
             captcha_image_path_default = f"/tmp/captcha_{safe_id}_{timestamp}.png"
-            await captcha_element.screenshot(path=captcha_image_path_default)
-            logger.info(f"[LD-Signup] CAPTCHA画像を保存: {captcha_image_path_default}")
+
+            # CAPTCHAの <img src="data:image/png;base64,..."> からBase64を直接取得
+            captcha_element = await page.wait_for_selector("#captcha-img", timeout=10000)
+            captcha_base64 = await captcha_element.evaluate("el => el.src")
+
+            if captcha_base64.startswith("data:image"):
+                header, b64data = captcha_base64.split(",", 1)
+                with open(captcha_image_path_default, "wb") as f:
+                    f.write(base64.b64decode(b64data))
+                logger.info(f"[LD-Signup] CAPTCHA画像をBase64から保存完了: {captcha_image_path_default}")
+            else:
+                logger.warning(f"[LD-Signup] CAPTCHA画像がBase64形式ではありません: {captcha_base64}")
+
 
 
             # Step 1のみを想定（画像保存して終了）
