@@ -3871,7 +3871,7 @@ def submit_captcha():
                 )
             )
 
-        if result.get("status") == "captcha_success":
+        if result.get("status") == "signup_success":
             session["external_blog_info"] = result
             return jsonify(result), 200
 
