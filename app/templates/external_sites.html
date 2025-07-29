@@ -56,7 +56,7 @@
       {% endfor %}
 
       <!-- ✅ 新GUI方式の登録ボタン -->
-      <form method="GET" action="{{ url_for('external.start_gui_signup') }}">
+      <form method="GET" action="{{ url_for('main.start_gui_signup') }}">
         <input type="hidden" name="site_id" value="{{ s.id }}">
         <button type="submit"
                 class="px-4 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded text-sm">
