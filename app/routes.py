@@ -3930,14 +3930,15 @@ def submit_captcha():
 
         if result.get("status") == "captcha_failed":
             logger.warning(f"[submit_captcha] CAPTCHA失敗: {result.get('html_path')}, {result.get('png_path')}")
-            return jsonify({"status": "captcha_failed", "message": "CAPTCHAが正しくありません"}), 200
+            return jsonify(result), 200
 
-        elif result.get("captcha_success"):
-            session["external_blog_info"] = result
-            return jsonify({"status": "captcha_success"}), 200
+        elif result.get("status") == "captcha_success":
+           session["external_blog_info"] = result
+           return jsonify(result), 200
 
         else:
-            return jsonify({"status": "unknown", "message": "CAPTCHAの結果が不明です"}), 200
+           return jsonify({"status": "unknown", "message": "CAPTCHAの結果が不明です"}), 200
+
 
     except Exception as e:
         logger.exception("[submit_captcha] CAPTCHA突破中に予期せぬエラー")

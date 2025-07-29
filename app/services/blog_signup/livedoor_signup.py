@@ -297,9 +297,13 @@ async def run_livedoor_signup(site, email, token, nickname, password,
             logger.info(f"[LD-Signup] アカウントをDBに保存しました（id={account.id}）")
 
             return {
+                "status": "captcha_success",  # ✅ 追加：UIと通信する明示的な成功ステータス
+                "captcha_success": True,
                 "blog_id": blog_id,
                 "api_key": api_key,
-                "captcha_success": True
+                "blog_url": f"https://blog.livedoor.jp/{blog_id}/",
+                "html_path": success_html,
+                "png_path": success_png
             }
 
         finally:
