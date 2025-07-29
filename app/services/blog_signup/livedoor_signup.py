@@ -340,10 +340,11 @@ async def run_livedoor_signup_gui(site, email, token, nickname, password):
 
     # xvfb-run で別スクリプトを実行
     proc = await asyncio.create_subprocess_exec(
-        "xvfb-run", "python3", "scripts/gui_signup_runner.py", str(temp_input),
+        "/usr/bin/xvfb-run", "python3", "scripts/gui_signup_runner.py", str(temp_input),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE
     )
+
     stdout, stderr = await proc.communicate()
     if proc.returncode != 0:
         raise RuntimeError(f"GUI登録スクリプトが失敗しました:\n{stderr.decode()}")
