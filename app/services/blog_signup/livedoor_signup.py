@@ -295,6 +295,7 @@ async def run_livedoor_signup(site, email, token, nickname, password,
             db.session.add(account)
             db.session.commit()
             logger.info(f"[LD-Signup] アカウントをDBに保存しました（id={account.id}）")
+            
 
             return {
                 "status": "captcha_success",  # ✅ 追加：UIと通信する明示的な成功ステータス
@@ -305,6 +306,20 @@ async def run_livedoor_signup(site, email, token, nickname, password,
                 "html_path": success_html,
                 "png_path": success_png
             }
+        except Exception as e:
+            # 例外詳細ログを記録してから再送出
+            err_trace_html = f"/tmp/ld_exception_{timestamp}.html"
+            err_trace_png = f"/tmp/ld_exception_{timestamp}.png"
+            try:
+                html = await page.content()
+                Path(err_trace_html).write_text(html, encoding="utf-8")
+                await page.screenshot(path=err_trace_png)
+                logger.error(f"[LD-Signup] 例外時スクリーンショット保存 ➜ HTML: {err_trace_html}, PNG: {err_trace_png}")
+            except Exception as inner:
+                logger.warning(f"[LD-Signup] 例外処理中のスクリーンショット保存にも失敗: {inner}")
+
+            logger.exception(f"[LD-Signup] CAPTCHA突破後の最終処理で例外発生: {e}")
+            raise  # エラーを再送出
 
         finally:
             await browser.close()
