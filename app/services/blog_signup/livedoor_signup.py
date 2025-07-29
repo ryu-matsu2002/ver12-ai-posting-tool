@@ -191,10 +191,14 @@ async def run_livedoor_signup(site, email, token, nickname, password,
             logger.info(f"[LD-Signup] CAPTCHA画像のsrc: {captcha_img_src_before}")
 
             # ✅ CAPTCHA画像をimg要素から直接保存
+            # ✅ CAPTCHA画像をimg要素から直接保存（トークンを使わない）
             captcha_element = await page.wait_for_selector("#captcha-img", timeout=10000)
-            captcha_image_path_default = f"/tmp/captcha_{token}_{timestamp}.png"
+            from uuid import uuid4
+            safe_id = uuid4().hex[:8]  # ファイル名が255文字を超えないよう短縮ID
+            captcha_image_path_default = f"/tmp/captcha_{safe_id}_{timestamp}.png"
             await captcha_element.screenshot(path=captcha_image_path_default)
             logger.info(f"[LD-Signup] CAPTCHA画像を保存: {captcha_image_path_default}")
+
 
             # Step 1のみを想定（画像保存して終了）
             if not captcha_text:
