@@ -220,12 +220,16 @@ async def run_livedoor_signup(site, email, token, nickname, password,
                 logger.info("[LD-Signup] CAPTCHA突破成功")
 
             # ✅ メール確認リンク取得
+            # ✅ メール確認リンク取得（修正済み）
             logger.info("[LD-Signup] メール確認中...")
             url = None
             max_attempts = 3
 
             for i in range(max_attempts):
-                url = await poll_latest_link_gw(token)
+                async for u in poll_latest_link_gw(token):
+                    url = u
+                    break  # 最初のリンクだけでOK
+
                 if url:
                     break
                 logger.warning(f"[LD-Signup] メールリンクがまだ取得できません（試行{i+1}/{max_attempts}）")
@@ -239,6 +243,7 @@ async def run_livedoor_signup(site, email, token, nickname, password,
                 await page.screenshot(path=err_png)
                 logger.error(f"[LD-Signup] メールリンク取得失敗 ➜ HTML: {err_html}, PNG: {err_png}")
                 raise RuntimeError("確認メールリンクが取得できません（リトライ上限に到達）")
+
 
             await page.goto(url)
             await page.wait_for_timeout(2000)
@@ -374,7 +379,9 @@ async def submit_captcha_and_complete(page, captcha_text: str, email: str, nickn
         logger.info("[LD-Signup] メール確認リンク取得中...")
         url = None
         for i in range(3):
-            url = await poll_latest_link_gw(token)
+            async for u in poll_latest_link_gw(token):
+                url = u
+                break
             if url:
                 break
             await asyncio.sleep(5)
