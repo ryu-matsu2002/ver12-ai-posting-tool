@@ -6,7 +6,11 @@
 
 {% set blog_label  = blog|capitalize %}
 {% set card_id     = "site-card-" ~ site_id %}
-{% set is_registered = blog in site.registered_blogs %}  {# ✅ 登録済みならTrue #}
+{% set is_registered = blog in site.registered_blogs %}
+
+{# CAPTCHA突破済アカウントの取得（site.external_blog_accountsから blog タイプを一致で検索） #}
+{% set account = site.external_blog_accounts | selectattr('blog_type', 'equalto', blog) | list | first %}
+{% set is_captcha_completed = account and account.is_captcha_completed %}
 
 <div id="{{ card_id }}" class="border p-4 rounded shadow-sm bg-white">
 
@@ -18,18 +22,25 @@
       <div class="text-green-600 font-bold">✅ 登録済み</div>
 
     {% elif blog == "livedoor" %}
-      <!-- ✅ livedoor: CAPTCHA用の手動ボタン -->
-      <button
-        id="start-btn-{{ blog }}-{{ site_id }}"
-        class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
-        data-site-id="{{ site_id }}"
-        data-blog="{{ blog }}"
-        onclick="handleCaptchaClick(this)">
-        開始
-      </button>
+      {% if is_captcha_completed %}
+        <!-- ✅ CAPTCHA突破済表示 -->
+        <button class="px-4 py-2 bg-gray-400 text-white rounded cursor-default" disabled>
+          ✅ CAPTCHA突破済
+        </button>
+      {% else %}
+        <!-- ✅ CAPTCHA突破ボタン -->
+        <button
+          id="start-btn-{{ blog }}-{{ site_id }}"
+          class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
+          data-site-id="{{ site_id }}"
+          data-blog="{{ blog }}"
+          onclick="handleCaptchaClick(this)">
+          📷 CAPTCHA突破
+        </button>
+      {% endif %}
 
     {% else %}
-      <!-- ✅ 他ブログ: HTMXで非同期実行（※ステータス変化対応） -->
+      <!-- ✅ 他ブログ: HTMXで非同期実行 -->
       <button
         id="start-btn-{{ blog }}-{{ site_id }}"
         class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
@@ -37,7 +48,7 @@
         hx-vals='{"site_id":"{{ site_id }}","blog":"{{ blog }}"}'
         hx-target="#{{ card_id }}"
         hx-swap="outerHTML"
-        onclick="setRunningStatus('{{ blog }}', '{{ site_id }}')"
+        onclick="setRunningStatus('{{ blog }}', '{{ site_id }}')">
         開始
       </button>
     {% endif %}
