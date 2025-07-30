@@ -6,29 +6,23 @@
 
 {% set blog_label  = blog|capitalize %}
 {% set card_id     = "site-card-" ~ site_id %}
-{% set is_registered = blog in site.registered_blogs %}
+{% set is_registered = blog in s.registered_blogs %}
 
-{# CAPTCHA突破済アカウントの取得（site.external_blog_accountsから blog タイプを一致で検索） #}
-{% set account = site.external_blog_accounts | selectattr('blog_type', 'equalto', blog) | list | first %}
+{% set account = s.external_blog_accounts | selectattr('blog_type', 'equalto', blog) | list | first %}
 {% set is_captcha_completed = account and account.is_captcha_completed %}
 
 <div id="{{ card_id }}" class="border p-4 rounded shadow-sm bg-white">
-
   <div class="flex items-center justify-between mb-2">
     <div class="font-bold text-gray-800">{{ blog_label }} 外部SEO</div>
 
     {% if is_registered %}
-      <!-- ✅ 成功表示 -->
       <div class="text-green-600 font-bold">✅ 登録済み</div>
-
     {% elif blog == "livedoor" %}
       {% if is_captcha_completed %}
-        <!-- ✅ CAPTCHA突破済表示 -->
         <button class="px-4 py-2 bg-gray-400 text-white rounded cursor-default" disabled>
           ✅ CAPTCHA突破済
         </button>
       {% else %}
-        <!-- ✅ CAPTCHA突破ボタン -->
         <button
           id="start-btn-{{ blog }}-{{ site_id }}"
           class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
@@ -38,9 +32,7 @@
           📷 CAPTCHA突破
         </button>
       {% endif %}
-
     {% else %}
-      <!-- ✅ 他ブログ: HTMXで非同期実行 -->
       <button
         id="start-btn-{{ blog }}-{{ site_id }}"
         class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
@@ -58,18 +50,15 @@
     AIエージェントが{{ blog_label }}でアカウント登録を試みます。
     処理には30秒前後かかる場合があります。
   </div>
-
 </div>
 
 <script>
   function setRunningStatus(blog, siteId) {
     const btn = document.getElementById(`start-btn-${blog}-${siteId}`);
     const statusText = document.getElementById(`status-text-${blog}-${siteId}`);
-
     if (btn) {
       btn.outerHTML = `<div class="text-blue-600 font-bold">⏳ 実行中...</div>`;
     }
-
     if (statusText) {
       statusText.innerText = "AIが登録を進めています。しばらくお待ちください...";
     }
