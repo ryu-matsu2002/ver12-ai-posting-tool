@@ -4028,3 +4028,111 @@ def start_gui_signup():
     except Exception as e:
         logger.exception("[LD-GUI] 例外発生")
         return f"❌ 処理中に例外が発生しました: {str(e)}", 500
+
+@bp.route("/gui_signup_auto", methods=["POST"])
+@login_required
+def gui_signup_auto():
+    import json
+    import subprocess
+    import uuid
+    import logging
+    import tempfile
+    import time
+    from pathlib import Path
+    from app.models import Site
+    from app.services.mail_utils.mail_gw import create_inbox
+    from app.services.blog_signup.livedoor_signup import generate_safe_id, generate_safe_password
+
+    logger = logging.getLogger(__name__)
+
+    # ✅ POSTされたsite_idを取得
+    site_id = request.form.get("site_id", type=int)
+    if not site_id:
+        return jsonify({"status": "error", "message": "site_idが指定されていません"}), 400
+
+    site = Site.query.get(site_id)
+    if not site:
+        return jsonify({"status": "error", "message": f"site_id={site_id} のサイトが見つかりません"}), 404
+
+    # ✅ 登録用情報の生成
+    email, token = create_inbox()
+    nickname = generate_safe_id()
+    password = generate_safe_password()
+
+    # ✅ 一時JSONファイルの生成
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    unique_id = uuid.uuid4().hex[:8]
+    json_filename = f"/tmp/ld_gui_input_{timestamp}_{unique_id}.json"
+    data = {
+        "site_id": site_id,
+        "site_domain": site.domain,
+        "email": email,
+        "token": token,
+        "nickname": nickname,
+        "password": password,
+    }
+
+    try:
+        with open(json_filename, "w") as f:
+            json.dump(data, f)
+        logger.info(f"[LD-GUI] JSONファイル作成: {json_filename}")
+    except Exception as e:
+        logger.exception("[LD-GUI] JSONファイル作成エラー")
+        return jsonify({"status": "error", "message": "JSONファイルの生成に失敗しました"}), 500
+
+    # ✅ xvfb-runでGUI処理を起動
+    cmd = [
+        "xvfb-run", "--auto-servernum", "--server-args=-screen 0 1024x768x24",
+        "python3", "scripts/gui_signup_runner.py", json_filename
+    ]
+
+    try:
+        logger.info("[LD-GUI] GUI登録処理を開始")
+        proc_result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)  # 最大5分待機
+
+        if proc_result.returncode != 0:
+            logger.error(f"[LD-GUI] 登録処理エラー: {proc_result.stderr}")
+            return jsonify({"status": "error", "message": "登録処理に失敗しました", "log": proc_result.stderr}), 500
+
+        logger.info(f"[LD-GUI] 登録処理成功: {proc_result.stdout}")
+        return jsonify({
+            "status": "success",
+            "message": "登録処理が完了しました",
+            "stdout": proc_result.stdout,
+        })
+
+    except subprocess.TimeoutExpired:
+        logger.error("[LD-GUI] 登録処理がタイムアウトしました")
+        return jsonify({"status": "error", "message": "登録処理がタイムアウトしました"}), 500
+    except Exception as e:
+        logger.exception("[LD-GUI] 処理中に例外が発生しました")
+        return jsonify({"status": "error", "message": "登録中に例外が発生しました"}), 500
+
+@bp.route("/external/gui-signup/<int:site_id>", methods=["POST"])
+@login_required
+def external_gui_signup(site_id):
+    from app.utils.gui_signup_utils import generate_config_json, start_gui_runner
+    from app.models import Site
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    site = Site.query.get(site_id)
+    if not site:
+        return jsonify({"status": "error", "message": f"site_id={site_id} のサイトが見つかりません"}), 404
+
+    try:
+        json_path = generate_config_json(site_id)
+        pid = start_gui_runner(json_path)
+
+        logger.info(f"[GUI-SIGNUP] GUI登録処理を開始: site_id={site_id}, PID={pid}")
+        return jsonify({
+            "status": "started",
+            "message": f"GUI登録を開始しました（PID: {pid}）",
+            "pid": pid,
+            "json_path": str(json_path)
+        })
+
+    except Exception as e:
+        logger.exception("[GUI-SIGNUP] 処理中に例外が発生しました")
+        return jsonify({"status": "error", "message": f"処理中に例外が発生しました: {str(e)}"}), 500

@@ -56,13 +56,10 @@
       {% endfor %}
 
       <!-- ✅ 新GUI方式の登録ボタン -->
-      <form method="GET" action="{{ url_for('main.start_gui_signup') }}">
-        <input type="hidden" name="site_id" value="{{ s.id }}">
-        <button type="submit"
-                class="px-4 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded text-sm">
-          GUI方式で登録開始
-        </button>
-      </form>
+      <a href="{{ url_for('main.start_gui_signup', site_id=s.id) }}"
+         class="px-4 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded text-sm">
+        GUI方式で登録開始
+      </a>
     </div>
   </div>
 {% endfor %}
