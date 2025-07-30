@@ -1,5 +1,3 @@
-
-
 """
 ライブドアブログ アカウント自動登録（AIエージェント仕様）
 ==================================
@@ -146,75 +144,91 @@ async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> 
 # ──────────────────────────────────────────────
 # ✅ CAPTCHA突破 + スクリーンショット付きサインアップ処理
 # ──────────────────────────────────────────────
-from datetime import datetime
-from pathlib import Path
-import asyncio
-import logging
-from playwright.async_api import async_playwright
-
-logger = logging.getLogger(__name__)
-
-async def run_livedoor_signup(site, email, token, nickname, password, job_id=None):
-    from app.models import ExternalBlogAccount
-    from app.services.blog_signup.crypto_utils import encrypt
-    from app.services.mail_utils.mail_gw import poll_latest_link_gw
-    from app import db
-    from app.enums import BlogType
-
-    logger.info(f"[LD-Signup] run_livedoor_signup() 実行開始: email={email}, nickname={nickname}")
-
+async def run_livedoor_signup(site, email, token, nickname, password,
+                              captcha_text: str | None = None,
+                              job_id=None,
+                              captcha_image_path: str | None = None):
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False)
+        browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         try:
-            logger.info("[LD-Signup] livedoor登録ページへ遷移開始")
             await page.goto("https://member.livedoor.com/register/input")
             await page.wait_for_selector('input[name="livedoor_id"]', timeout=10000)
-            logger.info("[LD-Signup] フォーム表示完了、入力開始")
 
+            logger.info(f"[LD-Signup] 入力: id = {nickname}")
             await page.fill('input[name="livedoor_id"]', nickname)
-            logger.info(f"[LD-Signup] 入力: livedoor_id={nickname}")
-
+            logger.info(f"[LD-Signup] 入力: password = {password}")
             await page.fill('input[name="password"]', password)
+            logger.info(f"[LD-Signup] 入力: password2 = {password}")
             await page.fill('input[name="password2"]', password)
+            logger.info(f"[LD-Signup] 入力: email = {email}")
             await page.fill('input[name="email"]', email)
-            logger.info(f"[LD-Signup] 入力: email={email}")
 
+            logger.info("[LD-Signup] ユーザー情報を登録ボタンをクリック")
             await page.click('input[value="ユーザー情報を登録"]')
-            logger.info("[LD-Signup] [ユーザー情報を登録] ボタンクリック")
 
-            # CAPTCHAページに遷移するのを検知し、停止
-            logger.info("[LD-Signup] CAPTCHAページへの遷移を確認中...")
-            for i in range(20):  # 最大60秒程度確認
-                await asyncio.sleep(3)
-                logger.debug(f"[LD-Signup] URLチェック中... 現在: {page.url}")
-                if "captcha" in page.url or "register/captcha" in page.url:
-                    logger.info("[LD-Signup] CAPTCHAページに遷移しました。ユーザーの手動入力を待機します。")
-                    break
+            # ✅ CAPTCHA検出とリダイレクトURL返却
+            try:
+                await page.wait_for_selector("#captcha-img", timeout=5000)
+                logger.info(f"[LD-Signup] CAPTCHA出現確認 → URL返却: {page.url}")
+                return {
+                    "status": "captcha_required",
+                    "captcha_url": page.url,
+                    "email": email,
+                    "nickname": nickname,
+                    "password": password
+                }
+            except Exception:
+                logger.info("[LD-Signup] CAPTCHAは表示されませんでした（通常通過）")
 
-            # CAPTCHA入力完了（/register/done）まで最大10分間待機
-            logger.info("[LD-Signup] CAPTCHA完了（/register/done）遷移を最大10分間待機します")
-            for i in range(120):  # 10分間チェック
-                await asyncio.sleep(5)
-                logger.debug(f"[LD-Signup] CAPTCHA待機中... {page.url}")
-                if page.url.endswith("/register/done"):
-                    logger.info("[LD-Signup] CAPTCHA突破検知: /register/done に遷移済み")
-                    break
-            else:
-                logger.warning("[LD-Signup] CAPTCHA突破未完了（/register/done に遷移せず）")
-                return {"status": "captcha_not_completed"}
+            # ✅ CAPTCHA画像存在チェック（submit時）
+            if captcha_image_path:
+                if not Path(captcha_image_path).exists():
+                    raise RuntimeError("CAPTCHA画像ファイルが見つかりません（画像固定モード）")
+                logger.info(f"[LD-Signup] CAPTCHA画像を再取得せず、固定パスを使用: {captcha_image_path}")
 
-            # ✅ メール認証処理
-            logger.info("[LD-Signup] メール認証リンク取得開始...")
+            # ✅ CAPTCHAテキストがある場合は処理継続
+            if captcha_text:
+                captcha_text = captcha_text.replace(" ", "").replace("　", "")
+                logger.info(f"[LD-Signup] CAPTCHA手入力（整形後）: {captcha_text}")
+                await page.fill("#captcha", captcha_text)
+
+                logger.info("[LD-Signup] 完了ボタンをクリック")
+                await page.click('input[id="commit-button"]')
+                await page.wait_for_timeout(2000)
+
+                html = await page.content()
+                current_url = page.url
+
+                if "仮登録メール" not in html and not current_url.endswith("/register/done"):
+                    error_html = f"/tmp/ld_signup_failed_{timestamp}.html"
+                    error_png = f"/tmp/ld_signup_failed_{timestamp}.png"
+                    Path(error_html).write_text(html, encoding="utf-8")
+                    await page.screenshot(path=error_png)
+                    logger.error(f"[LD-Signup] CAPTCHA失敗 ➜ HTML: {error_html}, PNG: {error_png}")
+
+                    return {
+                        "status": "captcha_failed",
+                        "error": "CAPTCHA突破失敗",
+                        "html_path": error_html,
+                        "png_path": error_png
+                    }
+
+                logger.info("[LD-Signup] CAPTCHA突破成功")
+
+            # ✅ メール確認リンク取得
+            logger.info("[LD-Signup] メール確認中...")
             url = None
-            for i in range(3):
+            max_attempts = 3
+
+            for i in range(max_attempts):
                 url = await poll_latest_link_gw(token)
                 if url:
-                    logger.info(f"[LD-Signup] メール認証リンク取得成功（試行{i+1}回目）: {url}")
                     break
-                logger.warning(f"[LD-Signup] メール認証リンク取得失敗（試行{i+1}/3）")
+                logger.warning(f"[LD-Signup] メールリンクがまだ取得できません（試行{i+1}/{max_attempts}）")
                 await asyncio.sleep(5)
 
             if not url:
@@ -238,18 +252,23 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
                 fail_png = f"/tmp/ld_final_fail_{timestamp}.png"
                 Path(fail_html).write_text(html, encoding="utf-8")
                 await page.screenshot(path=fail_png)
-                logger.error(f"[LD-Signup] 登録後の情報取得失敗 ➜ HTML: {fail_html}, PNG: {fail_png}")
+                logger.error(f"[LD-Signup] 確認リンク遷移後の失敗 ➜ HTML: {fail_html}, PNG: {fail_png}")
                 raise RuntimeError("確認リンク遷移後に必要な値が取得できません")
 
-            logger.info(f"[LD-Signup] 登録成功: blog_id={blog_id}, api_key=取得済み")
+            logger.info(f"[LD-Signup] 登録成功: blog_id={blog_id}")
 
             success_html = f"/tmp/ld_success_{timestamp}.html"
             success_png = f"/tmp/ld_success_{timestamp}.png"
             Path(success_html).write_text(html, encoding="utf-8")
             await page.screenshot(path=success_png)
-            logger.info(f"[LD-Signup] スクリーンショット保存完了: {success_html}, {success_png}")
+            logger.info(f"[LD-Signup] 成功スクリーンショット保存: {success_html}, {success_png}")
 
-            # DB登録処理
+            # DB保存処理
+            from app.models import ExternalBlogAccount
+            from app.services.blog_signup.crypto_utils import encrypt
+            from app import db
+            from app.enums import BlogType
+
             account = ExternalBlogAccount(
                 site_id=site.id,
                 blog_type=BlogType.LIVEDOOR,
@@ -265,120 +284,10 @@ async def run_livedoor_signup(site, email, token, nickname, password, job_id=Non
             logger.info(f"[LD-Signup] アカウントをDBに保存しました（id={account.id}）")
 
             return {
-                "status": "signup_success",
                 "blog_id": blog_id,
                 "api_key": api_key,
-                "blog_url": f"https://blog.livedoor.jp/{blog_id}/",
-                "html_path": success_html,
-                "png_path": success_png
+                "captcha_success": bool(captcha_text)
             }
-
-        except Exception as e:
-            logger.exception(f"[LD-Signup] 例外発生: {e}")
-            raise
 
         finally:
             await browser.close()
-            logger.info("[LD-Signup] ブラウザを閉じました")
-
-
-
-# ✅ CAPTCHA送信用ステップ2関数
-async def run_livedoor_signup_step2(site, email, token, nickname, password,
-                                    captcha_text: str, captcha_image_path: str):
-    from app.models import ExternalBlogAccount
-    from app import db
-
-    # CAPTCHA完了状態に更新
-    account = db.session.query(ExternalBlogAccount).filter_by(
-        site_id=site.id,
-        email=email
-    ).first()
-    if account:
-        account.is_captcha_completed = True
-        db.session.commit()
-
-    return await run_livedoor_signup(
-        site=site,
-        email=email,
-        token=token,
-        nickname=nickname,
-        password=password,
-        captcha_text=captcha_text,
-        captcha_image_path=captcha_image_path
-    )
-
-# ✅ 新方式：GUI操作でCAPTCHAを手動入力 → /register/done を検知して再開
-import asyncio
-import subprocess
-import json
-import tempfile
-from pathlib import Path
-
-async def run_livedoor_signup_gui(site, email, token, nickname, password):
-    from app.models import ExternalBlogAccount
-    from app.services.blog_signup.crypto_utils import encrypt
-    from app.services.mail_utils.mail_gw import poll_latest_link_gw
-    from app import db
-    from app.enums import BlogType
-    from datetime import datetime
-
-    logger = logging.getLogger(__name__)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    # 一時ファイルに入力データを保存
-    temp_input = Path(tempfile.gettempdir()) / f"ld_gui_input_{timestamp}.json"
-    temp_output = Path(tempfile.gettempdir()) / f"ld_gui_output_{timestamp}.json"
-    temp_input.write_text(json.dumps({
-        "site_id": site.id,
-        "email": email,
-        "token": token,
-        "nickname": nickname,
-        "password": password,
-        "output_path": str(temp_output),
-    }), encoding="utf-8")
-
-    # xvfb-run で別スクリプトを実行
-    proc = await asyncio.create_subprocess_exec(
-        "/usr/local/bin/xvfb-run-wrapper", "python3", "scripts/gui_signup_runner.py", str(temp_input),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
-    )
-
-
-    stdout, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        raise RuntimeError(f"GUI登録スクリプトが失敗しました:\n{stderr.decode()}")
-
-    if not temp_output.exists():
-        raise RuntimeError("GUI登録後の出力ファイルが存在しません")
-
-    # 出力結果を読み取り
-    result = json.loads(temp_output.read_text(encoding="utf-8"))
-
-    blog_id = result.get("blog_id")
-    api_key = result.get("api_key")
-    if not blog_id or not api_key:
-        raise RuntimeError("blog_id または api_key の取得に失敗しました")
-
-    # DB保存
-    account = ExternalBlogAccount(
-        site_id=site.id,
-        blog_type=BlogType.LIVEDOOR,
-        email=email,
-        username=blog_id,
-        password=password,
-        nickname=nickname,
-        livedoor_blog_id=blog_id,
-        atompub_key_enc=encrypt(api_key),
-    )
-    db.session.add(account)
-    db.session.commit()
-
-    logger.info(f"[LD-GUI] 登録成功: blog_id={blog_id}")
-    return {
-        "status": "success",
-        "blog_id": blog_id,
-        "api_key": api_key,
-        "blog_url": f"https://blog.livedoor.jp/{blog_id}/"
-    }

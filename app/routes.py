@@ -3887,8 +3887,8 @@ def submit_captcha():
     from app.utils.captcha_dataset_utils import save_captcha_label_pair
     import asyncio
     import logging
-    from flask import jsonify, session, request, current_app  # ✅ 修正ポイント
-    from pathlib import Path  # ✅ 修正ポイント
+    from flask import jsonify, session, request, current_app
+    from pathlib import Path
 
     logger = logging.getLogger(__name__)
 
@@ -3908,10 +3908,10 @@ def submit_captcha():
     site_id  = session.get("captcha_site_id")
     blog     = session.get("captcha_blog")
 
-    # ✅ 修正ポイント: CAPTCHA画像の絶対パスを構築
+    # ✅ CAPTCHA画像の絶対パス構築
     captcha_image_path = Path(current_app.root_path) / "static" / "captchas" / image_filename
 
-    # ✅ セッション不足チェック
+    # ✅ セッション情報チェック
     if not all([email, nickname, password, token, site_id, blog]):
         return jsonify({"status": "error", "message": "セッション情報が不足しています"}), 400
 
@@ -3920,7 +3920,7 @@ def submit_captcha():
         return jsonify({"status": "error", "message": "対象サイトが存在しません"}), 404
 
     try:
-        # ✅ イベントループの安全な起動（asyncio.runの代替）
+        # ✅ 安全なイベントループの起動（既存 or 新規）
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
@@ -3929,14 +3929,14 @@ def submit_captcha():
                 result = loop.run_until_complete(
                     run_livedoor_signup(
                         site, email, token, nickname, password, captcha_text,
-                        captcha_image_path=str(captcha_image_path)  # ✅ 修正ポイント: 画像パスを渡す
+                        captcha_image_path=str(captcha_image_path)
                     )
                 )
             else:
                 result = loop.run_until_complete(
                     run_livedoor_signup(
                         site, email, token, nickname, password, captcha_text,
-                        captcha_image_path=str(captcha_image_path)  # ✅ 修正ポイント: 画像パスを渡す
+                        captcha_image_path=str(captcha_image_path)
                     )
                 )
         except RuntimeError:
@@ -3945,194 +3945,30 @@ def submit_captcha():
             result = loop.run_until_complete(
                 run_livedoor_signup(
                     site, email, token, nickname, password, captcha_text,
-                    captcha_image_path=str(captcha_image_path)  # ✅ 修正ポイント: 画像パスを渡す
+                    captcha_image_path=str(captcha_image_path)
                 )
             )
 
+        # ✅ CAPTCHA失敗時
         if result.get("status") == "captcha_failed":
             logger.warning(f"[submit_captcha] CAPTCHA失敗: {result.get('html_path')}, {result.get('png_path')}")
             return jsonify(result), 200
 
-        elif result.get("status") == "captcha_success":
-           session["external_blog_info"] = result
-           return jsonify(result), 200
+        # ✅ CAPTCHA成功時（修正済み判定）
+        elif result.get("captcha_success") is True:
+            session["external_blog_info"] = result
+            return jsonify(result), 200
 
+        # ✅ その他（未知のケース）
         else:
-           return jsonify({"status": "unknown", "message": "CAPTCHAの結果が不明です"}), 200
-
+            return jsonify({"status": "unknown", "message": "CAPTCHAの結果が不明です"}), 200
 
     except Exception as e:
         logger.exception("[submit_captcha] CAPTCHA突破中に予期せぬエラー")
         return jsonify({"status": "error", "message": "サーバーエラーが発生しました"}), 500
 
     finally:
+        # ✅ セッションの掃除
         for key in list(session.keys()):
             if key.startswith("captcha_"):
                 session.pop(key)
-
-
-
-@bp.route("/start_signup", methods=["GET"])
-@login_required
-def start_gui_signup():
-    import asyncio
-    from app.models import Site
-    from app.services.blog_signup.livedoor_signup import (
-        run_livedoor_signup_gui, generate_safe_id, generate_safe_password
-    )
-    from app.services.mail_utils.mail_gw import create_inbox
-    import logging
-
-    logger = logging.getLogger(__name__)
-
-    # ✅ サイト情報を仮指定（※後でPOSTから選択できるように変更可）
-    site_id = request.args.get("site_id", type=int)
-    if not site_id:
-        return "❌ site_id が指定されていません", 400
-
-    site = Site.query.get(site_id)
-    if not site:
-        return f"❌ site_id={site_id} に該当するサイトが見つかりません", 404
-
-    email, token = create_inbox()
-    nickname = generate_safe_id()
-    password = generate_safe_password()
-
-    logger.info(f"[LD-GUI] 登録開始: {email}, {nickname}")
-
-    try:
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import nest_asyncio
-                nest_asyncio.apply()
-                result = loop.run_until_complete(
-                    run_livedoor_signup_gui(site, email, token, nickname, password)
-                )
-            else:
-                result = loop.run_until_complete(
-                    run_livedoor_signup_gui(site, email, token, nickname, password)
-                )
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            result = loop.run_until_complete(
-                run_livedoor_signup_gui(site, email, token, nickname, password)
-            )
-
-        if result.get("status") == "success":
-            return render_template("external_signup_status.html", result=result)
-        else:
-            return f"❌ 登録に失敗しました（ステータス: {result.get('status')}）", 500
-
-    except Exception as e:
-        logger.exception("[LD-GUI] 例外発生")
-        return f"❌ 処理中に例外が発生しました: {str(e)}", 500
-
-@bp.route("/gui_signup_auto", methods=["POST"])
-@login_required
-def gui_signup_auto():
-    import json
-    import subprocess
-    import uuid
-    import logging
-    import tempfile
-    import time
-    from pathlib import Path
-    from app.models import Site
-    from app.services.mail_utils.mail_gw import create_inbox
-    from app.services.blog_signup.livedoor_signup import generate_safe_id, generate_safe_password
-
-    logger = logging.getLogger(__name__)
-
-    # ✅ POSTされたsite_idを取得
-    site_id = request.form.get("site_id", type=int)
-    if not site_id:
-        return jsonify({"status": "error", "message": "site_idが指定されていません"}), 400
-
-    site = Site.query.get(site_id)
-    if not site:
-        return jsonify({"status": "error", "message": f"site_id={site_id} のサイトが見つかりません"}), 404
-
-    # ✅ 登録用情報の生成
-    email, token = create_inbox()
-    nickname = generate_safe_id()
-    password = generate_safe_password()
-
-    # ✅ 一時JSONファイルの生成
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    unique_id = uuid.uuid4().hex[:8]
-    json_filename = f"/tmp/ld_gui_input_{timestamp}_{unique_id}.json"
-    data = {
-        "site_id": site_id,
-        "site_domain": site.domain,
-        "email": email,
-        "token": token,
-        "nickname": nickname,
-        "password": password,
-    }
-
-    try:
-        with open(json_filename, "w") as f:
-            json.dump(data, f)
-        logger.info(f"[LD-GUI] JSONファイル作成: {json_filename}")
-    except Exception as e:
-        logger.exception("[LD-GUI] JSONファイル作成エラー")
-        return jsonify({"status": "error", "message": "JSONファイルの生成に失敗しました"}), 500
-
-    # ✅ xvfb-runでGUI処理を起動
-    cmd = [
-        "xvfb-run", "--auto-servernum", "--server-args=-screen 0 1024x768x24",
-        "python3", "scripts/gui_signup_runner.py", json_filename
-    ]
-
-    try:
-        logger.info("[LD-GUI] GUI登録処理を開始")
-        proc_result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)  # 最大5分待機
-
-        if proc_result.returncode != 0:
-            logger.error(f"[LD-GUI] 登録処理エラー: {proc_result.stderr}")
-            return jsonify({"status": "error", "message": "登録処理に失敗しました", "log": proc_result.stderr}), 500
-
-        logger.info(f"[LD-GUI] 登録処理成功: {proc_result.stdout}")
-        return jsonify({
-            "status": "success",
-            "message": "登録処理が完了しました",
-            "stdout": proc_result.stdout,
-        })
-
-    except subprocess.TimeoutExpired:
-        logger.error("[LD-GUI] 登録処理がタイムアウトしました")
-        return jsonify({"status": "error", "message": "登録処理がタイムアウトしました"}), 500
-    except Exception as e:
-        logger.exception("[LD-GUI] 処理中に例外が発生しました")
-        return jsonify({"status": "error", "message": "登録中に例外が発生しました"}), 500
-
-@bp.route("/external/gui-signup/<int:site_id>", methods=["POST"])
-@login_required
-def external_gui_signup(site_id):
-    from app.utils.gui_signup_utils import generate_config_json, start_gui_runner
-    from app.models import Site
-    import logging
-
-    logger = logging.getLogger(__name__)
-
-    site = Site.query.get(site_id)
-    if not site:
-        return jsonify({"status": "error", "message": f"site_id={site_id} のサイトが見つかりません"}), 404
-
-    try:
-        json_path = generate_config_json(site_id)
-        pid = start_gui_runner(json_path)
-
-        logger.info(f"[GUI-SIGNUP] GUI登録処理を開始: site_id={site_id}, PID={pid}")
-        return jsonify({
-            "status": "started",
-            "message": f"GUI登録を開始しました（PID: {pid}）",
-            "pid": pid,
-            "json_path": str(json_path)
-        })
-
-    except Exception as e:
-        logger.exception("[GUI-SIGNUP] 処理中に例外が発生しました")
-        return jsonify({"status": "error", "message": f"処理中に例外が発生しました: {str(e)}"}), 500
