@@ -3802,14 +3802,21 @@ def external_site_blogs(site_id):
 @login_required
 def prepare_captcha():
     from app.services.blog_signup.livedoor_signup import (
-        prepare_livedoor_captcha, generate_safe_id, generate_safe_password
+        generate_safe_id,
+        generate_safe_password,
+        launch_livedoor_and_capture_captcha  # ✅ 追加：セッション付き画像取得関数
     )
     from app.services.mail_utils.mail_gw import create_inbox
     from app.models import Site
+    from app.services.playwright_controller import store_session  # ✅ 追加
+    from flask import session as flask_session  # ✅ Flaskセッション用
     import asyncio
     import logging
     from pathlib import Path
-    import time  # ✅ 追加
+    import time
+    from uuid import uuid4
+
+    logger = logging.getLogger(__name__)
 
     site_id = request.form.get("site_id", type=int)
     blog = request.form.get("blog")  # 例: livedoor
@@ -3827,20 +3834,27 @@ def prepare_captcha():
     password = generate_safe_password()
     _, token = create_inbox()
 
-    # ✅ CAPTCHA画像生成（非同期処理対応＋エラーハンドリング）
+    # ✅ CAPTCHA画像生成：セッション付き
+    session_id = str(uuid4())
     try:
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 import nest_asyncio
                 nest_asyncio.apply()
-                result = loop.run_until_complete(prepare_livedoor_captcha(email, nickname, password))
+                result = loop.run_until_complete(
+                    launch_livedoor_and_capture_captcha(email, nickname, password, session_id)
+                )
             else:
-                result = loop.run_until_complete(prepare_livedoor_captcha(email, nickname, password))
+                result = loop.run_until_complete(
+                    launch_livedoor_and_capture_captcha(email, nickname, password, session_id)
+                )
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            result = loop.run_until_complete(prepare_livedoor_captcha(email, nickname, password))
+            result = loop.run_until_complete(
+                launch_livedoor_and_capture_captcha(email, nickname, password, session_id)
+            )
     except Exception as e:
         logger.exception("[prepare_captcha] CAPTCHA生成で例外が発生")
         return jsonify({"error": "CAPTCHAの準備に失敗しました"}), 500
@@ -3861,16 +3875,17 @@ def prepare_captcha():
     timestamp = int(time.time())
     captcha_url = url_for("static", filename=f"captchas/{image_filename}", _external=True) + f"?v={timestamp}"
 
-    # ✅ セッションに一連の登録情報を保存
+    # ✅ セッションに一連の登録情報を保存（session_id も含む）
     try:
-        session.update({
+        flask_session.update({
             "captcha_email": email,
             "captcha_nickname": nickname,
             "captcha_password": password,
             "captcha_token": token,
             "captcha_site_id": site_id,
             "captcha_blog": blog,
-            "captcha_image_filename": image_filename
+            "captcha_image_filename": image_filename,
+            "captcha_session_id": session_id  # ✅ 新たに保存
         })
     except Exception as e:
         logger.exception("[prepare_captcha] セッション保存時にエラー")
@@ -3882,93 +3897,104 @@ def prepare_captcha():
 @bp.route("/submit_captcha", methods=["POST"])
 @login_required
 def submit_captcha():
-    from app.services.blog_signup.livedoor_signup import run_livedoor_signup
+    from app.services.blog_signup.livedoor_signup import submit_captcha_and_complete
+    from app.services.playwright_controller import get_session, delete_session
     from app.models import Site
     from app.utils.captcha_dataset_utils import save_captcha_label_pair
     import asyncio
     import logging
-    from flask import jsonify, session, request, current_app
+    from flask import jsonify, session, request
     from pathlib import Path
 
     logger = logging.getLogger(__name__)
 
+    # ✅ ユーザー入力を取得
     captcha_text = request.form.get("captcha_text")
     image_filename = session.get("captcha_image_filename")
+    session_id = session.get("captcha_session_id")
 
     if not captcha_text:
         return jsonify({"status": "error", "message": "CAPTCHA文字列が入力されていません"}), 400
 
+    # ✅ CAPTCHA画像と入力をセットで保存（学習データ用途）
     if captcha_text and image_filename:
         save_captcha_label_pair(image_filename, captcha_text)
 
-    email    = session.get("captcha_email")
+    # ✅ セッションに保存していた登録情報を取得
+    email = session.get("captcha_email")
     nickname = session.get("captcha_nickname")
     password = session.get("captcha_password")
-    token    = session.get("captcha_token")
-    site_id  = session.get("captcha_site_id")
-    blog     = session.get("captcha_blog")
+    token = session.get("captcha_token")
+    site_id = session.get("captcha_site_id")
+    blog = session.get("captcha_blog")
 
-    # ✅ CAPTCHA画像の絶対パス構築
-    captcha_image_path = Path(current_app.root_path) / "static" / "captchas" / image_filename
-
-    # ✅ セッション情報チェック
-    if not all([email, nickname, password, token, site_id, blog]):
+    if not all([email, nickname, password, token, site_id, blog, session_id]):
         return jsonify({"status": "error", "message": "セッション情報が不足しています"}), 400
 
+    # ✅ サイト取得
     site = Site.query.get(site_id)
     if not site:
         return jsonify({"status": "error", "message": "対象サイトが存在しません"}), 404
 
+    # ✅ CAPTCHAセッションから Playwrightページ取得
     try:
-        # ✅ 安全なイベントループの起動（既存 or 新規）
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import nest_asyncio
+            nest_asyncio.apply()
+            page = loop.run_until_complete(get_session(session_id))
+        else:
+            page = loop.run_until_complete(get_session(session_id))
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        page = loop.run_until_complete(get_session(session_id))
+
+    if not page:
+        logger.error("[submit_captcha] Playwrightセッションが見つかりません")
+        return jsonify({"status": "error", "message": "セッションが切れています"}), 400
+
+    try:
+        # ✅ CAPTCHA入力と送信（Playwrightページに直接送信）
         try:
-            loop = asyncio.get_event_loop()
             if loop.is_running():
-                import nest_asyncio
-                nest_asyncio.apply()
                 result = loop.run_until_complete(
-                    run_livedoor_signup(
-                        site, email, token, nickname, password, captcha_text,
-                        captcha_image_path=str(captcha_image_path)
-                    )
+                    submit_captcha_and_complete(page, captcha_text, email, nickname, password, token, site)
                 )
             else:
                 result = loop.run_until_complete(
-                    run_livedoor_signup(
-                        site, email, token, nickname, password, captcha_text,
-                        captcha_image_path=str(captcha_image_path)
-                    )
+                    submit_captcha_and_complete(page, captcha_text, email, nickname, password, token, site)
                 )
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             result = loop.run_until_complete(
-                run_livedoor_signup(
-                    site, email, token, nickname, password, captcha_text,
-                    captcha_image_path=str(captcha_image_path)
-                )
+                submit_captcha_and_complete(page, captcha_text, email, nickname, password, token, site)
             )
 
-        # ✅ CAPTCHA失敗時
-        if result.get("status") == "captcha_failed":
-            logger.warning(f"[submit_captcha] CAPTCHA失敗: {result.get('html_path')}, {result.get('png_path')}")
-            return jsonify(result), 200
-
-        # ✅ CAPTCHA成功時（修正済み判定）
-        elif result.get("captcha_success") is True:
+        if result.get("captcha_success"):
             session["external_blog_info"] = result
             return jsonify(result), 200
-
-        # ✅ その他（未知のケース）
         else:
-            return jsonify({"status": "unknown", "message": "CAPTCHAの結果が不明です"}), 200
+            return jsonify({"status": "captcha_failed", "message": "CAPTCHA認証に失敗しました"}), 200
 
     except Exception as e:
-        logger.exception("[submit_captcha] CAPTCHA突破中に予期せぬエラー")
-        return jsonify({"status": "error", "message": "サーバーエラーが発生しました"}), 500
+        logger.exception("[submit_captcha] CAPTCHA送信中にエラーが発生しました")
+        return jsonify({"status": "error", "message": "CAPTCHA送信に失敗しました"}), 500
 
     finally:
-        # ✅ セッションの掃除
+        # ✅ Playwrightセッションの破棄
+        try:
+            if loop.is_running():
+                loop.run_until_complete(delete_session(session_id))
+            else:
+                loop.run_until_complete(delete_session(session_id))
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(delete_session(session_id))
+
+        # ✅ セッションの掃除（captcha_ で始まるキーすべて削除）
         for key in list(session.keys()):
             if key.startswith("captcha_"):
                 session.pop(key)

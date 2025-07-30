@@ -291,3 +291,138 @@ async def run_livedoor_signup(site, email, token, nickname, password,
 
         finally:
             await browser.close()
+
+from app.services.playwright_controller import store_session
+
+async def launch_livedoor_and_capture_captcha(email: str, nickname: str, password: str, session_id: str) -> dict:
+    """
+    CAPTCHA画像を取得し、Playwrightセッションを保持して返す。
+    """
+    from playwright.async_api import async_playwright
+    from pathlib import Path
+    from datetime import datetime
+
+    CAPTCHA_SAVE_DIR = Path(current_app.root_path) / "static" / "captchas"
+    CAPTCHA_SAVE_DIR.mkdir(parents=True, exist_ok=True)
+
+    p = await async_playwright().start()
+    browser = await p.chromium.launch(headless=True)
+    page = await browser.new_page()
+
+    try:
+        await page.goto("https://member.livedoor.com/register/input")
+        await page.fill('input[name="livedoor_id"]', nickname)
+        await page.fill('input[name="password"]', password)
+        await page.fill('input[name="password2"]', password)
+        await page.fill('input[name="email"]', email)
+        await page.click('input[value="ユーザー情報を登録"]')
+
+        await page.wait_for_selector("#captcha-img", timeout=10000)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"captcha_{session_id}_{timestamp}.png"
+        filepath = CAPTCHA_SAVE_DIR / filename
+
+        await page.locator("#captcha-img").screenshot(path=str(filepath))
+        logger.info(f"[LD-Signup] CAPTCHA画像を {filepath} に保存")
+
+        # ✅ セッションに page を保持（ブラウザは閉じずに返す）
+        await store_session(session_id, page)
+
+        return {"filename": filename}
+
+    except Exception as e:
+        await browser.close()
+        logger.exception("[LD-Signup] CAPTCHA画像取得失敗")
+        raise RuntimeError("CAPTCHA画像の取得に失敗しました")
+
+async def submit_captcha_and_complete(page, captcha_text: str, email: str, nickname: str,
+                                      password: str, token: str, site) -> dict:
+    """
+    CAPTCHAを入力・送信し、メール認証・アカウント作成を完了。
+    """
+    from datetime import datetime
+    from app.models import ExternalBlogAccount
+    from app.services.blog_signup.crypto_utils import encrypt
+    from app import db
+    from app.enums import BlogType
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    try:
+        logger.info(f"[LD-Signup] CAPTCHA入力中: {captcha_text}")
+        await page.fill("#captcha", captcha_text)
+        await page.click('input[id="commit-button"]')
+        await page.wait_for_timeout(2000)
+
+        html = await page.content()
+        current_url = page.url
+
+        if "仮登録メール" not in html and not current_url.endswith("/register/done"):
+            error_html = f"/tmp/ld_captcha_failed_{timestamp}.html"
+            error_png = f"/tmp/ld_captcha_failed_{timestamp}.png"
+            Path(error_html).write_text(html, encoding="utf-8")
+            await page.screenshot(path=error_png)
+            logger.warning(f"[LD-Signup] CAPTCHA失敗 ➜ HTML: {error_html}, PNG: {error_png}")
+            return {
+                "captcha_success": False,
+                "html_path": error_html,
+                "png_path": error_png
+            }
+
+        # ✅ メール確認
+        logger.info("[LD-Signup] メール確認リンク取得中...")
+        url = None
+        for i in range(3):
+            url = await poll_latest_link_gw(token)
+            if url:
+                break
+            await asyncio.sleep(5)
+
+        if not url:
+            html = await page.content()
+            err_html = f"/tmp/ld_email_link_fail_{timestamp}.html"
+            err_png = f"/tmp/ld_email_link_fail_{timestamp}.png"
+            Path(err_html).write_text(html, encoding="utf-8")
+            await page.screenshot(path=err_png)
+            logger.error(f"[LD-Signup] メールリンク取得失敗 ➜ HTML: {err_html}, PNG: {err_png}")
+            return {"captcha_success": False, "error": "メール認証に失敗"}
+
+        await page.goto(url)
+        await page.wait_for_timeout(2000)
+
+        html = await page.content()
+        blog_id = await page.input_value("#livedoor_blog_id")
+        api_key = await page.input_value("#atompub_key")
+
+        if not blog_id or not api_key:
+            fail_html = f"/tmp/ld_final_fail_{timestamp}.html"
+            fail_png = f"/tmp/ld_final_fail_{timestamp}.png"
+            Path(fail_html).write_text(html, encoding="utf-8")
+            await page.screenshot(path=fail_png)
+            logger.error(f"[LD-Signup] 登録後のAPI情報取得失敗")
+            return {"captcha_success": False, "error": "登録完了後の情報取得に失敗"}
+
+        account = ExternalBlogAccount(
+            site_id=site.id,
+            blog_type=BlogType.LIVEDOOR,
+            email=email,
+            username=blog_id,
+            password=password,
+            nickname=nickname,
+            livedoor_blog_id=blog_id,
+            atompub_key_enc=encrypt(api_key),
+        )
+        db.session.add(account)
+        db.session.commit()
+        logger.info(f"[LD-Signup] アカウントDB登録完了 blog_id={blog_id}")
+
+        return {
+            "captcha_success": True,
+            "blog_id": blog_id,
+            "api_key": api_key
+        }
+
+    except Exception as e:
+        logger.exception("[LD-Signup] CAPTCHA送信 or 登録失敗")
+        return {"captcha_success": False, "error": str(e)}
