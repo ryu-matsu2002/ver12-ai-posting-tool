@@ -26,22 +26,17 @@ S.headers.update({"User-Agent": "Mozilla/5.0"})
 
 # ---------------------------------------------------------------- utilities
 
-
 def _rand_str(n: int = 10) -> str:
     return "".join(random.choices(string.ascii_lowercase + string.digits, k=n))
-
 
 def _links_from_html(body: str) -> list[str]:
     soup = BeautifulSoup(body, "lxml")
     return [html.unescape(a["href"]) for a in soup.find_all("a", href=True)]
 
-
 def _log(resp: requests.Response) -> None:
     logging.debug("[mail.tm] %s %s → %s", resp.request.method, resp.url, resp.status_code)
 
-
 # ---------------------------------------------------------------- main API
-
 
 def create_inbox() -> tuple[str, str]:
     """
@@ -77,9 +72,7 @@ def create_inbox() -> tuple[str, str]:
     r.raise_for_status()
     jwt = r.json()["token"]
 
-    S.headers.update({"Authorization": f"Bearer {jwt}"})
     return email, jwt
-
 
 
 def poll_latest_link_tm(
@@ -91,11 +84,16 @@ def poll_latest_link_tm(
     """
     受信箱をポーリングし本文内の最初の URL を返す
     """
+    S2 = requests.Session()
+    S2.headers.update({
+        "User-Agent": "Mozilla/5.0",
+        "Authorization": f"Bearer {jwt}"
+    })
+
     deadline = time.time() + timeout
-    S.headers.update({"Authorization": f"Bearer {jwt}"})
 
     while time.time() < deadline:
-        r = S.get(f"{BASE}/messages")
+        r = S2.get(f"{BASE}/messages")
         _log(r)
         r.raise_for_status()
         msgs = sorted(r.json()["hydra:member"], key=lambda x: x["createdAt"], reverse=True)
@@ -105,7 +103,7 @@ def poll_latest_link_tm(
             if sender_like and sender_like not in frm:
                 continue
             mid = msg["id"]
-            body = S.get(f"{BASE}/messages/{mid}").json()["html"][0]
+            body = S2.get(f"{BASE}/messages/{mid}").json()["html"][0]
             links = _links_from_html(body)
             if links:
                 return links[0]
