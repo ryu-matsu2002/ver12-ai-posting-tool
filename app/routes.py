@@ -4023,7 +4023,8 @@ def confirm_email_manual(task_id):
         return redirect(url_for('dashboard'))
 
 from flask import request, session, redirect, url_for, flash
-from app.services.blog_signup.livedoor_signup import fetch_atompub_credentials
+from app.services.blog_signup.livedoor_signup import fetch_livedoor_credentials
+
 
 @bp.route('/finish_signup/<task_id>', methods=['POST'])
 def finish_signup(task_id):
@@ -4033,7 +4034,7 @@ def finish_signup(task_id):
     """
     try:
         # すでに存在する task_id のセッションや保存情報から再開
-        result = fetch_atompub_credentials(task_id)
+        result = fetch_livedoor_credentials(task_id)
 
         if result and result.get("blog_id") and result.get("api_key"):
             # 必要に応じてDB保存 or セッションに保存（ここでは表示用）
