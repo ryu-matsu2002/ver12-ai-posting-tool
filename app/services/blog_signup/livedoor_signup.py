@@ -18,7 +18,7 @@ from flask import url_for
 from app import db
 from app.enums import BlogType
 from app.models import ExternalBlogAccount
-from app.services.mail_utils.mail_tm import create_inbox, poll_latest_link_tm as poll_latest_link_gw
+from app.services.mail_utils.mail_tm import create_inbox, poll_latest_link_tm_async as poll_latest_link_gw
 from app.services.blog_signup.crypto_utils import encrypt
 from app.services.captcha_solver import solve
 
