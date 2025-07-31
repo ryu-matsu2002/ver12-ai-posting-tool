@@ -14,7 +14,7 @@ from collections.abc import AsyncGenerator
 
 logger = logging.getLogger(__name__)  # ← ✅ logger をモジュールスコープに統一
 
-BASE = "https://api.mail.gw"
+BASE = "https://api.mail.tm"
 USER_AGENT = "Mozilla/5.0 (SEO-Bot)"
 
 def _client():
