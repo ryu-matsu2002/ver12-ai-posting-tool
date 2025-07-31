@@ -106,7 +106,7 @@ async def poll_latest_link_tm_async(
     interval: int = 6,
 ) -> Optional[str]:
     """
-    非同期で受信箱をポーリングして本文内の最初のURLを返す
+    非同期で受信箱をポーリングして livedoor 認証リンクを抽出
     """
     headers = {
         "User-Agent": "Mozilla/5.0",
@@ -143,13 +143,20 @@ async def poll_latest_link_tm_async(
                         continue
                     body = body_html_list[0]
                     links = _links_from_html(body)
-                    if links:
-                        return links[0]
+
+                    # livedoor 認証リンクに絞る
+                    livedoor_links = [
+                        link for link in links if "email_auth/commit" in link
+                    ]
+                    if livedoor_links:
+                        logging.info(f"[mail.tm] ✅ 認証リンク検出: {livedoor_links[0]}")
+                        return livedoor_links[0]
+
                 except Exception as e:
                     logging.warning("[mail.tm] failed to parse message %s: %s", mid, e)
                     continue
 
             await asyncio.sleep(interval)
 
-    logging.error("[mail.tm] verification link not found (timeout)")
+    logging.error("[mail.tm] ❌ livedoor認証リンクが見つかりませんでした（timeout）")
     return None

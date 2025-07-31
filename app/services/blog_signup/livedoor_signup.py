@@ -238,7 +238,9 @@ async def run_livedoor_signup(site, email, token, nickname, password,
                 raise RuntimeError("確認メールリンクが取得できません（poll_latest_link_gw = None）")
 
             await page.goto(url)
-            await page.wait_for_timeout(2000)
+            await page.wait_for_load_state("networkidle")
+            logger.info(f"[LD-Signup] ✅ 認証リンクにアクセス成功: {url}")
+
 
 
             html = await page.content()
