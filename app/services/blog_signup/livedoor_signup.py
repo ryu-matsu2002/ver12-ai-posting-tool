@@ -343,9 +343,6 @@ async def submit_captcha_and_complete(page, captcha_text: str, email: str, nickn
     from app.services.blog_signup.crypto_utils import encrypt
     from app import db
     from app.enums import BlogType
-    from app.services.blog_signup.mailgw_utils import poll_latest_link_gw  # ← 明示的に追記が必要な場合もあり
-    import asyncio
-    from pathlib import Path
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -373,9 +370,13 @@ async def submit_captcha_and_complete(page, captcha_text: str, email: str, nickn
         # ✅ メール確認
         logger.info("[LD-Signup] メール確認リンク取得中...")
         url = None
-        async for u in poll_latest_link_gw(token):
-            url = u
-            break
+        for i in range(3):
+            u = poll_latest_link_gw(token)  # ← 通常の関数として呼び出す
+            if u:
+                url = u
+                break
+            await asyncio.sleep(5)
+
 
         if not url:
             html = await page.content()
@@ -418,13 +419,12 @@ async def submit_captcha_and_complete(page, captcha_text: str, email: str, nickn
         return {
             "captcha_success": True,
             "blog_id": blog_id,
-            "api_key": api_key,
+            "api_key": api_key
         }
 
     except Exception as e:
-        logger.exception(f"[LD-Signup] CAPTCHA後処理中に例外発生: {e}")
+        logger.exception("[LD-Signup] CAPTCHA送信 or 登録失敗")
         return {"captcha_success": False, "error": str(e)}
-
 
 import re
 
