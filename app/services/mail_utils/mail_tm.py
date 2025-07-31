@@ -82,9 +82,10 @@ def create_inbox() -> tuple[str, str]:
         return None, None
     
     logger.info(f"[mail.tm] ✅ created new inbox: {email}")
+    logger.info(f"[mail.tm] ✅ password: {pwd}")
     logger.info(f"[mail.tm] ✅ JWT head: {jwt[:10]}...")
 
-    return email, jwt
+    return email, pwd, jwt
 
 
 
