@@ -225,7 +225,7 @@ async def run_livedoor_signup(site, email, token, nickname, password,
             
             # ✅ メール確認リンク取得
             logger.info("[LD-Signup] メール確認中...")
-            url = poll_latest_link_gw(token)
+            url = await poll_latest_link_gw(token)
 
             if not url:
                 html = await page.content()
