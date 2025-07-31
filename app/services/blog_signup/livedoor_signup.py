@@ -446,3 +446,22 @@ def extract_verification_url(email_body: str) -> str | None:
     if match:
         return match.group(0)
     return None
+
+import json
+import os
+
+TEMP_DIR = "/tmp/livedoor_tasks"  # 必要なら /var/www/... 配下に移動可
+
+os.makedirs(TEMP_DIR, exist_ok=True)
+
+def save_livedoor_credentials(task_id: str, blog_id: str, api_key: str):
+    path = os.path.join(TEMP_DIR, f"{task_id}.json")
+    with open(path, "w") as f:
+        json.dump({"blog_id": blog_id, "api_key": api_key}, f)
+
+def fetch_livedoor_credentials(task_id: str) -> dict | None:
+    path = os.path.join(TEMP_DIR, f"{task_id}.json")
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        return json.load(f)

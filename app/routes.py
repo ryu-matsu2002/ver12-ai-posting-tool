@@ -4048,3 +4048,13 @@ def finish_signup(task_id):
     except Exception as e:
         flash(f"エラーが発生しました: {str(e)}", "danger")
         return redirect(url_for('dashboard'))
+
+from flask import render_template, abort
+from app.services.blog_signup.livedoor_signup import fetch_livedoor_credentials
+
+@bp.route("/external/livedoor/confirm/<task_id>")
+def confirm_livedoor_email(task_id):
+    creds = fetch_livedoor_credentials(task_id)
+    if not creds:
+        abort(404, description="認証情報が見つかりません")
+    return render_template("confirm_email.html", blog_id=creds["blog_id"], api_key=creds["api_key"])
