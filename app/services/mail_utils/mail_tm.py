@@ -88,60 +88,67 @@ def create_inbox() -> tuple[str, str]:
 
 
 
-def poll_latest_link_tm(
+import asyncio
+import logging
+from typing import Optional
+import httpx  # 非同期クライアント
+from .html_utils import _links_from_html  # ※既存のリンク抽出関数
+# BASE = "https://api.mail.tm" は既存と同じ前提
+
+
+BASE = "https://api.mail.tm"
+
+async def poll_latest_link_tm_async(
     jwt: str,
-    sender_like: str | None = "@livedoor",  # ← livedoor 専用に変更
+    sender_like: str | None = "@livedoor",
     timeout: int = 180,
     interval: int = 6,
 ) -> Optional[str]:
     """
-    受信箱をポーリングし本文内の最初の URL を返す
+    非同期で受信箱をポーリングして本文内の最初のURLを返す
     """
-    # ✅ 修正1：毎回新しい Session を作成しトークンを強制的に付与
-    S2 = requests.Session()
-    S2.headers.update({
+    headers = {
         "User-Agent": "Mozilla/5.0",
-        "Authorization": f"Bearer {jwt}"
-    })
+        "Authorization": f"Bearer {jwt}",
+    }
 
-    deadline = time.time() + timeout
+    deadline = asyncio.get_event_loop().time() + timeout
 
-    while time.time() < deadline:
-        try:
-            r = S2.get(f"{BASE}/messages")
-            _log(r)
-            r.raise_for_status()
-        except requests.exceptions.HTTPError as e:
-            logging.error("[mail.tm] AUTH ERROR: %s", e)
-            break  # ✅ 修正2：401発生時はリトライせず終了
-        except Exception as e:
-            logging.warning("[mail.tm] unexpected error: %s", e)
-            time.sleep(interval)
-            continue
-
-        msgs = sorted(r.json().get("hydra:member", []), key=lambda x: x["createdAt"], reverse=True)
-
-        for msg in msgs:
-            frm = msg.get("from", {}).get("address", "")
-            if sender_like and sender_like not in frm:
-                continue
-            mid = msg["id"]
+    async with httpx.AsyncClient(headers=headers, timeout=20) as client:
+        while asyncio.get_event_loop().time() < deadline:
             try:
-                body_resp = S2.get(f"{BASE}/messages/{mid}")
-                _log(body_resp)
-                body_resp.raise_for_status()
-                body_html_list = body_resp.json().get("html", [])
-                if not body_html_list:
-                    continue
-                body = body_html_list[0]
-                links = _links_from_html(body)
-                if links:
-                    return links[0]
+                r = await client.get(f"{BASE}/messages")
+                r.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                logging.error("[mail.tm] AUTH ERROR: %s", e)
+                break
             except Exception as e:
-                logging.warning("[mail.tm] failed to parse message %s: %s", mid, e)
+                logging.warning("[mail.tm] unexpected error: %s", e)
+                await asyncio.sleep(interval)
                 continue
 
-        time.sleep(interval)
+            msgs = sorted(r.json().get("hydra:member", []), key=lambda x: x["createdAt"], reverse=True)
+
+            for msg in msgs:
+                frm = msg.get("from", {}).get("address", "")
+                if sender_like and sender_like not in frm:
+                    continue
+                mid = msg["id"]
+                try:
+                    body_resp = await client.get(f"{BASE}/messages/{mid}")
+                    body_resp.raise_for_status()
+                    body_html_list = body_resp.json().get("html", [])
+                    if not body_html_list:
+                        continue
+                    body = body_html_list[0]
+                    links = _links_from_html(body)
+                    if links:
+                        return links[0]
+                except Exception as e:
+                    logging.warning("[mail.tm] failed to parse message %s: %s", mid, e)
+                    continue
+
+            await asyncio.sleep(interval)
 
     logging.error("[mail.tm] verification link not found (timeout)")
-    return None  # ✅ 修正3：必ず None を返す（async for 対応前提であればイテレータ化が必要）
+    return None
