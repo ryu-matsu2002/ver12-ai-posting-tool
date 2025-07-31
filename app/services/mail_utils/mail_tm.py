@@ -45,31 +45,33 @@ def _log(resp: requests.Response) -> None:
 
 def create_inbox() -> tuple[str, str]:
     """
-    1) ドメイン取得 → ランダム email 作成
-    2) /accounts で登録
-    3) /token で JWT 取得
+    1) 使用可能なドメインを取得 → mail.tm を除外
+    2) ランダム email を作成
+    3) /accounts で登録
+    4) /token で JWT 取得
     Returns
     -------
     (email, jwt)
-    Raises
-    ------
-    requests.HTTPError
     """
-    # 1️⃣ ドメイン
+    # ドメイン一覧を取得
     r = S.get(f"{BASE}/domains")
     _log(r)
     r.raise_for_status()
-    domain = r.json()["hydra:member"][0]["domain"]
+    domains = [d["domain"] for d in r.json()["hydra:member"]]
+
+    # mail.tm を除外して使用（fallbackあり）
+    usable_domains = [d for d in domains if "mail.tm" not in d]
+    domain = random.choice(usable_domains or domains)  # 使えるのがなければ fallback
 
     email = f"{_rand_str()}@{domain}"
-    pwd = _rand_str(12)  # 使い捨て用パス
+    pwd = _rand_str(12)
 
-    # 2️⃣ アカウント作成
+    # アカウント作成
     r = S.post(f"{BASE}/accounts", json={"address": email, "password": pwd})
     _log(r)
     r.raise_for_status()
 
-    # 3️⃣ トークン取得
+    # トークン取得
     r = S.post(f"{BASE}/token", json={"address": email, "password": pwd})
     _log(r)
     r.raise_for_status()
@@ -77,6 +79,7 @@ def create_inbox() -> tuple[str, str]:
 
     S.headers.update({"Authorization": f"Bearer {jwt}"})
     return email, jwt
+
 
 
 def poll_latest_link_tm(
