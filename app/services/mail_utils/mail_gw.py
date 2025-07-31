@@ -7,7 +7,7 @@ poll_latest_link()   -> URL or None
 ──────────────────────────────
 """
 from __future__ import annotations
-import secrets, string, time, re, logging, httpx, html
+import secrets, string, time, re, logging, httpx, html, random
 from bs4 import BeautifulSoup
 import asyncio 
 from collections.abc import AsyncGenerator
@@ -31,14 +31,40 @@ def _links_from_html(body: str) -> list[str]:
 
 # --------------------------------------------------------- main API
 def create_inbox() -> tuple[str, str]:
-    """
-    mail.tm 形式で仮アドレスを生成（mail.gw APIは使用しない）
-    """
-    username = _rand_str(10)
-    addr = f"{username}@mail.tm"
-    jwt = "dummy-token"  # mail.tm未使用なのでトークンは仮
-    return addr, jwt
+    import logging
+    logger = logging.getLogger(__name__)
+    BASE = "https://api.mail.tm"
 
+    # ドメイン一覧を取得
+    r = httpx.get(f"{BASE}/domains")
+    r.raise_for_status()
+    domains = [d["domain"] for d in r.json()["hydra:member"]]
+
+    # mail.tm を除外して使用（fallbackあり）
+    usable_domains = [d for d in domains if "mail.tm" not in d]
+    domain = random.choice(usable_domains or domains)
+
+    username = _rand_str()
+    password = _rand_str(12)
+    email = f"{username}@{domain}"
+
+    # アカウント作成
+    r = httpx.post(f"{BASE}/accounts", json={"address": email, "password": password})
+    r.raise_for_status()
+
+    # トークン取得
+    r = httpx.post(f"{BASE}/token", json={"address": email, "password": password})
+    r.raise_for_status()
+    jwt = r.json().get("token")
+
+    if not jwt:
+        logger.error("[mail.tm] JWTが取得できませんでした（トークン=None）: %s", r.text)
+        return None, None
+
+    logger.info(f"[mail.tm] ✅ created new inbox: {email}")
+    logger.info(f"[mail.tm] ✅ JWT head: {jwt[:10]}...")
+
+    return email, jwt
 
 
 # --------------------------------------------------------- polling
