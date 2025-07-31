@@ -69,15 +69,23 @@ def create_inbox() -> tuple[str, str]:
     # トークン取得
     r = S.post(f"{BASE}/token", json={"address": email, "password": pwd})
     _log(r)
-    r.raise_for_status()
-    jwt = r.json()["token"]
+    try:
+        r.raise_for_status()
+        jwt = r.json().get("token")
+        if not jwt:
+            logging.error("[mail.tm] JWTが取得できませんでした（トークン=None）: %s", r.text)
+            return None, None
+    except Exception as e:
+        logging.exception("[mail.tm] JWT取得中に例外が発生しました")
+        return None, None
 
     return email, jwt
 
 
+
 def poll_latest_link_tm(
     jwt: str,
-    sender_like: str | None = "@note.com",
+    sender_like: str | None = "@livedoor",  # ← livedoor 専用に変更
     timeout: int = 180,
     interval: int = 6,
 ) -> Optional[str]:
