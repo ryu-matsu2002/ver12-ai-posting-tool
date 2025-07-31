@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}メール認証 | Livedoor登録{% endblock %}
+
+{% block content %}
+<div class="max-w-xl mx-auto bg-white shadow-md rounded-lg p-6 mt-8">
+
+  <h2 class="text-2xl font-bold mb-4">📩 メール認証のお願い</h2>
+
+  <p class="mb-4">
+    以下のリンクをクリックして、Livedoorアカウントのメール認証を完了してください。
+  </p>
+
+  {% if verification_url %}
+    <div class="mb-6 p-4 bg-gray-100 rounded border border-gray-300">
+      <strong>認証リンク：</strong><br>
+      <a href="{{ verification_url }}" class="text-blue-600 underline" target="_blank">
+        {{ verification_url }}
+      </a>
+    </div>
+  {% else %}
+    <p class="text-red-600">認証リンクが見つかりませんでした。</p>
+  {% endif %}
+
+  <form action="{{ url_for('finish_signup', task_id=request.view_args.task_id) }}" method="post">
+    <button type="submit" class="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded">
+      ✅ 認証が完了したので次へ進む
+    </button>
+  </form>
+
+</div>
+{% endblock %}

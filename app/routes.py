@@ -3998,3 +3998,53 @@ def submit_captcha():
         for key in list(session.keys()):
             if key.startswith("captcha_"):
                 session.pop(key)
+
+from flask import render_template, redirect, url_for, request, session, flash
+from app.livedoor_signup import poll_latest_link_gw, extract_verification_url
+
+@bp.route('/confirm_email_manual/<task_id>')
+def confirm_email_manual(task_id):
+    """
+    CAPTCHA後、認証リンクをユーザーに手動で表示する画面。
+    """
+    # メール受信（最大30回ポーリング） ← 既存関数を再利用
+    email_body = poll_latest_link_gw(task_id=task_id, max_attempts=30, interval=5)
+
+    if email_body:
+        # 認証URLを抽出
+        verification_url = extract_verification_url(email_body)
+        if verification_url:
+            return render_template("confirm_email.html", verification_url=verification_url)
+        else:
+            flash("認証リンクが見つかりませんでした", "danger")
+            return redirect(url_for('dashboard'))
+    else:
+        flash("認証メールを取得できませんでした", "danger")
+        return redirect(url_for('dashboard'))
+
+from flask import request, session, redirect, url_for, flash
+from app.livedoor_signup import fetch_atompub_credentials
+
+@bp.route('/finish_signup/<task_id>', methods=['POST'])
+def finish_signup(task_id):
+    """
+    メール認証が完了した後に呼ばれる処理。
+    AtomPub API Keyを取得し、DB保存 or 表示に進む。
+    """
+    try:
+        # すでに存在する task_id のセッションや保存情報から再開
+        result = fetch_atompub_credentials(task_id)
+
+        if result and result.get("blog_id") and result.get("api_key"):
+            # 必要に応じてDB保存 or セッションに保存（ここでは表示用）
+            flash("🎉 AtomPub API情報を正常に取得しました", "success")
+            flash(f"ブログID: {result['blog_id']}", "info")
+            flash(f"API Key: {result['api_key']}", "info")
+            return redirect(url_for('dashboard'))  # または account_details, etc.
+        else:
+            flash("API情報の取得に失敗しました", "danger")
+            return redirect(url_for('dashboard'))
+
+    except Exception as e:
+        flash(f"エラーが発生しました: {str(e)}", "danger")
+        return redirect(url_for('dashboard'))

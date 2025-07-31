@@ -433,3 +433,16 @@ async def submit_captcha_and_complete(page, captcha_text: str, email: str, nickn
     except Exception as e:
         logger.exception("[LD-Signup] CAPTCHA送信 or 登録失敗")
         return {"captcha_success": False, "error": str(e)}
+
+import re
+
+def extract_verification_url(email_body: str) -> str | None:
+    """
+    livedoorの認証URLをメール本文から抽出する。
+    """
+    # livedoor登録メールに含まれる認証リンクのパターン
+    pattern = r"https://member\.livedoor\.com/verify/[a-zA-Z0-9]+"
+    match = re.search(pattern, email_body)
+    if match:
+        return match.group(0)
+    return None
