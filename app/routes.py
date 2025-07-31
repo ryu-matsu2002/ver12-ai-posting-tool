@@ -4000,7 +4000,7 @@ def submit_captcha():
                 session.pop(key)
 
 from flask import render_template, redirect, url_for, request, session, flash
-from app.livedoor_signup import poll_latest_link_gw, extract_verification_url
+from app.services.blog_signup.livedoor_signup import poll_latest_link_gw, extract_verification_url
 
 @bp.route('/confirm_email_manual/<task_id>')
 def confirm_email_manual(task_id):
@@ -4023,7 +4023,7 @@ def confirm_email_manual(task_id):
         return redirect(url_for('dashboard'))
 
 from flask import request, session, redirect, url_for, flash
-from app.livedoor_signup import fetch_atompub_credentials
+from app.services.blog_signup.livedoor_signup import fetch_atompub_credentials
 
 @bp.route('/finish_signup/<task_id>', methods=['POST'])
 def finish_signup(task_id):
