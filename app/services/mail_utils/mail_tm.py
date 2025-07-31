@@ -39,6 +39,8 @@ def _log(resp: requests.Response) -> None:
 # ---------------------------------------------------------------- main API
 
 def create_inbox() -> tuple[str, str]:
+    import logging
+    logger = logging.getLogger(__name__)
     """
     1) 使用可能なドメインを取得 → mail.tm を除外
     2) ランダム email を作成
@@ -78,6 +80,9 @@ def create_inbox() -> tuple[str, str]:
     except Exception as e:
         logging.exception("[mail.tm] JWT取得中に例外が発生しました")
         return None, None
+    
+    logger.info(f"[mail.tm] ✅ created new inbox: {email}")
+    logger.info(f"[mail.tm] ✅ JWT head: {jwt[:10]}...")
 
     return email, jwt
 
