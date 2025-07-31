@@ -84,10 +84,11 @@ def poll_latest_link_tm(
     """
     受信箱をポーリングし本文内の最初の URL を返す
     """
+    # ✅ 修正：requests.Session() を毎回新たに作成＋トークンを強制的に付与
     S2 = requests.Session()
     S2.headers.update({
         "User-Agent": "Mozilla/5.0",
-        "Authorization": f"Bearer {jwt}"
+        "Authorization": f"Bearer {jwt}"  # ✅ トークンをセット
     })
 
     deadline = time.time() + timeout
@@ -95,7 +96,12 @@ def poll_latest_link_tm(
     while time.time() < deadline:
         r = S2.get(f"{BASE}/messages")
         _log(r)
-        r.raise_for_status()
+        try:
+            r.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            logging.error("[mail.tm] AUTH ERROR: %s", e)
+            return None  # 🔁 401の時点でリトライせず終了する方が安全
+
         msgs = sorted(r.json()["hydra:member"], key=lambda x: x["createdAt"], reverse=True)
 
         for msg in msgs:
@@ -111,3 +117,4 @@ def poll_latest_link_tm(
 
     logging.error("[mail.tm] verification link not found (timeout)")
     return None
+
