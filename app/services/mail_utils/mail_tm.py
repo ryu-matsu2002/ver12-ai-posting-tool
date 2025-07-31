@@ -92,37 +92,51 @@ def poll_latest_link_tm(
     """
     受信箱をポーリングし本文内の最初の URL を返す
     """
-    # ✅ 修正：requests.Session() を毎回新たに作成＋トークンを強制的に付与
+    # ✅ 修正1：毎回新しい Session を作成しトークンを強制的に付与
     S2 = requests.Session()
     S2.headers.update({
         "User-Agent": "Mozilla/5.0",
-        "Authorization": f"Bearer {jwt}"  # ✅ トークンをセット
+        "Authorization": f"Bearer {jwt}"
     })
 
     deadline = time.time() + timeout
 
     while time.time() < deadline:
-        r = S2.get(f"{BASE}/messages")
-        _log(r)
         try:
+            r = S2.get(f"{BASE}/messages")
+            _log(r)
             r.raise_for_status()
         except requests.exceptions.HTTPError as e:
             logging.error("[mail.tm] AUTH ERROR: %s", e)
-            return None  # 🔁 401の時点でリトライせず終了する方が安全
+            break  # ✅ 修正2：401発生時はリトライせず終了
+        except Exception as e:
+            logging.warning("[mail.tm] unexpected error: %s", e)
+            time.sleep(interval)
+            continue
 
-        msgs = sorted(r.json()["hydra:member"], key=lambda x: x["createdAt"], reverse=True)
+        msgs = sorted(r.json().get("hydra:member", []), key=lambda x: x["createdAt"], reverse=True)
 
         for msg in msgs:
             frm = msg.get("from", {}).get("address", "")
             if sender_like and sender_like not in frm:
                 continue
             mid = msg["id"]
-            body = S2.get(f"{BASE}/messages/{mid}").json()["html"][0]
-            links = _links_from_html(body)
-            if links:
-                return links[0]
+            try:
+                body_resp = S2.get(f"{BASE}/messages/{mid}")
+                _log(body_resp)
+                body_resp.raise_for_status()
+                body_html_list = body_resp.json().get("html", [])
+                if not body_html_list:
+                    continue
+                body = body_html_list[0]
+                links = _links_from_html(body)
+                if links:
+                    return links[0]
+            except Exception as e:
+                logging.warning("[mail.tm] failed to parse message %s: %s", mid, e)
+                continue
+
         time.sleep(interval)
 
     logging.error("[mail.tm] verification link not found (timeout)")
-    return None
-
+    return None  # ✅ 修正3：必ず None を返す（async for 対応前提であればイテレータ化が必要）

@@ -368,12 +368,12 @@ async def submit_captcha_and_complete(page, captcha_text: str, email: str, nickn
         logger.info("[LD-Signup] メール確認リンク取得中...")
         url = None
         for i in range(3):
-            async for u in poll_latest_link_gw(token):
+            u = poll_latest_link_gw(token)  # ← 通常の関数として呼び出す
+            if u:
                 url = u
                 break
-            if url:
-                break
             await asyncio.sleep(5)
+
 
         if not url:
             html = await page.content()
