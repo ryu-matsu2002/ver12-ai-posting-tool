@@ -372,11 +372,13 @@ async def submit_captcha_and_complete(page, captcha_text: str, email: str, nickn
         logger.info("[LD-Signup] メール確認リンク取得中...")
         url = None
         for i in range(3):
-            u = poll_latest_link_gw(token)  # ← 通常の関数として呼び出す
+            logger.info(f"[LD-Signup] メール取得リトライ {i+1}/3")
+            u = await poll_latest_link_gw(token)
             if u:
                 url = u
                 break
             await asyncio.sleep(5)
+
 
 
         if not url:
