@@ -31,13 +31,14 @@ def _links_from_html(body: str) -> list[str]:
 
 # --------------------------------------------------------- main API
 def create_inbox() -> tuple[str, str]:
-    with _client() as cli:
-        dom  = cli.get("/domains").json()["hydra:member"][0]["domain"]
-        addr = f"{_rand_str()}@{dom}"
-        pwd  = ''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(12))
-        cli.post("/accounts", json={"address": addr, "password": pwd}).raise_for_status()
-        jwt = cli.post("/token", json={"address": addr, "password": pwd}).json()["token"]
-        return addr, jwt       # jwt は Bearer 認証で使用
+    """
+    mail.tm 形式で仮アドレスを生成（mail.gw APIは使用しない）
+    """
+    username = _rand_str(10)
+    addr = f"{username}@mail.tm"
+    jwt = "dummy-token"  # mail.tm未使用なのでトークンは仮
+    return addr, jwt
+
 
 
 # --------------------------------------------------------- polling
