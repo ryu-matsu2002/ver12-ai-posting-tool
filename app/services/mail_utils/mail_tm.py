@@ -20,7 +20,7 @@ from typing import Optional
 import requests
 from bs4 import BeautifulSoup
 
-BASE = "https://api.mail.tm"
+BASE = "https://api.mail.gw"
 S = requests.Session()
 S.headers.update({"User-Agent": "Mozilla/5.0"})
 
@@ -97,7 +97,7 @@ from .html_utils import _links_from_html  # ※既存のリンク抽出関数
 # BASE = "https://api.mail.tm" は既存と同じ前提
 
 
-BASE = "https://api.mail.tm"
+BASE = "https://api.mail.gw"
 
 async def poll_latest_link_tm_async(
     jwt: str,
