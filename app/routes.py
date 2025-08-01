@@ -3829,10 +3829,9 @@ def prepare_captcha():
         return jsonify({"error": "site が見つかりません"}), 404
 
     # ✅ 仮登録用データ生成
-    email = f"{generate_safe_id()}@test.com"
+    email, token = create_inbox()
     nickname = generate_safe_id()
     password = generate_safe_password()
-    _, _, token = create_inbox()  # ✅ JWTを正しく受け取る
 
     # ✅ CAPTCHA画像生成：セッション付き
     session_id = str(uuid4())
