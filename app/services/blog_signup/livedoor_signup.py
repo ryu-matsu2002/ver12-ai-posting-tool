@@ -56,7 +56,7 @@ def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
         return account
 
     # メール生成
-    email, token = create_inbox()
+    email, _, token = create_inbox()
     if not email or not token:
         logger.error("[LD-Signup] JWTまたはEmailが取得できなかったため処理中断")
         return {"captcha_success": False, "error": "メール認証用のJWT取得に失敗"}

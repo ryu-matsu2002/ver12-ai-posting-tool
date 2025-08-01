@@ -3832,7 +3832,7 @@ def prepare_captcha():
     email = f"{generate_safe_id()}@test.com"
     nickname = generate_safe_id()
     password = generate_safe_password()
-    _, token = create_inbox()
+    _, _, token = create_inbox()  # ✅ JWTを正しく受け取る
 
     # ✅ CAPTCHA画像生成：セッション付き
     session_id = str(uuid4())

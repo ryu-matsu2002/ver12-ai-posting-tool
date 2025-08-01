@@ -20,7 +20,7 @@ from typing import Optional
 import requests
 from bs4 import BeautifulSoup
 
-BASE = "https://api.mail.gw"
+BASE = "https://api.mail.tm"
 S = requests.Session()
 S.headers.update({"User-Agent": "Mozilla/5.0"})
 
@@ -38,7 +38,7 @@ def _log(resp: requests.Response) -> None:
 
 # ---------------------------------------------------------------- main API
 
-def create_inbox() -> tuple[str, str]:
+def create_inbox() -> tuple[str, str, str]:
     import logging
     logger = logging.getLogger(__name__)
     """
@@ -48,7 +48,7 @@ def create_inbox() -> tuple[str, str]:
     4) /token で JWT 取得
     Returns
     -------
-    (email, jwt)
+     (email, pwd, jwt)
     """
     # ドメイン一覧を取得
     r = S.get(f"{BASE}/domains")
@@ -97,7 +97,7 @@ from .html_utils import _links_from_html  # ※既存のリンク抽出関数
 # BASE = "https://api.mail.tm" は既存と同じ前提
 
 
-BASE = "https://api.mail.gw"
+BASE = "https://api.mail.tm"
 
 async def poll_latest_link_tm_async(
     jwt: str,
@@ -129,23 +129,21 @@ async def poll_latest_link_tm_async(
                 continue
 
             msgs = sorted(r.json().get("hydra:member", []), key=lambda x: x["createdAt"], reverse=True)
-            logging.info(f"[mail.tm] ✅ メール件数: {len(msgs)}")
 
-            for i, msg in enumerate(msgs, 1):
-                subject = msg.get("subject", "（件名なし）")
+            for msg in msgs:
+                subject = msg.get("subject") or ""  # None なら空文字に
                 sender = msg.get("from", {}).get("address", "（送信者不明）")
-                created_at = msg.get("createdAt", "（時刻不明）")
 
-                logging.info(f"[mail.tm] #{i}: Subject='{subject}' | From='{sender}' | At={created_at}")
+                # 🔍 ステップ①: すべての件名と送信者を表示（subjectがNoneでも空文字になるので安全）
+                print(f"📩 件名: {subject} ｜ 送信者: {sender}")
 
-                # 件名でのフィルタ（コメントアウトして弱める場合はここ）
-                if "livedoor" not in subject.lower():
-                    logging.debug(f"[mail.tm] → スキップ（件名に 'livedoor' 含まず）")
-                    continue
+                # 🔍 ステップ②: livedoorのフィルターを弱めたい場合は以下を一時的にコメントアウト
+                # if "livedoor" not in subject.lower():
+                #     continue
 
-                # 差出人メールアドレスの部分一致チェック
-                if sender_like and sender_like not in sender:
-                    logging.debug(f"[mail.tm] → スキップ（差出人 '{sender}' に '{sender_like}' 含まず）")
+                # 🔍 ステップ③: 差出人のメールアドレスでのフィルタ（必要であれば残す）
+                frm = msg.get("from", {}).get("address", "")
+                if sender_like and sender_like not in frm:
                     continue
 
                 mid = msg["id"]
@@ -154,20 +152,8 @@ async def poll_latest_link_tm_async(
                     body_resp.raise_for_status()
                     body_html_list = body_resp.json().get("html", [])
                     if not body_html_list:
-                        logging.debug("[mail.tm] → メール本文が空、スキップ")
                         continue
-                    
                     body = body_html_list[0]
-                    logging.debug(f"[mail.tm] 📩 本文HTML抜粋（先頭300文字）: {body[:300]}")
-
-                    # 保存オプション（必要な場合のみ）
-                    from datetime import datetime
-                    from pathlib import Path
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    html_path = f"/tmp/mail_tm_{timestamp}.html"
-                    Path(html_path).write_text(body, encoding="utf-8")
-                    logging.debug(f"[mail.tm] 💾 本文HTMLを保存: {html_path}")
-
                     links = _links_from_html(body)
 
                     # livedoor 認証リンクに絞る
@@ -178,14 +164,12 @@ async def poll_latest_link_tm_async(
                         logging.info(f"[mail.tm] ✅ 認証リンク検出: {livedoor_links[0]}")
                         return livedoor_links[0]
 
-                    logging.debug("[mail.tm] → リンク内に 'email_auth/commit' が見つからず")
-
                 except Exception as e:
                     logging.warning("[mail.tm] failed to parse message %s: %s", mid, e)
                     continue
+
 
             await asyncio.sleep(interval)
 
     logging.error("[mail.tm] ❌ livedoor認証リンクが見つかりませんでした（timeout）")
     return None
-

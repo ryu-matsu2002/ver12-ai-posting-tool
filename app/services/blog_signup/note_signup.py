@@ -40,7 +40,7 @@ def register_blog_account(site, email_seed="note") -> ExternalBlogAccount:
     if account:
         return account
 
-    email, token = create_inbox()
+    email, _, token = create_inbox()
     logger.info("[NOTE-Signup] disposable email = %s", email)
 
     password = "Nt" + str(int(time.time()))
