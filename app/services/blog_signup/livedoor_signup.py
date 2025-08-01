@@ -109,8 +109,29 @@ async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> 
     CAPTCHA_SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
+        browser = await p.chromium.launch(
+            headless=False,  # ⬅️ 人間操作に見せかける
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-infobars",
+                "--disable-dev-shm-usage",
+            ],
+        )
+        context = await browser.new_context(
+            viewport={"width": 1280, "height": 800},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/114.0.0.0 Safari/537.36",
+        )
+        page = await context.new_page()
+
+        await page.add_init_script(
+            """
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            window.navigator.chrome = { runtime: {} };
+            Object.defineProperty(navigator, 'languages', { get: () => ['ja-JP', 'ja'] });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+            """
+        )
 
         await page.goto("https://member.livedoor.com/register/input")
 
@@ -132,18 +153,17 @@ async def prepare_livedoor_captcha(email: str, nickname: str, password: str) -> 
             await captcha_element.screenshot(path=str(filepath))
             logger.info(f"[LD-Signup] CAPTCHA画像保存完了: {filepath}")
         except Exception as e:
-            await browser.close()
+            await context.close()
             logger.error("[LD-Signup] CAPTCHA画像の取得に失敗しました", exc_info=True)
             raise RuntimeError("CAPTCHA画像の取得に失敗しました") from e
 
-        await browser.close()
+        await context.close()
 
         return {
             "filename": filename,
             "web_path": f"/static/captchas/{filename}",
             "abs_path": str(filepath)
         }
-
 
 # ──────────────────────────────────────────────
 # ✅ CAPTCHA突破 + スクリーンショット付きサインアップ処理
@@ -153,16 +173,30 @@ async def run_livedoor_signup(site, email, token, nickname, password,
                               job_id=None,
                               captcha_image_path: str | None = None):
     async with async_playwright() as p:
-        # ✅ 人間っぽく見せる
-        browser = await p.chromium.launch(headless=False, slow_mo=150)
+        browser = await p.chromium.launch(
+            headless=False,
+            slow_mo=150,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-infobars",
+                "--disable-dev-shm-usage",
+            ]
+        )
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
             viewport={"width": 1280, "height": 800},
             locale="ja-JP"
         )
-        await context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => false})")
+        await context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            window.navigator.chrome = { runtime: {} };
+            Object.defineProperty(navigator, 'languages', { get: () => ['ja-JP', 'ja'] });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+        """)
 
         page = await context.new_page()
+
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -306,6 +340,7 @@ async def run_livedoor_signup(site, email, token, nickname, password,
             }
 
         finally:
+            await context.close()
             await browser.close()
 
 from app.services.playwright_controller import store_session

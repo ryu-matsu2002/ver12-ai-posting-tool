@@ -156,7 +156,18 @@ async def poll_latest_link_tm_async(
                     if not body_html_list:
                         logging.debug("[mail.tm] → メール本文が空、スキップ")
                         continue
+                    
                     body = body_html_list[0]
+                    logging.debug(f"[mail.tm] 📩 本文HTML抜粋（先頭300文字）: {body[:300]}")
+
+                    # 保存オプション（必要な場合のみ）
+                    from datetime import datetime
+                    from pathlib import Path
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    html_path = f"/tmp/mail_tm_{timestamp}.html"
+                    Path(html_path).write_text(body, encoding="utf-8")
+                    logging.debug(f"[mail.tm] 💾 本文HTMLを保存: {html_path}")
+
                     links = _links_from_html(body)
 
                     # livedoor 認証リンクに絞る
