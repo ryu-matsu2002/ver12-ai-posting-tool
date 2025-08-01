@@ -25,6 +25,7 @@ from app.services.captcha_solver import solve
 from playwright.async_api import async_playwright
 from flask import current_app
 
+
 logger = logging.getLogger(__name__)
 
 def generate_safe_id(n=10) -> str:
@@ -152,28 +153,41 @@ async def run_livedoor_signup(site, email, token, nickname, password,
                               job_id=None,
                               captcha_image_path: str | None = None):
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
+        # ✅ 人間っぽく見せる
+        browser = await p.chromium.launch(headless=False, slow_mo=150)
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 800},
+            locale="ja-JP"
+        )
+        await context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => false})")
+
+        page = await context.new_page()
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         try:
-            await page.goto("https://member.livedoor.com/register/input")
+            await page.goto("https://member.livedoor.com/register/input", wait_until="load")
             await page.wait_for_selector('input[name="livedoor_id"]', timeout=10000)
 
             logger.info(f"[LD-Signup] 入力: id = {nickname}")
-            await page.fill('input[name="livedoor_id"]', nickname)
+            await page.type('input[name="livedoor_id"]', nickname, delay=100)
+
             logger.info(f"[LD-Signup] 入力: password = {password}")
-            await page.fill('input[name="password"]', password)
+            await page.type('input[name="password"]', password, delay=100)
+
             logger.info(f"[LD-Signup] 入力: password2 = {password}")
-            await page.fill('input[name="password2"]', password)
+            await page.type('input[name="password2"]', password, delay=100)
+
             logger.info(f"[LD-Signup] 入力: email = {email}")
-            await page.fill('input[name="email"]', email)
+            await page.type('input[name="email"]', email, delay=100)
+
+            await page.wait_for_timeout(1000)
 
             logger.info("[LD-Signup] ユーザー情報を登録ボタンをクリック")
-            await page.click('input[value="ユーザー情報を登録"]')
+            await page.click('input[value="ユーザー情報を登録"]', delay=100)
 
-            # ✅ CAPTCHA検出とリダイレクトURL返却
+            # CAPTCHA検出
             try:
                 await page.wait_for_selector("#captcha-img", timeout=5000)
                 logger.info(f"[LD-Signup] CAPTCHA出現確認 → URL返却: {page.url}")
