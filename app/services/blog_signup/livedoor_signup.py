@@ -227,7 +227,7 @@ async def run_livedoor_signup(site, email, token, nickname, password,
             logger.info("[LD-Signup] メール確認中...")
             from app.services.mail_utils.mail_tm import poll_latest_link_tm_async
 
-            await asyncio.sleep(7)  # livedoorからのメール送信を待つ（確実性向上）
+            await asyncio.sleep(10)  # livedoorからのメール送信を待つ（確実性向上）
             url = await poll_latest_link_tm_async(token)
 
             if not url:

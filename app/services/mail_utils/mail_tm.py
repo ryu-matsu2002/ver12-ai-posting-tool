@@ -131,9 +131,18 @@ async def poll_latest_link_tm_async(
             msgs = sorted(r.json().get("hydra:member", []), key=lambda x: x["createdAt"], reverse=True)
 
             for msg in msgs:
+                subject = msg.get("subject")
+                if subject is None:
+                    logging.warning("[mail.tm] 件名が None のメールをスキップ: id=%s", msg.get("id"))
+                    continue
+
+                sender = msg.get("from", {}).get("address", "（送信者不明）")
+                print(f"📩 件名: {subject} ｜ 送信者: {sender}")  # ステップ①
+
                 frm = msg.get("from", {}).get("address", "")
                 if sender_like and sender_like not in frm:
                     continue
+
                 mid = msg["id"]
                 try:
                     body_resp = await client.get(f"{BASE}/messages/{mid}")
@@ -155,6 +164,7 @@ async def poll_latest_link_tm_async(
                 except Exception as e:
                     logging.warning("[mail.tm] failed to parse message %s: %s", mid, e)
                     continue
+
 
             await asyncio.sleep(interval)
 
