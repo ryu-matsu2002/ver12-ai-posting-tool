@@ -131,14 +131,17 @@ async def poll_latest_link_tm_async(
             msgs = sorted(r.json().get("hydra:member", []), key=lambda x: x["createdAt"], reverse=True)
 
             for msg in msgs:
-                subject = msg.get("subject")
-                if subject is None:
-                    logging.warning("[mail.tm] 件名が None のメールをスキップ: id=%s", msg.get("id"))
-                    continue
-
+                subject = msg.get("subject") or ""  # None なら空文字に
                 sender = msg.get("from", {}).get("address", "（送信者不明）")
-                print(f"📩 件名: {subject} ｜ 送信者: {sender}")  # ステップ①
 
+                # 🔍 ステップ①: すべての件名と送信者を表示（subjectがNoneでも空文字になるので安全）
+                print(f"📩 件名: {subject} ｜ 送信者: {sender}")
+
+                # 🔍 ステップ②: livedoorのフィルターを弱めたい場合は以下を一時的にコメントアウト
+                # if "livedoor" not in subject.lower():
+                #     continue
+
+                # 🔍 ステップ③: 差出人のメールアドレスでのフィルタ（必要であれば残す）
                 frm = msg.get("from", {}).get("address", "")
                 if sender_like and sender_like not in frm:
                     continue
