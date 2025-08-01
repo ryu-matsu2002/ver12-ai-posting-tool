@@ -76,10 +76,10 @@ def create_inbox() -> tuple[str, str, str]:
         jwt = r.json().get("token")
         if not jwt:
             logger.error("[mail.tm] JWTが取得できませんでした（トークン=None）: %s", r.text)
-            return None, None
+            return None, None, None  # ← 修正済みにする
     except Exception as e:
         logger.exception("[mail.tm] JWT取得中に例外が発生しました")
-        return None, None
+        return None, None, None  # ← 修正済みにする
     
     logger.info(f"[mail.tm] ✅ created new inbox: {email}")
     logger.info(f"[mail.tm] ✅ password: {pwd}")
