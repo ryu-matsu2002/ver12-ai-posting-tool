@@ -401,6 +401,7 @@ async def submit_captcha_and_complete(page, captcha_text: str, email: str, nickn
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     try:
+        # ✅ CAPTCHA送信
         logger.info(f"[LD-Signup] CAPTCHA入力中: {captcha_text}")
         await page.fill("#captcha", captcha_text)
         await page.click('input[id="commit-button"]')
@@ -409,6 +410,7 @@ async def submit_captcha_and_complete(page, captcha_text: str, email: str, nickn
         html = await page.content()
         current_url = page.url
 
+        # CAPTCHA突破判定
         if "仮登録メール" not in html and not current_url.endswith("/register/done"):
             error_html = f"/tmp/ld_captcha_failed_{timestamp}.html"
             error_png = f"/tmp/ld_captcha_failed_{timestamp}.png"
@@ -421,7 +423,7 @@ async def submit_captcha_and_complete(page, captcha_text: str, email: str, nickn
                 "png_path": error_png
             }
 
-        # ✅ メール確認
+        # ✅ メール認証リンク取得
         logger.info("[LD-Signup] メール確認リンク取得中...")
         url = None
         for i in range(3):
@@ -432,8 +434,6 @@ async def submit_captcha_and_complete(page, captcha_text: str, email: str, nickn
                 break
             await asyncio.sleep(5)
 
-
-
         if not url:
             html = await page.content()
             err_html = f"/tmp/ld_email_link_fail_{timestamp}.html"
@@ -443,58 +443,47 @@ async def submit_captcha_and_complete(page, captcha_text: str, email: str, nickn
             logger.error(f"[LD-Signup] メールリンク取得失敗 ➜ HTML: {err_html}, PNG: {err_png}")
             return {"captcha_success": False, "error": "メール認証に失敗"}
 
+        # ✅ 認証リンクへ遷移
         await page.goto(url)
         await page.wait_for_timeout(2000)
 
-        html = await page.content()
-        blog_id = await page.input_value("#livedoor_blog_id")
-        api_key = await page.input_value("#atompub_key")
+        # ✅ AtomPub情報取得（直接recover_atompub_keyで処理）
+        logger.info("[LD-Signup] AtomPub作成ルートに移行")
+        recover_result = await recover_atompub_key(page, nickname, email, password, site)
 
-        # ✅ AtomPub取得失敗時、recover_atompub_keyを呼び出す
-        if not blog_id or not api_key:
-            logger.info("[LD-Signup] 初回ページからのAPI取得失敗 → AtomPub作成ルートに移行")
-
-            recover_result = await recover_atompub_key(page, nickname, email, password, site)
-
-            if not recover_result["success"]:
-                return {
-                    "captcha_success": True,
-                    "error": recover_result.get("error", "AtomPub再取得に失敗"),
-                    "html_path": recover_result.get("html_path"),
-                    "png_path": recover_result.get("png_path")
-                }
-
+        if not recover_result["success"]:
             return {
                 "captcha_success": True,
-                "blog_id": recover_result["blog_id"],
-                "api_key": recover_result["api_key"]
+                "error": recover_result.get("error", "AtomPub再取得に失敗"),
+                "html_path": recover_result.get("html_path"),
+                "png_path": recover_result.get("png_path")
             }
 
-        # ✅ 初回で取得できた場合のみ保存
+        # ✅ DB登録
         account = ExternalBlogAccount(
             site_id=site.id,
             blog_type=BlogType.LIVEDOOR,
             email=email,
-            username=blog_id,
+            username=recover_result["blog_id"],
             password=password,
             nickname=nickname,
-            livedoor_blog_id=blog_id,
-            atompub_key_enc=encrypt(api_key),
+            livedoor_blog_id=recover_result["blog_id"],
+            atompub_key_enc=encrypt(recover_result["api_key"]),
         )
         db.session.add(account)
         db.session.commit()
-        logger.info(f"[LD-Signup] アカウントDB登録完了 blog_id={blog_id}")
+        logger.info(f"[LD-Signup] アカウントDB登録完了 blog_id={recover_result['blog_id']}")
 
         return {
             "captcha_success": True,
-            "blog_id": blog_id,
-            "api_key": api_key
+            "blog_id": recover_result["blog_id"],
+            "api_key": recover_result["api_key"]
         }
-
 
     except Exception as e:
         logger.exception("[LD-Signup] CAPTCHA送信 or 登録失敗")
         return {"captcha_success": False, "error": str(e)}
+
 
 import re
 
