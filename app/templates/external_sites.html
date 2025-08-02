@@ -23,15 +23,13 @@
     {% endif %}
   {% endwith %}
 
-  {% for site in sites %}
-  <div class="mb-2">
-    <a href="{{ url_for('main.external_site_blogs', site_id=site.id) }}"
-       class="text-sm px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded">
-      外部ブログ一覧
+  <div class="mb-4">
+    <a href="{{ url_for('main.external_accounts') }}"
+       class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm rounded">
+      外部ブログアカウント一覧
     </a>
-    <span class="ml-2 text-gray-800">{{ site.name }}</span>
   </div>
-{% endfor %}
+
 
 
 </h2>

@@ -3575,9 +3575,6 @@ from .services.blog_signup.crypto_utils import decrypt
 from app.models import ExternalBlogAccount, BlogType
 import asyncio, json, time
 
-# -----------------------------------------------------------
-# ユーザー向け: 自分の外部ブログアカウント一覧
-# -----------------------------------------------------------
 
 # -----------------------------------------------------------
 # ユーザー向け: 自分の外部ブログアカウント一覧（検索・絞込・ソート対応）
@@ -3585,15 +3582,16 @@ import asyncio, json, time
 
 @bp.route("/external/accounts")
 @login_required
-def my_blog_accounts():
+def external_accounts():
     from app.models import ExternalBlogAccount, Site
     from app.services.blog_signup.crypto_utils import decrypt
     from sqlalchemy import or_
 
     # 🔍 クエリパラメータ取得
-    blog_type = request.args.get("blog_type")  # e.g., "note"
-    sort = request.args.get("sort")            # "posted_desc" or "posted_asc"
-    search = request.args.get("q", "").strip() # email or nickname
+    blog_type = request.args.get("blog_type")
+    sort = request.args.get("sort")
+    search = request.args.get("q", "").strip()
+    site_id = request.args.get("site_id", type=int)
 
     # 🔗 JOINして current_user に紐づくサイト or site_id=None の外部アカウント取得
     query = (
@@ -3604,6 +3602,10 @@ def my_blog_accounts():
             (Site.user_id == current_user.id)
         )
     )
+
+    # 💡 サイトIDによるフィルター
+    if site_id:
+        query = query.filter(ExternalBlogAccount.site_id == site_id)
 
     # 💡 ブログ種別フィルター
     if blog_type:
@@ -3628,16 +3630,19 @@ def my_blog_accounts():
 
     accts = query.all()
 
+    # 🔽 サイト一覧（ユーザーに紐づくサイトのみ）
+    all_sites = Site.query.filter_by(user_id=current_user.id).all()
+
     return render_template(
-        "blog_accounts.html",  # ユーザー用テンプレ
+        "external_accounts.html",
         accts=accts,
+        all_sites=all_sites,
         decrypt=decrypt,
+        site_id=site_id,
         selected_blog_type=blog_type,
         selected_sort=sort,
         search_query=search
     )
-
-
 
 
 @bp.route("/external/account/<int:acct_id>/articles")

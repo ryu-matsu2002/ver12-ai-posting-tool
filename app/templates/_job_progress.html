@@ -1,14 +1,17 @@
 {# --------------------------------------------------------------------- #}
 {#  _job_progress.html                                                   #}
-{#  AIエージェント用（ジョブモデルなし）                                #}
-{#  期待変数: site_id, blog, site（=s）                                  #}
+{#  各サイトの外部SEOジョブ状態を表示                                   #}
+{#  期待変数: site_id, blog（str）, site（=s）                           #}
 {# --------------------------------------------------------------------- #}
 
 {% set blog_label  = blog|capitalize %}
 {% set card_id     = "site-card-" ~ site_id %}
-{% set is_registered = blog in s.registered_blogs %}
+{% set is_registered = blog in s.get('registered_blogs', []) %}
 
-{% set account = s.external_blog_accounts | selectattr('blog_type', 'equalto', blog) | list | first %}
+{# blog_typeがEnumの場合に備えて一致判定をvalueで #}
+{% set account = s.external_blog_accounts
+    | selectattr('blog_type.value', 'equalto', blog)
+    | list | first %}
 {% set is_captcha_completed = account and account.is_captcha_completed %}
 
 <div id="{{ card_id }}" class="border p-4 rounded shadow-sm bg-white">
@@ -17,6 +20,7 @@
 
     {% if is_registered %}
       <div class="text-green-600 font-bold">✅ 登録済み</div>
+
     {% elif blog == "livedoor" %}
       {% if is_captcha_completed %}
         <button class="px-4 py-2 bg-gray-400 text-white rounded cursor-default" disabled>
@@ -32,6 +36,7 @@
           📷 CAPTCHA突破
         </button>
       {% endif %}
+
     {% else %}
       <button
         id="start-btn-{{ blog }}-{{ site_id }}"

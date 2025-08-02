@@ -24,70 +24,83 @@
   </button>
 </form>
 
-{% if accts %}
-<table class="w-full text-sm">
-  <thead class="bg-gray-100">
-    <tr>
-      <th class="px-3 py-2">ブログ</th>
-      <th class="px-3 py-2">メール</th>
-      <th class="px-3 py-2 text-center">投稿済</th>
-      <th class="px-3 py-2 text-center">予定</th>
-      <th class="px-3 py-2 w-48">進捗</th>
-      <th class="px-3 py-2">記事一覧</th>
-      <th class="px-3 py-2 text-right">操作</th>
-    </tr>
-  </thead>
-  <tbody>
-  {% for a in accts %}
-    {% set scheduled = a.schedules|length %}
-    {% set posted = a.posted_cnt %}
-    {% set pct = (100 * posted / (scheduled if scheduled else 1)) | round(1) %}
-    <tr class="border-b">
-      <td class="px-3 py-2">
-        <span class="px-2 py-1 rounded text-white text-xs
-              {% if a.blog_type.value == 'note' %} bg-blue-600
-              {% elif a.blog_type.value == 'ameba' %} bg-green-600
-              {% else %} bg-gray-600 {% endif %}">
-          {{ a.blog_type.value }}
-        </span>
-      </td>
-      <td class="px-3 py-2 font-mono truncate max-w-[220px]">
-        {{ decrypt(a.email) }}
-      </td>
-      <td class="px-3 py-2 text-center">{{ posted }}</td>
-      <td class="px-3 py-2 text-center">{{ scheduled }}</td>
-      <td class="px-3 py-2">
-        <div class="flex items-center space-x-2">
-          <div class="flex-1 h-2 bg-gray-200 rounded">
-            <div class="h-2 bg-emerald-600 rounded"
-                 style="width: {{ pct }}%;"></div>
-          </div>
-          <span class="text-xs text-gray-500 w-10 text-right">{{ pct }}%</span>
-        </div>
-      </td>
-      <td class="px-3 py-2">
-        <a href="{{ url_for('main.external_account_articles', acct_id=a.id) }}"
-           class="text-blue-600 hover:underline">記事一覧</a>
-      </td>
-      <td class="px-3 py-2 text-right whitespace-nowrap">
-        <form action="{{ url_for('main.blog_one_click_login', acct_id=a.id) }}"
-              method="get" class="inline">
-          <button type="submit"
-                  class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs">
-            ログイン
-          </button>
-        </form>
-        <button type="button"
-                class="ml-2 px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-xs copy-cred"
-                data-user="{{ a.username }}"
-                data-pass="{{ decrypt(a.password) }}">
-          ID/Pass
-        </button>
-      </td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
+{% set has_accounts = false %}
+
+{% for site in all_sites %}
+  {% set site_accounts = accts | selectattr("site_id", "equalto", site.id) | list %}
+  {% if site_accounts %}
+    {% set has_accounts = true %}
+
+    <h3 class="text-lg font-bold mt-8 mb-2">{{ site.name }}</h3>
+    <table class="w-full text-sm border mb-4">
+      <thead class="bg-gray-100">
+        <tr>
+          <th class="px-3 py-2">ブログ</th>
+          <th class="px-3 py-2">メール</th>
+          <th class="px-3 py-2 text-center">投稿済</th>
+          <th class="px-3 py-2 text-center">予定</th>
+          <th class="px-3 py-2 w-48">進捗</th>
+          <th class="px-3 py-2">記事一覧</th>
+          <th class="px-3 py-2 text-right">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in site_accounts %}
+          {% set scheduled = a.schedules|length %}
+          {% set posted = a.posted_cnt %}
+          {% set pct = (100 * posted / (scheduled if scheduled else 1)) | round(1) %}
+          <tr class="border-b">
+            <td class="px-3 py-2">
+              <span class="px-2 py-1 rounded text-white text-xs
+                    {% if a.blog_type.value == 'note' %} bg-blue-600
+                    {% elif a.blog_type.value == 'ameba' %} bg-green-600
+                    {% else %} bg-gray-600 {% endif %}">
+                {{ a.blog_type.value }}
+              </span>
+            </td>
+            <td class="px-3 py-2 font-mono truncate max-w-[220px]">
+              {{ decrypt(a.email) }}
+            </td>
+            <td class="px-3 py-2 text-center">{{ posted }}</td>
+            <td class="px-3 py-2 text-center">{{ scheduled }}</td>
+            <td class="px-3 py-2">
+              <div class="flex items-center space-x-2">
+                <div class="flex-1 h-2 bg-gray-200 rounded">
+                  <div class="h-2 bg-emerald-600 rounded"
+                       style="width: {{ pct }}%;"></div>
+                </div>
+                <span class="text-xs text-gray-500 w-10 text-right">{{ pct }}%</span>
+              </div>
+            </td>
+            <td class="px-3 py-2">
+              <a href="{{ url_for('main.external_account_articles', acct_id=a.id) }}"
+                 class="text-blue-600 hover:underline">記事一覧</a>
+            </td>
+            <td class="px-3 py-2 text-right whitespace-nowrap">
+              <form action="{{ url_for('main.blog_one_click_login', acct_id=a.id) }}"
+                    method="get" class="inline">
+                <button type="submit"
+                        class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs">
+                  ログイン
+                </button>
+              </form>
+              <button type="button"
+                      class="ml-2 px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-xs copy-cred"
+                      data-user="{{ a.username }}"
+                      data-pass="{{ decrypt(a.password) }}">
+                ID/Pass
+              </button>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+{% endfor %}
+
+{% if not has_accounts %}
+  <p class="text-gray-500">まだ外部ブログアカウントはありません。</p>
+{% endif %}
 
 <script>
 document.querySelectorAll('.copy-cred').forEach(btn => {
@@ -100,8 +113,5 @@ document.querySelectorAll('.copy-cred').forEach(btn => {
   });
 });
 </script>
-
-{% else %}
-<p class="text-gray-500">まだ外部ブログアカウントはありません。</p>
-{% endif %}
 {% endblock %}
+
