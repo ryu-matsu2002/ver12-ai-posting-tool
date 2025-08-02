@@ -3828,7 +3828,7 @@ def external_site_blogs(site_id):
                  selectinload(ExternalBlogAccount.site)
              ).all())
 
-    return render_template("external_site_blogs.html",
+    return render_template("external_accounts.html",
                            site=site,
                            accts=accts,
                            decrypt=decrypt)
