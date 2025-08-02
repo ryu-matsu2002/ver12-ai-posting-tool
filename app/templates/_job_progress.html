@@ -7,19 +7,16 @@
 {% set blog_label  = blog|capitalize %}
 {% set card_id     = "site-card-" ~ site_id %}
 
-{# registered_blogs が存在すれば使う、それ以外は False にする #}
 {% if s.registered_blogs is defined %}
   {% set is_registered = blog in s.registered_blogs %}
 {% else %}
   {% set is_registered = False %}
 {% endif %}
 
-{# blog_type の一致（Enum.value と blog 文字列）で抽出 #}
 {% set account = s.external_blog_accounts
     | selectattr('blog_type.value', 'equalto', blog)
     | list | first %}
 {% set is_captcha_completed = account and account.is_captcha_completed %}
-
 
 <div id="{{ card_id }}" class="border p-4 rounded shadow-sm bg-white">
   <div class="flex items-center justify-between mb-2">
@@ -61,6 +58,17 @@
   <div class="text-sm text-gray-600" id="status-text-{{ blog }}-{{ site_id }}">
     AIエージェントが{{ blog_label }}でアカウント登録を試みます。
     処理には30秒前後かかる場合があります。
+  </div>
+
+  {# ✅ 状態進捗表示用の追加 span（JSで書き換えるターゲット） #}
+  <div class="mt-1 text-sm">
+    <span id="status-{{ site_id }}-{{ blog }}" class="text-blue-700 font-medium">
+      {% if is_captcha_completed %}
+        ✅ CAPTCHA突破済
+      {% else %}
+        ⏳ CAPTCHA未突破
+      {% endif %}
+    </span>
   </div>
 </div>
 

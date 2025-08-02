@@ -168,6 +168,7 @@
           btn.disabled = false;
           btn.classList.remove("bg-gray-500");
           btn.classList.add("bg-red-600");
+          updateCaptchaStatusUI(data); // ← 成功時も呼び出す
         }
         alert("CAPTCHA突破に失敗しました。再度お試しください。");
 
@@ -245,6 +246,7 @@
             if (data.step !== lastStatus) {
               progressText.innerText = data.step;
               lastStatus = data.step;
+              updateCaptchaStatusUI(data); // ← ここを追加
             }
 
             // ✅ API取得完了 → ボタン表示
@@ -269,5 +271,23 @@
         });
     }, 5000);
   }
+
+  function updateCaptchaStatusUI(data) {
+  if (!data || !data.site_id || !data.step) return;
+
+  const statusSpan = document.getElementById(`status-${data.site_id}-livedoor`);
+  if (!statusSpan) return;
+
+  if (data.step === "API取得完了") {
+    statusSpan.innerText = "✅ 登録完了";
+    statusSpan.classList.remove("text-blue-700");
+    statusSpan.classList.add("text-green-700");
+  } else {
+    statusSpan.innerText = `⏳ ${data.step}`;
+    statusSpan.classList.remove("text-green-700");
+    statusSpan.classList.add("text-blue-700");
+  }
+}
+
 </script>
 {% endblock %}
