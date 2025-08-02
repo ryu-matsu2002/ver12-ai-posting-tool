@@ -6,13 +6,20 @@
 
 {% set blog_label  = blog|capitalize %}
 {% set card_id     = "site-card-" ~ site_id %}
-{% set is_registered = blog in s.get('registered_blogs', []) %}
 
-{# blog_typeがEnumの場合に備えて一致判定をvalueで #}
+{# registered_blogs が存在すれば使う、それ以外は False にする #}
+{% if s.registered_blogs is defined %}
+  {% set is_registered = blog in s.registered_blogs %}
+{% else %}
+  {% set is_registered = False %}
+{% endif %}
+
+{# blog_type の一致（Enum.value と blog 文字列）で抽出 #}
 {% set account = s.external_blog_accounts
     | selectattr('blog_type.value', 'equalto', blog)
     | list | first %}
 {% set is_captcha_completed = account and account.is_captcha_completed %}
+
 
 <div id="{{ card_id }}" class="border p-4 rounded shadow-sm bg-white">
   <div class="flex items-center justify-between mb-2">
