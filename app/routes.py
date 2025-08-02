@@ -3579,29 +3579,64 @@ import asyncio, json, time
 # ユーザー向け: 自分の外部ブログアカウント一覧
 # -----------------------------------------------------------
 
+# -----------------------------------------------------------
+# ユーザー向け: 自分の外部ブログアカウント一覧（検索・絞込・ソート対応）
+# -----------------------------------------------------------
+
 @bp.route("/external/accounts")
 @login_required
 def my_blog_accounts():
     from app.models import ExternalBlogAccount, Site
     from app.services.blog_signup.crypto_utils import decrypt
+    from sqlalchemy import or_
 
-    # サイトと JOIN して「自分のサイト分」＋ site_id=None をまとめて取得
-    accts = (
+    # 🔍 クエリパラメータ取得
+    blog_type = request.args.get("blog_type")  # e.g., "note"
+    sort = request.args.get("sort")            # "posted_desc" or "posted_asc"
+    search = request.args.get("q", "").strip() # email or nickname
+
+    # 🔗 JOINして current_user に紐づくサイト or site_id=None の外部アカウント取得
+    query = (
         db.session.query(ExternalBlogAccount)
         .outerjoin(Site, ExternalBlogAccount.site_id == Site.id)
         .filter(
-            (ExternalBlogAccount.site_id == None)  # noqa: E711
-            | (Site.user_id == current_user.id)
+            (ExternalBlogAccount.site_id == None) |  # noqa: E711
+            (Site.user_id == current_user.id)
         )
-        .order_by(ExternalBlogAccount.created_at.desc())
-        .all()
     )
 
+    # 💡 ブログ種別フィルター
+    if blog_type:
+        query = query.filter(ExternalBlogAccount.blog_type == blog_type)
+
+    # 🔍 メール or ニックネーム検索
+    if search:
+        query = query.filter(
+            or_(
+                ExternalBlogAccount.email.ilike(f"%{search}%"),
+                ExternalBlogAccount.nickname.ilike(f"%{search}%")
+            )
+        )
+
+    # 📊 投稿数ソート
+    if sort == "posted_desc":
+        query = query.order_by(ExternalBlogAccount.posted_count.desc())
+    elif sort == "posted_asc":
+        query = query.order_by(ExternalBlogAccount.posted_count.asc())
+    else:
+        query = query.order_by(ExternalBlogAccount.created_at.desc())
+
+    accts = query.all()
+
     return render_template(
-        "blog_accounts.html",   # ← テンプレ名注意！ admin なら admin_blog_accounts.html
+        "blog_accounts.html",  # ユーザー用テンプレ
         accts=accts,
-        decrypt=decrypt
+        decrypt=decrypt,
+        selected_blog_type=blog_type,
+        selected_sort=sort,
+        search_query=search
     )
+
 
 
 
@@ -3972,10 +4007,33 @@ def submit_captcha():
             )
 
         if result.get("captcha_success"):
+            # ✅ 外部ブログ情報保存
             session["external_blog_info"] = result
+
+            # ✅ 状態進捗をセッションに保存
+            session["captcha_status"] = {
+                "captcha_sent": True,
+                "email_verified": result.get("email_verified", False),
+                "account_created": result.get("account_created", False),
+                "api_key_received": result.get("api_key_received", False),
+                "step": (
+                    "API取得完了" if result.get("api_key_received")
+                    else "アカウント登録完了" if result.get("account_created")
+                    else "メール認証完了" if result.get("email_verified")
+                    else "CAPTCHA突破完了"
+                ),
+                "site_id": site_id  # ✅ ← この1行を追加してください
+            }
+
             return jsonify(result), 200
+
         else:
+            session["captcha_status"] = {
+                "captcha_sent": False,
+                "step": "CAPTCHA認証失敗"
+            }
             return jsonify({"status": "captcha_failed", "message": "CAPTCHA認証に失敗しました"}), 200
+
 
     except Exception as e:
         logger.exception("[submit_captcha] CAPTCHA送信中にエラーが発生しました")
@@ -3997,6 +4055,18 @@ def submit_captcha():
         for key in list(session.keys()):
             if key.startswith("captcha_"):
                 session.pop(key)
+
+@bp.route("/captcha_status", methods=["GET"])
+@login_required
+def get_captcha_status():
+    from flask import session, jsonify
+
+    status = session.get("captcha_status")
+    if not status:
+        return jsonify({"status": "not_started", "step": "未開始"}), 200
+
+    return jsonify(status), 200
+
 
 from flask import render_template, redirect, url_for, request, session, flash
 from app.services.blog_signup.livedoor_signup import poll_latest_link_gw, extract_verification_url

@@ -21,7 +21,7 @@ from app.models import ExternalBlogAccount
 from app.services.mail_utils.mail_tm import create_inbox, poll_latest_link_tm_async as poll_latest_link_gw
 from app.services.blog_signup.crypto_utils import encrypt
 from app.services.captcha_solver import solve
-
+from app.services.blog_signup.livedoor_atompub_recover import recover_atompub_key
 from playwright.async_api import async_playwright
 from flask import current_app
 
@@ -450,14 +450,27 @@ async def submit_captcha_and_complete(page, captcha_text: str, email: str, nickn
         blog_id = await page.input_value("#livedoor_blog_id")
         api_key = await page.input_value("#atompub_key")
 
+        # ✅ AtomPub取得失敗時、recover_atompub_keyを呼び出す
         if not blog_id or not api_key:
-            fail_html = f"/tmp/ld_final_fail_{timestamp}.html"
-            fail_png = f"/tmp/ld_final_fail_{timestamp}.png"
-            Path(fail_html).write_text(html, encoding="utf-8")
-            await page.screenshot(path=fail_png)
-            logger.error(f"[LD-Signup] 登録後のAPI情報取得失敗")
-            return {"captcha_success": False, "error": "登録完了後の情報取得に失敗"}
+            logger.info("[LD-Signup] 初回ページからのAPI取得失敗 → AtomPub作成ルートに移行")
 
+            recover_result = await recover_atompub_key(page, nickname, email, password, site)
+
+            if not recover_result["success"]:
+                return {
+                    "captcha_success": True,
+                    "error": recover_result.get("error", "AtomPub再取得に失敗"),
+                    "html_path": recover_result.get("html_path"),
+                    "png_path": recover_result.get("png_path")
+                }
+
+            return {
+                "captcha_success": True,
+                "blog_id": recover_result["blog_id"],
+                "api_key": recover_result["api_key"]
+            }
+
+        # ✅ 初回で取得できた場合のみ保存
         account = ExternalBlogAccount(
             site_id=site.id,
             blog_type=BlogType.LIVEDOOR,
@@ -477,6 +490,7 @@ async def submit_captcha_and_complete(page, captcha_text: str, email: str, nickn
             "blog_id": blog_id,
             "api_key": api_key
         }
+
 
     except Exception as e:
         logger.exception("[LD-Signup] CAPTCHA送信 or 登録失敗")

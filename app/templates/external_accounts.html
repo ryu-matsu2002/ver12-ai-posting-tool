@@ -1,13 +1,28 @@
-{# app/templates/external_site_blogs.html #}
+{# app/templates/external_accounts.html #}
 {% extends "base.html" %}
-{% block title %}外部ブログ一覧 – {{ site.name }}{% endblock %}
+{% block title %}外部ブログアカウント一覧{% endblock %}
 
 {% block content %}
 <h2 class="text-2xl font-bold mb-6 flex items-center">
-  🚀 {{ site.name }} の無料ブログ一覧
-  <a href="{{ url_for('external.external_seo_sites') }}"
-     class="ml-4 text-sm text-blue-600 hover:underline">← サイト一覧へ戻る</a>
+  🚀 外部無料ブログアカウント一覧
 </h2>
+
+<!-- ✅ フィルター・ソートフォーム -->
+<form method="get" class="mb-6 flex items-center space-x-4">
+  <label for="site_id" class="text-sm font-medium">サイトで絞り込み：</label>
+  <select name="site_id" id="site_id" class="border rounded px-2 py-1 text-sm">
+    <option value="">-- 全サイトからランダム表示 --</option>
+    {% for s in all_sites %}
+      <option value="{{ s.id }}" {% if site_id and site_id == s.id %}selected{% endif %}>
+        {{ s.name }}
+      </option>
+    {% endfor %}
+  </select>
+  <button type="submit"
+          class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded">
+    絞り込む
+  </button>
+</form>
 
 {% if accts %}
 <table class="w-full text-sm">
@@ -25,10 +40,9 @@
   <tbody>
   {% for a in accts %}
     {% set scheduled = a.schedules|length %}
-    {% set posted    = a.posted_cnt %}
-    {% set pct       = (100 * posted / (scheduled if scheduled else 1)) | round(1) %}
+    {% set posted = a.posted_cnt %}
+    {% set pct = (100 * posted / (scheduled if scheduled else 1)) | round(1) %}
     <tr class="border-b">
-      <!-- ブログ種別バッジ -->
       <td class="px-3 py-2">
         <span class="px-2 py-1 rounded text-white text-xs
               {% if a.blog_type.value == 'note' %} bg-blue-600
@@ -37,34 +51,24 @@
           {{ a.blog_type.value }}
         </span>
       </td>
-
-      <!-- メール -->
       <td class="px-3 py-2 font-mono truncate max-w-[220px]">
         {{ decrypt(a.email) }}
       </td>
-
-      <!-- 投稿済/予定 -->
       <td class="px-3 py-2 text-center">{{ posted }}</td>
       <td class="px-3 py-2 text-center">{{ scheduled }}</td>
-
-      <!-- 進捗バー -->
       <td class="px-3 py-2">
         <div class="flex items-center space-x-2">
           <div class="flex-1 h-2 bg-gray-200 rounded">
-            {# ⬇️ VS Code 警告を出さないように inline-style へ変更 #}
             <div class="h-2 bg-emerald-600 rounded"
                  style="width: {{ pct }}%;"></div>
-            </div>
-            <span class="text-xs text-gray-500 w-10 text-right">{{ pct }}%</span>
+          </div>
+          <span class="text-xs text-gray-500 w-10 text-right">{{ pct }}%</span>
         </div>
       </td>
-      <!-- 記事一覧 -->
       <td class="px-3 py-2">
         <a href="{{ url_for('external.external_account_articles', acct_id=a.id) }}"
            class="text-blue-600 hover:underline">記事一覧</a>
       </td>
-
-      <!-- 操作 -->
       <td class="px-3 py-2 text-right whitespace-nowrap">
         <form action="{{ url_for('main.blog_one_click_login', acct_id=a.id) }}"
               method="get" class="inline">
@@ -86,13 +90,13 @@
 </table>
 
 <script>
-document.querySelectorAll('.copy-cred').forEach(btn=>{
-  btn.addEventListener('click',()=>{
+document.querySelectorAll('.copy-cred').forEach(btn => {
+  btn.addEventListener('click', () => {
     navigator.clipboard.writeText(
       `ユーザー名: ${btn.dataset.user}\nパスワード: ${btn.dataset.pass}`
     );
-    btn.textContent="✔ コピー";
-    setTimeout(()=>btn.textContent="ID/Pass",1500);
+    btn.textContent = "✔ コピー";
+    setTimeout(() => btn.textContent = "ID/Pass", 1500);
   });
 });
 </script>
