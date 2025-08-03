@@ -55,6 +55,11 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                 "html_path": error_html,
                 "png_path": error_png
             }
+        
+        # ✅ スクリーンショットを保存（正常ページであることが確認されたあと）
+        success_png = f"/tmp/ld_atompub_page_{timestamp}.png"
+        await page.screenshot(path=success_png)
+        logger.info(f"[LD-Recover] AtomPubページのスクリーンショットを保存: {success_png}")
 
         # 発行ボタンをクリック
         await page.wait_for_selector('button:has-text("発行する")', timeout=10000)
