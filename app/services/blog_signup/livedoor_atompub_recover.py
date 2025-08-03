@@ -29,14 +29,31 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         await page.goto(atompub_url, wait_until="load")
         logger.info(f"[LD-Recover] AtomPub設定ページに遷移: {atompub_url}")
 
-        # 「発行する」ボタンをクリック（新セレクタ）
+        # ✅ ページが /member にリダイレクトされたら失敗扱い
+        if "member" in page.url:
+            logger.error(f"[LD-Recover] AtomPubページが開けずに /member にリダイレクト: {page.url}")
+            html = await page.content()
+            error_html = f"/tmp/ld_atompub_fail_{timestamp}.html"
+            error_png = f"/tmp/ld_atompub_fail_{timestamp}.png"
+            Path(error_html).write_text(html, encoding="utf-8")
+            await page.screenshot(path=error_png)
+            return {
+                "success": False,
+                "error": "Redirected to member page instead of atompub",
+                "html_path": error_html,
+                "png_path": error_png
+            }
+
+        # ✅ 「発行する」ボタンを明示的に待機 → クリック
+        await page.wait_for_selector('button:has-text("発行する")', timeout=10000)
         await page.click('button:has-text("発行する")')
         logger.info("[LD-Recover] 『発行する』ボタンをクリック")
 
-        # モーダル「実行」ボタン
+        # ✅ モーダルの「実行」ボタンも明示的に待機してからクリック
         await page.wait_for_selector('button.btn-confirm', timeout=10000)
         await page.click('button.btn-confirm')
         logger.info("[LD-Recover] モーダルの『実行』ボタンをクリック")
+
 
         # APIキーの表示要素が出るのを待つ
         await page.wait_for_selector('pre.apikey', timeout=10000)
