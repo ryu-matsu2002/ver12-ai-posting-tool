@@ -61,19 +61,27 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         await page.screenshot(path=success_png)
         logger.info(f"[LD-Recover] AtomPubページのスクリーンショットを保存: {success_png}")
 
-        # 発行ボタンをクリック
-        await page.wait_for_selector('button:has-text("発行する")', timeout=10000)
-        await page.click('button:has-text("発行する")')
+        # 発行ボタン（input#apiKeyIssue）をクリック
+        await page.wait_for_selector('input#apiKeyIssue', timeout=10000)
+        await page.click('input#apiKeyIssue')
         logger.info("[LD-Recover] 『発行する』ボタンをクリック")
 
-        await page.wait_for_selector('button.btn-confirm', timeout=10000)
-        await page.click('button.btn-confirm')
+        # ポップアップの「実行」ボタンをクリック
+        await page.wait_for_selector('button:has-text("実行")', timeout=10000)
+        await page.click('button:has-text("実行")')
         logger.info("[LD-Recover] モーダルの『実行』ボタンをクリック")
 
-        # APIキー取得
-        await page.wait_for_selector('pre.apikey', timeout=10000)
-        api_key = await page.inner_text('pre.apikey')
+        # APIキー取得（inputのvalue属性を取得）
+        await page.wait_for_selector('input.input-xxlarge[readonly]', timeout=10000)
+        endpoint = await page.get_attribute('input.input-xxlarge[readonly]', 'value')
+
+        await page.wait_for_selector('input#apiKey', timeout=10000)
+        api_key = await page.get_attribute('input#apiKey', 'value')
+
+        logger.info(f"[LD-Recover] ✅ AtomPubエンドポイント: {endpoint}")
         logger.info(f"[LD-Recover] ✅ AtomPubパスワード取得成功: {api_key}")
+
+
 
         # DB保存
         account = ExternalBlogAccount(
@@ -85,6 +93,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
             nickname=nickname,
             livedoor_blog_id=blog_id,
             atompub_key_enc=encrypt(api_key),
+            atompub_endpoint=endpoint,  # ← NEW
         )
         db.session.add(account)
         db.session.commit()

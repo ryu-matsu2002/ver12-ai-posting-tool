@@ -336,6 +336,7 @@ class ExternalBlogAccount(db.Model):
 
     livedoor_blog_id  = db.Column(db.String(50),  nullable=True, index=True)
     atompub_key_enc   = db.Column(db.String(255), nullable=True)
+    atompub_endpoint  = db.Column(db.String(255), nullable=True)  # ← この行を追加
     api_post_enabled  = db.Column(db.Boolean,     default=False, nullable=False)
         # 🔸 CAPTCHA分離ステップ用のフラグとセッション識別子
     is_captcha_completed = db.Column(db.Boolean, default=False, nullable=False)  # CAPTCHAが完了したか
