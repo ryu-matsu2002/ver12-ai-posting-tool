@@ -12,9 +12,9 @@ logger = logging.getLogger(__name__)
 
 async def recover_atompub_key(page, nickname: str, email: str, password: str, site) -> dict:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    blog_id = nickname + "g"
 
     try:
+        # ブログ作成ページへ
         logger.info("[LD-Recover] ブログ作成ページに遷移")
         await page.goto("https://livedoor.blogcms.jp/member/blog/create", wait_until="load")
 
@@ -25,11 +25,23 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         await page.click('a.button[href*="edit?utm_source=pcwelcome"]')
         logger.info("[LD-Recover] 『最初のブログを書く』ボタンをクリック完了")
 
-        atompub_url = f"https://livedoor.blogcms.jp/blog/{blog_id}/config/atompub/"
-        await page.goto(atompub_url, wait_until="load")
-        logger.info(f"[LD-Recover] AtomPub設定ページに遷移: {atompub_url}")
+        # ✅ /member に遷移してブログIDを抽出
+        await page.goto("https://livedoor.blogcms.jp/member/", wait_until="load")
+        blog_url = await page.get_attribute('a[title="ブログ設定"]', 'href')  # 例: /blog/king1234567890/config/
+        blog_id = blog_url.split("/")[2]  # "king1234567890"
+        logger.info(f"[LD-Recover] ブログIDを取得: {blog_id}")
 
-        # ✅ ページが /member にリダイレクトされたら失敗扱い
+        # configページへ移動して AtomPub ボタンをクリック
+        config_url = f"https://livedoor.blogcms.jp{blog_url}"
+        await page.goto(config_url, wait_until="load")
+
+        await page.wait_for_selector('a.configIdxApi[title="API Keyの発行・確認"]', timeout=10000)
+        await page.click('a.configIdxApi[title="API Keyの発行・確認"]')
+
+        # AtomPubページに遷移 → URLチェック
+        await page.wait_for_load_state("load")
+        logger.info(f"[LD-Recover] AtomPub設定ページに遷移: {page.url}")
+
         if "member" in page.url:
             logger.error(f"[LD-Recover] AtomPubページが開けずに /member にリダイレクト: {page.url}")
             html = await page.content()
@@ -44,23 +56,21 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                 "png_path": error_png
             }
 
-        # ✅ 「発行する」ボタンを明示的に待機 → クリック
+        # 発行ボタンをクリック
         await page.wait_for_selector('button:has-text("発行する")', timeout=10000)
         await page.click('button:has-text("発行する")')
         logger.info("[LD-Recover] 『発行する』ボタンをクリック")
 
-        # ✅ モーダルの「実行」ボタンも明示的に待機してからクリック
         await page.wait_for_selector('button.btn-confirm', timeout=10000)
         await page.click('button.btn-confirm')
         logger.info("[LD-Recover] モーダルの『実行』ボタンをクリック")
 
-
-        # APIキーの表示要素が出るのを待つ
+        # APIキー取得
         await page.wait_for_selector('pre.apikey', timeout=10000)
         api_key = await page.inner_text('pre.apikey')
         logger.info(f"[LD-Recover] ✅ AtomPubパスワード取得成功: {api_key}")
 
-        # ✅ DB保存（上書き or 新規）
+        # DB保存
         account = ExternalBlogAccount(
             site_id=site.id,
             blog_type=BlogType.LIVEDOOR,
