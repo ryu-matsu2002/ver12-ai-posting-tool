@@ -29,22 +29,18 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         await page.goto(atompub_url, wait_until="load")
         logger.info(f"[LD-Recover] AtomPub設定ページに遷移: {atompub_url}")
 
-        # 「発行する」ボタンをクリック
-        await page.wait_for_selector('#apiKeyIssue', timeout=10000)
-        await page.click('#apiKeyIssue')
+        # 「発行する」ボタンをクリック（新セレクタ）
+        await page.click('button:has-text("発行する")')
         logger.info("[LD-Recover] 『発行する』ボタンをクリック")
 
-        # ポップアップが出るまで少し待つ
-        await page.wait_for_timeout(1000)
-
-        # 「実行」ボタンをクリック（ポップアップ内）
+        # モーダル「実行」ボタン
         await page.wait_for_selector('button.btn-confirm', timeout=10000)
         await page.click('button.btn-confirm')
         logger.info("[LD-Recover] モーダルの『実行』ボタンをクリック")
 
-        # APIキー入力欄の出現を待つ → 値を取得
-        await page.wait_for_selector('input[type="text"]', timeout=10000)
-        api_key = await page.input_value('input[type="text"]')
+        # APIキーの表示要素が出るのを待つ
+        await page.wait_for_selector('pre.apikey', timeout=10000)
+        api_key = await page.inner_text('pre.apikey')
         logger.info(f"[LD-Recover] ✅ AtomPubパスワード取得成功: {api_key}")
 
         # ✅ DB保存（上書き or 新規）

@@ -458,22 +458,8 @@ async def submit_captcha_and_complete(page, captcha_text: str, email: str, nickn
                 "html_path": recover_result.get("html_path"),
                 "png_path": recover_result.get("png_path")
             }
-
-        # ✅ DB登録
-        account = ExternalBlogAccount(
-            site_id=site.id,
-            blog_type=BlogType.LIVEDOOR,
-            email=email,
-            username=recover_result["blog_id"],
-            password=password,
-            nickname=nickname,
-            livedoor_blog_id=recover_result["blog_id"],
-            atompub_key_enc=encrypt(recover_result["api_key"]),
-        )
-        db.session.add(account)
-        db.session.commit()
-        logger.info(f"[LD-Signup] アカウントDB登録完了 blog_id={recover_result['blog_id']}")
-
+        
+        
         return {
             "captcha_success": True,
             "blog_id": recover_result["blog_id"],
