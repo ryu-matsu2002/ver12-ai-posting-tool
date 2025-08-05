@@ -3394,26 +3394,25 @@ def external_seo_sites():
     )
     from sqlalchemy.orm import selectinload
 
-    # 1. サイトと外部ジョブを一括取得（selectinloadでN+1回避）
+    # 1. サイトと外部ジョブを一括取得
     sites = (Site.query
              .filter_by(user_id=current_user.id)
              .options(selectinload(Site.external_jobs))
              .all())
 
-    # 2. job_map を事前に初期化
+    # 2. job_map 初期化
     job_map = {}
-
-    # 3. 必要な (site_id, blog_type) のセットを収集
     key_set = set()
+
     for s in sites:
         for job in s.external_jobs:
             if job.status == "archived":
                 continue
-            key = (s.id, job.blog_type.value.lower())
-            key_set.add((s.id, job.blog_type))
-            job_map[key] = job  # 後で posted_cnt を埋める
+            key = (s.id, job.blog_type)
+            key_set.add(key)
+            job_map[(s.id, job.blog_type.value.lower())] = job
 
-    # 4. 一括で posted_cnt を取得
+    # 3. 投稿済み件数集計
     posted_counts = (
         db.session.query(
             ExternalBlogAccount.site_id,
@@ -3422,50 +3421,56 @@ def external_seo_sites():
         )
         .join(ExternalArticleSchedule,
               ExternalArticleSchedule.blog_account_id == ExternalBlogAccount.id)
-        .filter(ExternalArticleSchedule.status == "posted",
-                ExternalBlogAccount.site_id.in_([sid for sid, _ in key_set]),
-                ExternalBlogAccount.blog_type.in_([bt for _, bt in key_set]))
+        .filter(
+            ExternalArticleSchedule.status == "posted",
+            ExternalBlogAccount.site_id.in_([sid for sid, _ in key_set]),
+            ExternalBlogAccount.blog_type.in_([bt for _, bt in key_set])
+        )
         .group_by(ExternalBlogAccount.site_id, ExternalBlogAccount.blog_type)
         .all()
     )
 
-    # 5. job_map に posted_cnt を設定
     for site_id, blog_type, cnt in posted_counts:
         key = (site_id, blog_type.value.lower())
         if key in job_map:
             job_map[key].posted_cnt = cnt
 
-    # 6. 何も該当しなかったものには 0 を入れておく
     for job in job_map.values():
         if not hasattr(job, "posted_cnt"):
             job.posted_cnt = 0
 
-    # ✅ 7. GUI CAPTCHA突破ステータスを DB から一括取得
-    from app.models import ExternalBlogAccount
-    gui_successes = (
+    # 4. CAPTCHA突破＆API取得状況を一括取得
+    accounts = (
         db.session.query(
             ExternalBlogAccount.site_id,
-            ExternalBlogAccount.blog_type
+            ExternalBlogAccount.blog_type,
+            ExternalBlogAccount.is_captcha_completed,
+            ExternalBlogAccount.api_key
         )
-        .filter(ExternalBlogAccount.is_captcha_completed == True,
-                ExternalBlogAccount.site_id.in_([sid for sid, _ in key_set]),
-                ExternalBlogAccount.blog_type.in_([bt for _, bt in key_set]))
+        .filter(
+            ExternalBlogAccount.site_id.in_([sid for sid, _ in key_set]),
+            ExternalBlogAccount.blog_type.in_([bt for _, bt in key_set])
+        )
         .all()
     )
 
-    # ✅ 8. gui_statuses 辞書構築
-    gui_statuses = {
-        (site_id, blog_type.value.lower()): True
-        for site_id, blog_type in gui_successes
-    }
+    # 5. 各サイトオブジェクトに属性追加
+    for s in sites:
+        s.is_captcha_completed = False
+        s.api_key = None
+        for acc_site_id, acc_blog_type, is_captcha_completed, api_key in accounts:
+            if s.id == acc_site_id and acc_blog_type.value.lower() == "livedoor":
+                s.is_captcha_completed = bool(is_captcha_completed)
+                s.api_key = api_key
+                break
 
     return render_template(
-        "external_sites.html",
+        "external_sites.html",  # ← 実際のテンプレ名に合わせて
         sites=sites,
         job_map=job_map,
-        gui_statuses=gui_statuses,  # ✅ 追加
         ExternalSEOJobLog=ExternalSEOJobLog
     )
+
 
 
 @bp.post("/external/start")

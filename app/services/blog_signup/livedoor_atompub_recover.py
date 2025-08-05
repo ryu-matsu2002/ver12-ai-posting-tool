@@ -94,6 +94,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
             livedoor_blog_id=blog_id,
             atompub_key_enc=encrypt(api_key),
             atompub_endpoint=endpoint,  # ← NEW
+            api_post_enabled=True  # ← 追加済み
         )
         db.session.add(account)
         db.session.commit()
