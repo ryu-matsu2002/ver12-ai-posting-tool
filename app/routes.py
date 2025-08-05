@@ -3445,7 +3445,7 @@ def external_seo_sites():
             ExternalBlogAccount.site_id,
             ExternalBlogAccount.blog_type,
             ExternalBlogAccount.is_captcha_completed,
-            ExternalBlogAccount.api_key
+            ExternalBlogAccount.atompub_key_enc   # ← 修正
         )
         .filter(
             ExternalBlogAccount.site_id.in_([sid for sid, _ in key_set]),
@@ -3458,10 +3458,10 @@ def external_seo_sites():
     for s in sites:
         s.is_captcha_completed = False
         s.api_key = None
-        for acc_site_id, acc_blog_type, is_captcha_completed, api_key in accounts:
+        for acc_site_id, acc_blog_type, is_captcha_completed, atompub_key_enc in accounts:
             if s.id == acc_site_id and acc_blog_type.value.lower() == "livedoor":
                 s.is_captcha_completed = bool(is_captcha_completed)
-                s.api_key = api_key
+                s.api_key = atompub_key_enc  # ← 修正
                 break
 
     return render_template(
