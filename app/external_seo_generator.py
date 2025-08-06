@@ -1,11 +1,11 @@
 import random
 import logging
 import threading
+from app.models import Site
 from datetime import datetime, timedelta, timezone
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import current_app
 from app import db
-from app.models import Article, Site
+from app.models import Article
 from app.google_client import fetch_search_queries_for_site
 from .article_generator import _chat, clean_gpt_output, _compose_body, TOKENS, TEMP
 
@@ -15,7 +15,6 @@ JST = timezone(timedelta(hours=9))
 # ===============================
 # 固定プロンプト（タイトル / 本文）
 # ===============================
-
 TITLE_PROMPT = """あなたはSEOとコンテンツマーケティングの専門家です。
 
 入力されたキーワードを使って
@@ -95,25 +94,7 @@ BODY_PROMPT = """あなたはSEOとコンテンツマーケティングの専門
 """
 
 # ===============================
-# スケジュール生成（1日10記事固定・時間ランダム）
-# ===============================
-def _generate_slots_external(app, site_id: int, n: int) -> list[datetime]:
-    POST_HOURS = list(range(10, 22))  # 10時〜21時
-    slots = []
-    day = datetime.now(JST).date() + timedelta(days=1)  # 翌日から
-    while len(slots) < n:
-        hours_for_day = random.sample(POST_HOURS, 10)
-        for hour in sorted(hours_for_day):
-            minute = random.randint(0, 59)
-            local = datetime.combine(day, datetime.min.time(), tzinfo=JST).replace(hour=hour, minute=minute)
-            slots.append(local.astimezone(timezone.utc))
-            if len(slots) >= n:
-                break
-        day += timedelta(days=1)
-    return slots
-
-# ===============================
-# ランダムリンク選択
+# ランダムリンク選択（修正版）
 # ===============================
 def choose_random_link(site_id: int) -> str:
     site = Site.query.get(site_id)
@@ -122,8 +103,10 @@ def choose_random_link(site_id: int) -> str:
 
     top_articles = []
     try:
-        queries = fetch_search_queries_for_site(site, days=28, row_limit=10, by_page=True)
-        top_articles = [q["page"] for q in queries if q.get("page")]
+        # 不要な by_page を削除、limit → row_limit に変更
+        queries = fetch_search_queries_for_site(site, days=28, row_limit=10)
+        if queries and isinstance(queries[0], dict):
+            top_articles = [q.get("page") for q in queries if q.get("page")]
     except Exception as e:
         logging.warning(f"GSC上位記事取得失敗: {e}")
 
@@ -131,32 +114,33 @@ def choose_random_link(site_id: int) -> str:
     return random.choice(link_pool)
 
 # ===============================
-# 外部SEO記事生成メイン関数（テスト用: 1記事だけ生成して即投稿スケジュール）
+# 外部SEO記事生成（テスト用）
 # ===============================
 from app.models import ExternalArticleSchedule, ExternalBlogAccount
 
 def generate_external_seo_articles(user_id: int, site_id: int, blog_id: int, account: ExternalBlogAccount):
     app = current_app._get_current_object()
 
-    # Site オブジェクト取得
+    # DetachedInstanceError対策で事前にIDだけ退避
+    blog_account_id = account.id
+
+    # Siteオブジェクト取得
     site_obj = Site.query.get(site_id)
-    if not site_obj:
-        logging.error(f"[外部SEO] site_id={site_id} が存在しません")
-        return
 
-    # 1件だけキーワード取得
-        # 1件だけキーワード取得
-    queries = fetch_search_queries_for_site(site_obj, days=28, row_limit=1)
-
-    # 戻り値が文字列リストの場合はそのまま、辞書型なら "query" を抽出
-    if queries and isinstance(queries[0], dict):
-        keywords = [q.get("query") for q in queries if q.get("query")]
-    else:
-        keywords = list(queries)
+    # 1. GSC上位キーワード取得（1件だけ）
+    try:
+        queries = fetch_search_queries_for_site(site_obj, days=28, row_limit=1)
+        if queries and isinstance(queries[0], dict):
+            keywords = [q.get("query") for q in queries if q.get("query")]
+        else:
+            keywords = list(queries) if queries else []
+    except Exception as e:
+        logging.warning(f"[外部SEOテスト] GSCキーワード取得失敗: {e}")
+        keywords = []
 
     keywords = keywords or ["テストキーワード"]
 
-    # スケジュール時間（2分後）
+    # 2. テスト用: 1記事だけ、2分後に投稿
     scheduled_time = (datetime.now(JST) + timedelta(minutes=2)).astimezone(timezone.utc)
 
     def _bg():
@@ -164,6 +148,8 @@ def generate_external_seo_articles(user_id: int, site_id: int, blog_id: int, acc
             schedules = []
             try:
                 kw = keywords[0]
+
+                # タイトル生成
                 title_prompt = f"{TITLE_PROMPT}\n\nキーワード: {kw}"
                 title = _chat(
                     [{"role": "system", "content": "あなたはSEOに強い日本語ライターです。"},
@@ -171,6 +157,7 @@ def generate_external_seo_articles(user_id: int, site_id: int, blog_id: int, acc
                     TOKENS["title"], TEMP["title"], user_id=user_id
                 )
 
+                # 本文生成
                 body = _compose_body(
                     kw=kw,
                     pt=BODY_PROMPT,
@@ -179,9 +166,11 @@ def generate_external_seo_articles(user_id: int, site_id: int, blog_id: int, acc
                     user_id=user_id
                 )
 
+                # リンク挿入
                 link = choose_random_link(site_id)
                 body += f"\n\n<a href='{link}' target='_blank'>{link}</a>"
 
+                # 記事保存
                 art = Article(
                     keyword=kw,
                     title=title,
@@ -196,8 +185,9 @@ def generate_external_seo_articles(user_id: int, site_id: int, blog_id: int, acc
                 db.session.add(art)
                 db.session.flush()
 
+                # スケジュール保存
                 sched = ExternalArticleSchedule(
-                    blog_account_id=account.id,
+                    blog_account_id=blog_account_id,
                     keyword_id=None,
                     scheduled_date=scheduled_time,
                     status="pending"
@@ -207,7 +197,6 @@ def generate_external_seo_articles(user_id: int, site_id: int, blog_id: int, acc
                 if schedules:
                     db.session.bulk_save_objects(schedules)
                 db.session.commit()
-                logging.info(f"[外部SEOテスト] site_id={site_id} に1記事生成＆スケジュール登録完了")
 
             except Exception as e:
                 db.session.rollback()
