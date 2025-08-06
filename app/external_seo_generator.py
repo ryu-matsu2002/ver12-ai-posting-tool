@@ -145,8 +145,16 @@ def generate_external_seo_articles(user_id: int, site_id: int, blog_id: int, acc
         return
 
     # 1件だけキーワード取得
+        # 1件だけキーワード取得
     queries = fetch_search_queries_for_site(site_obj, days=28, row_limit=1)
-    keywords = [q["query"] for q in queries] or ["テストキーワード"]
+
+    # 戻り値が文字列リストの場合はそのまま、辞書型なら "query" を抽出
+    if queries and isinstance(queries[0], dict):
+        keywords = [q.get("query") for q in queries if q.get("query")]
+    else:
+        keywords = list(queries)
+
+    keywords = keywords or ["テストキーワード"]
 
     # スケジュール時間（2分後）
     scheduled_time = (datetime.now(JST) + timedelta(minutes=2)).astimezone(timezone.utc)
