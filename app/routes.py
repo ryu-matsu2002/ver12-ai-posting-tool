@@ -3740,13 +3740,13 @@ def external_article_delete(article_id):
 
 
 # 外部SEO記事 即時投稿
-from app.tasks import _run_external_post_job
-from flask import current_app
-
 @bp.route("/external/schedule/<int:schedule_id>/post_now", methods=["POST"])
 @login_required
 def external_schedule_post_now(schedule_id):
     from app.models import ExternalArticleSchedule
+    from datetime import datetime
+    from app.tasks import _run_external_post_job
+    from flask import current_app
 
     sched = ExternalArticleSchedule.query.get_or_404(schedule_id)
     acct = sched.blog_account
@@ -3754,15 +3754,15 @@ def external_schedule_post_now(schedule_id):
     if site.user_id != current_user.id and not current_user.is_admin:
         abort(403)
 
-    from datetime import datetime, timezone
-    sched.scheduled_date = datetime.now(timezone.utc)
+    # 即時投稿用にUTCのnaive datetimeで設定
+    sched.scheduled_date = datetime.utcnow()
     sched.status = "pending"
     db.session.commit()
 
-    # 即時投稿ジョブを直接実行
+    # 🔹 即時投稿ジョブを直接実行（通常記事と同じ動き）
     _run_external_post_job(current_app._get_current_object())
 
-    flash("即時投稿を実行しました", "success")
+    flash("即時投稿が完了しました", "success")
     return redirect(request.referrer or url_for("main.external_account_articles", acct_id=acct.id))
 
 # -----------------------------------------------------------
