@@ -299,13 +299,13 @@ def _finalize_external_job(job_id: int):
 # ──────────────────────────────────────────
 def _run_external_post_job(app):
     from app.models import ExternalArticleSchedule, ExternalBlogAccount, Keyword, BlogType, Article, ExternalSEOJob
-    
     from datetime import datetime
     from flask import current_app
     from app.services.blog_post.livedoor_post import post_livedoor_article
 
     with app.app_context():
         now = datetime.utcnow()
+        current_app.logger.info(f"[ExtPost] Job start at {now}")
 
         rows = (
             db.session.query(ExternalArticleSchedule,
@@ -320,18 +320,26 @@ def _run_external_post_job(app):
             .all()
         )
 
+        current_app.logger.info(f"[ExtPost] Found {len(rows)} pending schedules")
+
         if not rows:
             return
 
         for sched, acct, kw in rows:
+            current_app.logger.info(
+                f"[ExtPost] Processing sched_id={sched.id}, keyword='{kw.keyword}', "
+                f"scheduled_date={sched.scheduled_date}, account={acct.username}"
+            )
             try:
                 # Livedoor専用チェック
                 if acct.blog_type != BlogType.LIVEDOOR:
                     sched.status = "error"
                     sched.message = f"未対応ブログタイプ: {acct.blog_type}"
                     db.session.commit()
+                    current_app.logger.warning(f"[ExtPost] Unsupported blog type {acct.blog_type}")
                     continue
-                
+
+                # 記事取得
                 art = (
                     Article.query
                     .filter(Article.keyword == kw.keyword,
@@ -345,32 +353,37 @@ def _run_external_post_job(app):
                     sched.message = "記事未生成"
                     sched.status = "error"
                     db.session.commit()
+                    current_app.logger.warning(f"[ExtPost] Article not found for keyword '{kw.keyword}'")
                     continue
 
+                current_app.logger.info(f"[ExtPost] Posting article_id={art.id} to Livedoor...")
                 res = post_livedoor_article(acct, art.title, art.body)
-                    
 
                 if res.get("ok"):
-                    sched.status     = "posted"
+                    sched.status = "posted"
                     sched.posted_url = res["url"]
-                    sched.posted_at  = res.get("posted_at")
+                    sched.posted_at = res.get("posted_at")
                     acct.posted_cnt += 1
                     db.session.commit()
+                    current_app.logger.info(f"[ExtPost] Success: {res['url']}")
 
-                    latest_job = (ExternalSEOJob.query
-                                  .filter_by(site_id=acct.site_id)
-                                  .order_by(ExternalSEOJob.id.desc())
-                                  .first())
+                    latest_job = (
+                        ExternalSEOJob.query
+                        .filter_by(site_id=acct.site_id)
+                        .order_by(ExternalSEOJob.id.desc())
+                        .first()
+                    )
                     if latest_job:
                         _finalize_external_job(latest_job.id)
                 else:
-                    sched.status  = "error"
+                    sched.status = "error"
                     sched.message = res.get("error")
                     db.session.commit()
+                    current_app.logger.error(f"[ExtPost] Failed: {res.get('error')}")
 
             except Exception as e:
-                current_app.logger.warning(f"[ExtPost] {e}")
-                sched.status  = "error"
+                current_app.logger.exception(f"[ExtPost] Exception during posting: {e}")
+                sched.status = "error"
                 sched.message = str(e)
                 db.session.commit()
 
