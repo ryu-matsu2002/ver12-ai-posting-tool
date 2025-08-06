@@ -295,29 +295,26 @@ def _finalize_external_job(job_id: int):
         db.session.commit()           
 
 # ──────────────────────────────────────────
-# 外部ブログ投稿ジョブ
+# 外部ブログ投稿ジョブ（簡略・安定版）
 # ──────────────────────────────────────────
 def _run_external_post_job(app):
     """
-    外部SEO記事を外部ブログに投稿するジョブ
-    - 即時投稿ボタンからの実行
-    - 10分ごとのスケジュール実行
-    の両方に対応
+    外部SEO記事を外部ブログに投稿するジョブ（簡略版）
+    - status="done" の外部SEO記事を投稿
+    - Keyword一致条件を排除し、site_id/source/status で判定
     """
-    from app.models import ExternalArticleSchedule, ExternalBlogAccount, Keyword, BlogType, Article, ExternalSEOJob
+    from app.models import ExternalArticleSchedule, ExternalBlogAccount, BlogType, Article, ExternalSEOJob
     from datetime import datetime
-    from flask import current_app
     from app.services.blog_post.livedoor_post import post_livedoor_article
 
     with app.app_context():
         now = datetime.utcnow()
         current_app.logger.info(f"[ExtPost] Job start at {now}")
 
-        # 投稿対象のスケジュール取得
+        # 投稿対象スケジュール取得
         rows = (
-            db.session.query(ExternalArticleSchedule, ExternalBlogAccount, Keyword)
+            db.session.query(ExternalArticleSchedule, ExternalBlogAccount)
             .join(ExternalBlogAccount, ExternalArticleSchedule.blog_account_id == ExternalBlogAccount.id)
-            .join(Keyword, ExternalArticleSchedule.keyword_id == Keyword.id)
             .filter(
                 ExternalArticleSchedule.status == "pending",
                 ExternalArticleSchedule.scheduled_date <= now
@@ -331,29 +328,26 @@ def _run_external_post_job(app):
         if not rows:
             return
 
-        for sched, acct, kw in rows:
+        for sched, acct in rows:
             current_app.logger.info(
-                f"[ExtPost] Processing sched_id={sched.id}, keyword='{kw.keyword}', "
-                f"scheduled_date={sched.scheduled_date}, account={acct.username}"
+                f"[ExtPost] Processing sched_id={sched.id}, scheduled_date={sched.scheduled_date}, account={acct.username}"
             )
 
             try:
-                # 対応ブログタイプのみ処理
+                # ブログタイプチェック
                 if acct.blog_type != BlogType.LIVEDOOR:
                     sched.status = "error"
                     sched.message = f"未対応ブログタイプ: {acct.blog_type}"
                     db.session.commit()
-                    current_app.logger.warning(f"[ExtPost] Unsupported blog type {acct.blog_type}")
                     continue
 
-                # 外部SEO専用の記事取得（keyword_id で直接紐付け）
+                # 外部SEO専用の記事取得
                 art = (
                     db.session.query(Article)
                     .filter(
                         Article.site_id == acct.site_id,
                         Article.status == "done",
-                        Article.source == "external",  # 外部SEO専用
-                        Article.keyword == kw.keyword  # 文字列で一致させる
+                        Article.source == "external"  # 外部SEOのみ
                     )
                     .order_by(Article.id.asc())
                     .first()
@@ -363,7 +357,7 @@ def _run_external_post_job(app):
                     sched.status = "error"
                     sched.message = "記事未生成"
                     db.session.commit()
-                    current_app.logger.warning(f"[ExtPost] Article not found for keyword_id={kw.id}")
+                    current_app.logger.warning(f"[ExtPost] Article not found for site_id={acct.site_id}")
                     continue
 
                 # 投稿処理
@@ -374,6 +368,7 @@ def _run_external_post_job(app):
                     sched.status = "posted"
                     sched.posted_url = res["url"]
                     sched.posted_at = res.get("posted_at")
+                    art.status = "posted"
                     acct.posted_cnt += 1
                     db.session.commit()
                     current_app.logger.info(f"[ExtPost] Success: {res['url']}")
