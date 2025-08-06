@@ -2,6 +2,7 @@ import random
 import logging
 import threading
 from app.models import Site
+from app.models import Keyword
 from datetime import datetime, timedelta, timezone
 from flask import current_app
 from app import db
@@ -170,6 +171,23 @@ def generate_external_seo_articles(user_id: int, site_id: int, blog_id: int, acc
                 link = choose_random_link(site_id)
                 body += f"\n\n<a href='{link}' target='_blank'>{link}</a>"
 
+                # 記事保存前にキーワードをKeywordテーブルに保存 or 取得
+                keyword_obj = Keyword.query.filter_by(
+                    user_id=user_id,
+                    site_id=site_id,
+                    keyword=kw
+                ).first()
+                if not keyword_obj:
+                    keyword_obj = Keyword(
+                        user_id=user_id,
+                        site_id=site_id,
+                        keyword=kw,
+                        created_at=datetime.now(JST)
+                    )
+                    db.session.add(keyword_obj)
+                    db.session.flush()
+
+
                 # 記事保存
                 art = Article(
                     keyword=kw,
@@ -185,17 +203,17 @@ def generate_external_seo_articles(user_id: int, site_id: int, blog_id: int, acc
                 db.session.add(art)
                 db.session.flush()
 
-                # スケジュール保存
+                # keyword_id にはKeywordテーブルのIDを入れる
+                # keyword_id にはKeywordテーブルのIDを入れる
                 sched = ExternalArticleSchedule(
                     blog_account_id=blog_account_id,
-                    keyword_id=art.id,  # ← ArticleのIDを使用してNULL回避
+                    keyword_id=keyword_obj.id,
                     scheduled_date=scheduled_time,
                     status="pending"
                 )
-                schedules.append(sched)
+                db.session.add(sched)  # bulk_save_objectsではなくadd
 
-                if schedules:
-                    db.session.bulk_save_objects(schedules)
+            
                 db.session.commit()
 
             except Exception as e:
