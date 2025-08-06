@@ -39,9 +39,10 @@
 
       <td class="px-3 py-2">
         {% if art %}
-          <a href="{{ url_for('main.preview_article', article_id=art.id) }}"
+          <a href="{{ url_for('external.external_article_preview', article_id=art.id) }}"
              class="text-blue-600 hover:underline" target="_blank">プレビュー</a>
         {% endif %}
+
       </td>
 
       <td class="px-3 py-2 space-x-2">

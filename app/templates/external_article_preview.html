@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}外部SEO記事プレビュー{% endblock %}
+
+{% block content %}
+<h2 class="text-2xl font-bold mb-6">{{ article.title }}</h2>
+
+<div class="prose max-w-none">
+    {{ article.body | safe }}
+</div>
+{% endblock %}
