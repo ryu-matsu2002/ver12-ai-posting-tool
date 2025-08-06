@@ -1,4 +1,4 @@
-# livedoor_post.py
+# app/services/blog_post/livedoor_post.py
 import requests
 from requests.auth import HTTPBasicAuth
 import re
@@ -11,11 +11,14 @@ def post_livedoor_article(account, title, body_html):
     """
     ライブドアブログに記事を投稿する
     account: ExternalBlogAccount インスタンス（APIキーなどを保持）
-    title: 投稿タイトル
-    body_html: HTML本文
     """
     try:
-        api_url = f"https://livedoor.blogcms.jp/atompub/{account.blog_id}/article"
+        # livedoor_blog_id を使う
+        if not account.livedoor_blog_id:
+            raise ValueError("livedoor_blog_id が設定されていません")
+
+        blog_id = account.livedoor_blog_id
+        api_url = f"https://livedoor.blogcms.jp/atompub/{blog_id}/article"
 
         xml_payload = f"""<?xml version="1.0" encoding="utf-8"?>
         <entry xmlns="http://www.w3.org/2005/Atom">
@@ -26,7 +29,7 @@ def post_livedoor_article(account, title, body_html):
 
         api_key_dec = decrypt(account.atompub_key_enc)
 
-        auth = HTTPBasicAuth(account.blog_id, api_key_dec)
+        auth = HTTPBasicAuth(blog_id, api_key_dec)
         headers = {"Content-Type": "application/atom+xml; charset=utf-8"}
 
         res = requests.post(api_url, data=xml_payload.encode("utf-8"), headers=headers, auth=auth)
@@ -41,11 +44,8 @@ def post_livedoor_article(account, title, body_html):
 
     except Exception as e:
         logging.exception("[LivedoorPost] 例外発生")
-        return {"ok": False, "error": str(e)}    
+        return {"ok": False, "error": str(e)}
 
 def extract_post_url(xml_response):
-    """
-    AtomPubレスポンスXMLから記事URLを抽出
-    """
     match = re.search(r"<link rel=['\"]alternate['\"] type=['\"]text/html['\"] href=['\"](.*?)['\"]", xml_response)
     return match.group(1) if match else None
