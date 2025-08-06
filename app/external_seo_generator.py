@@ -195,10 +195,10 @@ def generate_external_seo_articles(user_id: int, site_id: int, blog_id: int, acc
                     body=body,
                     user_id=user_id,
                     site_id=site_id,
-                    status="done",
+                    status="done",          # 投稿ジョブで拾えるように done にする
                     progress=100,
                     scheduled_at=scheduled_time,
-                    source="external_seo"
+                    source="external"       # 外部SEOはすべて external に統一
                 )
                 db.session.add(art)
                 db.session.flush()
