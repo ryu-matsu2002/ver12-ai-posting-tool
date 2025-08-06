@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import current_app
 from app import db
 from app.models import Article, Site
-from app.google_client import fetch_search_queries
+from app.google_client import fetch_search_queries_for_site
 from .article_generator import _chat, clean_gpt_output, _compose_body, TOKENS, TEMP
 
 # タイムゾーン設定
@@ -129,7 +129,7 @@ def choose_random_link(site_id: int) -> str:
     # GSC上位10記事（URL）取得
     top_articles = []
     try:
-        queries = fetch_search_queries(site_id, days=28, limit=10, by_page=True)
+        queries = fetch_search_queries_for_site(site_id, days=28, limit=10, by_page=True)
         top_articles = [q["page"] for q in queries if q.get("page")]
     except Exception as e:
         logging.warning(f"GSC上位記事取得失敗: {e}")
@@ -146,7 +146,7 @@ def generate_external_seo_articles(user_id: int, site_id: int, blog_id: int, acc
     app = current_app._get_current_object()
 
     # 1. GSC上位キーワード取得（1件だけ）
-    queries = fetch_search_queries(site_id, days=28, limit=1)
+    queries = fetch_search_queries_for_site(site_id, days=28, limit=1)
     keywords = [q["query"] for q in queries] or ["テストキーワード"]
 
     # 2. テスト用: 1記事だけ
