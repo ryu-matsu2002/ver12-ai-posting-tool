@@ -342,9 +342,12 @@ def _run_external_post_job(app):
                 # 記事取得
                 art = (
                     Article.query
-                    .filter(Article.keyword == kw.keyword,
-                            Article.site_id == acct.site_id,
-                            Article.status == "done")
+                    .filter(
+                        Article.keyword_id == kw.id,         # keyword_idで紐付け
+                        Article.site_id == acct.site_id,
+                        Article.status == "done",
+                        Article.source == "external"         # 外部SEO記事のみ
+                    )
                     .order_by(Article.id.asc())
                     .first()
                 )
