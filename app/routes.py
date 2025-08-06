@@ -3744,6 +3744,9 @@ def external_article_delete(article_id):
 @login_required
 def external_schedule_post_now(schedule_id):
     from app.models import ExternalArticleSchedule
+    from app.tasks import _run_external_post_job
+    from flask import current_app
+    from datetime import datetime, timezone
 
     sched = ExternalArticleSchedule.query.get_or_404(schedule_id)
     acct = sched.blog_account
@@ -3751,12 +3754,15 @@ def external_schedule_post_now(schedule_id):
     if site.user_id != current_user.id and not current_user.is_admin:
         abort(403)
 
-    from datetime import datetime, timezone
+    # ① 即時投稿用に pending にする
     sched.scheduled_date = datetime.now(timezone.utc)
     sched.status = "pending"
     db.session.commit()
 
-    flash("即時投稿としてキューに登録しました", "success")
+    # ② 即時投稿処理を実行（スケジューラ待ち不要）
+    _run_external_post_job(current_app._get_current_object())
+
+    flash("即時投稿を実行しました", "success")
     return redirect(request.referrer or url_for("main.external_account_articles", acct_id=acct.id))
 
 # -----------------------------------------------------------
