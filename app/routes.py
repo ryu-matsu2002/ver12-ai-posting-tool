@@ -3690,11 +3690,11 @@ def external_article_preview(article_id):
 
     art = Article.query.get_or_404(article_id)
 
-    # 所有権チェック（本人か管理者のみ）
     if art.user_id != current_user.id and not current_user.is_admin:
         abort(403)
 
     return render_template("external_article_preview.html", article=art)
+
 
 
 # 外部SEO記事 編集
