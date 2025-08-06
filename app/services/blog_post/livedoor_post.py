@@ -36,7 +36,7 @@ def post_livedoor_article(account, title, body_html):
         # APIキーを復号
         api_key_dec = decrypt(account.atompub_key_enc)
 
-        auth = HTTPBasicAuth(blog_id, api_key_dec)
+        auth = HTTPBasicAuth(account.username, api_key_dec)
         headers = {"Content-Type": "application/atom+xml; charset=utf-8"}
 
         logging.info(f"[LivedoorPost] 投稿開始: blog_id={blog_id}, url={api_url}")
