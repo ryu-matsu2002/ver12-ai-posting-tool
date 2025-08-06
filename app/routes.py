@@ -3740,13 +3740,13 @@ def external_article_delete(article_id):
 
 
 # 外部SEO記事 即時投稿
-# 外部SEO記事 即時投稿
+from app.tasks import _run_external_post_job
+from flask import current_app
+
 @bp.route("/external/schedule/<int:schedule_id>/post_now", methods=["POST"])
 @login_required
 def external_schedule_post_now(schedule_id):
     from app.models import ExternalArticleSchedule
-    from app.tasks import _run_external_post_job
-    from flask import current_app
 
     sched = ExternalArticleSchedule.query.get_or_404(schedule_id)
     acct = sched.blog_account
@@ -3759,12 +3759,11 @@ def external_schedule_post_now(schedule_id):
     sched.status = "pending"
     db.session.commit()
 
-    # 即時投稿ジョブを手動実行
+    # 即時投稿ジョブを直接実行
     _run_external_post_job(current_app._get_current_object())
 
     flash("即時投稿を実行しました", "success")
     return redirect(request.referrer or url_for("main.external_account_articles", acct_id=acct.id))
-
 
 # -----------------------------------------------------------
 # 管理者向け: 全ユーザーの外部ブログアカウント一覧
