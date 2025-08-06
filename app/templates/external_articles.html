@@ -22,11 +22,11 @@
 <table class="w-full text-sm">
   <thead class="bg-gray-100 text-left">
     <tr>
-      <th class="px-3 py-2">キーワード</th>
-      <th class="px-3 py-2">予定日時</th>
-      <th class="px-3 py-2">状態</th>
-      <th class="px-3 py-2">投稿URL</th>
-      <th class="px-3 py-2">WP元記事</th>
+      <th class="px-3 py-2">検索キーワード</th>
+      <th class="px-3 py-2">投稿予定日</th>
+      <th class="px-3 py-2">Q＆A記事タイトル</th>
+      <th class="px-3 py-2">プレビュー</th>
+      <th class="px-3 py-2">操作</th>
     </tr>
   </thead>
   <tbody>
@@ -35,31 +35,33 @@
       <td class="px-3 py-2 break-all">{{ kw.keyword }}</td>
       <td class="px-3 py-2">{{ sched.scheduled_date.strftime('%Y-%m-%d %H:%M') }}</td>
 
-      {# 状態 #}
-      <td class="px-3 py-2">
-        {% if sched.status == 'posted' %}
-          <span class="text-emerald-600">posted</span>
-        {% elif sched.status == 'error' %}
-          <span class="text-red-600">error</span>
-        {% else %}
-          <span class="text-gray-500">pending</span>
-        {% endif %}
-      </td>
+      <td class="px-3 py-2">{{ art.title if art else '-' }}</td>
 
-      {# 投稿URL #}
-      <td class="px-3 py-2">
-        {% if sched.posted_url %}
-          <a href="{{ sched.posted_url }}" class="text-blue-600 hover:underline"
-             target="_blank">open</a>
-        {% endif %}
-      </td>
-
-      {# WP 元記事 #}
       <td class="px-3 py-2">
         {% if art %}
           <a href="{{ url_for('main.preview_article', article_id=art.id) }}"
-             class="text-blue-600 hover:underline" target="_blank">WP記事</a>
+             class="text-blue-600 hover:underline" target="_blank">プレビュー</a>
         {% endif %}
+      </td>
+
+      <td class="px-3 py-2 space-x-2">
+        {% if art %}
+          <a href="{{ url_for('main.external_article_edit', article_id=art.id) }}"
+             class="px-2 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600">編集</a>
+
+          <form action="{{ url_for('main.external_article_delete', article_id=art.id) }}"
+                method="post" style="display:inline;">
+            <button type="submit" class="px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600"
+                    onclick="return confirm('削除しますか？')">削除</button>
+          </form>
+        {% endif %}
+
+        <form action="{{ url_for('main.external_schedule_post_now', schedule_id=sched.id) }}"
+              method="post" style="display:inline;">
+          <button type="submit" class="px-2 py-1 bg-green-500 text-white rounded hover:bg-green-600">
+            即時投稿
+          </button>
+        </form>
       </td>
     </tr>
   {% else %}

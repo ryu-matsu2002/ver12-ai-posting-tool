@@ -1,0 +1,31 @@
+{# app/templates/external_article_edit.html #}
+{% extends "base.html" %}
+{% block title %}外部SEO | 記事編集{% endblock %}
+
+{% block content %}
+<h2 class="text-2xl font-bold mb-6">外部SEO記事 編集</h2>
+
+<form method="post">
+  <div class="mb-4">
+    <label class="block font-semibold mb-1">タイトル</label>
+    <input type="text" name="title" value="{{ article.title }}"
+           class="w-full border px-3 py-2 rounded">
+  </div>
+
+  <div class="mb-4">
+    <label class="block font-semibold mb-1">本文</label>
+    <textarea name="body" rows="20"
+              class="w-full border px-3 py-2 rounded">{{ article.body }}</textarea>
+  </div>
+
+  <div class="flex space-x-4">
+    <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+      保存
+    </button>
+    <a href="{{ request.referrer or url_for('main.external_account_articles', acct_id=article.site_id) }}"
+       class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600">
+      キャンセル
+    </a>
+  </div>
+</form>
+{% endblock %}

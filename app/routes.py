@@ -3683,6 +3683,67 @@ def external_account_articles(acct_id):
         acct=acct, site=site, rows=rows
     )
 
+# 外部SEO記事 編集
+@bp.route("/external/article/<int:article_id>/edit", methods=["GET", "POST"])
+@login_required
+def external_article_edit(article_id):
+    from app.models import Article
+    art = Article.query.get_or_404(article_id)
+
+    # 所有者チェック
+    if art.user_id != current_user.id and not current_user.is_admin:
+        abort(403)
+
+    if request.method == "POST":
+        art.title = request.form.get("title", art.title)
+        art.body = request.form.get("body", art.body)
+        db.session.commit()
+        flash("記事を更新しました", "success")
+        return redirect(request.referrer or url_for("main.external_account_articles", acct_id=art.site_id))
+
+    return render_template("external_article_edit.html", article=art)
+
+
+# 外部SEO記事 削除
+@bp.route("/external/article/<int:article_id>/delete", methods=["POST"])
+@login_required
+def external_article_delete(article_id):
+    from app.models import Article, ExternalArticleSchedule
+
+    art = Article.query.get_or_404(article_id)
+    if art.user_id != current_user.id and not current_user.is_admin:
+        abort(403)
+
+    # 紐づくスケジュールも削除
+    schedules = ExternalArticleSchedule.query.filter_by(keyword_id=art.keyword_id).all()
+    for sched in schedules:
+        db.session.delete(sched)
+
+    db.session.delete(art)
+    db.session.commit()
+    flash("記事を削除しました", "success")
+    return redirect(request.referrer or url_for("main.external_account_articles", acct_id=art.site_id))
+
+
+# 外部SEO記事 即時投稿
+@bp.route("/external/schedule/<int:schedule_id>/post_now", methods=["POST"])
+@login_required
+def external_schedule_post_now(schedule_id):
+    from app.models import ExternalArticleSchedule
+
+    sched = ExternalArticleSchedule.query.get_or_404(schedule_id)
+    acct = sched.blog_account
+    site = acct.site
+    if site.user_id != current_user.id and not current_user.is_admin:
+        abort(403)
+
+    from datetime import datetime, timezone
+    sched.scheduled_date = datetime.now(timezone.utc)
+    sched.status = "pending"
+    db.session.commit()
+
+    flash("即時投稿としてキューに登録しました", "success")
+    return redirect(request.referrer or url_for("main.external_account_articles", acct_id=acct.id))
 
 # -----------------------------------------------------------
 # 管理者向け: 全ユーザーの外部ブログアカウント一覧
