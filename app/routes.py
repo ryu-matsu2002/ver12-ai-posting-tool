@@ -3670,7 +3670,7 @@ def external_account_articles(acct_id):
             db.and_(
                 Article.keyword == Keyword.keyword,
                 Article.site_id == site.id,
-                Article.source == "external"
+                Article.source == "external_seo"  # 修正
             )
         )
         .filter(ExternalArticleSchedule.blog_account_id == acct_id)
