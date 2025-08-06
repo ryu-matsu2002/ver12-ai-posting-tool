@@ -353,7 +353,7 @@ def _run_external_post_job(app):
                         Article.site_id == acct.site_id,
                         Article.status == "done",
                         Article.source == "external",  # 外部SEO専用
-                        Article.keyword_id == kw.id    # keyword_id で一致
+                        Article.keyword == kw.keyword  # 文字列で一致させる
                     )
                     .order_by(Article.id.asc())
                     .first()
