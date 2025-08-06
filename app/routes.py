@@ -3468,7 +3468,7 @@ def external_seo_sites():
                 break
 
     return render_template(
-        "external/sites.html",  # 実際のテンプレ名
+        "external_sites.html",  # 実際のテンプレ名
         sites=sites,
         job_map=job_map,
         ExternalSEOJobLog=ExternalSEOJobLog
