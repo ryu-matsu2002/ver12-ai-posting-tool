@@ -188,7 +188,7 @@ def generate_external_seo_articles(user_id: int, site_id: int, blog_id: int, acc
                 # スケジュール保存
                 sched = ExternalArticleSchedule(
                     blog_account_id=blog_account_id,
-                    keyword_id=None,
+                    keyword_id=art.id,  # ← ArticleのIDを使用してNULL回避
                     scheduled_date=scheduled_time,
                     status="pending"
                 )
