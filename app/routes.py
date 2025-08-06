@@ -4160,17 +4160,17 @@ def external_seo_generate(site_id, blog_id):
     account = ExternalBlogAccount.query.get(blog_id)
     if not account:
         flash("外部ブログアカウントが見つかりません。", "danger")
-        return redirect(url_for("external.external_seo_sites"))
+        return redirect(url_for("main.external_seo_sites"))
 
     # 2. site_idの一致確認（セキュリティ）
     if account.site_id != site_id:
         flash("不正なアクセスです（サイト不一致）。", "danger")
-        return redirect(url_for("external.external_seo_sites"))
+        return redirect(url_for("main.external_seo_sites"))
 
     # 3. APIキー確認
     if not account.atompub_key_enc:
         flash("APIキーが未取得のため記事生成できません。", "danger")
-        return redirect(url_for("external.external_seo_sites"))
+        return redirect(url_for("main.external_seo_sites"))
 
     try:
         # 4. 外部SEO記事生成開始（account オブジェクトを渡す）
@@ -4184,4 +4184,4 @@ def external_seo_generate(site_id, blog_id):
     except Exception as e:
         flash(f"記事生成開始に失敗しました: {str(e)}", "danger")
 
-    return redirect(url_for("external.external_seo_sites"))
+    return redirect(url_for("main.external_seo_sites"))
