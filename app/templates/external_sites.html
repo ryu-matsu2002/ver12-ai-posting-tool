@@ -52,14 +52,18 @@
       {% endfor %}
     </div>
 
-    <!-- ✅ 記事生成＆投稿ボタン（初期表示対応） -->
+    
     <div id="postButtonArea-{{ s.id }}" class="mt-3">
       {% if s.api_key %}
-        <a href="{{ url_for('main.generate', username=current_user.username, site_id=s.id) }}"
-           target="_blank"
-           class="inline-block bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded text-sm mt-2">
-          📝 記事生成＆投稿
-        </a>
+        <!-- 外部SEO記事生成ボタン -->
+        <form action="{{ url_for('external.external_seo_generate', site_id=s.id, blog_id=s.blog_id) }}"
+              method="post"
+              style="display:inline;">
+          <button type="submit"
+                  class="inline-block bg-pink-600 hover:bg-pink-700 text-white px-4 py-2 rounded text-sm mt-2">
+            🚀 外部SEO記事生成
+          </button>
+        </form>
       {% endif %}
     </div>
 

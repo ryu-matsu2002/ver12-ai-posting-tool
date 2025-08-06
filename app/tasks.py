@@ -20,11 +20,10 @@ from concurrent.futures import ThreadPoolExecutor
 from .models import (Site, Keyword, ExternalSEOJob,
                      BlogType, ExternalBlogAccount, ExternalArticleSchedule)
 
-from app.services.blog_signup import register_blog_account
-from app.services.blog_signup.blog_post import post_blog_article
-from app.article_generator import enqueue_generation, _generate_slots_per_site
 # app/tasks.py （インポートセクションの BlogType などの下あたり）
 from app.services.blog_signup.livedoor_signup import signup as livedoor_signup
+
+
 
 # ────────────────────────────────────────────────
 # APScheduler ＋ スレッドプール
@@ -272,79 +271,7 @@ def enqueue_livedoor_signup(site_id: int):
 # 4) 外部SEO ① キュー作成ジョブ
 # --------------------------------------------------------------------------- #
 
-def _run_external_seo_job(app, job_id: int):
-    """
-    1) ExternalSEOJob を running に
-    2) Note アカウントを自動登録
-    3) 上位キーワード100件で記事生成をキューに流し
-    4) ExternalArticleSchedule を作成
-    """
-    with app.app_context():
 
-        # ── 1. ジョブ行を作成 ──────────────────
-        # ① ジョブを再取得し running に
-        job  = ExternalSEOJob.query.get(job_id)
-        job.status = "running"; job.step = "signup"; db.session.commit()
-
-        site_id   = job.site_id
-        blog_type = job.blog_type           # NOTE / AMEBA / …
-
-        try:
-            # ② アカウント自動登録
-            account = register_blog_account(site_id, blog_type)
-            job.step = "generate"
-            db.session.commit()
-
-            # ── 3. 上位キーワード100件抽出 ────────
-            top_kws = (
-                Keyword.query.filter_by(site_id=site_id, status="done")
-                .order_by(Keyword.times_used.desc())
-                .limit(100)
-                .all()
-            )
-            if not top_kws:
-                raise ValueError("上位キーワードがありません")
-
-            # ③ キュー投入 & スケジュール生成
-            schedules = []
-            slots = iter(_generate_slots_per_site(app, site_id, len(top_kws)))
-            for kw in top_kws:
-                kw.source = "external"    # ★← ここを追加
-                kw.status = "queued"      # すでに書いてあるなら併せて
-
-                # 既存の非同期記事生成キューを使用
-                enqueue_generation(
-                    user_id      = kw.user_id,
-                    site_id      = site_id,
-                    keywords     = [kw.keyword],
-                    title_prompt = "",     # 空でOK。将来テンプレを渡すならここに文字列
-                    body_prompt  = "",
-                    format       = "html",
-                    self_review  = False,
-                    source       = "external",
-                )
-                # キュー投入済みとしてキーワードの status を更新しておくとベター
-                kw.status = "queued"
-
-
-                sched = ExternalArticleSchedule(
-                    blog_account_id=account.id,
-                    keyword_id=kw.id,
-                    scheduled_date  = next(slots),   # ✅ 既存ロジックを再利用
-                )
-                schedules.append(sched)
-
-            db.session.bulk_save_objects(schedules)
-            job.article_cnt = len(schedules)
-            job.step = "post"
-            db.session.commit()
-
-        except Exception as e:
-            db.session.rollback()
-            job.status = "error"
-            job.message = str(e)
-            db.session.commit()
-            current_app.logger.error(f"[外部SEO] 失敗: {e}")
 
 # --------------------------------------------------------------------------- #
 # 5) 外部SEO ② 投稿ジョブ
@@ -371,11 +298,12 @@ def _finalize_external_job(job_id: int):
 # 外部ブログ投稿ジョブ
 # ──────────────────────────────────────────
 def _run_external_post_job(app):
-    """
-    10 分おきに呼ばれ、
-    - scheduled_date <= 現在 の ExternalArticleSchedule(pending) を取得
-    - Note 等へ投稿し、成功すれば status=posted, posted_url 保存
-    """
+    from app.models import ExternalArticleSchedule, ExternalBlogAccount, Keyword, BlogType, Article, ExternalSEOJob
+    
+    from datetime import datetime
+    from flask import current_app
+    from app.services.blog_post.livedoor_post import post_livedoor_article
+
     with app.app_context():
         now = datetime.utcnow()
 
@@ -388,7 +316,7 @@ def _run_external_post_job(app):
             .filter(ExternalArticleSchedule.status == "pending",
                     ExternalArticleSchedule.scheduled_date <= now)
             .order_by(ExternalArticleSchedule.scheduled_date.asc())
-            .limit(10)          # 1 回で 10 本まで処理
+            .limit(10)
             .all()
         )
 
@@ -397,7 +325,13 @@ def _run_external_post_job(app):
 
         for sched, acct, kw in rows:
             try:
-                # ----- 記事本文を取得（最初に 'done' になった WP 記事を使う） -----
+                # Livedoor専用チェック
+                if acct.blog_type != BlogType.LIVEDOOR:
+                    sched.status = "error"
+                    sched.message = f"未対応ブログタイプ: {acct.blog_type}"
+                    db.session.commit()
+                    continue
+                
                 art = (
                     Article.query
                     .filter(Article.keyword == kw.keyword,
@@ -409,25 +343,20 @@ def _run_external_post_job(app):
 
                 if not art:
                     sched.message = "記事未生成"
-                    sched.status  = "error"
+                    sched.status = "error"
+                    db.session.commit()
                     continue
 
-                # ----- ブログへ投稿 -----
-                res = post_blog_article(
-                    blog_type  = acct.blog_type,
-                    account    = acct,   # ← 順序合わせ（関数シグネチャ次第）
-                    title      = art.title,
-                    body_html  = art.body,
-                    image_path = None,
-                )
+                res = post_livedoor_article(acct, art.title, art.body)
+                    
 
                 if res.get("ok"):
                     sched.status     = "posted"
                     sched.posted_url = res["url"]
-                    sched.posted_at  = res["posted_at"]
-                    # 👇 追加：バッチ監視用にカウントアップ
+                    sched.posted_at  = res.get("posted_at")
                     acct.posted_cnt += 1
-                    db.session.commit()  # ← 成功ごとに保存！
+                    db.session.commit()
+
                     latest_job = (ExternalSEOJob.query
                                   .filter_by(site_id=acct.site_id)
                                   .order_by(ExternalSEOJob.id.desc())
@@ -437,80 +366,18 @@ def _run_external_post_job(app):
                 else:
                     sched.status  = "error"
                     sched.message = res.get("error")
+                    db.session.commit()
 
             except Exception as e:
                 current_app.logger.warning(f"[ExtPost] {e}")
                 sched.status  = "error"
                 sched.message = str(e)
+                db.session.commit()
 
-        db.session.commit()
-
-
-def enqueue_external_seo(site_id: int, blog_type: BlogType):
-    """
-    外部SEOジョブをバックグラウンドスレッドに投入
-    """
-    app = current_app._get_current_object()
-    # ExternalSEOJob をまず DB に作成して job.id を渡す
-    job = ExternalSEOJob(site_id=site_id, blog_type=blog_type, status="queued")
-    db.session.add(job); db.session.commit()
-    executor.submit(_run_external_seo_job, app, job.id)
 
 # --------------------------------------------------------------------------- #
 # 6) 外部SEO バッチ監視ジョブ（100 本完了ごとに次バッチ）
 # --------------------------------------------------------------------------- #
-def _external_watch_job(app):
-    """
-    15 分おき：posted_cnt が 100 に達したアカウントを検知し、
-    - next_batch_started を True に
-    - 新アカウントを自動登録
-    - 次の 100KW を生成・スケジュール
-    """
-    with app.app_context():
-        # ① 100 本完了・次バッチ未開始のアカウント一覧
-        targets = ExternalBlogAccount.query.filter(
-            ExternalBlogAccount.posted_cnt >= 100,
-            ExternalBlogAccount.next_batch_started.is_(False)
-        ).all()
-
-        for acct in targets:
-            try:
-                # ② フラグを立てる
-                acct.next_batch_started = True
-                db.session.commit()
-
-                # ③ 同じ site_id で新アカウントを作成
-                new_acct = register_blog_account(acct.site_id, acct.blog_type)
-
-                # ④ 上位 KW 再取得 → enqueue_generation
-                kws = (Keyword.query.filter_by(site_id=acct.site_id, status="done")
-                       .order_by(Keyword.times_used.desc()).limit(100).all())
-
-                enqueue_generation(
-                    user_id      = acct.site.user_id,
-                    site_id      = acct.site_id,
-                    keywords     = [k.keyword for k in kws],
-                    title_prompt = "",
-                    body_prompt  = "",
-                    source       = "external",
-                )
-
-                # ⑤ スケジュール行を作成（既存ロジック流用）
-                slots = iter(_generate_slots_per_site(app, acct.site_id, 100))
-                rows  = [
-                    ExternalArticleSchedule(
-                        blog_account_id=new_acct.id,
-                        keyword_id=k.id,
-                        scheduled_date=next(slots)
-                    ) for k in kws
-                ]
-                db.session.bulk_save_objects(rows)
-                db.session.commit()
-                current_app.logger.info(f"[Watch] 次バッチ開始：site {acct.site_id}")
-
-            except Exception as e:
-                db.session.rollback()
-                current_app.logger.error(f"[Watch] 失敗: {e}")
 
 
 def init_scheduler(app):
@@ -564,20 +431,9 @@ def init_scheduler(app):
         max_instances=1
     )
 
-    # 外部SEO監視ジョブ（15 分おき）
-    scheduler.add_job(
-        func=_external_watch_job,
-        trigger="interval",
-        minutes=15,
-        args=[app],
-        id="external_watch_job",
-        replace_existing=True,
-        max_instances=1
-    )
 
     scheduler.start()
     app.logger.info("Scheduler started: auto_post_job every 3 minutes")
     app.logger.info("Scheduler started: gsc_metrics_job daily at 0:00")
     app.logger.info("Scheduler started: gsc_generation_job every 20 minutes")
     app.logger.info("Scheduler started: external_post_job every 10 minutes")
-    app.logger.info("Scheduler started: external_watch_job every 15 minutes")

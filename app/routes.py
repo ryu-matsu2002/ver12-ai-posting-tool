@@ -3442,10 +3442,11 @@ def external_seo_sites():
     # 4. CAPTCHA突破＆API取得状況を一括取得
     accounts = (
         db.session.query(
+            ExternalBlogAccount.id.label("account_id"),  # ← blog_id 用
             ExternalBlogAccount.site_id,
             ExternalBlogAccount.blog_type,
             ExternalBlogAccount.is_captcha_completed,
-            ExternalBlogAccount.atompub_key_enc   # ← 修正
+            ExternalBlogAccount.atompub_key_enc
         )
         .filter(
             ExternalBlogAccount.site_id.in_([sid for sid, _ in key_set]),
@@ -3454,23 +3455,24 @@ def external_seo_sites():
         .all()
     )
 
-    # 5. 各サイトオブジェクトに属性追加
+    # 5. 各サイトオブジェクトに属性追加（APIキーと blog_id をセット）
     for s in sites:
         s.is_captcha_completed = False
         s.api_key = None
-        for acc_site_id, acc_blog_type, is_captcha_completed, atompub_key_enc in accounts:
+        s.blog_id = None
+        for acc_id, acc_site_id, acc_blog_type, is_captcha_completed, atompub_key_enc in accounts:
             if s.id == acc_site_id and acc_blog_type.value.lower() == "livedoor":
                 s.is_captcha_completed = bool(is_captcha_completed)
-                s.api_key = atompub_key_enc  # ← 修正
+                s.api_key = atompub_key_enc
+                s.blog_id = acc_id  # ★ ここで blog_id をセット
                 break
 
     return render_template(
-        "external_sites.html",  # ← 実際のテンプレ名に合わせて
+        "external/sites.html",  # 実際のテンプレ名
         sites=sites,
         job_map=job_map,
         ExternalSEOJobLog=ExternalSEOJobLog
     )
-
 
 
 @bp.post("/external/start")
@@ -4138,3 +4140,48 @@ def confirm_livedoor_email(task_id):
     if not creds:
         abort(404, description="認証情報が見つかりません")
     return render_template("confirm_email.html", blog_id=creds["blog_id"], api_key=creds["api_key"])
+
+# ===============================
+# 外部SEO記事生成ルート（新規追加）
+# ===============================
+
+from flask import Blueprint, request, redirect, url_for, flash
+from flask_login import login_required, current_user
+from app.models import ExternalBlogAccount
+from app.external_seo_generator import generate_external_seo_articles
+
+@bp.route("/external-seo/generate/<int:site_id>/<int:blog_id>", methods=["POST"])
+@login_required
+def external_seo_generate(site_id, blog_id):
+    """
+    外部SEO記事生成ルート
+    """
+    # 1. アカウント取得
+    account = ExternalBlogAccount.query.get(blog_id)
+    if not account:
+        flash("外部ブログアカウントが見つかりません。", "danger")
+        return redirect(url_for("external.external_seo_sites"))
+
+    # 2. site_idの一致確認（セキュリティ）
+    if account.site_id != site_id:
+        flash("不正なアクセスです（サイト不一致）。", "danger")
+        return redirect(url_for("external.external_seo_sites"))
+
+    # 3. APIキー確認
+    if not account.atompub_key_enc:
+        flash("APIキーが未取得のため記事生成できません。", "danger")
+        return redirect(url_for("external.external_seo_sites"))
+
+    try:
+        # 4. 外部SEO記事生成開始（account オブジェクトを渡す）
+        generate_external_seo_articles(
+            user_id=current_user.id,
+            site_id=site_id,
+            blog_id=blog_id,
+            account=account  # ★ 新規追加
+        )
+        flash("外部SEO記事の生成を開始しました（100記事・1日10記事ペース）。", "success")
+    except Exception as e:
+        flash(f"記事生成開始に失敗しました: {str(e)}", "danger")
+
+    return redirect(url_for("external.external_seo_sites"))
