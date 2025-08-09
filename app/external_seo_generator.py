@@ -187,7 +187,6 @@ def generate_external_seo_articles(user_id: int, site_id: int, blog_id: int, acc
                     db.session.add(keyword_obj)
                     db.session.flush()
 
-
                 # 記事保存
                 art = Article(
                     keyword=kw,
@@ -203,8 +202,7 @@ def generate_external_seo_articles(user_id: int, site_id: int, blog_id: int, acc
                 db.session.add(art)
                 db.session.flush()
 
-                # keyword_id にはKeywordテーブルのIDを入れる
-                # keyword_id にはKeywordテーブルのIDを入れる
+                # keyword_id は KeywordテーブルのID
                 sched = ExternalArticleSchedule(
                     blog_account_id=blog_account_id,
                     keyword_id=keyword_obj.id,
@@ -213,7 +211,6 @@ def generate_external_seo_articles(user_id: int, site_id: int, blog_id: int, acc
                 )
                 db.session.add(sched)  # bulk_save_objectsではなくadd
 
-            
                 db.session.commit()
 
             except Exception as e:
@@ -221,3 +218,192 @@ def generate_external_seo_articles(user_id: int, site_id: int, blog_id: int, acc
                 logging.exception(f"[外部SEO記事生成テスト中エラー] site_id={site_id}, error={e}")
 
     threading.Thread(target=_bg, daemon=True).start()
+
+
+# ===============================
+# ここから追加：100本生成 + 1日10本スケジューリング
+# ===============================
+
+# “切りの良くない分” 候補
+RANDOM_MINUTE_CHOICES = [3, 7, 11, 13, 17, 19, 23, 27, 31, 37, 41, 43, 47, 53]
+
+def _random_minutes(n: int) -> list[int]:
+    """重複なく n 個の分を選ぶ。候補が足りない場合はプールを拡張"""
+    if n <= len(RANDOM_MINUTE_CHOICES):
+        return random.sample(RANDOM_MINUTE_CHOICES, n)
+    pool = RANDOM_MINUTE_CHOICES[:]
+    while len(pool) < n:
+        pool += [m for m in RANDOM_MINUTE_CHOICES if m not in pool]
+    return random.sample(pool, n)
+
+def _daily_slots_jst(per_day: int) -> list[tuple[int, int]]:
+    """
+    1日の投稿スロット（JST）を返す。
+    10:00〜21:59 の各“時”をベースに、分は“切りの良くない分”からランダム。
+    ※ 同一の“時”は1本のみ → 最低1時間以上間隔を担保
+    """
+    base_hours = list(range(10, 22))  # 10..21 の12時間
+    hours = sorted(random.sample(base_hours, per_day))  # 例: 10本/日 → 10時間を抽選
+    minutes = _random_minutes(per_day)
+    return list(zip(hours, minutes))
+
+def _to_utc(dt_jst: datetime) -> datetime:
+    return dt_jst.astimezone(timezone.utc)
+
+def generate_and_schedule_external_articles(
+    user_id: int,
+    site_id: int,
+    blog_account_id: int,
+    count: int = 100,
+    per_day: int = 10,
+    start_day_jst: datetime | None = None,
+) -> int:
+    """
+    外部SEO記事を一括生成し、1日 per_day 本、JST 10:00-21:59 のランダム分でスケジュール登録。
+    - 生成 Article: source='external', status='done'（投稿可能）
+    - ExternalArticleSchedule: Keyword に紐付け（keyword_id）
+    - DB保存はUTC。表示は既存どおりJST変換。
+    """
+    from app.models import ExternalArticleSchedule, Site
+
+    app = current_app._get_current_object()
+    site = Site.query.get(site_id)
+    assert site, "Site not found"
+
+    # 生成用キーワードを準備（GSC優先、足りなければ既存・最後はダミー）
+    kw_list: list[str] = []
+    try:
+        qs = fetch_search_queries_for_site(site, days=28, row_limit=count * 2)
+        if qs and isinstance(qs[0], dict):
+            kw_list = [q.get("query") for q in qs if q.get("query")]
+        elif isinstance(qs, list):
+            kw_list = list(qs)
+    except Exception as e:
+        logging.warning(f"[外部SEO] GSCキーワード取得失敗: {e}")
+
+    if len(kw_list) < count:
+        remain = count - len(kw_list)
+        extra = (
+            Keyword.query
+            .filter(Keyword.site_id == site_id)
+            .order_by(Keyword.id.desc())
+            .limit(remain)
+            .all()
+        )
+        kw_list += [k.keyword for k in extra]
+
+    if len(kw_list) < count:
+        # それでも足りないときはダミーで埋める
+        need = count - len(kw_list)
+        kw_list += [f"テストキーワード {i+1}" for i in range(need)]
+
+    kw_list = kw_list[:count]
+
+    # スケジュール開始日（JST）
+    base_jst = datetime.now(JST).replace(hour=0, minute=0, second=0, microsecond=0)
+    start_day_jst = start_day_jst or base_jst
+
+    created_cnt = 0
+    day_offset = 0
+    idx = 0
+
+    with app.app_context():
+        while idx < len(kw_list):
+            # その日のスロットを作成（1時間1本／分は“切りの良くない分”）
+            slots = _daily_slots_jst(per_day)
+            slots.sort()
+
+            for h, m in slots:
+                if idx >= len(kw_list):
+                    break
+
+                kw_str = kw_list[idx]
+
+                # Keyword 取得 or 生成
+                kobj = (
+                    Keyword.query
+                    .filter_by(user_id=user_id, site_id=site_id, keyword=kw_str)
+                    .first()
+                )
+                if not kobj:
+                    kobj = Keyword(
+                        user_id=user_id,
+                        site_id=site_id,
+                        keyword=kw_str,
+                        created_at=datetime.now(JST),
+                        # ここは任意。source を external に寄せたい場合は残す。
+                        source="external",
+                        status="pending",
+                        used=False,
+                    )
+                    db.session.add(kobj)
+                    db.session.flush()
+
+                # タイトル生成
+                title_prompt = f"{TITLE_PROMPT}\n\nキーワード: {kw_str}"
+                title = _chat(
+                    [
+                        {"role": "system", "content": "あなたはSEOに強い日本語ライターです。"},
+                        {"role": "user", "content": title_prompt},
+                    ],
+                    TOKENS["title"],
+                    TEMP["title"],
+                    user_id=user_id,
+                )
+
+                # 本文生成
+                body = _compose_body(
+                    kw=kw_str,
+                    pt=BODY_PROMPT,
+                    format="html",
+                    self_review=False,
+                    user_id=user_id,
+                )
+
+                # 内部リンクを軽く追加（任意）
+                try:
+                    link = choose_random_link(site_id)
+                    body = (body or "") + f"\n\n<a href='{link}' target='_blank'>{link}</a>"
+                except Exception:
+                    pass
+
+                # Article 生成（外部SEO：source='external'、投稿可能に done）
+                art = Article(
+                    keyword=kw_str,
+                    title=title or kw_str,
+                    body=body or "",
+                    user_id=user_id,
+                    site_id=site_id,
+                    status="done",
+                    progress=100,
+                    source="external",
+                )
+                db.session.add(art)
+                db.session.flush()
+
+                # 当日のスロット（JST） → UTC へ。秒はバラす（より人間的に）
+                when_jst = (start_day_jst + timedelta(days=day_offset)).replace(
+                    hour=h,
+                    minute=m,
+                    second=random.choice([5, 12, 17, 23, 35, 42, 49]),
+                    microsecond=0,
+                )
+                when_utc = when_jst.astimezone(timezone.utc)
+
+                # スケジュール登録（Keyword に紐付け）
+                sched = ExternalArticleSchedule(
+                    blog_account_id=blog_account_id,
+                    keyword_id=kobj.id,
+                    scheduled_date=when_utc,
+                    status="pending",
+                )
+                db.session.add(sched)
+
+                created_cnt += 1
+                idx += 1
+
+            day_offset += 1
+
+        db.session.commit()
+
+    return created_cnt

@@ -3393,6 +3393,7 @@ def external_seo_sites():
         ExternalBlogAccount, BlogType, ExternalSEOJobLog
     )
     from sqlalchemy.orm import selectinload
+    from sqlalchemy import func
 
     # 1. サイトと外部ジョブを一括取得
     sites = (Site.query
@@ -3629,11 +3630,12 @@ def external_accounts():
 
     # 📊 投稿数ソート
     if sort == "posted_desc":
-        query = query.order_by(ExternalBlogAccount.posted_count.desc())
+        query = query.order_by(ExternalBlogAccount.posted_cnt.desc())  # ← 修正
     elif sort == "posted_asc":
-        query = query.order_by(ExternalBlogAccount.posted_count.asc())
+        query = query.order_by(ExternalBlogAccount.posted_cnt.asc())   # ← 修正
     else:
         query = query.order_by(ExternalBlogAccount.created_at.desc())
+
 
     accts = query.all()
 
@@ -3670,7 +3672,7 @@ def external_account_articles(acct_id):
             db.and_(
                 Article.keyword == Keyword.keyword,
                 Article.site_id == site.id,
-                Article.source == "external_seo"  # 修正
+                Article.source == "external"  # ← 統一
             )
         )
         .filter(ExternalArticleSchedule.blog_account_id == acct_id)
@@ -3679,9 +3681,10 @@ def external_account_articles(acct_id):
     )
 
     return render_template(
-        "external_articles.html",   # 新テンプレ
+        "external_articles.html",
         acct=acct, site=site, rows=rows
     )
+
 
 @bp.route("/external/article/<int:article_id>/preview")
 @login_required
@@ -3704,7 +3707,6 @@ def external_article_edit(article_id):
     from app.models import Article
     art = Article.query.get_or_404(article_id)
 
-    # 所有者チェック
     if art.user_id != current_user.id and not current_user.is_admin:
         abort(403)
 
@@ -3713,30 +3715,34 @@ def external_article_edit(article_id):
         art.body = request.form.get("body", art.body)
         db.session.commit()
         flash("記事を更新しました", "success")
-        return redirect(request.referrer or url_for("main.external_account_articles", acct_id=art.site_id))
+        # 確実に戻れるように
+        return redirect(request.referrer or url_for("main.external_schedules", site_id=art.site_id))
 
     return render_template("external_article_edit.html", article=art)
-
 
 # 外部SEO記事 削除
 @bp.route("/external/article/<int:article_id>/delete", methods=["POST"])
 @login_required
 def external_article_delete(article_id):
-    from app.models import Article, ExternalArticleSchedule
+    from app.models import Article, ExternalArticleSchedule, Keyword
 
     art = Article.query.get_or_404(article_id)
     if art.user_id != current_user.id and not current_user.is_admin:
         abort(403)
 
-    # 紐づくスケジュールも削除
-    schedules = ExternalArticleSchedule.query.filter_by(keyword_id=art.keyword_id).all()
-    for sched in schedules:
-        db.session.delete(sched)
+    # Article から Keyword.id を引く
+    kw = Keyword.query.filter_by(site_id=art.site_id, keyword=art.keyword).first()
+
+    if kw:
+        schedules = ExternalArticleSchedule.query.filter_by(keyword_id=kw.id).all()
+        for sched in schedules:
+            db.session.delete(sched)
 
     db.session.delete(art)
     db.session.commit()
     flash("記事を削除しました", "success")
-    return redirect(request.referrer or url_for("main.external_account_articles", acct_id=art.site_id))
+    # 元画面に戻す（acct_id が取れないので referrer 優先）
+    return redirect(request.referrer or url_for("main.external_schedules", site_id=art.site_id))
 
 
 # 外部SEO記事 即時投稿
@@ -3906,25 +3912,6 @@ def blog_one_click_login(acct_id):
         )
     return resp
 
-# controllers/external.py
-@bp.route("/external/blogs/<int:site_id>")
-@login_required
-def external_site_blogs(site_id):
-    site = Site.query.get_or_404(site_id)
-    if site.user_id != current_user.id and not current_user.is_admin:
-        abort(403)
-
-    accts = (ExternalBlogAccount.query
-             .filter_by(site_id=site_id)
-             .options(
-                 selectinload(ExternalBlogAccount.schedules),
-                 selectinload(ExternalBlogAccount.site)
-             ).all())
-
-    return render_template("external_accounts.html",
-                           site=site,
-                           accts=accts,
-                           decrypt=decrypt)
 
 @bp.route("/prepare_captcha", methods=["POST"])
 @login_required
@@ -4266,3 +4253,77 @@ def external_seo_generate(site_id, blog_id):
         flash(f"記事生成開始に失敗しました: {str(e)}", "danger")
 
     return redirect(url_for("main.external_seo_sites"))
+
+
+# ===============================
+# 外部SEO: 100本生成＋1日10本スケジューリング（新規）
+# ===============================
+from flask import request, jsonify, current_app
+from flask_login import login_required, current_user
+from datetime import datetime, timedelta, timezone
+from app.models import ExternalBlogAccount, BlogType
+from app.external_seo_generator import generate_and_schedule_external_articles
+
+
+JST = timezone(timedelta(hours=9))
+
+@bp.route("/external-seo/generate_and_schedule", methods=["POST"])
+@login_required
+def external_seo_generate_and_schedule():
+    """
+    外部SEO記事をまとめて生成し、1日10本（JST 10:00〜21:59の“切りの良くない分”）でスケジューリング。
+    JSON/FORM:
+      site_id: int (必須)
+      blog_account_id: int (任意。未指定なら site_id に紐づく最新 Livedoor を自動選択)
+      count: 生成本数（デフォルト100）
+      per_day: 1日あたり本数（デフォルト10）
+      start_date_jst: "YYYY-MM-DD"（JSTの開始日。省略時は当日）
+    """
+    # 入力パラメータ
+    site_id = request.form.get("site_id", type=int) or (request.json or {}).get("site_id")
+    count = request.form.get("count", type=int) or (request.json or {}).get("count", 100)
+    per_day = request.form.get("per_day", type=int) or (request.json or {}).get("per_day", 10)
+    start_date_s = request.form.get("start_date_jst") or (request.json or {}).get("start_date_jst")
+
+    if not site_id:
+        return jsonify({"ok": False, "error": "site_id is required"}), 400
+
+    if start_date_s:
+        try:
+            y, m, d = map(int, start_date_s.split("-"))
+            start_day_jst = datetime(y, m, d, tzinfo=JST)
+        except Exception:
+            return jsonify({"ok": False, "error": "start_date_jst must be YYYY-MM-DD"}), 400
+    else:
+        start_day_jst = datetime.now(JST).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # 対象アカウント
+    blog_account_id = request.form.get("blog_account_id") or (request.json or {}).get("blog_account_id")
+    if blog_account_id:
+        acct = ExternalBlogAccount.query.get(int(blog_account_id))
+    else:
+        acct = (ExternalBlogAccount.query
+                .filter_by(site_id=site_id, blog_type=BlogType.LIVEDOOR)
+                .order_by(ExternalBlogAccount.id.desc())
+                .first())
+    if not acct:
+        return jsonify({"ok": False, "error": "Livedoorアカウントが見つかりません"}), 400
+
+    # 所有権チェック（管理者はスキップ）
+    if (not current_user.is_admin) and (acct.site.user_id != current_user.id):
+        return jsonify({"ok": False, "error": "権限がありません"}), 403
+
+    # 実行
+    try:
+        created = generate_and_schedule_external_articles(
+            user_id=current_user.id,
+            site_id=site_id,
+            blog_account_id=acct.id,
+            count=int(count),
+            per_day=int(per_day),
+            start_day_jst=start_day_jst,
+        )
+        return jsonify({"ok": True, "created": created})
+    except Exception as e:
+        current_app.logger.exception("[external-seo] generate_and_schedule failed")
+        return jsonify({"ok": False, "error": str(e)}), 500
