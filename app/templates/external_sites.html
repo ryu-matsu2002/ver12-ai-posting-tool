@@ -109,7 +109,7 @@
                 {# ─ ミニメトリクス（外部アカウント一覧と同型） ─ #}
                 <div class="text-[12px] text-gray-600 flex items-center gap-4">
                   <div>投稿完了: <span class="font-semibold">{{ acc.stat_posted|default(0) }}</span></div>
-                  <div>記事生成済み: <span class="font-semibold">{{ (acc.stat_total|default(0) - acc.stat_posted|default(0)) | max(0) }}</span></div>
+                  <div>記事生成済み: <span class="font-semibold">{{ acc.stat_generated|default(0) }}</span></div>
                   <div>総記事数: <span class="font-semibold">{{ acc.stat_total|default(0) }}</span></div>
                   <div><a class="underline" href="{{ url_for('main.external_accounts') }}?site_id={{ s.id }}">記事一覧</a></div>
                 </div>
