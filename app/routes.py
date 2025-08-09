@@ -3581,9 +3581,9 @@ import asyncio, json, time
 @bp.route("/external/accounts")
 @login_required
 def external_accounts():
-    from app.models import ExternalBlogAccount, Site, ExternalArticleSchedule
+    from app.models import ExternalBlogAccount, Site, ExternalArticleSchedule, Keyword, Article
     from app.services.blog_signup.crypto_utils import decrypt
-    from sqlalchemy import or_, func, case
+    from sqlalchemy import or_, func, case, and_
     from sqlalchemy.orm import aliased
 
     blog_type = request.args.get("blog_type")
@@ -3591,9 +3591,9 @@ def external_accounts():
     search    = request.args.get("q", "").strip()
     site_id   = request.args.get("site_id", type=int)
 
-    # ベース：ユーザーに紐づくアカウント
+    # ベース: ユーザーに紐づくアカウント
     base = (
-        db.session.query(ExternalBlogAccount)
+        db.session.query(ExternalBlogAccount.id)
         .outerjoin(Site, ExternalBlogAccount.site_id == Site.id)
         .filter(
             (ExternalBlogAccount.site_id == None) |  # noqa: E711
@@ -3611,39 +3611,56 @@ def external_accounts():
             ExternalBlogAccount.username.ilike(f"%{search}%"),
         ))
 
-    # 集計JOIN
+    # 集計: Schedule/Keyword/Article を外部結合
     S = aliased(ExternalArticleSchedule)
+    K = aliased(Keyword)
+    A = aliased(Article)
+
+    # 本体クエリ
     q = (
         db.session.query(
             ExternalBlogAccount,
             func.count(S.id).label("total_cnt"),
             func.sum(case((S.status == "posted", 1), else_=0)).label("posted_cnt"),
-            # 生成済み: article_idがある想定。無い場合は status IN (...) に変更
-            func.sum(case((S.article_id != None, 1), else_=0)).label("generated_cnt")  # noqa: E711
+            func.sum(case((A.id != None, 1), else_=0)).label("generated_cnt")  # noqa: E711
         )
         .select_from(ExternalBlogAccount)
         .outerjoin(S, S.blog_account_id == ExternalBlogAccount.id)
-        .filter(base.whereclause)  # 上のフィルタを適用
+        .outerjoin(K, K.id == S.keyword_id)
+        .outerjoin(
+            A,
+            and_(
+                A.keyword == K.keyword,
+                A.site_id == ExternalBlogAccount.site_id,
+                A.source == "external"
+            )
+        )
+        .outerjoin(Site, ExternalBlogAccount.site_id == Site.id)
+        .filter(base.whereclause)  # フィルタ適用
         .group_by(ExternalBlogAccount.id)
     )
 
-    # ソート
-    if sort == "posted_desc":
-        q = q.order_by(func.coalesce(func.sum(case((S.status == "posted", 1), else_=0)), 0).desc())
-    elif sort == "posted_asc":
-        q = q.order_by(func.coalesce(func.sum(case((S.status == "posted", 1), else_=0)), 0).asc())
-    elif sort == "generated_desc":
-        q = q.order_by(func.coalesce(func.sum(case((S.article_id != None, 1), else_=0)), 0).desc())
+    # 並び替え式を定義（再利用）
+    posted_expr    = func.coalesce(func.sum(case((S.status == "posted", 1), else_=0)), 0)
+    generated_expr = func.coalesce(func.sum(case((A.id != None, 1), else_=0)), 0)  # noqa: E711
+    total_expr     = func.count(S.id)
+
+    if sort == "posted_asc":
+        q = q.order_by(posted_expr.asc())
+    elif sort == "posted_desc":
+        q = q.order_by(posted_expr.desc())
     elif sort == "generated_asc":
-        q = q.order_by(func.coalesce(func.sum(case((S.article_id != None, 1), else_=0)), 0).asc())
+        q = q.order_by(generated_expr.asc())
+    elif sort == "generated_desc":
+        q = q.order_by(generated_expr.desc())
     elif sort == "total_asc":
-        q = q.order_by(func.count(S.id).asc())
-    else:  # default
-        q = q.order_by(func.count(S.id).desc())  # total_desc
+        q = q.order_by(total_expr.asc())
+    else:  # default → total_desc
+        q = q.order_by(total_expr.desc())
 
     rows = q.all()
 
-    # テンプレへ：各accに属性として乗せる
+    # テンプレへ：各 acc に集計値を載せる
     accts = []
     for acc, total_cnt, posted_cnt, generated_cnt in rows:
         acc.total_cnt     = int(total_cnt or 0)
@@ -3662,7 +3679,6 @@ def external_accounts():
         selected_sort=sort,
         search_query=search
     )
-
 
 
 @bp.route("/external/account/<int:acct_id>/articles")
