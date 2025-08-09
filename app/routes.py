@@ -3392,6 +3392,7 @@ def external_seo_sites():
         Site, ExternalSEOJob, ExternalArticleSchedule,
         ExternalBlogAccount, BlogType, ExternalSEOJobLog
     )
+    from app import db
     from sqlalchemy.orm import selectinload
     from sqlalchemy import func
 
@@ -3416,7 +3417,7 @@ def external_seo_sites():
             key_set.add(key)
             job_map[(s.id, job.blog_type.value.lower())] = job
 
-    # 3) 投稿済み件数（既存ロジック準拠）
+    # 3) サイト×PFの投稿済み件数（既存ロジック準拠・そのまま）
     posted_counts = (
         db.session.query(
             ExternalBlogAccount.site_id,
@@ -3443,7 +3444,48 @@ def external_seo_sites():
         if not hasattr(job, "posted_cnt"):
             job.posted_cnt = 0
 
-    # 4) テンプレが読む Livedoor アカウント配列を作る
+    # 3.5) アカウント単位のメトリクス集計（カード用）
+    # 対象：現在ユーザーの全サイトに属する Livedoor アカウント
+    all_ld_account_ids = []
+    site_id_by_acc = {}
+    for s in sites:
+        for acc in (s.external_accounts or []):
+            if acc.blog_type == BlogType.LIVEDOOR:
+                all_ld_account_ids.append(acc.id)
+                site_id_by_acc[acc.id] = s.id
+
+    per_acc_total = {}   # blog_account_id -> 総記事数
+    per_acc_posted = {}  # blog_account_id -> 投稿完了
+
+    if all_ld_account_ids:
+        # 総記事数（ステータスを問わず、スケジュール行の総数）
+        for aid, cnt in (
+            db.session.query(
+                ExternalArticleSchedule.blog_account_id,
+                func.count(ExternalArticleSchedule.id),
+            )
+            .filter(ExternalArticleSchedule.blog_account_id.in_(all_ld_account_ids))
+            .group_by(ExternalArticleSchedule.blog_account_id)
+            .all()
+        ):
+            per_acc_total[aid] = cnt
+
+        # 投稿完了数
+        for aid, cnt in (
+            db.session.query(
+                ExternalArticleSchedule.blog_account_id,
+                func.count(ExternalArticleSchedule.id),
+            )
+            .filter(
+                ExternalArticleSchedule.blog_account_id.in_(all_ld_account_ids),
+                ExternalArticleSchedule.status == "posted",
+            )
+            .group_by(ExternalArticleSchedule.blog_account_id)
+            .all()
+        ):
+            per_acc_posted[aid] = cnt
+
+    # 4) テンプレが読む Livedoor アカウント配列を作る（メトリクス付与込み）
     for s in sites:
         livedoor_accounts = []
         for acc in (s.external_accounts or []):
@@ -3479,19 +3521,27 @@ def external_seo_sites():
                 public_url = f"https://{livedoor_blog_id}.livedoor.blog/"
             setattr(acc, "public_url", public_url)
 
+            # ▼ ここからカード用メトリクス
+            total = per_acc_total.get(acc.id, 0)
+            posted = per_acc_posted.get(acc.id, 0)
+            generated = max(total - posted, 0)
+
+            setattr(acc, "stat_total", total)        # 総記事数
+            setattr(acc, "stat_posted", posted)      # 投稿完了
+            setattr(acc, "stat_generated", generated)# 生成済み（未投稿含む）
+            setattr(acc, "has_activity", total > 0)  # 実績ありフラグ（CTAの出し分け用）
+
             livedoor_accounts.append(acc)
 
         # テンプレが参照する配列
         s.livedoor_accounts = livedoor_accounts
 
     return render_template(
-         "external_sites.html",   # ← テンプレ名に合わせる（アンダースコア無し）
+        "external_sites.html",
         sites=sites,
         job_map=job_map,
         ExternalSEOJobLog=ExternalSEOJobLog,
     )
-
-
 
 
 @bp.post("/external/start")
@@ -4524,3 +4574,48 @@ def external_seo_generate_and_schedule():
     except Exception as e:
         current_app.logger.exception("[external-seo] generate_and_schedule failed")
         return jsonify({"ok": False, "error": str(e)}), 500
+
+# routes.py など Blueprint のファイルに追加
+@bp.post("/external-seo/new-account")
+@login_required
+def external_seo_new_account():
+    """
+    Livedoorの仮アカウントを1件作成して返すAPI。
+    返却データはフロントがカードを即時追加できる最小構成。
+    """
+    from flask import request, jsonify
+    from app.models import Site, ExternalBlogAccount, BlogType
+    from app import db
+
+    site_id = request.form.get("site_id", type=int)
+    if not site_id:
+        return jsonify({"ok": False, "error": "site_id がありません"}), 400
+
+    site = Site.query.get(site_id)
+    if not site:
+        return jsonify({"ok": False, "error": "Site が見つかりません"}), 404
+    if (not current_user.is_admin) and (site.user_id != current_user.id):
+        return jsonify({"ok": False, "error": "権限がありません"}), 403
+
+    # 仮レコード作成（必須最低限だけ）
+    acc = ExternalBlogAccount(
+        site_id=site.id,
+        blog_type=BlogType.LIVEDOOR,
+        is_captcha_completed=False,
+        atompub_key_enc=None,
+        api_post_enabled=False,
+    )
+    # タイトルは一旦 account#id を後で表示するため、作成後に id を使う
+    db.session.add(acc)
+    db.session.commit()
+
+    # フロントで描画に使う最小情報を返す
+    account_payload = {
+        "id": acc.id,
+        "blog_title": f"account#{acc.id}",
+        "public_url": None,
+        "api_key": None,
+        "stat_total": 0,
+        "stat_posted": 0,
+    }
+    return jsonify({"ok": True, "site_id": site.id, "account": account_payload}), 201

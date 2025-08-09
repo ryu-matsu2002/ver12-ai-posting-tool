@@ -31,9 +31,6 @@
 
 {# =========================================================
    サイトカード（1サイト＝1カード）
-   - s は { id, name, url, ... }
-   - アカウント配列は livedoor_accounts / external_accounts / accounts の順で参照
-   - 今回は Livedoor タブのみ（将来タブを増やして拡張）
    ========================================================= #}
 {% for s in sites %}
   {# まずアカウント配列の決定 #}
@@ -60,39 +57,39 @@
       </div>
 
       <div class="flex items-center gap-2 md:self-start">
-        {# 準備OKが1件以上ある場合のみ、サイト一括の生成＆投稿ボタンを出す #}
-        {% if ready_cnt > 0 %}
-          <a href="/generate?site_id={{ s.id }}"
-             class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm shadow">
-            📝 サイト全体で記事生成＆投稿
-          </a>
-        {% else %}
-          <button class="px-4 py-2 rounded-xl bg-gray-200 text-gray-500 text-sm cursor-not-allowed" disabled>
-            📝 サイト全体で記事生成＆投稿
-          </button>
-        {% endif %}
+        {# サイトごとの「無料ブログ一覧」へ #}
+        <a href="{{ url_for('main.external_accounts') }}?site_id={{ s.id }}"
+           class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm border">
+          📒 無料ブログ一覧
+        </a>
+        {# 旧：サイト全体で記事生成＆投稿（削除） #}
       </div>
     </div>
 
     {# ───────── プラットフォームタブ（現状は Livedoor のみ） ───────── #}
     <div class="mt-4">
-      <div class="border-b flex gap-2" role="tablist">
-        <button class="px-3 py-2 text-sm rounded-t-lg border border-b-0 bg-white"
-                data-tabs-target="#tab-ld-{{ s.id }}" aria-selected="true">
-          Livedoor
-          <span class="ml-1 text-xs text-gray-500">({{ total_cnt }})</span>
+      <div class="border-b flex items-center justify-between">
+        <div class="flex gap-2" role="tablist">
+          <button class="px-3 py-2 text-sm rounded-t-lg border border-b-0 bg-white"
+                  data-tabs-target="#tab-ld-{{ s.id }}" aria-selected="true">
+            Livedoor <span class="ml-1 text-xs text-gray-500">({{ total_cnt }})</span>
+          </button>
+        </div>
+
+        {# 2個目以降の作成用：タブ右上に追加ボタン（Step3で配線） #}
+        <button type="button"
+                class="px-3 py-2 text-sm rounded-lg border bg-white hover:bg-gray-50"
+                data-site-id="{{ s.id }}"
+                onclick="newAccountStart(this)">
+          ＋アカウント追加
         </button>
-        {# 例：将来追加
-        <button class="px-3 py-2 text-sm rounded-t-lg border border-b-0 bg-gray-50 text-gray-400"
-                data-tabs-target="#tab-note-{{ s.id }}" aria-selected="false" disabled>Note</button>
-        #}
       </div>
 
       <div id="tab-ld-{{ s.id }}" class="border rounded-b-lg p-3" role="tabpanel">
         {% if _all_accounts and _all_accounts|length > 0 %}
           <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
             {% for acc in _all_accounts %}
-              {# acc は { id, blog_title/blog_id/public_url, captcha_done, email_verified, blog_created, api_key } #}
+              {# acc は { id, blog_title/blog_id/public_url, api_key, stat_total, stat_posted } #}
               <div id="acc-card-{{ acc.id }}" class="rounded-xl border p-4 shadow-sm flex flex-col gap-3">
                 <div class="flex items-start justify-between gap-3">
                   <div class="min-w-0">
@@ -109,20 +106,17 @@
                   </div>
                 </div>
 
-                {# バッジ列 #}
-                <div class="flex items-center gap-2 text-xs">
-                  <span class="px-2 py-1 rounded-full {{ 'bg-green-100 text-green-700' if acc.captcha_done|default(false) else 'bg-gray-100 text-gray-600' }}">CAPTCHA</span>
-                  <span class="px-2 py-1 rounded-full {{ 'bg-green-100 text-green-700' if acc.email_verified|default(false) else 'bg-gray-100 text-gray-600' }}">メール</span>
-                  <span class="px-2 py-1 rounded-full {{ 'bg-green-100 text-green-700' if acc.blog_created|default(false) else 'bg-gray-100 text-gray-600' }}">ブログ</span>
-                  <span id="status-{{ s.id }}-acc-{{ acc.id }}"
-                        class="px-2 py-1 rounded-full {{ 'bg-green-100 text-green-700' if acc.api_key else 'bg-gray-100 text-gray-600' }}">
-                    API
-                  </span>
+                {# ─ ミニメトリクス（外部アカウント一覧と同型） ─ #}
+                <div class="text-[12px] text-gray-600 flex items-center gap-4">
+                  <div>投稿完了: <span class="font-semibold">{{ acc.stat_posted|default(0) }}</span></div>
+                  <div>記事生成済み: <span class="font-semibold">{{ (acc.stat_total|default(0) - acc.stat_posted|default(0)) | max(0) }}</span></div>
+                  <div>総記事数: <span class="font-semibold">{{ acc.stat_total|default(0) }}</span></div>
+                  <div><a class="underline" href="{{ url_for('main.external_accounts') }}?site_id={{ s.id }}">記事一覧</a></div>
                 </div>
 
-                {# メインCTA（状態でひとつだけ） #}
+                {# ─ メインCTA（状態でひとつだけ） ─ #}
                 <div id="actionArea-acc-{{ acc.id }}" class="mt-1">
-                  {% if not acc.captcha_done|default(false) %}
+                  {% if not acc.api_key %}
                     <button
                       type="button"
                       class="w-full px-3 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm"
@@ -130,29 +124,44 @@
                       data-account-id="{{ acc.id }}"
                       data-platform="livedoor"
                       onclick="handleCaptchaClick(this)">
-                      CAPTCHA突破
+                      新規アカウント作成開始
                     </button>
-                  {% elif acc.api_key %}
-                    <a
-                      href="/generate?site_id={{ s.id }}&account_id={{ acc.id }}"
-                      target="_blank"
-                      class="w-full inline-flex items-center justify-center px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm">
-                      📝 記事生成＆投稿
-                    </a>
                   {% else %}
-                    <div class="text-sm text-gray-600">処理中…</div>
+                    {# 実績あり（Step2で acc.stat_total を計上）。未計上でも0扱いで安全。 #}
+                    {% set _total = acc.stat_total|default(0) %}
+                    {% if _total > 0 %}
+                      <a
+                        href="/generate?site_id={{ s.id }}&account_id={{ acc.id }}"
+                        class="w-full inline-flex items-center justify-center px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm">
+                        ➕ 追加で記事生成をする
+                      </a>
+                    {% else %}
+                      <a
+                        href="/generate?site_id={{ s.id }}&account_id={{ acc.id }}"
+                        class="w-full inline-flex items-center justify-center px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm">
+                        📝 記事生成＆投稿
+                      </a>
+                    {% endif %}
                   {% endif %}
                 </div>
 
-                {# 小メトリクス（将来：今日投稿/累計/失敗など） #}
+                {# 状態の補足（文言のみ・任意） #}
                 <div class="mt-1 text-[11px] text-gray-500">
-                  {% if acc.api_key %}準備OK{% elif acc.captcha_done %}メール認証・API取得を実行中…{% else %}CAPTCHA待ち{% endif %}
+                  {% if not acc.api_key %}アカウント作成から開始します{% elif (_total|default(0) > 0) %}追加生成が可能です{% else %}初回の生成を開始できます{% endif %}
                 </div>
               </div>
             {% endfor %}
           </div>
         {% else %}
-          <div class="text-sm text-gray-500 px-2 py-1">まだLivedoorアカウントはありません。</div>
+          <div class="flex items-center justify-between px-2 py-1">
+            <div class="text-sm text-gray-500">まだLivedoorアカウントはありません。</div>
+            <button type="button"
+                    class="px-3 py-2 text-sm rounded-lg border bg-white hover:bg-gray-50"
+                    data-site-id="{{ s.id }}"
+                    onclick="newAccountStart(this)">
+              ＋アカウント追加
+            </button>
+          </div>
         {% endif %}
       </div>
     </div>
@@ -160,9 +169,7 @@
 {% endfor %}
 
 {# =========================================================
-   CAPTCHA入力モーダル（Step1: 画像→入力、以降は自動進捗）
-   - /prepare_captcha で画像URLを取得
-   - /submit_captcha で送信→以降は /captcha_status をポーリング
+   CAPTCHA入力モーダル（既存）
    ========================================================= #}
 <div id="captchaModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
   <div class="bg-white p-6 rounded-2xl shadow-lg w-[420px] max-w-[92vw] relative">
@@ -182,17 +189,18 @@
 
 {% block scripts %}
 <script>
-  // ───────── タブ（将来PF追加を見越した最小JS） ─────────
+  // ───────── タブ（最小JS） ─────────
   document.addEventListener('click', (e) => {
     const tabBtn = e.target.closest('[data-tabs-target]');
     if (!tabBtn) return;
     const target = tabBtn.getAttribute('data-tabs-target');
-    const tablist = tabBtn.parentElement;
+    const tablist = tabBtn.parentElement.parentElement; // 左側のラッパ
     const panel   = document.querySelector(target);
     if (!panel) return;
 
     // 兄弟ボタンを非選択に
-    [...tablist.children].forEach(btn => {
+    const btns = tablist.querySelectorAll('[data-tabs-target]');
+    btns.forEach(btn => {
       btn.classList.remove('bg-white');
       btn.classList.add('bg-gray-50','text-gray-600');
       btn.setAttribute('aria-selected', 'false');
@@ -202,13 +210,132 @@
     tabBtn.classList.remove('bg-gray-50','text-gray-600');
     tabBtn.setAttribute('aria-selected', 'true');
 
-    // パネル切替（同じ親の中だけを対象に）
-    const panelsWrap = tablist.parentElement;
-    [...panelsWrap.querySelectorAll('[role="tabpanel"]')].forEach(p => p.classList.add('hidden'));
+    // パネル切替（同じ親の中だけ）
+    const panelsWrap = tablist.parentElement.parentElement;
+    panelsWrap.querySelectorAll('[role="tabpanel"]').forEach(p => p.classList.add('hidden'));
     panel.classList.remove('hidden');
   });
 
-  // ───────── CAPTCHA処理 ─────────
+  // ───────── Step3: ＋アカウント追加（API連携） ─────────
+  async function newAccountStart(button) {
+    const siteId = button.getAttribute('data-site-id');
+    if (!siteId) return;
+
+    button.disabled = true;
+    const oldText = button.innerText;
+    button.innerText = "作成中…";
+
+    try {
+      const body = new URLSearchParams();
+      body.append("site_id", siteId);
+
+      const res = await fetch("/external-seo/new-account", {
+        method: "POST",
+        headers: {"Content-Type": "application/x-www-form-urlencoded"},
+        body
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "作成に失敗しました");
+
+      // カードを挿入
+      renderNewAccountCard(data.site_id, data.account);
+
+      // タブの件数を +1（Livedoor (n)）
+      try { incrementLdCount(siteId, +1); } catch (_) {}
+
+    } catch (err) {
+      alert(err.message || "アカウント作成に失敗しました");
+    } finally {
+      button.disabled = false;
+      button.innerText = oldText;
+    }
+  }
+
+  function incrementLdCount(siteId, delta) {
+    const tabBtn = document.querySelector(`[data-tabs-target="#tab-ld-${siteId}"]`);
+    if (!tabBtn) return;
+    const m = tabBtn.textContent.match(/\((\d+)\)/);
+    if (!m) return;
+    const n = Math.max(parseInt(m[1] || "0", 10) + delta, 0);
+    tabBtn.innerHTML = `Livedoor <span class="ml-1 text-xs text-gray-500">(${n})</span>`;
+  }
+
+  function renderNewAccountCard(siteId, account) {
+    const panel = document.querySelector(`#tab-ld-${siteId}`);
+    if (!panel) return;
+
+    // 既存の「まだありません」行があれば消す
+    const emptyRow = panel.querySelector('.text-sm.text-gray-500');
+    if (emptyRow && emptyRow.textContent.includes('まだLivedoorアカウントはありません')) {
+      // パネル内を初期化
+      panel.innerHTML = '';
+    }
+
+    // 既存の grid を探す or 作成
+    let grid = panel.querySelector('.grid');
+    if (!grid) {
+      grid = document.createElement('div');
+      grid.className = 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3';
+      panel.appendChild(grid);
+    }
+
+    // カードDOMを構築（Step1でのカードHTMLと同形）
+    const acc = account || {};
+    const card = document.createElement('div');
+    card.id = `acc-card-${acc.id}`;
+    card.className = 'rounded-xl border p-4 shadow-sm flex flex-col gap-3';
+
+    const title = acc.blog_title || `account#${acc.id}`;
+    const url = acc.public_url || '';
+
+    card.innerHTML = `
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="font-medium truncate max-w-[220px]">${escapeHtml(title)}</div>
+          ${url ? `<a href="${escapeAttr(url)}" target="_blank" class="text-xs underline text-gray-600 break-all">${escapeHtml(url)}</a>` : ``}
+        </div>
+        <div>
+          <button class="text-gray-400 hover:text-gray-700 text-lg leading-none" title="詳細/ログ（準備中）">⋯</button>
+        </div>
+      </div>
+
+      <div class="text-[12px] text-gray-600 flex items-center gap-4">
+        <div>投稿完了: <span class="font-semibold">${acc.stat_posted || 0}</span></div>
+        <div>記事生成済み: <span class="font-semibold">${Math.max((acc.stat_total||0) - (acc.stat_posted||0), 0)}</span></div>
+        <div>総記事数: <span class="font-semibold">${acc.stat_total || 0}</span></div>
+        <div><a class="underline" href="/external/accounts?site_id=${siteId}">記事一覧</a></div>
+      </div>
+
+      <div id="actionArea-acc-${acc.id}" class="mt-1">
+        <button
+          type="button"
+          class="w-full px-3 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm"
+          data-site-id="${siteId}"
+          data-account-id="${acc.id}"
+          data-platform="livedoor"
+          onclick="handleCaptchaClick(this)">
+          新規アカウント作成開始
+        </button>
+      </div>
+
+      <div class="mt-1 text-[11px] text-gray-500">アカウント作成から開始します</div>
+    `;
+
+    grid.prepend(card); // 先頭に挿入して目立たせる
+  }
+
+  function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
+  }
+  function escapeAttr(s) { return escapeHtml(s).replaceAll('"','&quot;'); }
+
+  // ───────── CAPTCHA処理（既存） ─────────
   let progressInterval = null;
   let lastStatus = null;
 
@@ -217,7 +344,6 @@
     const accountId = button.getAttribute("data-account-id");
     const platform  = button.getAttribute("data-platform") || "livedoor";
 
-    // UIを取得中に
     button.disabled = true;
     button.innerText = "📷 CAPTCHA取得中…";
     button.classList.remove("bg-green-600");
@@ -249,7 +375,7 @@
         document.getElementById("captchaForm").reset();
         startProgressPolling();
       } else {
-        alert("CAPTCHA画像の取得に失敗しました");
+        alert(data && data.error ? data.error : "CAPTCHA画像の取得に失敗しました");
         restoreCaptchaButton(siteId, accountId, "❌ 再挑戦");
       }
     })
@@ -292,7 +418,6 @@
     fetch("/submit_captcha", { method: "POST", body: payload })
       .then(r => r.json())
       .then(data => {
-        // ボタン復帰
         btn.innerText = "送信";
         btn.disabled = false;
         btn.classList.remove("bg-gray-500");
@@ -304,12 +429,9 @@
           alert("CAPTCHA突破に失敗しました。再度お試しください。");
           restoreCaptchaButton(siteId, accountId, "❌ 再挑戦");
           updateCaptchaStatusUI(data);
-
         } else if (data.status === "captcha_success") {
           setCaptchaDoneUI(siteId, accountId);
           alert("CAPTCHA突破成功。仮登録メールを送信しました！");
-          // 以降は進捗ポーリングでAPI完了までUI更新
-
         } else {
           alert("予期しない応答が返されました");
           restoreCaptchaButton(siteId, accountId, "⚠ 不明な応答");
@@ -326,7 +448,7 @@
     const btn = document.querySelector(`button[data-site-id="${siteId}"][data-account-id="${accountId}"]`);
     if (!btn) return;
     btn.disabled = false;
-    btn.innerText = label || "CAPTCHA突破";
+    btn.innerText = label || "新規アカウント作成開始";
     btn.classList.remove("bg-gray-500");
     btn.classList.add(label && label.includes("❌") ? "bg-red-600" : "bg-green-600");
   }
@@ -362,7 +484,6 @@
             updateCaptchaStatusUI(data);
           }
 
-          // API取得完了 → アクション差し替え
           if (data.step === "API取得完了" && (data.site_id || siteId) && (data.account_id || accountId)) {
             const sid = data.site_id || siteId;
             const aid = data.account_id || accountId;
@@ -372,17 +493,9 @@
               actionArea.innerHTML = "";
               const a = document.createElement("a");
               a.href = `/generate?site_id=${sid}&account_id=${aid}`;
-              a.target = "_blank";
               a.className = "w-full inline-flex items-center justify-center px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm";
               a.textContent = "📝 記事生成＆投稿";
               actionArea.appendChild(a);
-            }
-
-            // APIバッジも緑化
-            const statusSpan = document.getElementById(`status-${sid}-acc-${aid}`);
-            if (statusSpan) {
-              statusSpan.classList.remove("bg-gray-100","text-gray-600");
-              statusSpan.classList.add("bg-green-100","text-green-700");
             }
 
             clearInterval(progressInterval);
@@ -397,22 +510,7 @@
   }
 
   function updateCaptchaStatusUI(data) {
-    const siteId    = data.site_id || sessionStorage.getItem("currentSiteId");
-    const accountId = data.account_id || sessionStorage.getItem("currentAccountId");
-    if (!siteId || !accountId) return;
-
-    const statusSpan = document.getElementById(`status-${siteId}-acc-${accountId}`);
-    if (!statusSpan) return;
-
-    if (data.step === "API取得完了") {
-      statusSpan.innerText = "API";
-      statusSpan.classList.remove("bg-gray-100","text-gray-600");
-      statusSpan.classList.add("bg-green-100","text-green-700");
-    } else {
-      statusSpan.innerText = "API";
-      statusSpan.classList.remove("bg-green-100","text-green-700");
-      statusSpan.classList.add("bg-gray-100","text-gray-600");
-    }
+    // バッジは廃止したため、ここでは何もしない
   }
 </script>
 {% endblock %}
