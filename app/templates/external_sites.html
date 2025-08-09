@@ -4,7 +4,7 @@
 {% block content %}
 <h2 class="text-2xl font-bold mb-4">🚀 外部SEO | サイト一覧</h2>
 
-<!-- ✅ flashメッセージ -->
+{# ───────── flashメッセージ ───────── #}
 {% with messages = get_flashed_messages(with_categories=true) %}
   {% if messages %}
     <div class="mb-4 space-y-2">
@@ -29,132 +29,150 @@
   </a>
 </div>
 
-{# -----------------------------------------------------------
+{# =========================================================
    サイトカード（1サイト＝1カード）
-   - s は { id, name, url, ... } を想定
-   - アカウントは以下の優先順で取得
-     1) s.livedoor_accounts があればそれ（将来は他PFも同様に拡張）
-     2) s.external_accounts or s.accounts があればそこから使用
-   ----------------------------------------------------------- #}
+   - s は { id, name, url, ... }
+   - アカウント配列は livedoor_accounts / external_accounts / accounts の順で参照
+   - 今回は Livedoor タブのみ（将来タブを増やして拡張）
+   ========================================================= #}
 {% for s in sites %}
-  <section id="site-card-{{ s.id }}" class="border rounded-xl p-4 mb-6 bg-white shadow-sm">
-    <!-- サイト名 & URL -->
-    <div class="flex items-start justify-between gap-4">
+  {# まずアカウント配列の決定 #}
+  {% set _all_accounts = [] %}
+  {% if s.livedoor_accounts is defined %}
+    {% set _all_accounts = s.livedoor_accounts %}
+  {% elif s.external_accounts is defined %}
+    {% set _all_accounts = s.external_accounts %}
+  {% elif s.accounts is defined %}
+    {% set _all_accounts = s.accounts %}
+  {% endif %}
+
+  {% set ready_cnt = (_all_accounts | selectattr('api_key') | list) | length %}
+  {% set total_cnt = _all_accounts | length %}
+
+  <section id="site-card-{{ s.id }}" class="border rounded-2xl p-5 mb-6 bg-white shadow-sm">
+    <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
       <div class="min-w-0">
-        <div class="font-semibold truncate max-w-md">{{ s.name }}</div>
+        <div class="font-semibold text-lg truncate max-w-xl">{{ s.name }}</div>
         {% if s.url %}
-          <a href="{{ s.url }}" class="text-blue-600 text-sm break-all underline" target="_blank">{{ s.url }}</a>
+          <a href="{{ s.url }}" class="text-blue-600 text-sm underline break-all" target="_blank">{{ s.url }}</a>
+        {% endif %}
+        <div class="mt-1 text-sm text-gray-500">準備OK <span class="font-semibold">{{ ready_cnt }}</span> / {{ total_cnt }}</div>
+      </div>
+
+      <div class="flex items-center gap-2 md:self-start">
+        {# 準備OKが1件以上ある場合のみ、サイト一括の生成＆投稿ボタンを出す #}
+        {% if ready_cnt > 0 %}
+          <a href="/generate?site_id={{ s.id }}"
+             class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm shadow">
+            📝 サイト全体で記事生成＆投稿
+          </a>
+        {% else %}
+          <button class="px-4 py-2 rounded-xl bg-gray-200 text-gray-500 text-sm cursor-not-allowed" disabled>
+            📝 サイト全体で記事生成＆投稿
+          </button>
         {% endif %}
       </div>
-
-      {# 将来：サイト単位の一括操作（準備OKのみ対象など）
-      <div class="hidden md:block">
-        <button class="px-3 py-1 rounded-lg border text-sm">一括生成＆スケジュール</button>
-      </div>
-      #}
     </div>
 
-    {# ---------- プラットフォーム：Livedoor（まずは固定で展開） ---------- #}
-    {# アカウント配列の取得（存在ベースでフォールバック） #}
-    {% set _all_accounts = [] %}
-    {% if s.livedoor_accounts is defined %}
-      {% set _all_accounts = s.livedoor_accounts %}
-    {% elif s.external_accounts is defined %}
-      {% set _all_accounts = s.external_accounts %}
-    {% elif s.accounts is defined %}
-      {% set _all_accounts = s.accounts %}
-    {% endif %}
+    {# ───────── プラットフォームタブ（現状は Livedoor のみ） ───────── #}
+    <div class="mt-4">
+      <div class="border-b flex gap-2" role="tablist">
+        <button class="px-3 py-2 text-sm rounded-t-lg border border-b-0 bg-white"
+                data-tabs-target="#tab-ld-{{ s.id }}" aria-selected="true">
+          Livedoor
+          <span class="ml-1 text-xs text-gray-500">({{ total_cnt }})</span>
+        </button>
+        {# 例：将来追加
+        <button class="px-3 py-2 text-sm rounded-t-lg border border-b-0 bg-gray-50 text-gray-400"
+                data-tabs-target="#tab-note-{{ s.id }}" aria-selected="false" disabled>Note</button>
+        #}
+      </div>
 
-    {# Livedoorのみ抽出（platform/blog_type名がないケースも考慮し、まずは全件=LD想定で表示） #}
-    {% set ld_accounts = _all_accounts %}
-
-    <details class="mt-4 rounded-lg border" open>
-      <summary class="cursor-pointer px-3 py-2 flex items-center justify-between">
-        <div class="font-medium">Livedoor（{{ ld_accounts | length }}）</div>
-        {# 簡易の準備状況カウント #}
-        {% set _ready = (ld_accounts | selectattr('api_key') | list) | length %}
-        <div class="text-sm text-gray-500">準備OK {{ _ready }} / {{ ld_accounts | length }}</div>
-      </summary>
-
-      <div class="p-3 space-y-3">
-        {% if ld_accounts and ld_accounts|length > 0 %}
-          {% for acc in ld_accounts %}
-            {# acc は { id, blog_title/blog_id/public_url, captcha_done, email_verified, blog_created, api_key } を想定 #}
-            <div id="acc-row-{{ acc.id }}" class="flex items-center justify-between rounded-lg border p-3 gap-3">
-              <!-- 左：タイトル/URL -->
-              <div class="min-w-0">
-                <div class="font-medium truncate max-w-xs">
-                  {{ acc.blog_title or acc.blog_id or ('account#' ~ acc.id) }}
+      <div id="tab-ld-{{ s.id }}" class="border rounded-b-lg p-3" role="tabpanel">
+        {% if _all_accounts and _all_accounts|length > 0 %}
+          <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {% for acc in _all_accounts %}
+              {# acc は { id, blog_title/blog_id/public_url, captcha_done, email_verified, blog_created, api_key } #}
+              <div id="acc-card-{{ acc.id }}" class="rounded-xl border p-4 shadow-sm flex flex-col gap-3">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <div class="font-medium truncate max-w-[220px]">
+                      {{ acc.blog_title or acc.blog_id or ('account#' ~ acc.id) }}
+                    </div>
+                    {% if acc.public_url %}
+                      <a href="{{ acc.public_url }}" target="_blank"
+                         class="text-xs underline text-gray-600 break-all">{{ acc.public_url }}</a>
+                    {% endif %}
+                  </div>
+                  <div>
+                    <button class="text-gray-400 hover:text-gray-700 text-lg leading-none" title="詳細/ログ（準備中）">⋯</button>
+                  </div>
                 </div>
-                {% if acc.public_url %}
-                  <a href="{{ acc.public_url }}" target="_blank"
-                     class="text-xs underline text-gray-600 break-all">{{ acc.public_url }}</a>
-                {% endif %}
-              </div>
 
-              <!-- 中：進捗バッジ -->
-              <div class="flex items-center gap-2 text-xs">
-                <span class="px-2 py-1 rounded-full {{ 'bg-green-100 text-green-700' if acc.captcha_done|default(false) else 'bg-gray-100 text-gray-600' }}">CAPTCHA</span>
-                <span class="px-2 py-1 rounded-full {{ 'bg-green-100 text-green-700' if acc.email_verified|default(false) else 'bg-gray-100 text-gray-600' }}">メール</span>
-                <span class="px-2 py-1 rounded-full {{ 'bg-green-100 text-green-700' if acc.blog_created|default(false) else 'bg-gray-100 text-gray-600' }}">ブログ</span>
-                <span id="status-{{ s.id }}-acc-{{ acc.id }}"
-                      class="px-2 py-1 rounded-full {{ 'bg-green-100 text-green-700' if acc.api_key else 'bg-gray-100 text-gray-600' }}">
-                  {{ 'API' if not acc.api_key else 'API' }}
-                </span>
-              </div>
-
-              <!-- 右：アクション（次の一手だけ） -->
-              <div id="actionArea-acc-{{ acc.id }}" class="flex items-center gap-2">
-                {% if not acc.captcha_done|default(false) %}
-                  <button
-                    type="button"
-                    class="px-3 py-1 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm"
-                    data-site-id="{{ s.id }}"
-                    data-account-id="{{ acc.id }}"
-                    data-platform="livedoor"
-                    onclick="handleCaptchaClick(this)">
-                    CAPTCHA突破
-                  </button>
-                {% elif acc.api_key %}
-                  <a
-                    href="/generate?site_id={{ s.id }}&account_id={{ acc.id }}"
-                    target="_blank"
-                    class="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm">
-                    📝 記事生成＆投稿
-                  </a>
-                {% else %}
-                  <span class="text-sm text-gray-600">処理中…</span>
-                {% endif %}
-
-                <!-- その他メニュー例（必要に応じて） -->
-                <!--
-                <div class="relative">
-                  <button class="px-2 py-1 rounded-lg border">⋯</button>
+                {# バッジ列 #}
+                <div class="flex items-center gap-2 text-xs">
+                  <span class="px-2 py-1 rounded-full {{ 'bg-green-100 text-green-700' if acc.captcha_done|default(false) else 'bg-gray-100 text-gray-600' }}">CAPTCHA</span>
+                  <span class="px-2 py-1 rounded-full {{ 'bg-green-100 text-green-700' if acc.email_verified|default(false) else 'bg-gray-100 text-gray-600' }}">メール</span>
+                  <span class="px-2 py-1 rounded-full {{ 'bg-green-100 text-green-700' if acc.blog_created|default(false) else 'bg-gray-100 text-gray-600' }}">ブログ</span>
+                  <span id="status-{{ s.id }}-acc-{{ acc.id }}"
+                        class="px-2 py-1 rounded-full {{ 'bg-green-100 text-green-700' if acc.api_key else 'bg-gray-100 text-gray-600' }}">
+                    API
+                  </span>
                 </div>
-                -->
+
+                {# メインCTA（状態でひとつだけ） #}
+                <div id="actionArea-acc-{{ acc.id }}" class="mt-1">
+                  {% if not acc.captcha_done|default(false) %}
+                    <button
+                      type="button"
+                      class="w-full px-3 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm"
+                      data-site-id="{{ s.id }}"
+                      data-account-id="{{ acc.id }}"
+                      data-platform="livedoor"
+                      onclick="handleCaptchaClick(this)">
+                      CAPTCHA突破
+                    </button>
+                  {% elif acc.api_key %}
+                    <a
+                      href="/generate?site_id={{ s.id }}&account_id={{ acc.id }}"
+                      target="_blank"
+                      class="w-full inline-flex items-center justify-center px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm">
+                      📝 記事生成＆投稿
+                    </a>
+                  {% else %}
+                    <div class="text-sm text-gray-600">処理中…</div>
+                  {% endif %}
+                </div>
+
+                {# 小メトリクス（将来：今日投稿/累計/失敗など） #}
+                <div class="mt-1 text-[11px] text-gray-500">
+                  {% if acc.api_key %}準備OK{% elif acc.captcha_done %}メール認証・API取得を実行中…{% else %}CAPTCHA待ち{% endif %}
+                </div>
               </div>
-            </div>
-          {% endfor %}
+            {% endfor %}
+          </div>
         {% else %}
           <div class="text-sm text-gray-500 px-2 py-1">まだLivedoorアカウントはありません。</div>
         {% endif %}
       </div>
-    </details>
+    </div>
   </section>
 {% endfor %}
 
-<!-- ✅ CAPTCHA入力モーダル -->
+{# =========================================================
+   CAPTCHA入力モーダル（Step1: 画像→入力、以降は自動進捗）
+   - /prepare_captcha で画像URLを取得
+   - /submit_captcha で送信→以降は /captcha_status をポーリング
+   ========================================================= #}
 <div id="captchaModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
-  <div class="bg-white p-6 rounded-xl shadow-lg w-96 relative">
-    <button onclick="closeCaptcha()" class="absolute top-2 right-2 text-gray-500 hover:text-gray-800">×</button>
+  <div class="bg-white p-6 rounded-2xl shadow-lg w-[420px] max-w-[92vw] relative">
+    <button onclick="closeCaptcha()" class="absolute top-2 right-2 text-gray-500 hover:text-gray-800 text-xl leading-none">×</button>
     <h2 class="text-xl font-bold mb-4">CAPTCHA認証</h2>
-    <img id="captchaImage" src="" alt="CAPTCHA画像" class="border mb-4 w-full h-auto">
+    <img id="captchaImage" src="" alt="CAPTCHA画像" class="border mb-4 w-full h-auto rounded-lg">
     <form id="captchaForm" onsubmit="submitCaptcha(event)">
-      <input type="text" name="captcha_text" placeholder="画像の文字を入力" class="w-full border p-2 mb-4" required>
-      <button id="captchaSubmitBtn" type="submit" class="w-full bg-blue-600 text-white py-2 rounded">送信</button>
+      <input type="text" name="captcha_text" placeholder="画像の文字を入力" class="w-full border rounded-lg p-2 mb-3" required>
+      <button id="captchaSubmitBtn" type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg">送信</button>
     </form>
-
-    <!-- ✅ 進捗状況表示欄 -->
     <div id="progressStatus" class="mt-4 text-sm text-gray-700 font-semibold hidden">
       進行状況: <span id="progressText">待機中</span>
     </div>
@@ -164,7 +182,33 @@
 
 {% block scripts %}
 <script>
-  // 現在のモーダル対象（サイトID／アカウントID／PF）
+  // ───────── タブ（将来PF追加を見越した最小JS） ─────────
+  document.addEventListener('click', (e) => {
+    const tabBtn = e.target.closest('[data-tabs-target]');
+    if (!tabBtn) return;
+    const target = tabBtn.getAttribute('data-tabs-target');
+    const tablist = tabBtn.parentElement;
+    const panel   = document.querySelector(target);
+    if (!panel) return;
+
+    // 兄弟ボタンを非選択に
+    [...tablist.children].forEach(btn => {
+      btn.classList.remove('bg-white');
+      btn.classList.add('bg-gray-50','text-gray-600');
+      btn.setAttribute('aria-selected', 'false');
+    });
+    // 自分を選択
+    tabBtn.classList.add('bg-white');
+    tabBtn.classList.remove('bg-gray-50','text-gray-600');
+    tabBtn.setAttribute('aria-selected', 'true');
+
+    // パネル切替（同じ親の中だけを対象に）
+    const panelsWrap = tablist.parentElement;
+    [...panelsWrap.querySelectorAll('[role="tabpanel"]')].forEach(p => p.classList.add('hidden'));
+    panel.classList.remove('hidden');
+  });
+
+  // ───────── CAPTCHA処理 ─────────
   let progressInterval = null;
   let lastStatus = null;
 
@@ -173,38 +217,37 @@
     const accountId = button.getAttribute("data-account-id");
     const platform  = button.getAttribute("data-platform") || "livedoor";
 
-    // ボタン状態を取得中に変更
+    // UIを取得中に
     button.disabled = true;
     button.innerText = "📷 CAPTCHA取得中…";
-    button.classList.remove("bg-green-600", "bg-red-600");
+    button.classList.remove("bg-green-600");
     button.classList.add("bg-gray-500");
 
     openCaptchaModal(siteId, accountId, platform);
   }
 
   function openCaptchaModal(siteId, accountId, platform) {
-    // 保存（ポーリングや送信で参照）
     sessionStorage.setItem("currentSiteId", siteId);
     sessionStorage.setItem("currentAccountId", accountId);
     sessionStorage.setItem("currentPlatform", platform);
 
-    const data = new URLSearchParams();
-    data.append("site_id", siteId);
-    data.append("account_id", accountId);
-    data.append("blog", platform); // 互換のため
+    const params = new URLSearchParams();
+    params.append("site_id", siteId);
+    params.append("account_id", accountId);
+    params.append("blog", platform);
 
     fetch("/prepare_captcha", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: data
+      body: params
     })
-    .then(response => response.json())
+    .then(r => r.json())
     .then(data => {
-      if (data.captcha_url) {
-        document.getElementById("captchaImage").src = data.captcha_url + "?t=" + new Date().getTime();
+      if (data && data.captcha_url) {
+        document.getElementById("captchaImage").src = data.captcha_url + "?t=" + Date.now();
         document.getElementById("captchaModal").classList.remove("hidden");
         document.getElementById("captchaForm").reset();
-        startProgressPolling(); // 進捗の表示
+        startProgressPolling();
       } else {
         alert("CAPTCHA画像の取得に失敗しました");
         restoreCaptchaButton(siteId, accountId, "❌ 再挑戦");
@@ -227,62 +270,56 @@
 
   function submitCaptcha(event) {
     event.preventDefault();
-
     const siteId    = sessionStorage.getItem("currentSiteId");
     const accountId = sessionStorage.getItem("currentAccountId");
     const platform  = sessionStorage.getItem("currentPlatform") || "livedoor";
 
-    const submitBtn = document.getElementById("captchaSubmitBtn");
-    submitBtn.innerText = "⏳ 送信中...";
-    submitBtn.disabled = true;
-    submitBtn.classList.remove("bg-blue-600");
-    submitBtn.classList.add("bg-gray-500");
+    const btn = document.getElementById("captchaSubmitBtn");
+    btn.innerText = "⏳ 送信中...";
+    btn.disabled = true;
+    btn.classList.remove("bg-blue-600");
+    btn.classList.add("bg-gray-500");
 
     const form = document.getElementById("captchaForm");
-    const formData = new FormData(form);
-    const captchaText = formData.get("captcha_text");
-
+    const fd = new FormData(form);
     const payload = new URLSearchParams({
-      "captcha_text": captchaText,
+      "captcha_text": fd.get("captcha_text"),
       "site_id": siteId,
       "account_id": accountId,
       "blog": platform
     });
 
-    fetch("/submit_captcha", {
-      method: "POST",
-      body: payload
-    })
-    .then(res => res.json())
-    .then(data => {
-      // 送信ボタン復帰
-      submitBtn.innerText = "送信";
-      submitBtn.disabled  = false;
-      submitBtn.classList.remove("bg-gray-500");
-      submitBtn.classList.add("bg-blue-600");
+    fetch("/submit_captcha", { method: "POST", body: payload })
+      .then(r => r.json())
+      .then(data => {
+        // ボタン復帰
+        btn.innerText = "送信";
+        btn.disabled = false;
+        btn.classList.remove("bg-gray-500");
+        btn.classList.add("bg-blue-600");
 
-      closeCaptcha();
+        closeCaptcha();
 
-      if (data.status === "captcha_failed") {
-        alert("CAPTCHA突破に失敗しました。再度お試しください。");
+        if (data.status === "captcha_failed") {
+          alert("CAPTCHA突破に失敗しました。再度お試しください。");
+          restoreCaptchaButton(siteId, accountId, "❌ 再挑戦");
+          updateCaptchaStatusUI(data);
+
+        } else if (data.status === "captcha_success") {
+          setCaptchaDoneUI(siteId, accountId);
+          alert("CAPTCHA突破成功。仮登録メールを送信しました！");
+          // 以降は進捗ポーリングでAPI完了までUI更新
+
+        } else {
+          alert("予期しない応答が返されました");
+          restoreCaptchaButton(siteId, accountId, "⚠ 不明な応答");
+        }
+      })
+      .catch(err => {
+        console.error(err);
+        alert("CAPTCHA送信中にエラーが発生しました");
         restoreCaptchaButton(siteId, accountId, "❌ 再挑戦");
-        updateCaptchaStatusUI(data);
-
-      } else if (data.status === "captcha_success") {
-        setCaptchaDoneUI(siteId, accountId);
-        alert("CAPTCHA突破成功。仮登録メールを送信しました！");
-        // 進捗ポーリングがAPI取得完了までUIを更新します
-
-      } else {
-        alert("予期しない応答が返されました");
-        restoreCaptchaButton(siteId, accountId, "⚠ 不明な応答");
-      }
-    })
-    .catch(err => {
-      console.error(err);
-      alert("CAPTCHA送信中にエラーが発生しました");
-      restoreCaptchaButton(siteId, accountId, "❌ 再挑戦");
-    });
+      });
   }
 
   function restoreCaptchaButton(siteId, accountId, label) {
@@ -299,7 +336,7 @@
     if (!btn) return;
     btn.innerText = "✅ 実行済み";
     btn.disabled = true;
-    btn.classList.remove("bg-gray-500", "bg-red-600");
+    btn.classList.remove("bg-gray-500","bg-red-600");
     btn.classList.add("bg-green-500");
   }
 
@@ -309,41 +346,47 @@
     if (!progressDiv || !progressText) return;
 
     progressDiv.classList.remove("hidden");
+    lastStatus = null;
 
-    // サーバ側が現在対象のステータスを返す前提
     progressInterval = setInterval(() => {
       const siteId    = sessionStorage.getItem("currentSiteId");
       const accountId = sessionStorage.getItem("currentAccountId");
 
-      // アカウントIDを投げられるならクエリで渡す（互換のため両対応）
       fetch("/captcha_status" + (accountId ? ("?account_id=" + encodeURIComponent(accountId)) : ""))
-        .then(response => response.json())
+        .then(r => r.json())
         .then(data => {
-          if (data && data.step) {
-            if (data.step !== lastStatus) {
-              progressText.innerText = data.step;
-              lastStatus = data.step;
-              updateCaptchaStatusUI(data);
+          if (!data || !data.step) return;
+          if (data.step !== lastStatus) {
+            progressText.innerText = data.step;
+            lastStatus = data.step;
+            updateCaptchaStatusUI(data);
+          }
+
+          // API取得完了 → アクション差し替え
+          if (data.step === "API取得完了" && (data.site_id || siteId) && (data.account_id || accountId)) {
+            const sid = data.site_id || siteId;
+            const aid = data.account_id || accountId;
+
+            const actionArea = document.getElementById(`actionArea-acc-${aid}`);
+            if (actionArea) {
+              actionArea.innerHTML = "";
+              const a = document.createElement("a");
+              a.href = `/generate?site_id=${sid}&account_id=${aid}`;
+              a.target = "_blank";
+              a.className = "w-full inline-flex items-center justify-center px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm";
+              a.textContent = "📝 記事生成＆投稿";
+              actionArea.appendChild(a);
             }
 
-            // ✅ API取得完了 → 対象アカウント行のアクションを「記事生成＆投稿」に差し替え
-            if (data.step === "API取得完了" && (data.site_id || siteId) && (data.account_id || accountId)) {
-              const sid = data.site_id || siteId;
-              const aid = data.account_id || accountId;
-
-              const actionArea = document.getElementById(`actionArea-acc-${aid}`);
-              if (actionArea) {
-                actionArea.innerHTML = "";
-                const a = document.createElement("a");
-                a.href = `/generate?site_id=${sid}&account_id=${aid}`;
-                a.target = "_blank";
-                a.className = "px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm";
-                a.textContent = "📝 記事生成＆投稿";
-                actionArea.appendChild(a);
-              }
-              clearInterval(progressInterval);
-              progressInterval = null;
+            // APIバッジも緑化
+            const statusSpan = document.getElementById(`status-${sid}-acc-${aid}`);
+            if (statusSpan) {
+              statusSpan.classList.remove("bg-gray-100","text-gray-600");
+              statusSpan.classList.add("bg-green-100","text-green-700");
             }
+
+            clearInterval(progressInterval);
+            progressInterval = null;
           }
         })
         .catch(err => {
@@ -353,10 +396,7 @@
     }, 5000);
   }
 
-  // ステータス文字（行中央のバッジ）を更新
   function updateCaptchaStatusUI(data) {
-    if (!data || !data.step) return;
-
     const siteId    = data.site_id || sessionStorage.getItem("currentSiteId");
     const accountId = data.account_id || sessionStorage.getItem("currentAccountId");
     if (!siteId || !accountId) return;
@@ -366,12 +406,12 @@
 
     if (data.step === "API取得完了") {
       statusSpan.innerText = "API";
-      statusSpan.classList.remove("text-blue-700", "bg-gray-100", "text-gray-600");
-      statusSpan.classList.add("bg-green-100", "text-green-700");
+      statusSpan.classList.remove("bg-gray-100","text-gray-600");
+      statusSpan.classList.add("bg-green-100","text-green-700");
     } else {
       statusSpan.innerText = "API";
-      statusSpan.classList.remove("bg-green-100", "text-green-700");
-      statusSpan.classList.add("bg-gray-100", "text-gray-600");
+      statusSpan.classList.remove("bg-green-100","text-green-700");
+      statusSpan.classList.add("bg-gray-100","text-gray-600");
     }
   }
 </script>

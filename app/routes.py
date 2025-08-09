@@ -3395,16 +3395,18 @@ def external_seo_sites():
     from sqlalchemy.orm import selectinload
     from sqlalchemy import func
 
-    # 1. サイト + 外部ジョブ + アカウントを一括ロード
-    sites = (Site.query
-             .filter_by(user_id=current_user.id)
-             .options(
-                 selectinload(Site.external_jobs),
-                 selectinload(Site.external_accounts)      # ★ 追加：アカウントを一緒に取得
-             )
-             .all())
+    # 1) サイト + 外部ジョブ + アカウントを一括ロード
+    sites = (
+        Site.query
+        .filter_by(user_id=current_user.id)
+        .options(
+            selectinload(Site.external_jobs),
+            selectinload(Site.external_accounts),  # アカウントも同時に
+        )
+        .all()
+    )
 
-    # 2. job_map（既存ロジックのまま）
+    # 2) job_map（既存ロジック準拠）
     job_map, key_set = {}, set()
     for s in sites:
         for job in s.external_jobs:
@@ -3414,19 +3416,21 @@ def external_seo_sites():
             key_set.add(key)
             job_map[(s.id, job.blog_type.value.lower())] = job
 
-    # 3. 投稿済み件数（既存ロジックのまま）
+    # 3) 投稿済み件数（既存ロジック準拠）
     posted_counts = (
         db.session.query(
             ExternalBlogAccount.site_id,
             ExternalBlogAccount.blog_type,
-            func.count(ExternalArticleSchedule.id)
+            func.count(ExternalArticleSchedule.id),
         )
-        .join(ExternalArticleSchedule,
-              ExternalArticleSchedule.blog_account_id == ExternalBlogAccount.id)
+        .join(
+            ExternalArticleSchedule,
+            ExternalArticleSchedule.blog_account_id == ExternalBlogAccount.id,
+        )
         .filter(
             ExternalArticleSchedule.status == "posted",
             ExternalBlogAccount.site_id.in_([sid for sid, _ in key_set]) if key_set else True,
-            ExternalBlogAccount.blog_type.in_([bt for _, bt in key_set]) if key_set else True
+            ExternalBlogAccount.blog_type.in_([bt for _, bt in key_set]) if key_set else True,
         )
         .group_by(ExternalBlogAccount.site_id, ExternalBlogAccount.blog_type)
         .all()
@@ -3439,30 +3443,54 @@ def external_seo_sites():
         if not hasattr(job, "posted_cnt"):
             job.posted_cnt = 0
 
-    # 4. 各サイトに「Livedoorアカウント配列」を付与（テンプレが参照）
+    # 4) テンプレが読む Livedoor アカウント配列を作る
     for s in sites:
         livedoor_accounts = []
         for acc in (s.external_accounts or []):
             if acc.blog_type != BlogType.LIVEDOOR:
                 continue
-            # テンプレが参照する別名プロパティを付与
-            setattr(acc, "captcha_done", bool(acc.is_captcha_completed))
-            setattr(acc, "api_key", acc.atompub_key_enc)  # truthy ならOK
+
+            # ▼ テンプレ用フィールドを安全に付与
+            # CAPTCHA済み
+            setattr(acc, "captcha_done", bool(getattr(acc, "is_captcha_completed", False)))
+
+            # メール認証（モデルにフラグがなければ False 想定）
+            setattr(acc, "email_verified", bool(getattr(acc, "is_email_verified", False)))
+
+            # ブログ作成済み：blog_id が取れていれば True とみなす
+            livedoor_blog_id = getattr(acc, "livedoor_blog_id", None)
+            setattr(acc, "blog_created", bool(livedoor_blog_id))
+
+            # APIキー（存在すれば準備OK）
+            setattr(acc, "api_key", getattr(acc, "atompub_key_enc", None))
+
             # 表示名：nickname > username > livedoor_blog_id > account#id
-            title = acc.nickname or acc.username or acc.livedoor_blog_id or f"account#{acc.id}"
+            title = (
+                getattr(acc, "nickname", None)
+                or getattr(acc, "username", None)
+                or livedoor_blog_id
+                or f"account#{acc.id}"
+            )
             setattr(acc, "blog_title", title)
-            # 公開URL（不明なら None のままでOK／テンプレは存在チェック）
-            setattr(acc, "public_url", None)
+
+            # 公開URL（blog_id あれば自動生成）
+            public_url = getattr(acc, "public_url", None)
+            if not public_url and livedoor_blog_id:
+                public_url = f"https://{livedoor_blog_id}.livedoor.blog/"
+            setattr(acc, "public_url", public_url)
+
             livedoor_accounts.append(acc)
-        # テンプレが読む配列
+
+        # テンプレが参照する配列
         s.livedoor_accounts = livedoor_accounts
 
     return render_template(
-        "external_sites.html",     # ← あなたのテンプレ名に合わせる
+        "externalsites.html",   # ← テンプレ名に合わせる（アンダースコア無し）
         sites=sites,
         job_map=job_map,
-        ExternalSEOJobLog=ExternalSEOJobLog
+        ExternalSEOJobLog=ExternalSEOJobLog,
     )
+
 
 
 
@@ -3966,6 +3994,7 @@ def prepare_captcha():
     )
     from app.services.mail_utils.mail_gw import create_inbox
     from app.models import Site, ExternalBlogAccount
+    from app import db
     from flask import session as flask_session, jsonify, request, url_for
     from uuid import uuid4
     import asyncio, logging, time
@@ -3978,19 +4007,24 @@ def prepare_captcha():
     account_id = request.form.get("account_id", type=int)  # ★ 追加
 
     if not site_id or not blog:
-        return jsonify({"error": "site_id または blog が指定されていません"}), 400
+        # 200で契約統一（フロント側は captcha_url の有無で分岐）
+        return jsonify({"captcha_url": None, "error": "site_id または blog が指定されていません",
+                        "site_id": site_id, "account_id": account_id})
 
     site = Site.query.get(site_id)
     if not site or (not current_user.is_admin and site.user_id != current_user.id):
-        return jsonify({"error": "権限がありません"}), 403
+        return jsonify({"captcha_url": None, "error": "権限がありません",
+                        "site_id": site_id, "account_id": account_id})
 
     # ★ 追加：対象アカウントの所有権チェック
     acct = ExternalBlogAccount.query.get(account_id) if account_id else None
     if acct:
         if acct.site_id != site_id:
-            return jsonify({"error": "account_id が site_id に属していません"}), 400
+            return jsonify({"captcha_url": None, "error": "account_id が site_id に属していません",
+                            "site_id": site_id, "account_id": account_id})
         if (not current_user.is_admin) and (acct.site.user_id != current_user.id):
-            return jsonify({"error": "権限がありません"}), 403
+            return jsonify({"captcha_url": None, "error": "権限がありません",
+                            "site_id": site_id, "account_id": account_id})
 
     # 仮登録用データ
     email, token = create_inbox()
@@ -4007,15 +4041,18 @@ def prepare_captcha():
         )
     except Exception:
         logger.exception("[prepare_captcha] CAPTCHA生成で例外が発生")
-        return jsonify({"error": "CAPTCHAの準備に失敗しました"}), 500
+        return jsonify({"captcha_url": None, "error": "CAPTCHAの準備に失敗しました",
+                        "site_id": site_id, "account_id": account_id})
 
     if not result or "filename" not in result:
-        return jsonify({"error": "CAPTCHA画像の取得に失敗しました"}), 500
+        return jsonify({"captcha_url": None, "error": "CAPTCHA画像の取得に失敗しました",
+                        "site_id": site_id, "account_id": account_id})
 
     image_filename = result["filename"]
     image_path = Path(f"app/static/captchas/{image_filename}")
     if (not image_path.exists()) or image_path.stat().st_size == 0:
-        return jsonify({"error": "CAPTCHA画像の保存に失敗しました"}), 500
+        return jsonify({"captcha_url": None, "error": "CAPTCHA画像の保存に失敗しました",
+                        "site_id": site_id, "account_id": account_id})
 
     ts = int(time.time())
     captcha_url = url_for("static", filename=f"captchas/{image_filename}", _external=True) + f"?v={ts}"
@@ -4039,7 +4076,11 @@ def prepare_captcha():
         acct.captcha_image_path = f"captchas/{image_filename}"
         db.session.commit()
 
-    return jsonify({"captcha_url": captcha_url})
+    return jsonify({
+        "captcha_url": captcha_url,
+        "site_id": site_id,
+        "account_id": account_id
+    })
 
 
 @bp.route("/submit_captcha", methods=["POST"])
@@ -4049,6 +4090,7 @@ def submit_captcha():
     from app.services.playwright_controller import get_session, delete_session
     from app.models import Site, ExternalBlogAccount
     from app.utils.captcha_dataset_utils import save_captcha_label_pair
+    from app import db
     from flask import jsonify, session, request
     import asyncio, logging
 
@@ -4060,6 +4102,7 @@ def submit_captcha():
 
     image_filename = session.get("captcha_image_filename")
     if captcha_text and image_filename:
+        # データセット保存（学習用）
         save_captcha_label_pair(image_filename, captcha_text)
 
     # ★ 追加：account_id を受け取り、整合性確認
@@ -4093,12 +4136,14 @@ def submit_captcha():
     try:
         # CAPTCHA送信 → 後続（メール認証/ブログ作成/API取得）まで実行
         result = loop.run_until_complete(
-            submit_captcha_and_complete(page, captcha_text,
-                                        session.get("captcha_email"),
-                                        session.get("captcha_nickname"),
-                                        session.get("captcha_password"),
-                                        session.get("captcha_token"),
-                                        site)
+            submit_captcha_and_complete(
+                page, captcha_text,
+                session.get("captcha_email"),
+                session.get("captcha_nickname"),
+                session.get("captcha_password"),
+                session.get("captcha_token"),
+                site
+            )
         )
 
         if result.get("captcha_success"):
@@ -4111,11 +4156,13 @@ def submit_captcha():
                 acct.api_post_enabled = True
             db.session.commit()
 
-            # ★ 進捗をセッションに保存（テンプレのポーリングで使用）
-            step = ("API取得完了" if result.get("api_key_received")
-                    else "アカウント登録完了" if result.get("account_created")
-                    else "メール認証完了" if result.get("email_verified")
-                    else "CAPTCHA突破完了")
+            # ★ 進捗をセッションに保存（フロントのポーリングで使用）
+            step = (
+                "API取得完了" if result.get("api_key") else
+                "アカウント登録完了" if result.get("account_created") else
+                "メール認証完了" if result.get("email_verified") else
+                "CAPTCHA突破完了"
+            )
 
             session["captcha_status"] = {
                 "captcha_sent": True,
@@ -4136,9 +4183,13 @@ def submit_captcha():
             }), 200
 
         # 失敗時
-        session["captcha_status"] = {"captcha_sent": False, "step": "CAPTCHA認証失敗",
-                                     "site_id": site_id, "account_id": account_id}
-        return jsonify({"status": "captcha_failed"}), 200
+        session["captcha_status"] = {
+            "captcha_sent": False,
+            "step": "CAPTCHA認証失敗",
+            "site_id": site_id,
+            "account_id": account_id
+        }
+        return jsonify({"status": "captcha_failed", "site_id": site_id, "account_id": account_id}), 200
 
     except Exception:
         logger.exception("[submit_captcha] CAPTCHA送信中にエラーが発生しました")
@@ -4164,57 +4215,134 @@ def submit_captcha():
 @login_required
 def get_captcha_status():
     from flask import session, jsonify, request
+    # DBフォールバック用
+    from app.models import ExternalBlogAccount
 
     status = session.get("captcha_status")
+
     # 任意：?account_id=... が来たら整合性チェック
     q_acc = request.args.get("account_id", type=int)
-    if status and q_acc and status.get("account_id") and status["account_id"] != q_acc:
-        # 別アカウントのステータスを見に来た場合は未開始扱い
-        return jsonify({"status": "not_started", "step": "未開始"}), 200
 
-    if not status:
-        return jsonify({"status": "not_started", "step": "未開始"}), 200
+    # セッションがある場合の基本応答
+    if status:
+        if q_acc and status.get("account_id") and status["account_id"] != q_acc:
+            # 別アカウントのステータスを見に来た場合は未開始扱い
+            return jsonify({"status": "not_started", "step": "未開始"}), 200
+        return jsonify(status), 200
 
-    return jsonify(status), 200
+    # ★ セッションが切れても、DBがAPI取得済なら「API取得完了」を返すフォールバック
+    if q_acc:
+        acct = ExternalBlogAccount.query.get(q_acc)
+        if acct and getattr(acct, "atompub_key_enc", None):
+            return jsonify({
+                "captcha_sent": True,
+                "email_verified": True,          # ここは推定（API取得済み前提）
+                "account_created": True,         # 同上
+                "api_key_received": True,
+                "step": "API取得完了",
+                "site_id": getattr(acct, "site_id", None),
+                "account_id": q_acc
+            }), 200
+
+    # 何も情報がない
+    return jsonify({"status": "not_started", "step": "未開始"}), 200
 
 @bp.get("/generate")
 @login_required
 def external_seo_generate_get():
-    from app.models import ExternalBlogAccount
+    from app.models import Site, ExternalBlogAccount, BlogType
     from app.external_seo_generator import generate_external_seo_articles
+    from sqlalchemy import and_
 
     site_id = request.args.get("site_id", type=int)
     account_id = request.args.get("account_id", type=int)
+    # 将来PF拡張を見越して blog_type を受けられるように（無指定は LIVEDOOR）
+    blog_type_param = request.args.get("blog_type", default="livedoor").strip().lower() if request.args.get("blog_type") else "livedoor"
 
-    if not site_id or not account_id:
-        flash("site_id / account_id が不足しています", "danger")
+    if not site_id:
+        flash("site_id が不足しています。", "danger")
         return redirect(url_for("main.external_seo_sites"))
 
-    acct = ExternalBlogAccount.query.get_or_404(account_id)
-    if acct.site_id != site_id:
-        flash("不正なアクセスです（サイト不一致）", "danger")
-        return redirect(url_for("main.external_seo_sites"))
-
-    if (not current_user.is_admin) and (acct.site.user_id != current_user.id):
+    site = Site.query.get_or_404(site_id)
+    # 権限チェック（サイト単位）
+    if (not current_user.is_admin) and (site.user_id != current_user.id):
         abort(403)
 
-    if not acct.atompub_key_enc:
-        flash("APIキーが未取得のため記事生成できません。", "danger")
-        return redirect(url_for("main.external_seo_sites"))
-
+    # blog_type の正規化
     try:
-        generate_external_seo_articles(
-            user_id=current_user.id,
-            site_id=site_id,
-            blog_id=account_id,
-            account=acct
+        # BlogType が Enum で value が "LIVEDOOR" などの場合を想定
+        target_blog_type = getattr(BlogType, blog_type_param.upper())
+    except Exception:
+        # 不明PFなら LIVEDOOR にフォールバック
+        target_blog_type = BlogType.LIVEDOOR
+
+    # 対象アカウントの決定
+    accounts_to_run = []
+    if account_id:
+        acct = ExternalBlogAccount.query.get_or_404(account_id)
+        # サイト整合性
+        if acct.site_id != site_id:
+            flash("不正なアクセスです（サイト不一致）", "danger")
+            return redirect(url_for("main.external_seo_sites"))
+        # ブログ種別整合性（指定があればチェック）
+        if acct.blog_type != target_blog_type:
+            flash("不正なアクセスです（プラットフォーム不一致）", "danger")
+            return redirect(url_for("main.external_seo_sites"))
+        # APIキー必須
+        if not acct.atompub_key_enc:
+            flash("このアカウントはAPIキー未取得のため記事生成できません。", "danger")
+            return redirect(url_for("main.external_seo_sites"))
+        accounts_to_run = [acct]
+    else:
+        # サイト内の“準備OK（api_keyあり）”のみを一括対象
+        accounts_to_run = (
+            ExternalBlogAccount.query
+            .filter(
+                and_(
+                    ExternalBlogAccount.site_id == site_id,
+                    ExternalBlogAccount.blog_type == target_blog_type,
+                    ExternalBlogAccount.atompub_key_enc.isnot(None)
+                )
+            )
+            .all()
         )
-        flash("外部SEO記事の生成を開始しました（100記事・1日10件ペース）", "success")
-    except Exception as e:
-        flash(f"記事生成開始に失敗しました: {str(e)}", "danger")
+        if not accounts_to_run:
+            flash("このサイトで実行可能なアカウント（API取得済）が見つかりませんでした。", "warning")
+            return redirect(url_for("main.external_seo_sites"))
+
+    # 実行（複数アカウントに対してキック）
+    ok, ng = 0, 0
+    failed = []
+    for acct in accounts_to_run:
+        try:
+            generate_external_seo_articles(
+                user_id=current_user.id,
+                site_id=site_id,
+                blog_id=acct.id,   # 既存実装に合わせて account_id を blog_id 引数に渡す
+                account=acct
+            )
+            ok += 1
+        except Exception as e:
+            ng += 1
+            failed.append((acct.id, str(e)))
+
+    # フィードバック
+    if ok and not ng:
+        # 例：「100記事・1日10件ペース」は既存実装のデフォ想定
+        flash(f"{ok}件のアカウントで外部SEO記事の生成を開始しました（100記事・1日10件ペース）", "success")
+    elif ok and ng:
+        flash(f"{ok}件開始 / {ng}件失敗しました。", "warning")
+    else:
+        flash("記事生成の開始に失敗しました。", "danger")
+
+    # 失敗詳細（必要なら軽く通知）
+    if failed:
+        for aid, msg in failed[:3]:  # 長すぎると邪魔なので最大3件
+            flash(f"account_id={aid}: {msg}", "danger")
+        if len(failed) > 3:
+            flash(f"…他 {len(failed)-3}件", "danger")
 
     return redirect(url_for("main.external_seo_sites"))
-
 
 
 from flask import render_template, redirect, url_for, request, session, flash
