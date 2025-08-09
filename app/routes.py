@@ -3784,18 +3784,24 @@ def external_schedule_post_now(schedule_id):
     sched = ExternalArticleSchedule.query.get_or_404(schedule_id)
     acct = sched.blog_account
     site = acct.site
+
+    # 所有権チェック
     if site.user_id != current_user.id and not current_user.is_admin:
         abort(403)
 
-    # 即時投稿用にUTCのnaive datetimeで設定
+    # 直ちに実行対象へ
     sched.scheduled_date = datetime.utcnow()
-    sched.status = "pending"
+    sched.status = "pending"   # ワーカーが拾う状態名に合わせてください
     db.session.commit()
 
-    # 🔹 即時投稿ジョブを直接実行（通常記事と同じ動き）
-    _run_external_post_job(current_app._get_current_object())
+    try:
+        # 既存のワーカー実装に合わせて“今あるpending”を処理
+        _run_external_post_job(current_app._get_current_object())
+        flash("即時投稿を開始しました。しばらくしてページを更新してください。", "success")
+    except Exception as e:
+        current_app.logger.exception("[external] post_now failed")
+        flash(f"即時投稿に失敗しました: {e}", "danger")
 
-    flash("即時投稿が完了しました", "success")
     return redirect(request.referrer or url_for("main.external_account_articles", acct_id=acct.id))
 
 # -----------------------------------------------------------

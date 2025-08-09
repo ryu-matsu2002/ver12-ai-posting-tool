@@ -3,75 +3,108 @@
 {% block title %}外部SEO | 記事一覧{% endblock %}
 
 {% block content %}
-<h2 class="text-2xl font-bold mb-6">
-  ✍️ {{ site.name }} —
-  <span class="px-2 py-1 rounded text-white text-xs
-        {% if acct.blog_type.value == 'note' %}bg-blue-600
-        {% elif acct.blog_type.value == 'blogger' %}bg-orange-600
-        {% else %}bg-gray-600{% endif %}">
+<h2 class="text-2xl font-bold mb-6 flex items-center">
+  📝 {{ site.name }} —
+  <span class="ml-2 px-2 py-0.5 rounded text-white text-xs {% if acct.blog_type.value == 'livedoor' %}bg-orange-600{% elif acct.blog_type.value == 'note' %}bg-blue-600{% else %}bg-gray-600{% endif %}">
     {{ acct.blog_type.value }}
   </span>
   の記事一覧
 </h2>
 
-<a href="{{ url_for('main.external_accounts') }}"
-   class="text-sm text-blue-600 hover:underline mb-4 inline-block">
-  ← アカウント一覧に戻る
-</a>
+<p class="mb-4">
+  <a href="{{ url_for('main.external_accounts', site_id=site.id) }}" class="text-blue-600 hover:underline">← アカウント一覧に戻る</a>
+</p>
 
-<table class="w-full text-sm">
-  <thead class="bg-gray-100 text-left">
+<table class="w-full text-sm border">
+  <thead class="bg-gray-100">
     <tr>
-      <th class="px-3 py-2">検索キーワード</th>
-      <th class="px-3 py-2">投稿予定日</th>
-      <th class="px-3 py-2">Q＆A記事タイトル</th>
-      <th class="px-3 py-2">プレビュー</th>
-      <th class="px-3 py-2">操作</th>
+      <th class="px-3 py-2 text-left">検索キーワード</th>
+      <th class="px-3 py-2 text-left">現在の状態</th>
+      <th class="px-3 py-2 text-left">投稿予定日</th>
+      <th class="px-3 py-2 text-left">Q&amp;A記事タイトル</th>
+      <th class="px-3 py-2 text-left">プレビュー</th>
+      <th class="px-3 py-2 text-right">操作</th>
     </tr>
   </thead>
   <tbody>
-  {% for sched, kw, art in rows %}
-    <tr class="border-b">
-      <td class="px-3 py-2 break-all">{{ kw.keyword }}</td>
-      <td class="px-3 py-2">{{ sched.scheduled_date.strftime('%Y-%m-%d %H:%M') }}</td>
-
-      <td class="px-3 py-2">{{ art.title if art else '-' }}</td>
-
-      <td class="px-3 py-2">
-        {% if art %}
-          <a href="{{ url_for('main.external_article_preview', article_id=art.id) }}"
-             class="text-blue-600 hover:underline" target="_blank">プレビュー</a>
+    {% for sched, kw, art in rows %}
+      {# 状態の決定 #}
+      {% set state = '記事生成中' %}
+      {% if sched.status == 'posted' %}
+        {% set state = '投稿完了' %}
+      {% elif sched.status == 'error' or (art and art.status == 'error') %}
+        {% set state = 'エラー' %}
+      {% elif art %}
+        {% if art.status in ['done'] %}
+          {% set state = '記事生成済み' %}
+        {% else %}
+          {% set state = '記事生成中' %}
         {% endif %}
+      {% endif %}
 
-      </td>
+      {% set badge_classes =
+         'bg-green-100 text-green-700' if state == '投稿完了' else
+         'bg-blue-100 text-blue-700'  if state == '記事生成済み' else
+         'bg-amber-100 text-amber-700' if state == '記事生成中' else
+         'bg-red-100 text-red-700' %}
 
-      <td class="px-3 py-2 space-x-2">
-        {% if art %}
-          <a href="{{ url_for('main.external_article_edit', article_id=art.id) }}"
-             class="px-2 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600">編集</a>
+      {# 表示URLの決定 #}
+      {% set view_url = sched.posted_url or (art and art.posted_url) or None %}
 
-          <form action="{{ url_for('main.external_article_delete', article_id=art.id) }}"
-                method="post" style="display:inline;">
-            <button type="submit" class="px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600"
-                    onclick="return confirm('削除しますか？')">削除</button>
+      <tr class="border-b">
+        <td class="px-3 py-2">{{ kw.keyword }}</td>
+        <td class="px-3 py-2">
+          <span class="px-2 py-1 rounded text-xs font-semibold {{ badge_classes }}">{{ state }}</span>
+        </td>
+        <td class="px-3 py-2">
+          {% if sched.scheduled_date %}{{ sched.scheduled_date.strftime("%Y-%m-%d %H:%M") }}{% endif %}
+        </td>
+        <td class="px-3 py-2">{{ art.title if art else "" }}</td>
+        <td class="px-3 py-2">
+          {% if art %}
+            <a href="{{ url_for('main.external_article_preview', article_id=art.id) }}"
+               class="text-blue-600 hover:underline" target="_blank">プレビュー</a>
+          {% else %}
+            <span class="text-gray-400">—</span>
+          {% endif %}
+        </td>
+        <td class="px-3 py-2 text-right whitespace-nowrap">
+          <a href="{{ url_for('main.external_article_edit', article_id=art.id) if art else '#' }}"
+             class="px-2 py-1 bg-amber-500/90 hover:bg-amber-500 text-white rounded text-xs {% if not art %}pointer-events-none opacity-50{% endif %}">編集</a>
+
+          <form action="{{ url_for('main.external_article_delete', article_id=art.id) if art else '#' }}"
+                method="post" class="inline"
+                onsubmit="return confirm('この記事を削除しますか？');">
+            <button type="submit"
+                    class="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded text-xs {% if not art %}pointer-events-none opacity-50{% endif %}">
+              削除
+            </button>
           </form>
-        {% endif %}
 
-        <form action="{{ url_for('main.external_schedule_post_now', schedule_id=sched.id) }}"
-              method="post" style="display:inline;">
-          <button type="submit" class="px-2 py-1 bg-green-500 text-white rounded hover:bg-green-600">
-            即時投稿
-          </button>
-        </form>
-      </td>
-    </tr>
-  {% else %}
-    <tr>
-      <td colspan="5" class="py-6 text-center text-gray-500">
-        記事がありません
-      </td>
-    </tr>
-  {% endfor %}
+          {% if state == '投稿完了' %}
+            {% if view_url %}
+              <a href="{{ view_url }}" target="_blank"
+                 class="ml-1 px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs">
+                記事表示
+              </a>
+            {% elif art %}
+              <a href="{{ url_for('main.external_article_preview', article_id=art.id) }}" target="_blank"
+                 class="ml-1 px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs">
+                記事表示
+              </a>
+            {% endif %}
+          {% else %}
+            <form action="{{ url_for('main.external_schedule_post_now', schedule_id=sched.id) }}"
+                  method="post" class="inline">
+              <button type="submit"
+                      class="ml-1 px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs">
+                即時投稿
+              </button>
+            </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
   </tbody>
 </table>
 {% endblock %}
