@@ -3581,18 +3581,18 @@ import asyncio, json, time
 @bp.route("/external/accounts")
 @login_required
 def external_accounts():
-    from app.models import ExternalBlogAccount, Site
+    from app.models import ExternalBlogAccount, Site, ExternalArticleSchedule
     from app.services.blog_signup.crypto_utils import decrypt
-    from sqlalchemy import or_
+    from sqlalchemy import or_, func, case
+    from sqlalchemy.orm import aliased
 
-    # 🔍 クエリパラメータ取得
     blog_type = request.args.get("blog_type")
-    sort = request.args.get("sort")
-    search = request.args.get("q", "").strip()
-    site_id = request.args.get("site_id", type=int)
+    sort      = request.args.get("sort")
+    search    = request.args.get("q", "").strip()
+    site_id   = request.args.get("site_id", type=int)
 
-    # 🔗 JOINして current_user に紐づくサイト or site_id=None の外部アカウント取得
-    query = (
+    # ベース：ユーザーに紐づくアカウント
+    base = (
         db.session.query(ExternalBlogAccount)
         .outerjoin(Site, ExternalBlogAccount.site_id == Site.id)
         .filter(
@@ -3600,38 +3600,58 @@ def external_accounts():
             (Site.user_id == current_user.id)
         )
     )
-
-    # 💡 サイトIDによるフィルター
     if site_id:
-        query = query.filter(ExternalBlogAccount.site_id == site_id)
-
-    # 💡 ブログ種別フィルター
+        base = base.filter(ExternalBlogAccount.site_id == site_id)
     if blog_type:
-        query = query.filter(ExternalBlogAccount.blog_type == blog_type)
-
-    # 🔍 メール or ニックネーム検索
+        base = base.filter(ExternalBlogAccount.blog_type == blog_type)
     if search:
-        query = query.filter(
-            or_(
-                ExternalBlogAccount.email.ilike(f"%{search}%"),
-                ExternalBlogAccount.nickname.ilike(f"%{search}%")
-            )
+        base = base.filter(or_(
+            ExternalBlogAccount.email.ilike(f"%{search}%"),
+            ExternalBlogAccount.nickname.ilike(f"%{search}%"),
+            ExternalBlogAccount.username.ilike(f"%{search}%"),
+        ))
+
+    # 集計JOIN
+    S = aliased(ExternalArticleSchedule)
+    q = (
+        db.session.query(
+            ExternalBlogAccount,
+            func.count(S.id).label("total_cnt"),
+            func.sum(case((S.status == "posted", 1), else_=0)).label("posted_cnt"),
+            # 生成済み: article_idがある想定。無い場合は status IN (...) に変更
+            func.sum(case((S.article_id != None, 1), else_=0)).label("generated_cnt")  # noqa: E711
         )
+        .select_from(ExternalBlogAccount)
+        .outerjoin(S, S.blog_account_id == ExternalBlogAccount.id)
+        .filter(base.whereclause)  # 上のフィルタを適用
+        .group_by(ExternalBlogAccount.id)
+    )
 
-    # 📊 投稿数ソート
+    # ソート
     if sort == "posted_desc":
-        query = query.order_by(ExternalBlogAccount.posted_cnt.desc())  # ← 修正
+        q = q.order_by(func.coalesce(func.sum(case((S.status == "posted", 1), else_=0)), 0).desc())
     elif sort == "posted_asc":
-        query = query.order_by(ExternalBlogAccount.posted_cnt.asc())   # ← 修正
-    else:
-        query = query.order_by(ExternalBlogAccount.created_at.desc())
+        q = q.order_by(func.coalesce(func.sum(case((S.status == "posted", 1), else_=0)), 0).asc())
+    elif sort == "generated_desc":
+        q = q.order_by(func.coalesce(func.sum(case((S.article_id != None, 1), else_=0)), 0).desc())
+    elif sort == "generated_asc":
+        q = q.order_by(func.coalesce(func.sum(case((S.article_id != None, 1), else_=0)), 0).asc())
+    elif sort == "total_asc":
+        q = q.order_by(func.count(S.id).asc())
+    else:  # default
+        q = q.order_by(func.count(S.id).desc())  # total_desc
 
+    rows = q.all()
 
-    accts = query.all()
+    # テンプレへ：各accに属性として乗せる
+    accts = []
+    for acc, total_cnt, posted_cnt, generated_cnt in rows:
+        acc.total_cnt     = int(total_cnt or 0)
+        acc.posted_cnt    = int(posted_cnt or 0)
+        acc.generated_cnt = int(generated_cnt or 0)
+        accts.append(acc)
 
-    # 🔽 サイト一覧（ユーザーに紐づくサイトのみ）
     all_sites = Site.query.filter_by(user_id=current_user.id).all()
-
     return render_template(
         "external_accounts.html",
         accts=accts,
@@ -3642,6 +3662,7 @@ def external_accounts():
         selected_sort=sort,
         search_query=search
     )
+
 
 
 @bp.route("/external/account/<int:acct_id>/articles")
@@ -3872,7 +3893,7 @@ def admin_blog_login():
 
 
 # -----------------------------------------------------------
-# ワンクリックログイン (Note)
+# ワンクリックログイン 
 # -----------------------------------------------------------
 @bp.route("/external/login/<int:acct_id>")
 @login_required
@@ -3881,26 +3902,38 @@ def blog_one_click_login(acct_id):
     if not (current_user.is_admin or acct.site.user_id == current_user.id):
         abort(403)
 
-    if acct.blog_type != BlogType.NOTE:
+    from app.services.blog_signup.crypto_utils import decrypt
+
+    if acct.blog_type == BlogType.NOTE:
+        from app.services.blog_signup.note_login import get_note_cookies
+        cookies = asyncio.run(get_note_cookies(decrypt(acct.email), decrypt(acct.password)))
+        resp = make_response(redirect("https://note.com"))
+        for c in cookies:
+            resp.set_cookie(
+                key=c["name"], value=c["value"],
+                domain=".note.com", path="/", secure=True, httponly=True,
+                samesite="Lax", expires=int(time.time()) + 60*60
+            )
+        return resp
+
+    elif acct.blog_type == BlogType.LIVEDOOR:
+        # ★ 追加：Livedoor対応
+        from app.services.blog_signup.livedoor_login import get_livedoor_cookies
+        cookies = asyncio.run(get_livedoor_cookies(decrypt(acct.email), decrypt(acct.password)))
+        # 管理画面側に入れる
+        resp = make_response(redirect("https://livedoor.blogcms.jp/member/"))
+        for c in cookies:
+            resp.set_cookie(
+                key=c["name"], value=c["value"],
+                domain=c.get("domain", ".livedoor.com"),
+                path="/", secure=True, httponly=True,
+                samesite="Lax", expires=int(time.time()) + 60*60
+            )
+        return resp
+
+    else:
         abort(400, "Login not supported yet")
 
-    # Playwright で Note にログイン → cookie を取得
-    from app.services.blog_signup.note_login import get_note_cookies
-    cookies = asyncio.run(get_note_cookies(decrypt(acct.email), decrypt(acct.password)))
-
-    resp = make_response(redirect("https://note.com"))
-    for c in cookies:
-        resp.set_cookie(
-            key=c["name"],
-            value=c["value"],
-            domain=".note.com",
-            path="/",
-            secure=True,
-            httponly=True,
-            samesite="Lax",
-            expires=int(time.time()) + 60*60
-        )
-    return resp
 
 
 @bp.route("/prepare_captcha", methods=["POST"])

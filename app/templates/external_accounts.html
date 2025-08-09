@@ -7,7 +7,7 @@
   🚀 外部無料ブログアカウント一覧
 </h2>
 
-<!-- ✅ フィルター・ソートフォーム -->
+{# ── フィルター ── #}
 <form method="get" class="mb-6 flex items-center space-x-4">
   <label for="site_id" class="text-sm font-medium">サイトで絞り込み：</label>
   <select name="site_id" id="site_id" class="border rounded px-2 py-1 text-sm">
@@ -18,11 +18,21 @@
       </option>
     {% endfor %}
   </select>
+  {# 既存の他パラメータがあれば温存 #}
+  {% if selected_blog_type %}<input type="hidden" name="blog_type" value="{{ selected_blog_type }}">{% endif %}
+  {% if selected_sort %}<input type="hidden" name="sort" value="{{ selected_sort }}">{% endif %}
+  {% if search_query %}<input type="hidden" name="q" value="{{ search_query }}">{% endif %}
   <button type="submit"
           class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded">
     絞り込む
   </button>
 </form>
+
+{# ── ソートトグル計算 ── #}
+{% set current_sort = selected_sort or request.args.get('sort') %}
+{% set posted_toggle    = 'posted_asc'    if current_sort == 'posted_desc'    else 'posted_desc' %}
+{% set generated_toggle = 'generated_asc' if current_sort == 'generated_desc' else 'generated_desc' %}
+{% set total_toggle     = 'total_asc'     if current_sort == 'total_desc'     else 'total_desc' %}
 
 {% set has_accounts = false %}
 
@@ -37,53 +47,94 @@
         <tr>
           <th class="px-3 py-2">ブログ</th>
           <th class="px-3 py-2">メール</th>
-          <th class="px-3 py-2 text-center">投稿済</th>
-          <th class="px-3 py-2 text-center">予定</th>
-          <th class="px-3 py-2 w-48">進捗</th>
+
+          {# ▼ 進捗列は削除し、数値3列に変更 #}
+          <th class="px-3 py-2 text-right">
+            <a class="hover:underline"
+               href="{{ url_for('main.external_accounts',
+                                site_id=site_id,
+                                blog_type=selected_blog_type,
+                                q=search_query,
+                                sort=posted_toggle) }}">
+              投稿完了
+              {% if current_sort and current_sort.startswith('posted_') %}
+                {% if current_sort.endswith('desc') %}⬇{% else %}⬆{% endif %}
+              {% else %}↕{% endif %}
+            </a>
+          </th>
+          <th class="px-3 py-2 text-right">
+            <a class="hover:underline"
+               href="{{ url_for('main.external_accounts',
+                                site_id=site_id,
+                                blog_type=selected_blog_type,
+                                q=search_query,
+                                sort=generated_toggle) }}">
+              記事生成済み
+              {% if current_sort and current_sort.startswith('generated_') %}
+                {% if current_sort.endswith('desc') %}⬇{% else %}⬆{% endif %}
+              {% else %}↕{% endif %}
+            </a>
+          </th>
+          <th class="px-3 py-2 text-right">
+            <a class="hover:underline"
+               href="{{ url_for('main.external_accounts',
+                                site_id=site_id,
+                                blog_type=selected_blog_type,
+                                q=search_query,
+                                sort=total_toggle) }}">
+              総記事数
+              {% if current_sort and current_sort.startswith('total_') %}
+                {% if current_sort.endswith('desc') %}⬇{% else %}⬆{% endif %}
+              {% else %}↕{% endif %}
+            </a>
+          </th>
+
           <th class="px-3 py-2">記事一覧</th>
           <th class="px-3 py-2 text-right">操作</th>
         </tr>
       </thead>
       <tbody>
         {% for a in site_accounts %}
-          {% set scheduled = a.schedules|length %}
-          {% set posted = a.posted_cnt %}
-          {% set pct = (100 * posted / (scheduled if scheduled else 1)) | round(1) %}
+          {# サーバ側が付けた集計属性が無い環境でも安全に表示 #}
+          {% set posted    = a.posted_cnt or 0 %}
+          {% set generated = a.generated_cnt or 0 %}
+          {% if a.total_cnt is not none %}
+            {% set total = a.total_cnt %}
+          {% elif a.schedules is defined %}
+            {% set total = a.schedules|length %}
+          {% else %}
+            {% set total = posted + generated %}
+          {% endif %}
+
           <tr class="border-b">
             <td class="px-3 py-2">
               <span class="px-2 py-1 rounded text-white text-xs
                     {% if a.blog_type.value == 'note' %} bg-blue-600
                     {% elif a.blog_type.value == 'ameba' %} bg-green-600
+                    {% elif a.blog_type.value == 'livedoor' %} bg-orange-600
                     {% else %} bg-gray-600 {% endif %}">
                 {{ a.blog_type.value }}
               </span>
             </td>
+
             <td class="px-3 py-2 font-mono truncate max-w-[220px]">
               {{ decrypt(a.email) }}
             </td>
-            <td class="px-3 py-2 text-center">{{ posted }}</td>
-            <td class="px-3 py-2 text-center">{{ scheduled }}</td>
-            <td class="px-3 py-2">
-              <div class="flex items-center space-x-2">
-                <div class="flex-1 h-2 bg-gray-200 rounded">
-                  <div class="h-2 bg-emerald-600 rounded"
-                       style="width: {{ pct }}%;"></div>
-                </div>
-                <span class="text-xs text-gray-500 w-10 text-right">{{ pct }}%</span>
-              </div>
-            </td>
+
+            <td class="px-3 py-2 text-right">{{ posted }}</td>
+            <td class="px-3 py-2 text-right">{{ generated }}</td>
+            <td class="px-3 py-2 text-right">{{ total }}</td>
+
             <td class="px-3 py-2">
               <a href="{{ url_for('main.external_account_articles', acct_id=a.id) }}"
                  class="text-blue-600 hover:underline">記事一覧</a>
             </td>
+
             <td class="px-3 py-2 text-right whitespace-nowrap">
-              <form action="{{ url_for('main.blog_one_click_login', acct_id=a.id) }}"
-                    method="get" class="inline">
-                <button type="submit"
-                        class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs">
-                  ログイン
-                </button>
-              </form>
+              <a href="{{ url_for('main.blog_one_click_login', acct_id=a.id) }}"
+                 class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs inline-block">
+                ログイン
+              </a>
               <button type="button"
                       class="ml-2 px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-xs copy-cred"
                       data-user="{{ a.username }}"
@@ -114,4 +165,3 @@ document.querySelectorAll('.copy-cred').forEach(btn => {
 });
 </script>
 {% endblock %}
-
