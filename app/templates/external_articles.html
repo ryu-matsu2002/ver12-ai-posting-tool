@@ -28,9 +28,14 @@
   </thead>
   <tbody>
     {% for sched, kw, art in rows %}
-      {# 状態の決定 #}
+      {# 表示URLの決定（まずURLを確定させる） #}
+      {% set view_url = sched.posted_url or (art and art.posted_url) or None %}
+
+      {# 状態の決定（順番が重要：URLがあれば最優先で「投稿完了」） #}
       {% set state = '記事生成中' %}
-      {% if sched.status == 'posted' %}
+      {% if view_url %}
+        {% set state = '投稿完了' %}
+      {% elif sched.status == 'posted' %}
         {% set state = '投稿完了' %}
       {% elif sched.status == 'error' or (art and art.status == 'error') %}
         {% set state = 'エラー' %}
@@ -47,9 +52,6 @@
          'bg-blue-100 text-blue-700'  if state == '記事生成済み' else
          'bg-amber-100 text-amber-700' if state == '記事生成中' else
          'bg-red-100 text-red-700' %}
-
-      {# 表示URLの決定 #}
-      {% set view_url = sched.posted_url or (art and art.posted_url) or None %}
 
       <tr class="border-b">
         <td class="px-3 py-2">{{ kw.keyword }}</td>

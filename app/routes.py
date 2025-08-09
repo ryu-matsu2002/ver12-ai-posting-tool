@@ -3778,7 +3778,7 @@ def external_article_delete(article_id):
 def external_schedule_post_now(schedule_id):
     from app.models import ExternalArticleSchedule
     from datetime import datetime
-    from app.tasks import _run_external_post_job
+    from app.external_seo_generator import _run_external_post_job
     from flask import current_app
 
     sched = ExternalArticleSchedule.query.get_or_404(schedule_id)

@@ -143,6 +143,8 @@ def generate_external_seo_articles(user_id: int, site_id: int, blog_id: int, acc
 
     # 2. テスト用: 1記事だけ、2分後に投稿
     scheduled_time = (datetime.now(JST) + timedelta(minutes=2)).astimezone(timezone.utc)
+    scheduled_time_naive = scheduled_time.replace(tzinfo=None)  # ★ 追加
+
 
     def _bg():
         with app.app_context():
@@ -206,7 +208,7 @@ def generate_external_seo_articles(user_id: int, site_id: int, blog_id: int, acc
                 sched = ExternalArticleSchedule(
                     blog_account_id=blog_account_id,
                     keyword_id=keyword_obj.id,
-                    scheduled_date=scheduled_time,
+                    scheduled_date=scheduled_time_naive,
                     status="pending"
                 )
                 db.session.add(sched)  # bulk_save_objectsではなくadd
@@ -389,12 +391,13 @@ def generate_and_schedule_external_articles(
                     microsecond=0,
                 )
                 when_utc = when_jst.astimezone(timezone.utc)
+                when_naive = when_utc.replace(tzinfo=None)  # ★ 追加
 
                 # スケジュール登録（Keyword に紐付け）
                 sched = ExternalArticleSchedule(
                     blog_account_id=blog_account_id,
                     keyword_id=kobj.id,
-                    scheduled_date=when_utc,
+                    scheduled_date=when_naive,        # ★ 差し替え
                     status="pending",
                 )
                 db.session.add(sched)
