@@ -3395,16 +3395,17 @@ def external_seo_sites():
     from sqlalchemy.orm import selectinload
     from sqlalchemy import func
 
-    # 1. サイトと外部ジョブを一括取得
+    # 1. サイト + 外部ジョブ + アカウントを一括ロード
     sites = (Site.query
              .filter_by(user_id=current_user.id)
-             .options(selectinload(Site.external_jobs))
+             .options(
+                 selectinload(Site.external_jobs),
+                 selectinload(Site.external_accounts)      # ★ 追加：アカウントを一緒に取得
+             )
              .all())
 
-    # 2. job_map 初期化
-    job_map = {}
-    key_set = set()
-
+    # 2. job_map（既存ロジックのまま）
+    job_map, key_set = {}, set()
     for s in sites:
         for job in s.external_jobs:
             if job.status == "archived":
@@ -3413,7 +3414,7 @@ def external_seo_sites():
             key_set.add(key)
             job_map[(s.id, job.blog_type.value.lower())] = job
 
-    # 3. 投稿済み件数集計
+    # 3. 投稿済み件数（既存ロジックのまま）
     posted_counts = (
         db.session.query(
             ExternalBlogAccount.site_id,
@@ -3424,56 +3425,45 @@ def external_seo_sites():
               ExternalArticleSchedule.blog_account_id == ExternalBlogAccount.id)
         .filter(
             ExternalArticleSchedule.status == "posted",
-            ExternalBlogAccount.site_id.in_([sid for sid, _ in key_set]),
-            ExternalBlogAccount.blog_type.in_([bt for _, bt in key_set])
+            ExternalBlogAccount.site_id.in_([sid for sid, _ in key_set]) if key_set else True,
+            ExternalBlogAccount.blog_type.in_([bt for _, bt in key_set]) if key_set else True
         )
         .group_by(ExternalBlogAccount.site_id, ExternalBlogAccount.blog_type)
         .all()
     )
-
     for site_id, blog_type, cnt in posted_counts:
         key = (site_id, blog_type.value.lower())
         if key in job_map:
             job_map[key].posted_cnt = cnt
-
     for job in job_map.values():
         if not hasattr(job, "posted_cnt"):
             job.posted_cnt = 0
 
-    # 4. CAPTCHA突破＆API取得状況を一括取得
-    accounts = (
-        db.session.query(
-            ExternalBlogAccount.id.label("account_id"),  # ← blog_id 用
-            ExternalBlogAccount.site_id,
-            ExternalBlogAccount.blog_type,
-            ExternalBlogAccount.is_captcha_completed,
-            ExternalBlogAccount.atompub_key_enc
-        )
-        .filter(
-            ExternalBlogAccount.site_id.in_([sid for sid, _ in key_set]),
-            ExternalBlogAccount.blog_type.in_([bt for _, bt in key_set])
-        )
-        .all()
-    )
-
-    # 5. 各サイトオブジェクトに属性追加（APIキーと blog_id をセット）
+    # 4. 各サイトに「Livedoorアカウント配列」を付与（テンプレが参照）
     for s in sites:
-        s.is_captcha_completed = False
-        s.api_key = None
-        s.blog_id = None
-        for acc_id, acc_site_id, acc_blog_type, is_captcha_completed, atompub_key_enc in accounts:
-            if s.id == acc_site_id and acc_blog_type.value.lower() == "livedoor":
-                s.is_captcha_completed = bool(is_captcha_completed)
-                s.api_key = atompub_key_enc
-                s.blog_id = acc_id  # ★ ここで blog_id をセット
-                break
+        livedoor_accounts = []
+        for acc in (s.external_accounts or []):
+            if acc.blog_type != BlogType.LIVEDOOR:
+                continue
+            # テンプレが参照する別名プロパティを付与
+            setattr(acc, "captcha_done", bool(acc.is_captcha_completed))
+            setattr(acc, "api_key", acc.atompub_key_enc)  # truthy ならOK
+            # 表示名：nickname > username > livedoor_blog_id > account#id
+            title = acc.nickname or acc.username or acc.livedoor_blog_id or f"account#{acc.id}"
+            setattr(acc, "blog_title", title)
+            # 公開URL（不明なら None のままでOK／テンプレは存在チェック）
+            setattr(acc, "public_url", None)
+            livedoor_accounts.append(acc)
+        # テンプレが読む配列
+        s.livedoor_accounts = livedoor_accounts
 
     return render_template(
-        "external_sites.html",  # 実際のテンプレ名
+        "external_sites.html",     # ← あなたのテンプレ名に合わせる
         sites=sites,
         job_map=job_map,
         ExternalSEOJobLog=ExternalSEOJobLog
     )
+
 
 
 @bp.post("/external/start")
@@ -3917,93 +3907,82 @@ def blog_one_click_login(acct_id):
 @login_required
 def prepare_captcha():
     from app.services.blog_signup.livedoor_signup import (
-        generate_safe_id,
-        generate_safe_password,
-        launch_livedoor_and_capture_captcha  # ✅ 追加：セッション付き画像取得関数
+        generate_safe_id, generate_safe_password, launch_livedoor_and_capture_captcha
     )
     from app.services.mail_utils.mail_gw import create_inbox
-    from app.models import Site
-    from app.services.playwright_controller import store_session  # ✅ 追加
-    from flask import session as flask_session  # ✅ Flaskセッション用
-    import asyncio
-    import logging
-    from pathlib import Path
-    import time
+    from app.models import Site, ExternalBlogAccount
+    from flask import session as flask_session, jsonify, request, url_for
     from uuid import uuid4
+    import asyncio, logging, time
+    from pathlib import Path
 
     logger = logging.getLogger(__name__)
 
-    site_id = request.form.get("site_id", type=int)
-    blog = request.form.get("blog")  # 例: livedoor
+    site_id    = request.form.get("site_id", type=int)
+    blog       = request.form.get("blog")  # "livedoor"
+    account_id = request.form.get("account_id", type=int)  # ★ 追加
 
     if not site_id or not blog:
         return jsonify({"error": "site_id または blog が指定されていません"}), 400
 
     site = Site.query.get(site_id)
-    if not site:
-        return jsonify({"error": "site が見つかりません"}), 404
+    if not site or (not current_user.is_admin and site.user_id != current_user.id):
+        return jsonify({"error": "権限がありません"}), 403
 
-    # ✅ 仮登録用データ生成
+    # ★ 追加：対象アカウントの所有権チェック
+    acct = ExternalBlogAccount.query.get(account_id) if account_id else None
+    if acct:
+        if acct.site_id != site_id:
+            return jsonify({"error": "account_id が site_id に属していません"}), 400
+        if (not current_user.is_admin) and (acct.site.user_id != current_user.id):
+            return jsonify({"error": "権限がありません"}), 403
+
+    # 仮登録用データ
     email, token = create_inbox()
     nickname = generate_safe_id()
     password = generate_safe_password()
 
-    # ✅ CAPTCHA画像生成：セッション付き
     session_id = str(uuid4())
     try:
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import nest_asyncio
-                nest_asyncio.apply()
-                result = loop.run_until_complete(
-                    launch_livedoor_and_capture_captcha(email, nickname, password, session_id)
-                )
-            else:
-                result = loop.run_until_complete(
-                    launch_livedoor_and_capture_captcha(email, nickname, password, session_id)
-                )
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            result = loop.run_until_complete(
-                launch_livedoor_and_capture_captcha(email, nickname, password, session_id)
-            )
-    except Exception as e:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import nest_asyncio; nest_asyncio.apply()
+        result = loop.run_until_complete(
+            launch_livedoor_and_capture_captcha(email, nickname, password, session_id)
+        )
+    except Exception:
         logger.exception("[prepare_captcha] CAPTCHA生成で例外が発生")
         return jsonify({"error": "CAPTCHAの準備に失敗しました"}), 500
 
     if not result or "filename" not in result:
-        logger.error("[prepare_captcha] CAPTCHA生成結果が不正またはファイル名なし")
         return jsonify({"error": "CAPTCHA画像の取得に失敗しました"}), 500
 
     image_filename = result["filename"]
     image_path = Path(f"app/static/captchas/{image_filename}")
-
-    # ✅ 画像ファイルの存在と破損（0バイト）チェック
-    if not image_path.exists() or image_path.stat().st_size == 0:
-        logger.error("[prepare_captcha] CAPTCHA画像ファイルが存在しないか空です: %s", image_filename)
+    if (not image_path.exists()) or image_path.stat().st_size == 0:
         return jsonify({"error": "CAPTCHA画像の保存に失敗しました"}), 500
 
-    # ✅ キャッシュバスター（timestamp）付きURL
-    timestamp = int(time.time())
-    captcha_url = url_for("static", filename=f"captchas/{image_filename}", _external=True) + f"?v={timestamp}"
+    ts = int(time.time())
+    captcha_url = url_for("static", filename=f"captchas/{image_filename}", _external=True) + f"?v={ts}"
 
-    # ✅ セッションに一連の登録情報を保存（session_id も含む）
-    try:
-        flask_session.update({
-            "captcha_email": email,
-            "captcha_nickname": nickname,
-            "captcha_password": password,
-            "captcha_token": token,
-            "captcha_site_id": site_id,
-            "captcha_blog": blog,
-            "captcha_image_filename": image_filename,
-            "captcha_session_id": session_id  # ✅ 新たに保存
-        })
-    except Exception as e:
-        logger.exception("[prepare_captcha] セッション保存時にエラー")
-        return jsonify({"error": "セッション保存エラー"}), 500
+    # セッション保存（★ account も保持）
+    flask_session.update({
+        "captcha_email": email,
+        "captcha_nickname": nickname,
+        "captcha_password": password,
+        "captcha_token": token,
+        "captcha_site_id": site_id,
+        "captcha_blog": blog,
+        "captcha_image_filename": image_filename,
+        "captcha_session_id": session_id,
+        "captcha_account_id": account_id,  # ★ 追加
+    })
+
+    # ★ 任意：DBにも紐付け（ログ用途）
+    if acct:
+        acct.captcha_session_id = session_id
+        acct.captcha_image_path = f"captchas/{image_filename}"
+        db.session.commit()
 
     return jsonify({"captcha_url": captcha_url})
 
@@ -4013,139 +3992,174 @@ def prepare_captcha():
 def submit_captcha():
     from app.services.blog_signup.livedoor_signup import submit_captcha_and_complete
     from app.services.playwright_controller import get_session, delete_session
-    from app.models import Site
+    from app.models import Site, ExternalBlogAccount
     from app.utils.captcha_dataset_utils import save_captcha_label_pair
-    import asyncio
-    import logging
     from flask import jsonify, session, request
-    from pathlib import Path
+    import asyncio, logging
 
     logger = logging.getLogger(__name__)
 
-    # ✅ ユーザー入力を取得
     captcha_text = request.form.get("captcha_text")
-    image_filename = session.get("captcha_image_filename")
-    session_id = session.get("captcha_session_id")
-
     if not captcha_text:
         return jsonify({"status": "error", "message": "CAPTCHA文字列が入力されていません"}), 400
 
-    # ✅ CAPTCHA画像と入力をセットで保存（学習データ用途）
+    image_filename = session.get("captcha_image_filename")
     if captcha_text and image_filename:
         save_captcha_label_pair(image_filename, captcha_text)
 
-    # ✅ セッションに保存していた登録情報を取得
-    email = session.get("captcha_email")
-    nickname = session.get("captcha_nickname")
-    password = session.get("captcha_password")
-    token = session.get("captcha_token")
+    # ★ 追加：account_id を受け取り、整合性確認
+    account_id = request.form.get("account_id", type=int) or session.get("captcha_account_id")
     site_id = session.get("captcha_site_id")
-    blog = session.get("captcha_blog")
+    session_id = session.get("captcha_session_id")
 
-    if not all([email, nickname, password, token, site_id, blog, session_id]):
+    if not all([site_id, session_id, account_id]):
         return jsonify({"status": "error", "message": "セッション情報が不足しています"}), 400
 
-    # ✅ サイト取得
     site = Site.query.get(site_id)
-    if not site:
-        return jsonify({"status": "error", "message": "対象サイトが存在しません"}), 404
+    acct = ExternalBlogAccount.query.get(account_id)
+    if not site or not acct or acct.site_id != site_id:
+        return jsonify({"status": "error", "message": "対象が不正です"}), 400
+    if (not current_user.is_admin) and (site.user_id != current_user.id):
+        return jsonify({"status": "error", "message": "権限がありません"}), 403
 
-    # ✅ CAPTCHAセッションから Playwrightページ取得
+    # CAPTCHAセッションから Playwrightページ取得
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            import nest_asyncio
-            nest_asyncio.apply()
-            page = loop.run_until_complete(get_session(session_id))
-        else:
-            page = loop.run_until_complete(get_session(session_id))
+            import nest_asyncio; nest_asyncio.apply()
+        page = loop.run_until_complete(get_session(session_id))
     except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop)
         page = loop.run_until_complete(get_session(session_id))
 
     if not page:
-        logger.error("[submit_captcha] Playwrightセッションが見つかりません")
         return jsonify({"status": "error", "message": "セッションが切れています"}), 400
 
     try:
-        # ✅ CAPTCHA入力と送信（Playwrightページに直接送信）
-        try:
-            if loop.is_running():
-                result = loop.run_until_complete(
-                    submit_captcha_and_complete(page, captcha_text, email, nickname, password, token, site)
-                )
-            else:
-                result = loop.run_until_complete(
-                    submit_captcha_and_complete(page, captcha_text, email, nickname, password, token, site)
-                )
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            result = loop.run_until_complete(
-                submit_captcha_and_complete(page, captcha_text, email, nickname, password, token, site)
-            )
+        # CAPTCHA送信 → 後続（メール認証/ブログ作成/API取得）まで実行
+        result = loop.run_until_complete(
+            submit_captcha_and_complete(page, captcha_text,
+                                        session.get("captcha_email"),
+                                        session.get("captcha_nickname"),
+                                        session.get("captcha_password"),
+                                        session.get("captcha_token"),
+                                        site)
+        )
 
         if result.get("captcha_success"):
-            # ✅ 外部ブログ情報保存
-            session["external_blog_info"] = result
+            # ★ DB更新（進捗 & API情報）
+            acct.is_captcha_completed = True
+            if result.get("blog_id"):
+                acct.livedoor_blog_id = result["blog_id"]
+            if result.get("api_key"):
+                acct.atompub_key_enc = result["api_key"]
+                acct.api_post_enabled = True
+            db.session.commit()
 
-            # ✅ 状態進捗をセッションに保存
+            # ★ 進捗をセッションに保存（テンプレのポーリングで使用）
+            step = ("API取得完了" if result.get("api_key_received")
+                    else "アカウント登録完了" if result.get("account_created")
+                    else "メール認証完了" if result.get("email_verified")
+                    else "CAPTCHA突破完了")
+
             session["captcha_status"] = {
                 "captcha_sent": True,
                 "email_verified": result.get("email_verified", False),
                 "account_created": result.get("account_created", False),
-                "api_key_received": result.get("api_key_received", False),
-                "step": (
-                    "API取得完了" if result.get("api_key_received")
-                    else "アカウント登録完了" if result.get("account_created")
-                    else "メール認証完了" if result.get("email_verified")
-                    else "CAPTCHA突破完了"
-                ),
-                "site_id": site_id  # ✅ ← この1行を追加してください
+                "api_key_received": bool(result.get("api_key")),
+                "step": step,
+                "site_id": site_id,
+                "account_id": account_id,  # ★ 追加
             }
 
-            return jsonify(result), 200
+            # フロント用の最小レスポンス
+            return jsonify({
+                "status": "captcha_success",
+                "step": step,
+                "site_id": site_id,
+                "account_id": account_id
+            }), 200
 
-        else:
-            session["captcha_status"] = {
-                "captcha_sent": False,
-                "step": "CAPTCHA認証失敗"
-            }
-            return jsonify({"status": "captcha_failed", "message": "CAPTCHA認証に失敗しました"}), 200
+        # 失敗時
+        session["captcha_status"] = {"captcha_sent": False, "step": "CAPTCHA認証失敗",
+                                     "site_id": site_id, "account_id": account_id}
+        return jsonify({"status": "captcha_failed"}), 200
 
-
-    except Exception as e:
+    except Exception:
         logger.exception("[submit_captcha] CAPTCHA送信中にエラーが発生しました")
         return jsonify({"status": "error", "message": "CAPTCHA送信に失敗しました"}), 500
 
     finally:
-        # ✅ Playwrightセッションの破棄
+        # セッション破棄
         try:
             if loop.is_running():
                 loop.run_until_complete(delete_session(session_id))
             else:
                 loop.run_until_complete(delete_session(session_id))
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(delete_session(session_id))
+        except Exception:
+            pass
 
-        # ✅ セッションの掃除（captcha_ で始まるキーすべて削除）
+        # captcha_* を掃除
         for key in list(session.keys()):
             if key.startswith("captcha_"):
                 session.pop(key)
 
+
 @bp.route("/captcha_status", methods=["GET"])
 @login_required
 def get_captcha_status():
-    from flask import session, jsonify
+    from flask import session, jsonify, request
 
     status = session.get("captcha_status")
+    # 任意：?account_id=... が来たら整合性チェック
+    q_acc = request.args.get("account_id", type=int)
+    if status and q_acc and status.get("account_id") and status["account_id"] != q_acc:
+        # 別アカウントのステータスを見に来た場合は未開始扱い
+        return jsonify({"status": "not_started", "step": "未開始"}), 200
+
     if not status:
         return jsonify({"status": "not_started", "step": "未開始"}), 200
 
     return jsonify(status), 200
+
+@bp.get("/generate")
+@login_required
+def external_seo_generate_get():
+    from app.models import ExternalBlogAccount
+    from app.external_seo_generator import generate_external_seo_articles
+
+    site_id = request.args.get("site_id", type=int)
+    account_id = request.args.get("account_id", type=int)
+
+    if not site_id or not account_id:
+        flash("site_id / account_id が不足しています", "danger")
+        return redirect(url_for("main.external_seo_sites"))
+
+    acct = ExternalBlogAccount.query.get_or_404(account_id)
+    if acct.site_id != site_id:
+        flash("不正なアクセスです（サイト不一致）", "danger")
+        return redirect(url_for("main.external_seo_sites"))
+
+    if (not current_user.is_admin) and (acct.site.user_id != current_user.id):
+        abort(403)
+
+    if not acct.atompub_key_enc:
+        flash("APIキーが未取得のため記事生成できません。", "danger")
+        return redirect(url_for("main.external_seo_sites"))
+
+    try:
+        generate_external_seo_articles(
+            user_id=current_user.id,
+            site_id=site_id,
+            blog_id=account_id,
+            account=acct
+        )
+        flash("外部SEO記事の生成を開始しました（100記事・1日10件ペース）", "success")
+    except Exception as e:
+        flash(f"記事生成開始に失敗しました: {str(e)}", "danger")
+
+    return redirect(url_for("main.external_seo_sites"))
+
 
 
 from flask import render_template, redirect, url_for, request, session, flash
