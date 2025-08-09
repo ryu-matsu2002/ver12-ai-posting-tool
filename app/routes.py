@@ -3485,7 +3485,7 @@ def external_seo_sites():
         s.livedoor_accounts = livedoor_accounts
 
     return render_template(
-        "externalsites.html",   # ← テンプレ名に合わせる（アンダースコア無し）
+         "external_sites.html",   # ← テンプレ名に合わせる（アンダースコア無し）
         sites=sites,
         job_map=job_map,
         ExternalSEOJobLog=ExternalSEOJobLog,
