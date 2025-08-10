@@ -44,7 +44,8 @@
   {% endif %}
 
   {% set ready_cnt = (_all_accounts | selectattr('api_key') | list) | length %}
-  {% set total_cnt = _all_accounts | length %}
+  {# タブ件数は重複除外後の s.ld_count を優先。無ければ _all_accounts の長さ。 #}
+  {% set tab_cnt = s.ld_count | default(_all_accounts|length) %}
 
   <section id="site-card-{{ s.id }}" class="border rounded-2xl p-5 mb-6 bg-white shadow-sm">
     <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
@@ -53,7 +54,7 @@
         {% if s.url %}
           <a href="{{ s.url }}" class="text-blue-600 text-sm underline break-all" target="_blank">{{ s.url }}</a>
         {% endif %}
-        <div class="mt-1 text-sm text-gray-500">準備OK <span class="font-semibold">{{ ready_cnt }}</span> / {{ total_cnt }}</div>
+        <div class="mt-1 text-sm text-gray-500">準備OK <span class="font-semibold">{{ ready_cnt }}</span> / {{ tab_cnt }}</div>
       </div>
 
       <div class="flex items-center gap-2 md:self-start">
@@ -62,7 +63,13 @@
            class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm border">
           📒 無料ブログ一覧
         </a>
-        {# 旧：サイト全体で記事生成＆投稿（削除） #}
+        {# サイトにつきボタンは1つだけ（空状態にも出さない） #}
+        <button type="button"
+                class="px-3 py-2 text-sm rounded-lg border bg-white hover:bg-gray-50"
+                data-site-id="{{ s.id }}"
+                onclick="newAccountStart(this)">
+          ＋アカウント追加
+        </button>
       </div>
     </div>
 
@@ -72,24 +79,19 @@
         <div class="flex gap-2" role="tablist">
           <button class="px-3 py-2 text-sm rounded-t-lg border border-b-0 bg-white"
                   data-tabs-target="#tab-ld-{{ s.id }}" aria-selected="true">
-            Livedoor <span class="ml-1 text-xs text-gray-500">({{ total_cnt }})</span>
+            Livedoor <span class="ml-1 text-xs text-gray-500">({{ tab_cnt }})</span>
           </button>
         </div>
 
-        {# 2個目以降の作成用：タブ右上に追加ボタン（Step3で配線） #}
-        <button type="button"
-                class="px-3 py-2 text-sm rounded-lg border bg-white hover:bg-gray-50"
-                data-site-id="{{ s.id }}"
-                onclick="newAccountStart(this)">
-          ＋アカウント追加
-        </button>
+        {# 右上ボタンは上のヘッダーで出しているのでここはナシ #}
+        <span></span>
       </div>
 
       <div id="tab-ld-{{ s.id }}" class="border rounded-b-lg p-3" role="tabpanel">
         {% if _all_accounts and _all_accounts|length > 0 %}
           <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
             {% for acc in _all_accounts %}
-              {# acc は { id, blog_title/blog_id/public_url, api_key, stat_total, stat_posted } #}
+              {# acc は { id, blog_title/blog_id/public_url, api_key, stat_total, stat_posted, stat_generated } #}
               <div id="acc-card-{{ acc.id }}" class="rounded-xl border p-4 shadow-sm flex flex-col gap-3">
                 <div class="flex items-start justify-between gap-3">
                   <div class="min-w-0">
@@ -127,7 +129,6 @@
                       新規アカウント作成開始
                     </button>
                   {% else %}
-                    {# 実績あり（Step2で acc.stat_total を計上）。未計上でも0扱いで安全。 #}
                     {% set _total = acc.stat_total|default(0) %}
                     {% if _total > 0 %}
                       <a
@@ -153,14 +154,8 @@
             {% endfor %}
           </div>
         {% else %}
-          <div class="flex items-center justify-between px-2 py-1">
-            <div class="text-sm text-gray-500">まだLivedoorアカウントはありません。</div>
-            <button type="button"
-                    class="px-3 py-2 text-sm rounded-lg border bg-white hover:bg-gray-50"
-                    data-site-id="{{ s.id }}"
-                    onclick="newAccountStart(this)">
-              ＋アカウント追加
-            </button>
+          <div class="px-2 py-1 text-sm text-gray-500">
+            まだLivedoorアカウントはありません。
           </div>
         {% endif %}
       </div>
@@ -218,47 +213,45 @@
 
   // ───────── Step3: ＋アカウント追加（API連携） ─────────
   async function newAccountStart(button) {
-  const siteId = button.getAttribute('data-site-id');
-  if (!siteId) return;
+    const siteId = button.getAttribute('data-site-id');
+    if (!siteId) return;
 
-  button.disabled = true;
-  const oldText = button.innerText;
-  button.innerText = "作成中…";
+    button.disabled = true;
+    const oldText = button.innerText;
+    button.innerText = "作成中…";
 
-  try {
-    const body = new URLSearchParams();
-    body.append("site_id", siteId);
-
-    const res = await fetch("/external-seo/new-account", {
-      method: "POST",
-      headers: {"Content-Type": "application/x-www-form-urlencoded"},
-      body,
-      credentials: "same-origin" // 念のため明示
-    });
-
-    const text = await res.text();               // まずテキストで受ける
-    let data;
     try {
-      data = JSON.parse(text);                   // JSONなら通常処理
-    } catch {
-      // HTMLなどが返ってきたときのデバッグ表示
-      const head = text.replace(/\s+/g, " ").slice(0, 120);
-      throw new Error(`APIがJSONを返していません (HTTP ${res.status}). 先頭: ${head}`);
+      const body = new URLSearchParams();
+      body.append("site_id", siteId);
+
+      const res = await fetch("/external-seo/new-account", {
+        method: "POST",
+        headers: {"Content-Type": "application/x-www-form-urlencoded"},
+        body,
+        credentials: "same-origin"
+      });
+
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        const head = text.replace(/\s+/g, " ").slice(0, 120);
+        throw new Error(`APIがJSONを返していません (HTTP ${res.status}). 先頭: ${head}`);
+      }
+
+      if (!data.ok) throw new Error(data.error || "作成に失敗しました");
+
+      renderNewAccountCard(data.site_id, data.account);
+      try { incrementLdCount(siteId, +1); } catch(_) {}
+
+    } catch (err) {
+      alert(err.message || "アカウント作成に失敗しました");
+    } finally {
+      button.disabled = false;
+      button.innerText = oldText;
     }
-
-    if (!data.ok) throw new Error(data.error || "作成に失敗しました");
-
-    renderNewAccountCard(data.site_id, data.account);
-    try { incrementLdCount(siteId, +1); } catch (_) {}
-
-  } catch (err) {
-    alert(err.message || "アカウント作成に失敗しました");
-  } finally {
-    button.disabled = false;
-    button.innerText = oldText;
   }
-}
-
 
   function incrementLdCount(siteId, delta) {
     const tabBtn = document.querySelector(`[data-tabs-target="#tab-ld-${siteId}"]`);
@@ -273,10 +266,12 @@
     const panel = document.querySelector(`#tab-ld-${siteId}`);
     if (!panel) return;
 
+    // 既存カードがあれば追加しない（重複防止）
+    if (account && document.getElementById(`acc-card-${account.id}`)) return;
+
     // 既存の「まだありません」行があれば消す
     const emptyRow = panel.querySelector('.text-sm.text-gray-500');
     if (emptyRow && emptyRow.textContent.includes('まだLivedoorアカウントはありません')) {
-      // パネル内を初期化
       panel.innerHTML = '';
     }
 
@@ -288,7 +283,6 @@
       panel.appendChild(grid);
     }
 
-    // カードDOMを構築（Step1でのカードHTMLと同形）
     const acc = account || {};
     const card = document.createElement('div');
     card.id = `acc-card-${acc.id}`;
@@ -330,7 +324,7 @@
       <div class="mt-1 text-[11px] text-gray-500">アカウント作成から開始します</div>
     `;
 
-    grid.prepend(card); // 先頭に挿入して目立たせる
+    grid.prepend(card);
   }
 
   function escapeHtml(s) {

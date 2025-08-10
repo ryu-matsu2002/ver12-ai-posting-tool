@@ -3396,18 +3396,16 @@ def external_seo_sites():
     from sqlalchemy.orm import selectinload
     from sqlalchemy import func
 
-    # 1) サイト + 外部ジョブ + アカウントを一括ロード
     sites = (
         Site.query
         .filter_by(user_id=current_user.id)
         .options(
             selectinload(Site.external_jobs),
-            selectinload(Site.external_accounts),  # アカウントも同時に
+            selectinload(Site.external_accounts),
         )
         .all()
     )
 
-    # 2) job_map（既存ロジック準拠）
     job_map, key_set = {}, set()
     for s in sites:
         for job in s.external_jobs:
@@ -3417,7 +3415,6 @@ def external_seo_sites():
             key_set.add(key)
             job_map[(s.id, job.blog_type.value.lower())] = job
 
-    # 3) サイト×PFの投稿済み件数（既存ロジック準拠・そのまま）
     posted_counts = (
         db.session.query(
             ExternalBlogAccount.site_id,
@@ -3444,21 +3441,15 @@ def external_seo_sites():
         if not hasattr(job, "posted_cnt"):
             job.posted_cnt = 0
 
-    # 3.5) アカウント単位のメトリクス集計（カード用）
-    # 対象：現在ユーザーの全サイトに属する Livedoor アカウント
+    # メトリクス集計（アカウント単位）
     all_ld_account_ids = []
-    site_id_by_acc = {}
     for s in sites:
         for acc in (s.external_accounts or []):
             if acc.blog_type == BlogType.LIVEDOOR:
                 all_ld_account_ids.append(acc.id)
-                site_id_by_acc[acc.id] = s.id
 
-    per_acc_total = {}   # blog_account_id -> 総記事数
-    per_acc_posted = {}  # blog_account_id -> 投稿完了
-
+    per_acc_total, per_acc_posted = {}, {}
     if all_ld_account_ids:
-        # 総記事数（ステータスを問わず、スケジュール行の総数）
         for aid, cnt in (
             db.session.query(
                 ExternalArticleSchedule.blog_account_id,
@@ -3470,7 +3461,6 @@ def external_seo_sites():
         ):
             per_acc_total[aid] = cnt
 
-        # 投稿完了数
         for aid, cnt in (
             db.session.query(
                 ExternalArticleSchedule.blog_account_id,
@@ -3485,20 +3475,17 @@ def external_seo_sites():
         ):
             per_acc_posted[aid] = cnt
 
-    # 4) テンプレが読む Livedoor アカウント配列を作る（メトリクス付与込み）
     for s in sites:
         livedoor_accounts = []
         for acc in (s.external_accounts or []):
             if acc.blog_type != BlogType.LIVEDOOR:
                 continue
 
-            # ▼ テンプレ用フィールドを安全に付与
             setattr(acc, "captcha_done", bool(getattr(acc, "is_captcha_completed", False)))
             setattr(acc, "email_verified", bool(getattr(acc, "is_email_verified", False)))
 
             livedoor_blog_id = getattr(acc, "livedoor_blog_id", None)
             setattr(acc, "blog_created", bool(livedoor_blog_id))
-
             setattr(acc, "api_key", getattr(acc, "atompub_key_enc", None))
 
             title = (
@@ -3514,40 +3501,45 @@ def external_seo_sites():
                 public_url = f"https://{livedoor_blog_id}.livedoor.blog/"
             setattr(acc, "public_url", public_url)
 
-            # ▼ カード用メトリクス
-            total = per_acc_total.get(acc.id, 0)
+            total  = per_acc_total.get(acc.id, 0)
             posted = per_acc_posted.get(acc.id, 0)
             generated = max(total - posted, 0)
-
-            setattr(acc, "stat_total", total)         # 総記事数
-            setattr(acc, "stat_posted", posted)       # 投稿完了
-            setattr(acc, "stat_generated", generated) # 生成済み（未投稿含む）
-            setattr(acc, "has_activity", total > 0)   # 実績ありフラグ
+            setattr(acc, "stat_total", total)
+            setattr(acc, "stat_posted", posted)
+            setattr(acc, "stat_generated", generated)
+            setattr(acc, "has_activity", total > 0)
 
             livedoor_accounts.append(acc)
 
-        # ▼▼ 重複除外：同じ livedoor_blog_id は 1 件に統一（未取得なら id 基準）
-        # どれを残すか：api_key あり > captcha_done あり > id が新しい
-        dedup_map = {}  # key -> acc
+        # ▼ livedoor_blog_id が同じものは 1 件に統合（NULLは統合しない）
+        dedup_map = {}
         for acc in livedoor_accounts:
-            key = getattr(acc, "livedoor_blog_id", None) or f"__id__:{acc.id}"
+            key = getattr(acc, "livedoor_blog_id", None)
+            if key is None:
+                # blog_id 未確定はそのまま別カードとして扱う
+                dedup_map[f"__id__:{acc.id}"] = acc
+                continue
+
             prev = dedup_map.get(key)
             if not prev:
                 dedup_map[key] = acc
                 continue
 
-            # 比較優先度
+            # どちらを残すか：APIキー > CAPTCHA済み > id新しい
             def score(a):
                 return (
                     2 if getattr(a, "api_key", None) else
                     1 if getattr(a, "captcha_done", False) else
-                    0
-                , getattr(a, "id", 0))
+                    0,
+                    getattr(a, "id", 0)
+                )
 
             if score(acc) > score(prev):
-                dedup_map[key] = acc  # より良い方に置き換え
+                dedup_map[key] = acc
 
-        s.livedoor_accounts = list(dedup_map.values())
+        dedup_list = list(dedup_map.values())
+        s.livedoor_accounts = dedup_list
+        s.ld_count = len(dedup_list)  # ← この値をテンプレの (n) に使う
 
     return render_template(
         "external_sites.html",
@@ -3555,7 +3547,6 @@ def external_seo_sites():
         job_map=job_map,
         ExternalSEOJobLog=ExternalSEOJobLog,
     )
-
 
 
 @bp.post("/external/start")
