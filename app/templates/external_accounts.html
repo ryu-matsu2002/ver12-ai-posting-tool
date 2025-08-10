@@ -18,7 +18,6 @@
       </option>
     {% endfor %}
   </select>
-  {# 既存の他パラメータがあれば温存 #}
   {% if selected_blog_type %}<input type="hidden" name="blog_type" value="{{ selected_blog_type }}">{% endif %}
   {% if selected_sort %}<input type="hidden" name="sort" value="{{ selected_sort }}">{% endif %}
   {% if search_query %}<input type="hidden" name="q" value="{{ search_query }}">{% endif %}
@@ -48,7 +47,6 @@
           <th class="px-3 py-2">ブログ</th>
           <th class="px-3 py-2">メール</th>
 
-          {# ▼ 進捗列は削除し、数値3列に変更 #}
           <th class="px-3 py-2 text-right">
             <a class="hover:underline"
                href="{{ url_for('main.external_accounts',
@@ -95,16 +93,9 @@
       </thead>
       <tbody>
         {% for a in site_accounts %}
-          {# サーバ側が付けた集計属性が無い環境でも安全に表示 #}
           {% set posted    = a.posted_cnt or 0 %}
           {% set generated = a.generated_cnt or 0 %}
-          {% if a.total_cnt is not none %}
-            {% set total = a.total_cnt %}
-          {% elif a.schedules is defined %}
-            {% set total = a.schedules|length %}
-          {% else %}
-            {% set total = posted + generated %}
-          {% endif %}
+          {% set total     = a.total_cnt or (posted + generated) %}
 
           <tr class="border-b">
             <td class="px-3 py-2">
@@ -128,6 +119,8 @@
             <td class="px-3 py-2">
               <a href="{{ url_for('main.external_account_articles', acct_id=a.id) }}"
                  class="text-blue-600 hover:underline">記事一覧</a>
+              {# 任意: 統合件数を見せたい場合 #}
+              {# <span class="ml-2 text-xs text-gray-500">(統合 {{ a._raw_count }} 件)</span> #}
             </td>
 
             <td class="px-3 py-2 text-right whitespace-nowrap">

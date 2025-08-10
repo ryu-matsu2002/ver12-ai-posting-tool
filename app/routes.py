@@ -3664,7 +3664,7 @@ import asyncio, json, time
 @bp.route("/external/accounts")
 @login_required
 def external_accounts():
-    from app.models import ExternalBlogAccount, Site, ExternalArticleSchedule, Keyword, Article
+    from app.models import ExternalBlogAccount, Site, ExternalArticleSchedule, Keyword, Article, BlogType
     from app.services.blog_signup.crypto_utils import decrypt
     from sqlalchemy import or_, func, case, and_
     from sqlalchemy.orm import aliased
@@ -3674,7 +3674,7 @@ def external_accounts():
     search    = request.args.get("q", "").strip()
     site_id   = request.args.get("site_id", type=int)
 
-    # ベース: ユーザーに紐づくアカウント
+    # ベース: ログインユーザーのサイトに属する（site_id が NULL でも可）
     base = (
         db.session.query(ExternalBlogAccount.id)
         .outerjoin(Site, ExternalBlogAccount.site_id == Site.id)
@@ -3686,7 +3686,13 @@ def external_accounts():
     if site_id:
         base = base.filter(ExternalBlogAccount.site_id == site_id)
     if blog_type:
-        base = base.filter(ExternalBlogAccount.blog_type == blog_type)
+        # Enum の可能性に配慮（文字列でも Enum でも比較できるように）
+        try:
+            bt = BlogType(blog_type)  # 文字列→Enum
+            base = base.filter(ExternalBlogAccount.blog_type == bt)
+        except Exception:
+            base = base.filter(ExternalBlogAccount.blog_type == blog_type)
+
     if search:
         base = base.filter(or_(
             ExternalBlogAccount.email.ilike(f"%{search}%"),
@@ -3694,13 +3700,13 @@ def external_accounts():
             ExternalBlogAccount.username.ilike(f"%{search}%"),
         ))
 
-    # 集計: Schedule/Keyword/Article を外部結合
+    # 集計に使う別名
     S = aliased(ExternalArticleSchedule)
     K = aliased(Keyword)
     A = aliased(Article)
 
-    # 本体クエリ
-    q = (
+    # 各アカウント行ごとの集計（ここでは1アカウント=1行）
+    per_acc_rows = (
         db.session.query(
             ExternalBlogAccount,
             func.count(S.id).label("total_cnt"),
@@ -3719,42 +3725,80 @@ def external_accounts():
             )
         )
         .outerjoin(Site, ExternalBlogAccount.site_id == Site.id)
-        .filter(base.whereclause)  # フィルタ適用
+        .filter(base.whereclause)  # ベースのフィルタを適用
         .group_by(ExternalBlogAccount.id)
+        .all()
     )
 
-    # 並び替え式を定義（再利用）
-    posted_expr    = func.coalesce(func.sum(case((S.status == "posted", 1), else_=0)), 0)
-    generated_expr = func.coalesce(func.sum(case((A.id != None, 1), else_=0)), 0)  # noqa: E711
-    total_expr     = func.count(S.id)
+    # （blog_type, blog_id）でユニーク化し、代表1件に集計を合算
+    def score(acc):
+        # 代表選定優先度: APIキー > CAPTCHA済み > id
+        return (
+            2 if getattr(acc, "atompub_key_enc", None) else
+            1 if getattr(acc, "is_captcha_completed", False) else
+            0,
+            getattr(acc, "id", 0)
+        )
 
-    if sort == "posted_asc":
-        q = q.order_by(posted_expr.asc())
-    elif sort == "posted_desc":
-        q = q.order_by(posted_expr.desc())
-    elif sort == "generated_asc":
-        q = q.order_by(generated_expr.asc())
-    elif sort == "generated_desc":
-        q = q.order_by(generated_expr.desc())
-    elif sort == "total_asc":
-        q = q.order_by(total_expr.asc())
-    else:  # default → total_desc
-        q = q.order_by(total_expr.desc())
+    groups = {}  # key -> {"repr": acc, "total":int, "posted":int, "generated":int, "raw":[acc,...]}
+    for acc, total_cnt, posted_cnt, generated_cnt in per_acc_rows:
+        key_blog_id = acc.livedoor_blog_id or f"__id__:{acc.id}"
+        key = (acc.blog_type, key_blog_id)
+        g = groups.get(key)
+        total_i     = int(total_cnt or 0)
+        posted_i    = int(posted_cnt or 0)
+        generated_i = int(generated_cnt or 0)
 
-    rows = q.all()
+        if not g:
+            groups[key] = {
+                "repr": acc,
+                "total": total_i,
+                "posted": posted_i,
+                "generated": generated_i,
+                "raw": [acc],
+            }
+        else:
+            # 代表を差し替える場合がある
+            if score(acc) > score(g["repr"]):
+                g["repr"] = acc
+            # 集計は合算
+            g["total"]     += total_i
+            g["posted"]    += posted_i
+            g["generated"] += generated_i
+            g["raw"].append(acc)
 
-    # テンプレへ：各 acc に集計値を載せる
+    # 表示用リスト（代表 acc に合算済みの数値を持たせる）
     accts = []
-    for acc, total_cnt, posted_cnt, generated_cnt in rows:
-        acc.total_cnt     = int(total_cnt or 0)
-        acc.posted_cnt    = int(posted_cnt or 0)
-        acc.generated_cnt = int(generated_cnt or 0)
-        accts.append(acc)
+    for _, g in groups.items():
+        a = g["repr"]
+        a.total_cnt     = g["total"]
+        a.posted_cnt    = g["posted"]
+        a.generated_cnt = g["generated"]
+        a._raw_count    = len(g["raw"])  # 任意：統合件数（表示したければテンプレで参照）
+        accts.append(a)
+
+    # 並び替え（ユニーク化後の値で）
+    def sort_key(a):
+        if sort == "posted_asc":
+            return (a.posted_cnt or 0, a.id)
+        if sort == "posted_desc":
+            return (-(a.posted_cnt or 0), a.id)
+        if sort == "generated_asc":
+            return (a.generated_cnt or 0, a.id)
+        if sort == "generated_desc":
+            return (-(a.generated_cnt or 0), a.id)
+        if sort == "total_asc":
+            return (a.total_cnt or 0, a.id)
+        # default: total_desc
+        return (-(a.total_cnt or 0), a.id)
+
+    accts.sort(key=sort_key)
 
     all_sites = Site.query.filter_by(user_id=current_user.id).all()
+
     return render_template(
         "external_accounts.html",
-        accts=accts,
+        accts=accts,                 # ← ユニーク化後の代表たち
         all_sites=all_sites,
         decrypt=decrypt,
         site_id=site_id,
@@ -3762,6 +3806,7 @@ def external_accounts():
         selected_sort=sort,
         search_query=search
     )
+
 
 
 @bp.route("/external/account/<int:acct_id>/articles")
