@@ -4585,8 +4585,8 @@ from sqlalchemy.exc import IntegrityError
 @login_required
 def external_seo_new_account():
     """
-    Livedoorの仮アカウントを1件作成して返すAPI。
-    NOT NULLのカラムにはダミー値を入れておく。
+    Livedoorの仮アカウントを1件作成（必須カラムは存在確認してからセット）。
+    例外時も必ずJSONで返す。
     """
     from flask import request, jsonify
     from app.models import Site, ExternalBlogAccount, BlogType
@@ -4606,38 +4606,31 @@ def external_seo_new_account():
         if (not current_user.is_admin) and (site.user_id != current_user.id):
             return jsonify({"ok": False, "error": "権限がありません"}), 200
 
-        # --- NOT NULL のカラムに入れるダミー値（空文字でも良い設計なら空文字）
-        dummy_email    = ""
-        dummy_username = ""
-        dummy_password = ""
-        dummy_nickname = ""
-
+        # まず最小限の必須だけでインスタンス化（存在しない引数は渡さない）
         acc = ExternalBlogAccount(
             site_id=site.id,
             blog_type=BlogType.LIVEDOOR,
-
-            # ★ ここが重要：NOT NULL を満たすためのダミー
-            email=dummy_email,
-            username=dummy_username,
-            password=dummy_password,
-            nickname=dummy_nickname,
-
-            status="active",                 # 既存設計に合わせる
-            message=None,
-            cookie_path=None,
-
-            # 初期状態
-            livedoor_blog_id=None,
-            atompub_key_enc=None,
-            api_post_enabled=False,
-            is_captcha_completed=False,
-            is_email_verified=False,
-
-            # もし必須/デフォルトが必要なら
-            posted_cnt=0,
-            next_batch_started=None,
-            created_at=datetime.utcnow(),
         )
+
+        # --- カラムが存在する場合のみ安全にセット ---
+        # NOT NULL の可能性が高い基本4つ（空文字でOKな設計を想定）
+        if hasattr(acc, "email"):    acc.email = ""
+        if hasattr(acc, "username"): acc.username = ""
+        if hasattr(acc, "password"): acc.password = ""
+        if hasattr(acc, "nickname"): acc.nickname = ""
+
+        # 状態系（存在すれば）
+        if hasattr(acc, "status"):                acc.status = "active"
+        if hasattr(acc, "message"):               acc.message = None
+        if hasattr(acc, "cookie_path"):           acc.cookie_path = None
+        if hasattr(acc, "livedoor_blog_id"):      acc.livedoor_blog_id = None
+        if hasattr(acc, "atompub_key_enc"):       acc.atompub_key_enc = None
+        if hasattr(acc, "api_post_enabled"):      acc.api_post_enabled = False
+        if hasattr(acc, "is_captcha_completed"):  acc.is_captcha_completed = False
+        # ★ ここで「is_email_verified」は触らない（存在しない環境があるため）
+        if hasattr(acc, "posted_cnt"):            acc.posted_cnt = 0
+        if hasattr(acc, "next_batch_started"):    acc.next_batch_started = None
+        if hasattr(acc, "created_at"):            acc.created_at = datetime.utcnow()
 
         db.session.add(acc)
         db.session.commit()
