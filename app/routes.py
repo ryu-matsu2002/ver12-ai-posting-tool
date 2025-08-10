@@ -4576,46 +4576,58 @@ def external_seo_generate_and_schedule():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 # routes.py など Blueprint のファイルに追加
-@bp.post("/external-seo/new-account")
+# routes.py など Blueprint 定義ファイル
+
+@bp.route("/external-seo/new-account", methods=["POST"])
+@bp.route("/external-seo/new-account/", methods=["POST"])  # 末尾スラッシュでもOKに
 @login_required
 def external_seo_new_account():
     """
     Livedoorの仮アカウントを1件作成して返すAPI。
-    返却データはフロントがカードを即時追加できる最小構成。
+    フロントは必ずJSONを期待するため、例外時もJSONを返す。
     """
     from flask import request, jsonify
     from app.models import Site, ExternalBlogAccount, BlogType
     from app import db
+    import logging
 
-    site_id = request.form.get("site_id", type=int)
-    if not site_id:
-        return jsonify({"ok": False, "error": "site_id がありません"}), 400
+    logger = logging.getLogger(__name__)
 
-    site = Site.query.get(site_id)
-    if not site:
-        return jsonify({"ok": False, "error": "Site が見つかりません"}), 404
-    if (not current_user.is_admin) and (site.user_id != current_user.id):
-        return jsonify({"ok": False, "error": "権限がありません"}), 403
+    try:
+        site_id = request.form.get("site_id", type=int)
+        if not site_id:
+            return jsonify({"ok": False, "error": "site_id がありません"}), 200  # ← 常にJSONを返す
 
-    # 仮レコード作成（必須最低限だけ）
-    acc = ExternalBlogAccount(
-        site_id=site.id,
-        blog_type=BlogType.LIVEDOOR,
-        is_captcha_completed=False,
-        atompub_key_enc=None,
-        api_post_enabled=False,
-    )
-    # タイトルは一旦 account#id を後で表示するため、作成後に id を使う
-    db.session.add(acc)
-    db.session.commit()
+        site = Site.query.get(site_id)
+        if not site:
+            return jsonify({"ok": False, "error": "Site が見つかりません"}), 200
+        if (not current_user.is_admin) and (site.user_id != current_user.id):
+            return jsonify({"ok": False, "error": "権限がありません"}), 200
 
-    # フロントで描画に使う最小情報を返す
-    account_payload = {
-        "id": acc.id,
-        "blog_title": f"account#{acc.id}",
-        "public_url": None,
-        "api_key": None,
-        "stat_total": 0,
-        "stat_posted": 0,
-    }
-    return jsonify({"ok": True, "site_id": site.id, "account": account_payload}), 201
+        # 仮レコード作成（必須最低限だけ）
+        acc = ExternalBlogAccount(
+            site_id=site.id,
+            blog_type=BlogType.LIVEDOOR,
+            is_captcha_completed=False,
+            atompub_key_enc=None,
+            api_post_enabled=False,
+        )
+
+        db.session.add(acc)
+        db.session.commit()
+
+        account_payload = {
+            "id": acc.id,
+            "blog_title": f"account#{acc.id}",
+            "public_url": None,
+            "api_key": None,
+            "stat_total": 0,
+            "stat_posted": 0,
+        }
+        return jsonify({"ok": True, "site_id": site.id, "account": account_payload}), 200
+
+    except Exception as e:
+        # ここで握りつぶさずログに残して、必ずJSONを返す
+        logger.exception("[external_seo_new_account] error")
+        # エラーメッセージは短めに返す（必要なら詳細はログで確認）
+        return jsonify({"ok": False, "error": f"サーバエラー: {str(e)}"}), 200

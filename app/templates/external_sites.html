@@ -218,38 +218,47 @@
 
   // ───────── Step3: ＋アカウント追加（API連携） ─────────
   async function newAccountStart(button) {
-    const siteId = button.getAttribute('data-site-id');
-    if (!siteId) return;
+  const siteId = button.getAttribute('data-site-id');
+  if (!siteId) return;
 
-    button.disabled = true;
-    const oldText = button.innerText;
-    button.innerText = "作成中…";
+  button.disabled = true;
+  const oldText = button.innerText;
+  button.innerText = "作成中…";
 
+  try {
+    const body = new URLSearchParams();
+    body.append("site_id", siteId);
+
+    const res = await fetch("/external-seo/new-account", {
+      method: "POST",
+      headers: {"Content-Type": "application/x-www-form-urlencoded"},
+      body,
+      credentials: "same-origin" // 念のため明示
+    });
+
+    const text = await res.text();               // まずテキストで受ける
+    let data;
     try {
-      const body = new URLSearchParams();
-      body.append("site_id", siteId);
-
-      const res = await fetch("/external-seo/new-account", {
-        method: "POST",
-        headers: {"Content-Type": "application/x-www-form-urlencoded"},
-        body
-      });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || "作成に失敗しました");
-
-      // カードを挿入
-      renderNewAccountCard(data.site_id, data.account);
-
-      // タブの件数を +1（Livedoor (n)）
-      try { incrementLdCount(siteId, +1); } catch (_) {}
-
-    } catch (err) {
-      alert(err.message || "アカウント作成に失敗しました");
-    } finally {
-      button.disabled = false;
-      button.innerText = oldText;
+      data = JSON.parse(text);                   // JSONなら通常処理
+    } catch {
+      // HTMLなどが返ってきたときのデバッグ表示
+      const head = text.replace(/\s+/g, " ").slice(0, 120);
+      throw new Error(`APIがJSONを返していません (HTTP ${res.status}). 先頭: ${head}`);
     }
+
+    if (!data.ok) throw new Error(data.error || "作成に失敗しました");
+
+    renderNewAccountCard(data.site_id, data.account);
+    try { incrementLdCount(siteId, +1); } catch (_) {}
+
+  } catch (err) {
+    alert(err.message || "アカウント作成に失敗しました");
+  } finally {
+    button.disabled = false;
+    button.innerText = oldText;
   }
+}
+
 
   function incrementLdCount(siteId, delta) {
     const tabBtn = document.querySelector(`[data-tabs-target="#tab-ld-${siteId}"]`);
