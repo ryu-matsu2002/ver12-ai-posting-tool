@@ -4578,25 +4578,27 @@ def external_seo_generate_and_schedule():
 # routes.py など Blueprint のファイルに追加
 # routes.py など Blueprint 定義ファイル
 
+from sqlalchemy.exc import IntegrityError
+
 @bp.route("/external-seo/new-account", methods=["POST"])
-@bp.route("/external-seo/new-account/", methods=["POST"])  # 末尾スラッシュでもOKに
+@bp.route("/external-seo/new-account/", methods=["POST"])
 @login_required
 def external_seo_new_account():
     """
     Livedoorの仮アカウントを1件作成して返すAPI。
-    フロントは必ずJSONを期待するため、例外時もJSONを返す。
+    NOT NULLのカラムにはダミー値を入れておく。
     """
     from flask import request, jsonify
     from app.models import Site, ExternalBlogAccount, BlogType
     from app import db
     import logging
+    from datetime import datetime
 
     logger = logging.getLogger(__name__)
-
     try:
         site_id = request.form.get("site_id", type=int)
         if not site_id:
-            return jsonify({"ok": False, "error": "site_id がありません"}), 200  # ← 常にJSONを返す
+            return jsonify({"ok": False, "error": "site_id がありません"}), 200
 
         site = Site.query.get(site_id)
         if not site:
@@ -4604,13 +4606,37 @@ def external_seo_new_account():
         if (not current_user.is_admin) and (site.user_id != current_user.id):
             return jsonify({"ok": False, "error": "権限がありません"}), 200
 
-        # 仮レコード作成（必須最低限だけ）
+        # --- NOT NULL のカラムに入れるダミー値（空文字でも良い設計なら空文字）
+        dummy_email    = ""
+        dummy_username = ""
+        dummy_password = ""
+        dummy_nickname = ""
+
         acc = ExternalBlogAccount(
             site_id=site.id,
             blog_type=BlogType.LIVEDOOR,
-            is_captcha_completed=False,
+
+            # ★ ここが重要：NOT NULL を満たすためのダミー
+            email=dummy_email,
+            username=dummy_username,
+            password=dummy_password,
+            nickname=dummy_nickname,
+
+            status="active",                 # 既存設計に合わせる
+            message=None,
+            cookie_path=None,
+
+            # 初期状態
+            livedoor_blog_id=None,
             atompub_key_enc=None,
             api_post_enabled=False,
+            is_captcha_completed=False,
+            is_email_verified=False,
+
+            # もし必須/デフォルトが必要なら
+            posted_cnt=0,
+            next_batch_started=None,
+            created_at=datetime.utcnow(),
         )
 
         db.session.add(acc)
@@ -4626,8 +4652,11 @@ def external_seo_new_account():
         }
         return jsonify({"ok": True, "site_id": site.id, "account": account_payload}), 200
 
+    except IntegrityError as ie:
+        db.session.rollback()
+        logger.exception("[external_seo_new_account] integrity error")
+        return jsonify({"ok": False, "error": f"DB制約エラー: {str(ie).splitlines()[0]}"}), 200
     except Exception as e:
-        # ここで握りつぶさずログに残して、必ずJSONを返す
+        db.session.rollback()
         logger.exception("[external_seo_new_account] error")
-        # エラーメッセージは短めに返す（必要なら詳細はログで確認）
         return jsonify({"ok": False, "error": f"サーバエラー: {str(e)}"}), 200
