@@ -3493,20 +3493,14 @@ def external_seo_sites():
                 continue
 
             # ▼ テンプレ用フィールドを安全に付与
-            # CAPTCHA済み
             setattr(acc, "captcha_done", bool(getattr(acc, "is_captcha_completed", False)))
-
-            # メール認証（モデルにフラグがなければ False 想定）
             setattr(acc, "email_verified", bool(getattr(acc, "is_email_verified", False)))
 
-            # ブログ作成済み：blog_id が取れていれば True とみなす
             livedoor_blog_id = getattr(acc, "livedoor_blog_id", None)
             setattr(acc, "blog_created", bool(livedoor_blog_id))
 
-            # APIキー（存在すれば準備OK）
             setattr(acc, "api_key", getattr(acc, "atompub_key_enc", None))
 
-            # 表示名：nickname > username > livedoor_blog_id > account#id
             title = (
                 getattr(acc, "nickname", None)
                 or getattr(acc, "username", None)
@@ -3515,26 +3509,45 @@ def external_seo_sites():
             )
             setattr(acc, "blog_title", title)
 
-            # 公開URL（blog_id あれば自動生成）
             public_url = getattr(acc, "public_url", None)
             if not public_url and livedoor_blog_id:
                 public_url = f"https://{livedoor_blog_id}.livedoor.blog/"
             setattr(acc, "public_url", public_url)
 
-            # ▼ ここからカード用メトリクス
+            # ▼ カード用メトリクス
             total = per_acc_total.get(acc.id, 0)
             posted = per_acc_posted.get(acc.id, 0)
             generated = max(total - posted, 0)
 
-            setattr(acc, "stat_total", total)        # 総記事数
-            setattr(acc, "stat_posted", posted)      # 投稿完了
-            setattr(acc, "stat_generated", generated)# 生成済み（未投稿含む）
-            setattr(acc, "has_activity", total > 0)  # 実績ありフラグ（CTAの出し分け用）
+            setattr(acc, "stat_total", total)         # 総記事数
+            setattr(acc, "stat_posted", posted)       # 投稿完了
+            setattr(acc, "stat_generated", generated) # 生成済み（未投稿含む）
+            setattr(acc, "has_activity", total > 0)   # 実績ありフラグ
 
             livedoor_accounts.append(acc)
 
-        # テンプレが参照する配列
-        s.livedoor_accounts = livedoor_accounts
+        # ▼▼ 重複除外：同じ livedoor_blog_id は 1 件に統一（未取得なら id 基準）
+        # どれを残すか：api_key あり > captcha_done あり > id が新しい
+        dedup_map = {}  # key -> acc
+        for acc in livedoor_accounts:
+            key = getattr(acc, "livedoor_blog_id", None) or f"__id__:{acc.id}"
+            prev = dedup_map.get(key)
+            if not prev:
+                dedup_map[key] = acc
+                continue
+
+            # 比較優先度
+            def score(a):
+                return (
+                    2 if getattr(a, "api_key", None) else
+                    1 if getattr(a, "captcha_done", False) else
+                    0
+                , getattr(a, "id", 0))
+
+            if score(acc) > score(prev):
+                dedup_map[key] = acc  # より良い方に置き換え
+
+        s.livedoor_accounts = list(dedup_map.values())
 
     return render_template(
         "external_sites.html",
@@ -3542,6 +3555,7 @@ def external_seo_sites():
         job_map=job_map,
         ExternalSEOJobLog=ExternalSEOJobLog,
     )
+
 
 
 @bp.post("/external/start")
@@ -4138,7 +4152,7 @@ def prepare_captcha():
 def submit_captcha():
     from app.services.blog_signup.livedoor_signup import submit_captcha_and_complete
     from app.services.playwright_controller import get_session, delete_session
-    from app.models import Site, ExternalBlogAccount
+    from app.models import Site, ExternalBlogAccount, BlogType
     from app.utils.captcha_dataset_utils import save_captcha_label_pair
     from app import db
     from flask import jsonify, session, request
@@ -4155,7 +4169,7 @@ def submit_captcha():
         # データセット保存（学習用）
         save_captcha_label_pair(image_filename, captcha_text)
 
-    # ★ 追加：account_id を受け取り、整合性確認
+    # ★ account_id を受け取り、整合性確認
     account_id = request.form.get("account_id", type=int) or session.get("captcha_account_id")
     site_id = session.get("captcha_site_id")
     session_id = session.get("captcha_session_id")
@@ -4197,39 +4211,67 @@ def submit_captcha():
         )
 
         if result.get("captcha_success"):
-            # ★ DB更新（進捗 & API情報）
-            acct.is_captcha_completed = True
-            if result.get("blog_id"):
-                acct.livedoor_blog_id = result["blog_id"]
-            if result.get("api_key"):
-                acct.atompub_key_enc = result["api_key"]
-                acct.api_post_enabled = True
+            new_blog_id = result.get("blog_id")
+            new_api_key = result.get("api_key")
+
+            # ▼▼ 重複 blog_id チェック（同サイト・同PFで同じ blog_id を既に持つ行がないか）
+            dup = None
+            if new_blog_id:
+                dup = (ExternalBlogAccount.query
+                       .filter(
+                           ExternalBlogAccount.site_id == site_id,
+                           ExternalBlogAccount.blog_type == (acct.blog_type or BlogType.LIVEDOOR),
+                           ExternalBlogAccount.livedoor_blog_id == new_blog_id,
+                           ExternalBlogAccount.id != account_id
+                       )
+                       .first())
+
+            target = acct  # 書き込み対象。重複があれば既存 dup を優先
+            if dup:
+                target = dup
+
+            # 進捗フラグ
+            if hasattr(target, "is_captcha_completed"):
+                target.is_captcha_completed = True
+
+            # blog_id
+            if new_blog_id and hasattr(target, "livedoor_blog_id"):
+                target.livedoor_blog_id = new_blog_id
+
+            # APIキー
+            if new_api_key and hasattr(target, "atompub_key_enc"):
+                target.atompub_key_enc = new_api_key
+                if hasattr(target, "api_post_enabled"):
+                    target.api_post_enabled = True
+
             db.session.commit()
 
-            # ★ 進捗をセッションに保存（フロントのポーリングで使用）
+            # 表示用の step 判定
             step = (
-                "API取得完了" if result.get("api_key") else
+                "API取得完了" if (new_api_key or getattr(target, "atompub_key_enc", None)) else
                 "アカウント登録完了" if result.get("account_created") else
                 "メール認証完了" if result.get("email_verified") else
                 "CAPTCHA突破完了"
             )
 
+            # フロントのポーリングが拾うステータス（★ dup があれば既存IDを返す）
+            resolved_account_id = target.id
+
             session["captcha_status"] = {
                 "captcha_sent": True,
                 "email_verified": result.get("email_verified", False),
                 "account_created": result.get("account_created", False),
-                "api_key_received": bool(result.get("api_key")),
-                "step": step,
+                "api_key_received": bool(new_api_key or getattr(target, "atompub_key_enc", None)),
+                "step": "既存アカウントに紐付け済み" if dup else step,
                 "site_id": site_id,
-                "account_id": account_id,  # ★ 追加
+                "account_id": resolved_account_id,
             }
 
-            # フロント用の最小レスポンス
             return jsonify({
                 "status": "captcha_success",
-                "step": step,
+                "step": session["captcha_status"]["step"],
                 "site_id": site_id,
-                "account_id": account_id
+                "account_id": resolved_account_id
             }), 200
 
         # 失敗時
@@ -4246,7 +4288,7 @@ def submit_captcha():
         return jsonify({"status": "error", "message": "CAPTCHA送信に失敗しました"}), 500
 
     finally:
-        # セッション破棄
+        # セッション破棄（★ captcha_status は残す → ポーリングのため）
         try:
             if loop.is_running():
                 loop.run_until_complete(delete_session(session_id))
@@ -4255,9 +4297,9 @@ def submit_captcha():
         except Exception:
             pass
 
-        # captcha_* を掃除
+        # captcha_* を掃除。ただし captcha_status は残す
         for key in list(session.keys()):
-            if key.startswith("captcha_"):
+            if key.startswith("captcha_") and key != "captcha_status":
                 session.pop(key)
 
 
