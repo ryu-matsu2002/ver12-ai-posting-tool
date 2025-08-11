@@ -4744,6 +4744,7 @@ def external_seo_generate_and_schedule():
 # routes.py など Blueprint 定義ファイル
 
 from sqlalchemy.exc import IntegrityError
+import secrets, time  # ★ 追加
 
 @bp.route("/external-seo/new-account", methods=["POST"])
 @bp.route("/external-seo/new-account/", methods=["POST"])
@@ -4760,6 +4761,16 @@ def external_seo_new_account():
     from datetime import datetime
 
     logger = logging.getLogger(__name__)
+
+    # ユニークなダミー値を作るユーティリティ
+    def _stub_email(site_id: int) -> str:
+        # 例: pending-12-1723358300123-a3f1@stub.local
+        return f"pending-{site_id}-{int(time.time()*1000)}-{secrets.token_hex(2)}@stub.local"
+
+    def _stub_name(prefix: str, site_id: int) -> str:
+        # 例: u-12-1723358300123-a
+        return f"{prefix}-{site_id}-{int(time.time()*1000)}-{secrets.token_hex(1)}"
+
     try:
         site_id = request.form.get("site_id", type=int)
         if not site_id:
@@ -4771,34 +4782,54 @@ def external_seo_new_account():
         if (not current_user.is_admin) and (site.user_id != current_user.id):
             return jsonify({"ok": False, "error": "権限がありません"}), 200
 
-        # まず最小限の必須だけでインスタンス化（存在しない引数は渡さない）
-        acc = ExternalBlogAccount(
-            site_id=site.id,
-            blog_type=BlogType.LIVEDOOR,
-        )
+        # UNIQUE衝突に備えて数回だけリトライ
+        attempts = 0
+        while True:
+            try:
+                # まず最小限の必須だけでインスタンス化（存在しない列は触らない）
+                acc = ExternalBlogAccount(
+                    site_id=site.id,
+                    blog_type=BlogType.LIVEDOOR,
+                )
 
-        # --- カラムが存在する場合のみ安全にセット ---
-        # NOT NULL の可能性が高い基本4つ（空文字でOKな設計を想定）
-        if hasattr(acc, "email"):    acc.email = ""
-        if hasattr(acc, "username"): acc.username = ""
-        if hasattr(acc, "password"): acc.password = ""
-        if hasattr(acc, "nickname"): acc.nickname = ""
+                # --- カラムが存在する場合のみ安全にセット ---
+                # UNIQUE の可能性がある email は必ずユニークなダミーにする
+                if hasattr(acc, "email"):
+                    acc.email = _stub_email(site.id)
 
-        # 状態系（存在すれば）
-        if hasattr(acc, "status"):                acc.status = "active"
-        if hasattr(acc, "message"):               acc.message = None
-        if hasattr(acc, "cookie_path"):           acc.cookie_path = None
-        if hasattr(acc, "livedoor_blog_id"):      acc.livedoor_blog_id = None
-        if hasattr(acc, "atompub_key_enc"):       acc.atompub_key_enc = None
-        if hasattr(acc, "api_post_enabled"):      acc.api_post_enabled = False
-        if hasattr(acc, "is_captcha_completed"):  acc.is_captcha_completed = False
-        # ★ ここで「is_email_verified」は触らない（存在しない環境があるため）
-        if hasattr(acc, "posted_cnt"):            acc.posted_cnt = 0
-        if hasattr(acc, "next_batch_started"):    acc.next_batch_started = None
-        if hasattr(acc, "created_at"):            acc.created_at = datetime.utcnow()
+                # 必須/NOT NULL かもしれない欄はダミーを入れておく
+                if hasattr(acc, "username"):
+                    acc.username = _stub_name("u", site.id)
+                if hasattr(acc, "password"):
+                    acc.password = ""  # 仮
+                if hasattr(acc, "nickname"):
+                    acc.nickname = _stub_name("n", site.id)
 
-        db.session.add(acc)
-        db.session.commit()
+                # 状態系（存在すれば）
+                if hasattr(acc, "status"):                acc.status = "active"
+                if hasattr(acc, "message"):               acc.message = None
+                if hasattr(acc, "cookie_path"):           acc.cookie_path = None
+                if hasattr(acc, "livedoor_blog_id"):      acc.livedoor_blog_id = None
+                if hasattr(acc, "atompub_key_enc"):       acc.atompub_key_enc = None
+                if hasattr(acc, "api_post_enabled"):      acc.api_post_enabled = False
+                if hasattr(acc, "is_captcha_completed"):  acc.is_captcha_completed = False
+                # is_email_verified は存在しない環境があるため触らない
+                if hasattr(acc, "posted_cnt"):            acc.posted_cnt = 0
+                if hasattr(acc, "next_batch_started"):    acc.next_batch_started = None
+                if hasattr(acc, "created_at"):            acc.created_at = datetime.utcnow()
+
+                db.session.add(acc)
+                db.session.commit()
+                break  # ← 成功
+
+            except IntegrityError:
+                # email（や他の一意制約）衝突時は再採番してリトライ
+                db.session.rollback()
+                attempts += 1
+                if attempts >= 5:
+                    logger.exception("[external_seo_new_account] integrity error (retries exceeded)")
+                    return jsonify({"ok": False, "error": "DBの一意制約で作成に失敗しました。時間をおいて再試行してください。"}), 200
+                # ループ先頭で新しいダミーを採番して再作成
 
         account_payload = {
             "id": acc.id,
@@ -4810,10 +4841,6 @@ def external_seo_new_account():
         }
         return jsonify({"ok": True, "site_id": site.id, "account": account_payload}), 200
 
-    except IntegrityError as ie:
-        db.session.rollback()
-        logger.exception("[external_seo_new_account] integrity error")
-        return jsonify({"ok": False, "error": f"DB制約エラー: {str(ie).splitlines()[0]}"}), 200
     except Exception as e:
         db.session.rollback()
         logger.exception("[external_seo_new_account] error")
