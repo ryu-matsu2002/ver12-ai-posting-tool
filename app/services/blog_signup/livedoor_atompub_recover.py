@@ -1,18 +1,15 @@
 import asyncio
+import time
 from datetime import datetime
 from pathlib import Path
 import logging
 import re as _re
 
-from app import db
-from app.models import ExternalBlogAccount
-from app.enums import BlogType
-
 logger = logging.getLogger(__name__)
 
 
 def _slugify_ascii(s: str) -> str:
-    """日本語/記号混じり → 半角英数とハイフンの短いスラッグ（先頭英字、長さ20程度）"""
+    """日本語/記号混じり → 半角英数とハイフンのスラッグ（先頭英字、長さ20程度）"""
     try:
         from unidecode import unidecode
     except Exception:
@@ -40,11 +37,11 @@ async def _try_set_desired_blog_id(page, desired: str) -> bool:
     成功/入力欄が見つからない場合は True、明確な失敗で False を返す。
     """
     selectors = [
-        '#blogId',
+        "#blogId",
         'input[name="blog_id"]',
         'input[name="livedoor_blog_id"]',
         'input[name="blogId"]',
-        'input#livedoor_blog_id',
+        "input#livedoor_blog_id",
     ]
     try:
         for sel in selectors:
@@ -60,23 +57,66 @@ async def _try_set_desired_blog_id(page, desired: str) -> bool:
         return False
 
 
-async def recover_atompub_key(page, nickname: str, email: str, password: str, site,
-                              desired_blog_id: str | None = None) -> dict:
+async def _dump_error(page, prefix: str, timestamp: str):
+    html = await page.content()
+    error_html = f"/tmp/{prefix}_{timestamp}.html"
+    error_png = f"/tmp/{prefix}_{timestamp}.png"
+    Path(error_html).write_text(html, encoding="utf-8")
+    await page.screenshot(path=error_png)
+    return error_html, error_png
+
+
+async def _issue_api_key(page) -> None:
+    """AtomPubページで『発行する』→『実行』を押す操作を1回実行"""
+    await page.wait_for_selector('input#apiKeyIssue', timeout=10000)
+    await page.click('input#apiKeyIssue')
+    logger.info("[LD-Recover] 『発行する』をクリック")
+
+    await page.wait_for_selector('button:has-text("実行")', timeout=10000)
+    await page.click('button:has-text("実行")')
+    logger.info("[LD-Recover] モーダルの『実行』をクリック")
+
+
+async def _wait_input_value(page, selector: str, timeout_ms: int = 15000, interval_ms: int = 300) -> str | None:
+    """
+    input要素の現在値（JSで書き換わる value を含む）を待って取得する。
+    非空になったら返す。タイムアウトで None。
+    """
+    deadline = time.monotonic() + (timeout_ms / 1000.0)
+    last = ""
+    while time.monotonic() < deadline:
+        try:
+            val = await page.input_value(selector)
+            if val and val.strip():
+                return val.strip()
+            last = val or ""
+        except Exception:
+            pass
+        await asyncio.sleep(interval_ms / 1000.0)
+    logger.warning(f"[LD-Recover] wait_input_value timeout: selector={selector}, last='{last}'")
+    return None
+
+
+async def recover_atompub_key(
+    page,
+    nickname: str,
+    email: str,
+    password: str,
+    site,
+    desired_blog_id: str | None = None,
+) -> dict:
     """
     - Livedoorブログの作成 → AtomPub APIキーを発行・取得
     - desired_blog_id が指定されれば、可能ならそのIDで作成を試みる
     - DBには保存しない（呼び出し元で保存）
+    返り値:
+      success: bool
+      blog_id: str | None
+      api_key: str | None
+      endpoint: str | None
+      html_path/png_path: 失敗時のダンプ
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    # 失敗時保存用ヘルパ
-    async def _dump_error(prefix: str):
-        html = await page.content()
-        error_html = f"/tmp/{prefix}_{timestamp}.html"
-        error_png = f"/tmp/{prefix}_{timestamp}.png"
-        Path(error_html).write_text(html, encoding="utf-8")
-        await page.screenshot(path=error_png)
-        return error_html, error_png
 
     try:
         # 1) ブログ作成ページへ
@@ -85,7 +125,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
 
         # 希望 blog_id の準備（無ければ site.name などから生成）
         if not desired_blog_id:
-            base_text = (site.name or site.url or "blog")
+            base_text = (getattr(site, "name", None) or getattr(site, "url", None) or "blog")
             desired_blog_id = _slugify_ascii(base_text)
 
         # 2) 希望 blog_id 入力（入力欄があれば）
@@ -93,7 +133,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         if not ok:
             logger.warning("[LD-Recover] blog_id 入力に失敗（入力欄不在の可能性）")
 
-        # 3) 「ブログを作成する」をクリック（重複ならメッセージが出る可能性）
+        # 3) 「ブログを作成する」をクリック
         async def click_create():
             await page.wait_for_selector('input[type="submit"][value="ブログを作成する"]', timeout=10000)
             await page.click('input[type="submit"][value="ブログを作成する"]')
@@ -104,34 +144,28 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         # 4) 重複時のリトライ（最大5回、-2, -3...）
         retry = 0
         while True:
-            # 成功導線「最初のブログを書く」ボタンが出るかを待つ
             try:
                 await page.wait_for_selector('a.button[href*="edit?utm_source=pcwelcome"]', timeout=5000)
                 break  # 成功
             except Exception:
-                # エラー文言を検知（日本語のパターンは状況で変化する可能性があるので広めに）
                 content = (await page.content()).lower()
-                dup_hint = any(k in content for k in [
-                    "使用できません", "既に使われています", "存在します", "重複", "invalid", "already"
-                ])
+                dup_hint = any(k in content for k in ["使用できません", "既に使われています", "存在します", "重複", "invalid", "already"])
                 if dup_hint and retry < 5:
                     retry += 1
                     candidate = f"{desired_blog_id}-{retry}"
                     logger.info(f"[LD-Recover] blog_idが重複の可能性 → 再試行: {candidate}")
-                    # 入力して再度作成
                     await _try_set_desired_blog_id(page, candidate)
                     await click_create()
                     desired_blog_id = candidate
                     continue
                 else:
-                    # 失敗
-                    err_html, err_png = await _dump_error("ld_atompub_create_fail")
+                    err_html, err_png = await _dump_error(page, "ld_atompub_create_fail", timestamp)
                     logger.error("[LD-Recover] ブログ作成に失敗（重複回避不能 or 不明エラー）")
                     return {
                         "success": False,
                         "error": "blog create failed",
                         "html_path": err_html,
-                        "png_path": err_png
+                        "png_path": err_png,
                     }
 
         # 5) 「最初のブログを書く」をクリック
@@ -140,14 +174,14 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
 
         # 6) /member に遷移して blog_id を抽出
         await page.goto("https://livedoor.blogcms.jp/member/", wait_until="load")
-        blog_url = await page.get_attribute('a[title="ブログ設定"]', 'href')  # 例: /blog/king123/config/
+        blog_url = await page.get_attribute('a[title="ブログ設定"]', "href")  # 例: /blog/king123/config/
         if not blog_url:
-            err_html, err_png = await _dump_error("ld_atompub_member_fail")
+            err_html, err_png = await _dump_error(page, "ld_atompub_member_fail", timestamp)
             return {
                 "success": False,
                 "error": "member page missing blog link",
                 "html_path": err_html,
-                "png_path": err_png
+                "png_path": err_png,
             }
         blog_id = blog_url.split("/")[2]  # "king123"
         logger.info(f"[LD-Recover] ブログIDを取得: {blog_id}")
@@ -163,53 +197,64 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         logger.info(f"[LD-Recover] AtomPub設定ページに遷移: {page.url}")
 
         if "member" in page.url:
-            err_html, err_png = await _dump_error("ld_atompub_redirect_fail")
+            err_html, err_png = await _dump_error(page, "ld_atompub_redirect_fail", timestamp)
             logger.error(f"[LD-Recover] AtomPubページが開けず /member にリダイレクト: {page.url}")
             return {
                 "success": False,
                 "error": "redirected to member",
                 "html_path": err_html,
-                "png_path": err_png
+                "png_path": err_png,
             }
 
-        # 8) スクショ
+        # 8) スクショ（デバッグ用）
         success_png = f"/tmp/ld_atompub_page_{timestamp}.png"
         await page.screenshot(path=success_png)
         logger.info(f"[LD-Recover] AtomPubページのスクリーンショット保存: {success_png}")
 
-        # 9) APIキー発行
-        await page.wait_for_selector('input#apiKeyIssue', timeout=10000)
-        await page.click('input#apiKeyIssue')
-        logger.info("[LD-Recover] 『発行する』をクリック")
+        # 9) APIキー発行（最大3回まで試行し、毎回ポーリングして値を読む）
+        api_key = None
+        endpoint = None
+        for attempt in range(1, 4):
+            logger.info(f"[LD-Recover] AtomPubキー発行 試行 {attempt}/3")
+            await _issue_api_key(page)
 
-        await page.wait_for_selector('button:has-text("実行")', timeout=10000)
-        await page.click('button:has-text("実行")')
-        logger.info("[LD-Recover] モーダルの『実行』をクリック")
+            # endpoint は readonly の大きい入力欄
+            endpoint = await _wait_input_value(page, 'input.input-xxlarge[readonly]', timeout_ms=15000, interval_ms=300)
+            # api_key は #apiKey
+            api_key = await _wait_input_value(page, "input#apiKey", timeout_ms=15000, interval_ms=300)
 
-        # 10) 取得
-        await page.wait_for_selector('input.input-xxlarge[readonly]', timeout=10000)
-        endpoint = await page.get_attribute('input.input-xxlarge[readonly]', 'value')
+            if endpoint:
+                logger.info(f"[LD-Recover] ✅ AtomPub endpoint: {endpoint}")
+            if api_key:
+                logger.info(f"[LD-Recover] ✅ AtomPub key: {api_key}")
 
-        await page.wait_for_selector('input#apiKey', timeout=10000)
-        api_key = await page.get_attribute('input#apiKey', 'value')
+            if endpoint and api_key:
+                break
 
-        logger.info(f"[LD-Recover] ✅ AtomPub endpoint: {endpoint}")
-        logger.info(f"[LD-Recover] ✅ AtomPub key: {api_key}")
+        if not (endpoint and api_key):
+            err_html, err_png = await _dump_error(page, "ld_atompub_key_empty", timestamp)
+            logger.error("[LD-Recover] APIキー/エンドポイントの取得に失敗（空のまま）")
+            return {
+                "success": False,
+                "error": "api key not populated",
+                "html_path": err_html,
+                "png_path": err_png,
+            }
 
-        # 11) 返却（DB保存は呼び出し元が担当）
+        # 10) 返却（DB保存は呼び出し元が担当）
         return {
             "success": True,
             "blog_id": blog_id,
             "api_key": api_key,
-            "endpoint": endpoint
+            "endpoint": endpoint,
         }
 
     except Exception as e:
-        err_html, err_png = await _dump_error("ld_atompub_fail")
+        err_html, err_png = await _dump_error(page, "ld_atompub_fail", timestamp)
         logger.error("[LD-Recover] AtomPub処理エラー", exc_info=True)
         return {
             "success": False,
             "error": str(e),
             "html_path": err_html,
-            "png_path": err_png
+            "png_path": err_png,
         }

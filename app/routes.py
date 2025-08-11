@@ -4271,6 +4271,7 @@ def prepare_captcha():
 def submit_captcha():
     from app.services.blog_signup.livedoor_signup import submit_captcha_and_complete
     from app.services.playwright_controller import get_session, delete_session
+    from app.services.blog_signup.crypto_utils import encrypt  # ★ 追加：APIキーを暗号化して保存
     from app.models import Site, ExternalBlogAccount, BlogType
     from app.utils.captcha_dataset_utils import save_captcha_label_pair
     from app import db
@@ -4317,7 +4318,7 @@ def submit_captcha():
         return jsonify({"status": "error", "message": "セッションが切れています"}), 400
 
     try:
-        # ★ 追加：候補 blog_id をセッションから取り出して渡す
+        # ★ 追加：候補 blog_id をセッションから取り出して渡す（無ければ recover 側で site.name から決定）
         desired_blog_id = session.get("captcha_desired_blog_id")
 
         # CAPTCHA送信 → 後続（メール認証/ブログ作成/API取得）まで実行
@@ -4334,8 +4335,9 @@ def submit_captcha():
         )
 
         if result.get("captcha_success"):
-            new_blog_id = result.get("blog_id")
-            new_api_key = result.get("api_key")
+            new_blog_id = (result.get("blog_id") or "").strip() or None
+            new_api_key = (result.get("api_key") or "").strip() or None
+            new_endpoint = (result.get("endpoint") or "").strip() or None  # recover 側が返せる場合に備える
 
             # ▼▼ 重複 blog_id チェック（同サイト・同PFで同じ blog_id を既に持つ行がないか）
             dup = None
@@ -4349,9 +4351,7 @@ def submit_captcha():
                        )
                        .first())
 
-            target = acct  # 書き込み対象。重複があれば既存 dup を優先
-            if dup:
-                target = dup
+            target = dup or acct  # 書き込み対象。重複があれば既存 dup を優先
 
             # 進捗フラグ
             if hasattr(target, "is_captcha_completed"):
@@ -4361,21 +4361,33 @@ def submit_captcha():
             if new_blog_id and hasattr(target, "livedoor_blog_id"):
                 target.livedoor_blog_id = new_blog_id
 
-            # APIキー
+            # username を空/プレースホルダなら blog_id で補完（存在すれば）
+            if new_blog_id and hasattr(target, "username"):
+                if not target.username or target.username.startswith("u-"):
+                    target.username = new_blog_id
+
+            # AtomPub endpoint（列があれば）
+            if new_endpoint and hasattr(target, "atompub_endpoint"):
+                try:
+                    target.atompub_endpoint = new_endpoint
+                except Exception:
+                    pass  # あればセット、無ければ無視
+
+            # APIキー（暗号化して保存）+ 投稿有効化
             if new_api_key and hasattr(target, "atompub_key_enc"):
-                target.atompub_key_enc = new_api_key
+                try:
+                    target.atompub_key_enc = encrypt(new_api_key)  # ★ 修正：暗号化
+                except Exception:
+                    logger.exception("[submit_captcha] APIキーの暗号化に失敗しました")
+                    # 保存できなくても次の判定に備えて続行（step は new_api_key で判定）
                 if hasattr(target, "api_post_enabled"):
                     target.api_post_enabled = True
 
             db.session.commit()
 
-            # 表示用の step 判定
-            step = (
-                "API取得完了" if (new_api_key or getattr(target, "atompub_key_enc", None)) else
-                "アカウント登録完了" if result.get("account_created") else
-                "メール認証完了" if result.get("email_verified") else
-                "CAPTCHA突破完了"
-            )
+            # 表示用の step 判定（フロントは 'API取得完了' をトリガーにCTAを差し替え）
+            got_api = bool(new_api_key or getattr(target, "atompub_key_enc", None))
+            step = "API取得完了" if got_api else "CAPTCHA突破完了"
 
             # フロントのポーリングが拾うステータス（★ dup があれば既存IDを返す）
             resolved_account_id = target.id
@@ -4384,7 +4396,7 @@ def submit_captcha():
                 "captcha_sent": True,
                 "email_verified": result.get("email_verified", False),
                 "account_created": result.get("account_created", False),
-                "api_key_received": bool(new_api_key or getattr(target, "atompub_key_enc", None)),
+                "api_key_received": got_api,
                 "step": "既存アカウントに紐付け済み" if dup else step,
                 "site_id": site_id,
                 "account_id": resolved_account_id,
@@ -4424,6 +4436,7 @@ def submit_captcha():
         for key in list(session.keys()):
             if key.startswith("captcha_") and key != "captcha_status":
                 session.pop(key)
+
 
 
 @bp.route("/captcha_status", methods=["GET"])
