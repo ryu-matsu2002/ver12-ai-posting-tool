@@ -4740,11 +4740,15 @@ def external_seo_generate_and_schedule():
         current_app.logger.exception("[external-seo] generate_and_schedule failed")
         return jsonify({"ok": False, "error": str(e)}), 500
 
-# routes.py など Blueprint のファイルに追加
-# routes.py など Blueprint 定義ファイル
-
 from sqlalchemy.exc import IntegrityError
 import secrets, time  # ★ 追加
+import re as _re
+from urllib.parse import urlparse
+try:
+    from unidecode import unidecode  # あれば日本語→ローマ字化
+except Exception:
+    def unidecode(x): return x
+
 
 @bp.route("/external-seo/new-account", methods=["POST"])
 @bp.route("/external-seo/new-account/", methods=["POST"])
@@ -4762,14 +4766,46 @@ def external_seo_new_account():
 
     logger = logging.getLogger(__name__)
 
-    # ユニークなダミー値を作るユーティリティ
+    # ---- ユーティリティ -------------------------------------------------
     def _stub_email(site_id: int) -> str:
+        """email UNIQUE対策：衝突しないダミーを毎回生成"""
         # 例: pending-12-1723358300123-a3f1@stub.local
         return f"pending-{site_id}-{int(time.time()*1000)}-{secrets.token_hex(2)}@stub.local"
 
     def _stub_name(prefix: str, site_id: int) -> str:
+        """username 用のダミー（安全にユニーク寄りに）"""
         # 例: u-12-1723358300123-a
         return f"{prefix}-{site_id}-{int(time.time()*1000)}-{secrets.token_hex(1)}"
+
+    def _slugify_from_site(site: "Site") -> str:
+        """
+        サイト名/URLから display 用の短いスラッグを生成（a-z0-9-、先頭は英字、最大20文字）
+        外部アカウントのカード表示に使う。DBの一意制約には関与しない。
+        """
+        base = (site.name or "")[:60]
+        if not base and getattr(site, "url", None):
+            try:
+                host = urlparse(site.url).hostname or ""
+                base = host.split(".")[0] if host else ""
+            except Exception:
+                base = ""
+
+        if not base:
+            base = f"site-{site.id}"
+
+        s = unidecode(str(base)).lower()
+        s = s.replace("&", " and ")
+        s = _re.sub(r"[^a-z0-9]+", "-", s)
+        s = _re.sub(r"-{2,}", "-", s).strip("-")
+        if not s:
+            s = f"site-{site.id}"
+        if s[0].isdigit():
+            s = "blog-" + s
+        s = s[:20]
+        if len(s) < 3:
+            s = (s + "-blog")[:20]
+        return s
+    # --------------------------------------------------------------------
 
     try:
         site_id = request.form.get("site_id", type=int)
@@ -4781,6 +4817,9 @@ def external_seo_new_account():
             return jsonify({"ok": False, "error": "Site が見つかりません"}), 200
         if (not current_user.is_admin) and (site.user_id != current_user.id):
             return jsonify({"ok": False, "error": "権限がありません"}), 200
+
+        # 表示用スラッグ（カードのタイトルに使う）
+        display_slug = _slugify_from_site(site)
 
         # UNIQUE衝突に備えて数回だけリトライ
         attempts = 0
@@ -4797,13 +4836,13 @@ def external_seo_new_account():
                 if hasattr(acc, "email"):
                     acc.email = _stub_email(site.id)
 
-                # 必須/NOT NULL かもしれない欄はダミーを入れておく
+                # username はダミー、nickname は表示に近い値（サイト由来スラッグ）を入れておく
                 if hasattr(acc, "username"):
                     acc.username = _stub_name("u", site.id)
                 if hasattr(acc, "password"):
                     acc.password = ""  # 仮
                 if hasattr(acc, "nickname"):
-                    acc.nickname = _stub_name("n", site.id)
+                    acc.nickname = display_slug  # ← ここをサイト由来に
 
                 # 状態系（存在すれば）
                 if hasattr(acc, "status"):                acc.status = "active"
@@ -4833,7 +4872,8 @@ def external_seo_new_account():
 
         account_payload = {
             "id": acc.id,
-            "blog_title": f"account#{acc.id}",
+            # 表示名はサイト名ベースのスラッグを使用（カードのタイトルが人間にわかりやすくなる）
+            "blog_title": display_slug,
             "public_url": None,
             "api_key": None,
             "stat_total": 0,
