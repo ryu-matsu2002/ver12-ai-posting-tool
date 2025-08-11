@@ -28,6 +28,53 @@ from flask import current_app
 
 logger = logging.getLogger(__name__)
 
+# 追加ここから
+import re as _re
+try:
+    from unidecode import unidecode  # pip install Unidecode があれば日本語→ローマ字に
+except Exception:                     # 未導入でも動くフォールバック
+    def unidecode(x): return x
+
+def _slugify_ascii(s: str) -> str:
+    """日本語/記号混じり → 半角英数とハイフンの短いスラッグに（livedoor向け）"""
+    if not s:
+        s = "blog"
+    s = unidecode(str(s)).lower()
+    s = s.replace("&", " and ")
+    s = _re.sub(r"[^a-z0-9]+", "-", s)
+    s = _re.sub(r"-{2,}", "-", s).strip("-")
+    if s and s[0].isdigit():
+        s = "blog-" + s
+    if not s:
+        s = "blog"
+    s = s[:20]
+    if len(s) < 3:
+        s = (s + "-blog")[:20]
+    return s
+
+def suggest_livedoor_blog_id(base_text: str, db_session) -> str:
+    """
+    サイト名/ドメインの文字列から blog_id 候補を作り、
+    DBに既存があれば `-2`, `-3`... と採番して一意にする
+    """
+    from app.models import ExternalBlogAccount
+    from app.enums import BlogType
+
+    base = _slugify_ascii(base_text)
+    candidate, n = base, 0
+    while True:
+        exists = db_session.query(ExternalBlogAccount.id).filter(
+            ExternalBlogAccount.blog_type == BlogType.LIVEDOOR,
+            ExternalBlogAccount.livedoor_blog_id == candidate
+        ).first()
+        if not exists:
+            return candidate
+        n += 1
+        tail = str(n)
+        candidate = (base[: max(1, 20 - len(tail) - 1)] + "-" + tail)
+# 追加ここまで
+
+
 def generate_safe_id(n=10) -> str:
     """先頭英字 + 半角英小文字 + 数字 + アンダーバー"""
     chars = string.ascii_lowercase + string.digits + "_"
@@ -345,7 +392,11 @@ async def run_livedoor_signup(site, email, token, nickname, password,
 
 from app.services.playwright_controller import store_session
 
-async def launch_livedoor_and_capture_captcha(email: str, nickname: str, password: str, session_id: str) -> dict:
+async def launch_livedoor_and_capture_captcha(
+    email: str, nickname: str, password: str, session_id: str,
+    desired_blog_id: str | None = None  # ★ 追加
+) -> dict:
+
     """
     CAPTCHA画像を取得し、Playwrightセッションを保持して返す。
     """
@@ -388,7 +439,9 @@ async def launch_livedoor_and_capture_captcha(email: str, nickname: str, passwor
         raise RuntimeError("CAPTCHA画像の取得に失敗しました")
 
 async def submit_captcha_and_complete(page, captcha_text: str, email: str, nickname: str,
-                                      password: str, token: str, site) -> dict:
+                                      password: str, token: str, site,
+                                      desired_blog_id: str | None = None) -> dict:  # ★ 追加
+
     """
     CAPTCHAを入力・送信し、メール認証・アカウント作成を完了。
     """
@@ -449,7 +502,7 @@ async def submit_captcha_and_complete(page, captcha_text: str, email: str, nickn
 
         # ✅ AtomPub情報取得（直接recover_atompub_keyで処理）
         logger.info("[LD-Signup] AtomPub作成ルートに移行")
-        recover_result = await recover_atompub_key(page, nickname, email, password, site)
+        recover_result = await recover_atompub_key(page, nickname, email, password, site, desired_blog_id=desired_blog_id)
 
         if not recover_result["success"]:
             return {

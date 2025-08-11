@@ -3932,6 +3932,79 @@ def external_schedule_post_now(schedule_id):
 
     return redirect(request.referrer or url_for("main.external_account_articles", acct_id=acct.id))
 
+
+# --- 一括削除: 外部ブログアカウント + 予約 +（安全条件下の）生成記事 ---
+@bp.post("/external/account/<int:acct_id>/delete")
+@login_required
+def external_account_delete(acct_id):
+    from app.models import (
+        ExternalBlogAccount, ExternalArticleSchedule, Keyword, Article, Site
+    )
+    from sqlalchemy import exists, and_, select
+    from app import db
+
+    acct = ExternalBlogAccount.query.get_or_404(acct_id)
+    site: Site = acct.site
+
+    # 権限
+    if not current_user.is_admin and site.user_id != current_user.id:
+        return {"ok": False, "error": "権限がありません"}, 403
+
+    # まず、このアカウントの全スケジュールを取得（Keywordも使うためIDを保持）
+    schedules = (
+        db.session.query(ExternalArticleSchedule)
+        .filter(ExternalArticleSchedule.blog_account_id == acct.id)
+        .all()
+    )
+    keyword_ids = [s.keyword_id for s in schedules if getattr(s, "keyword_id", None)]
+    # ID→テキストを得る（Articleは keyword(テキスト) 基準で紐付けられているため）
+    kw_texts = []
+    if keyword_ids:
+        kw_texts = [
+            k.keyword for k in db.session.query(Keyword).filter(Keyword.id.in_(keyword_ids)).all()
+        ]
+
+    # このアカウント以外でも同じキーワードIDが使われているか（残す条件）
+    # → Articleは「同じ keyword テキスト」を共有し得るので、
+    #   “他アカウントの予約が同一KeywordIDを参照していない”記事のみ削除対象とする
+    if kw_texts:
+        # schedules テーブルで “同一 keyword_id かつ 別アカウント” が存在しないことを条件に Article を削除
+        # Article は site_id と source='external' で限定
+        subq_other = (
+            db.session.query(ExternalArticleSchedule.id)
+            .filter(
+                ExternalArticleSchedule.keyword_id.in_(keyword_ids),
+                ExternalArticleSchedule.blog_account_id != acct.id
+            )
+            .exists()
+        )
+        # 削除対象 Article の選別
+        articles_q = (
+            db.session.query(Article)
+            .filter(
+                Article.site_id == site.id,
+                Article.source == "external",
+                Article.keyword.in_(kw_texts),
+                ~subq_other   # 他アカウントの予約が無いキーワードのみ
+            )
+        )
+        deleted_articles = articles_q.delete(synchronize_session=False)
+    else:
+        deleted_articles = 0
+
+    # スケジュール削除
+    db.session.query(ExternalArticleSchedule)\
+        .filter(ExternalArticleSchedule.blog_account_id == acct.id)\
+        .delete(synchronize_session=False)
+
+    # アカウント削除
+    db.session.delete(acct)
+    db.session.commit()
+
+    return {"ok": True, "deleted_articles": int(deleted_articles)}
+
+
+
 # -----------------------------------------------------------
 # 管理者向け: 全ユーザーの外部ブログアカウント一覧
 # -----------------------------------------------------------
@@ -4090,7 +4163,8 @@ def blog_one_click_login(acct_id):
 @login_required
 def prepare_captcha():
     from app.services.blog_signup.livedoor_signup import (
-        generate_safe_id, generate_safe_password, launch_livedoor_and_capture_captcha
+        generate_safe_id, generate_safe_password, launch_livedoor_and_capture_captcha,
+        suggest_livedoor_blog_id,   # ★ 追加：候補 blog_id 生成
     )
     from app.services.mail_utils.mail_gw import create_inbox
     from app.models import Site, ExternalBlogAccount
@@ -4131,13 +4205,21 @@ def prepare_captcha():
     nickname = generate_safe_id()
     password = generate_safe_password()
 
+    # ★ 追加：サイト名/URLから blog_id 候補を作る（ユニーク化込み）
+    try:
+        base_text = site.name or site.url or ""
+        desired_blog_id = suggest_livedoor_blog_id(base_text, db.session)
+    except Exception:
+        desired_blog_id = None
+
     session_id = str(uuid4())
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
             import nest_asyncio; nest_asyncio.apply()
         result = loop.run_until_complete(
-            launch_livedoor_and_capture_captcha(email, nickname, password, session_id)
+            # ★ desired_blog_id を渡す
+            launch_livedoor_and_capture_captcha(email, nickname, password, session_id, desired_blog_id=desired_blog_id)
         )
     except Exception:
         logger.exception("[prepare_captcha] CAPTCHA生成で例外が発生")
@@ -4167,7 +4249,8 @@ def prepare_captcha():
         "captcha_blog": blog,
         "captcha_image_filename": image_filename,
         "captcha_session_id": session_id,
-        "captcha_account_id": account_id,  # ★ 追加
+        "captcha_account_id": account_id,      # ★ 追加
+        "captcha_desired_blog_id": desired_blog_id,  # ★ 追加：候補 blog_id を保持
     })
 
     # ★ 任意：DBにも紐付け（ログ用途）
@@ -4234,6 +4317,9 @@ def submit_captcha():
         return jsonify({"status": "error", "message": "セッションが切れています"}), 400
 
     try:
+        # ★ 追加：候補 blog_id をセッションから取り出して渡す
+        desired_blog_id = session.get("captcha_desired_blog_id")
+
         # CAPTCHA送信 → 後続（メール認証/ブログ作成/API取得）まで実行
         result = loop.run_until_complete(
             submit_captcha_and_complete(
@@ -4242,7 +4328,8 @@ def submit_captcha():
                 session.get("captcha_nickname"),
                 session.get("captcha_password"),
                 session.get("captcha_token"),
-                site
+                site,
+                desired_blog_id=desired_blog_id   # ★ 追加
             )
         )
 

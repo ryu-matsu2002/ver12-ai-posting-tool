@@ -105,6 +105,15 @@
                   </div>
                   <div>
                     <button class="text-gray-400 hover:text-gray-700 text-lg leading-none" title="詳細/ログ（準備中）">⋯</button>
+                    <button
+                      type="button"
+                      class="ml-2 text-xs px-2 py-1 border rounded hover:bg-red-50 text-red-600"
+                      data-acct-id="{{ acc.id }}"
+                      data-site-id="{{ s.id }}"
+                      onclick="deleteExternalAccount(this.dataset.acctId, this.dataset.siteId)"
+                      title="このアカウントと記事を削除">
+                      削除
+                    </button>
                   </div>
                 </div>
 
@@ -515,5 +524,41 @@
   function updateCaptchaStatusUI(data) {
     // バッジは廃止したため、ここでは何もしない
   }
+
+async function deleteExternalAccount(acctId, siteId) {
+  if (!acctId) return;
+  if (!confirm("この無料ブログアカウントを削除します。予約と（このアカウントだけが使っている）生成記事も削除します。よろしいですか？")) {
+    return;
+  }
+  try {
+    const res  = await fetch(`/external/account/${acctId}/delete`, { method: "POST" });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "削除に失敗しました");
+
+    // カードDOMを削除
+    const card = document.getElementById(`acc-card-${acctId}`);
+    if (card) {
+      const panel = card.closest(`[id^="tab-ld-"]`);
+      card.remove();
+
+      // パネル（タブ内）にカードが無くなったら空表示に差し替え
+      if (panel) {
+        const grid = panel.querySelector('.grid');
+        const hasCards = grid && grid.children.length > 0;
+        if (!hasCards) {
+          panel.innerHTML = '<div class="px-2 py-1 text-sm text-gray-500">まだLivedoorアカウントはありません。</div>';
+        }
+      }
+    }
+
+    // タブの件数を -1
+    try { incrementLdCount(siteId, -1); } catch (_) {}
+
+    alert(`削除しました（削除記事: ${data.deleted_articles || 0}）`);
+  } catch (e) {
+    console.error(e);
+    alert(e.message || "削除に失敗しました");
+  }
+}
 </script>
 {% endblock %}
