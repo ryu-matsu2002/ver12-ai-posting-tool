@@ -4330,7 +4330,7 @@ def submit_captcha():
         return jsonify({"status": "error", "message": "セッションが切れています"}), 400
 
     try:
-        # 追加：候補 blog_id をセッションから取り出して渡す（無ければ recover 側で site.name から決定）
+        # 候補 blog_id をセッションから取り出して渡す（無ければ recover 側で site.name から決定）
         desired_blog_id = session.get("captcha_desired_blog_id")
 
         # CAPTCHA送信 → 認証 → ブログ作成 → APIキー取得（内部で recover）
@@ -4397,13 +4397,16 @@ def submit_captcha():
 
             db.session.commit()
 
+            # ←← ここでフロント用のフラグを算出（未定義バグを修正）
+            got_api = bool(new_api_key or getattr(target, "atompub_key_enc", None))
+
             # 表示用の step（成功時は常に API取得完了）
             resolved_account_id = target.id
             session["captcha_status"] = {
                 "captcha_sent": True,
                 "email_verified": True,
                 "account_created": True,
-                "api_key_received": True,
+                "api_key_received": got_api,
                 "step": "既存アカウントに紐付け済み" if dup else "API取得完了",
                 "site_id": site_id,
                 "account_id": resolved_account_id,
@@ -4413,7 +4416,9 @@ def submit_captcha():
                 "status": "captcha_success",
                 "step": session["captcha_status"]["step"],
                 "site_id": site_id,
-                "account_id": resolved_account_id
+                "account_id": resolved_account_id,
+                "api_key_received": got_api,                       # ← フロント即時切替用
+                "next_cta": "ready_to_post" if got_api else "captcha_done"
             }), 200
 
         # ===== ここから失敗扱い =====
@@ -4463,7 +4468,6 @@ def submit_captcha():
         for key in list(session.keys()):
             if key.startswith("captcha_") and key != "captcha_status":
                 session.pop(key)
-
 
 
 

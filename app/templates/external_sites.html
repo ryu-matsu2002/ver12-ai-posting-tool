@@ -407,54 +407,96 @@
   }
 
   function submitCaptcha(event) {
-    event.preventDefault();
-    const siteId    = sessionStorage.getItem("currentSiteId");
-    const accountId = sessionStorage.getItem("currentAccountId");
-    const platform  = sessionStorage.getItem("currentPlatform") || "livedoor";
+  event.preventDefault();
+  const siteId    = sessionStorage.getItem("currentSiteId");
+  const accountId = sessionStorage.getItem("currentAccountId");
+  const platform  = sessionStorage.getItem("currentPlatform") || "livedoor";
 
-    const btn = document.getElementById("captchaSubmitBtn");
-    btn.innerText = "⏳ 送信中...";
-    btn.disabled = true;
-    btn.classList.remove("bg-blue-600");
-    btn.classList.add("bg-gray-500");
+  const btn = document.getElementById("captchaSubmitBtn");
+  btn.innerText = "⏳ 送信中...";
+  btn.disabled = true;
+  btn.classList.remove("bg-blue-600");
+  btn.classList.add("bg-gray-500");
 
-    const form = document.getElementById("captchaForm");
-    const fd = new FormData(form);
-    const payload = new URLSearchParams({
-      "captcha_text": fd.get("captcha_text"),
-      "site_id": siteId,
-      "account_id": accountId,
-      "blog": platform
-    });
+  const form = document.getElementById("captchaForm");
+  const fd = new FormData(form);
+  const payload = new URLSearchParams({
+    "captcha_text": fd.get("captcha_text"),
+    "site_id": siteId,
+    "account_id": accountId,
+    "blog": platform
+  });
 
-    fetch("/submit_captcha", { method: "POST", body: payload })
-      .then(r => r.json())
-      .then(data => {
-        btn.innerText = "送信";
-        btn.disabled = false;
-        btn.classList.remove("bg-gray-500");
-        btn.classList.add("bg-blue-600");
+  fetch("/submit_captcha", { method: "POST", body: payload })
+    .then(r => r.json())
+    .then(data => {
+      btn.innerText = "送信";
+      btn.disabled = false;
+      btn.classList.remove("bg-gray-500");
+      btn.classList.add("bg-blue-600");
 
-        closeCaptcha();
+      closeCaptcha();
 
-        if (data.status === "captcha_failed") {
-          alert("CAPTCHA突破に失敗しました。再度お試しください。");
-          restoreCaptchaButton(siteId, accountId, "❌ 再挑戦");
-          updateCaptchaStatusUI(data);
-        } else if (data.status === "captcha_success") {
-          setCaptchaDoneUI(siteId, accountId);
-          alert("CAPTCHA突破成功。仮登録メールを送信しました！");
-        } else {
-          alert("予期しない応答が返されました");
-          restoreCaptchaButton(siteId, accountId, "⚠ 不明な応答");
-        }
-      })
-      .catch(err => {
-        console.error(err);
-        alert("CAPTCHA送信中にエラーが発生しました");
+      // ❶ CAPTCHA自体がNG
+      if (data.status === "captcha_failed") {
+        alert("CAPTCHA突破に失敗しました。再度お試しください。");
         restoreCaptchaButton(siteId, accountId, "❌ 再挑戦");
-      });
-  }
+        updateCaptchaStatusUI(data);
+        return;
+      }
+
+      // ❷ 完全成功（APIキー取得済み）
+      if (data.status === "captcha_success" && data.api_key_received) {
+        const sid = data.site_id || siteId;
+        const aid = data.account_id || accountId;
+
+        switchToPostCTA(sid, aid);                 // ← 「記事生成＆投稿」に即時切替
+        if (progressInterval) {                    // 進捗ポーリングは停止
+          clearInterval(progressInterval);
+          progressInterval = null;
+        }
+        alert("アカウント作成とAPIキー取得が完了しました。すぐに投稿を始められます。");
+        return;
+      }
+
+      // ❸ 想定外 or 再作成要求（API未取得）
+      if (data.status === "recreate_required") {
+        alert("アカウント作成に失敗しました。『↻ アカウントを再作成』からやり直してください。");
+        restoreCaptchaButton(siteId, accountId, "↻ アカウントを再作成");
+        return;
+      }
+
+      // ❹ 安全側（旧挙動との後方互換：API未取得だが success など）
+      if (data.status === "captcha_success") {
+        setCaptchaDoneUI(siteId, accountId);       // 「✅ 実行済み」表示
+        // 取得完了までは既存のポーリングで CTA を置き換える
+        startProgressPolling();
+        return;
+      }
+
+      alert("予期しない応答が返されました");
+      restoreCaptchaButton(siteId, accountId, "⚠ 不明な応答");
+    })
+    .catch(err => {
+      console.error(err);
+      alert("CAPTCHA送信中にエラーが発生しました");
+      restoreCaptchaButton(siteId, accountId, "❌ 再挑戦");
+    });
+}
+
+function switchToPostCTA(siteId, accountId) {
+  const actionArea = document.getElementById(`actionArea-acc-${accountId}`);
+  if (!actionArea) return;
+
+  actionArea.innerHTML = "";
+  const a = document.createElement("a");
+  a.href = `/generate?site_id=${siteId}&account_id=${accountId}`;
+  a.className = "w-full inline-flex items-center justify-center px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm";
+  a.textContent = "📝 記事生成＆投稿";
+  actionArea.appendChild(a);
+  const hint = document.querySelector(`#acc-card-${accountId} .mt-1.text-gray-500`);
+  if (hint) hint.textContent = "初回の生成を開始できます";
+}
 
   function restoreCaptchaButton(siteId, accountId, label) {
     const btn = document.querySelector(`button[data-site-id="${siteId}"][data-account-id="${accountId}"]`);
@@ -508,6 +550,8 @@
               a.className = "w-full inline-flex items-center justify-center px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm";
               a.textContent = "📝 記事生成＆投稿";
               actionArea.appendChild(a);
+              const hint = document.querySelector(`#acc-card-${aid} .mt-1.text-gray-500`);
+              if (hint) hint.textContent = "初回の生成を開始できます";
             }
 
             clearInterval(progressInterval);
