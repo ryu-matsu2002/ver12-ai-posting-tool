@@ -3835,16 +3835,13 @@ def external_account_articles(acct_id):
         .join(Keyword, ExternalArticleSchedule.keyword_id == Keyword.id)
         .outerjoin(
             Article,
-            db.and_(
-                Article.keyword == Keyword.keyword,
-                Article.site_id == site.id,
-                Article.source == "external"  # ← 統一
-            )
+            Article.id == ExternalArticleSchedule.article_id
         )
         .filter(ExternalArticleSchedule.blog_account_id == acct_id)
         .order_by(ExternalArticleSchedule.scheduled_date.desc())
         .all()
     )
+
 
     return render_template(
         "external_articles.html",
@@ -3937,7 +3934,7 @@ def external_schedule_post_now(schedule_id):
 
     try:
         # pending を処理
-        _run_external_post_job(current_app._get_current_object())
+        _run_external_post_job(current_app._get_current_object(), schedule_id=schedule_id)
         flash("即時投稿を開始しました。しばらくしてページを更新してください。", "success")
     except Exception as e:
         current_app.logger.exception("[external] post_now failed")
@@ -4512,12 +4509,11 @@ def get_captcha_status():
 @login_required
 def external_seo_generate_get():
     from app.models import Site, ExternalBlogAccount, BlogType
-    from app.external_seo_generator import generate_external_seo_articles
+    from app.external_seo_generator import generate_and_schedule_external_articles
     from sqlalchemy import and_
 
     site_id = request.args.get("site_id", type=int)
     account_id = request.args.get("account_id", type=int)
-    # 将来PF拡張を見越して blog_type を受けられるように（無指定は LIVEDOOR）
     blog_type_param = request.args.get("blog_type", default="livedoor").strip().lower() if request.args.get("blog_type") else "livedoor"
 
     if not site_id:
@@ -4525,37 +4521,28 @@ def external_seo_generate_get():
         return redirect(url_for("main.external_seo_sites"))
 
     site = Site.query.get_or_404(site_id)
-    # 権限チェック（サイト単位）
     if (not current_user.is_admin) and (site.user_id != current_user.id):
         abort(403)
 
-    # blog_type の正規化
     try:
-        # BlogType が Enum で value が "LIVEDOOR" などの場合を想定
         target_blog_type = getattr(BlogType, blog_type_param.upper())
     except Exception:
-        # 不明PFなら LIVEDOOR にフォールバック
         target_blog_type = BlogType.LIVEDOOR
 
-    # 対象アカウントの決定
     accounts_to_run = []
     if account_id:
         acct = ExternalBlogAccount.query.get_or_404(account_id)
-        # サイト整合性
         if acct.site_id != site_id:
             flash("不正なアクセスです（サイト不一致）", "danger")
             return redirect(url_for("main.external_seo_sites"))
-        # ブログ種別整合性（指定があればチェック）
         if acct.blog_type != target_blog_type:
             flash("不正なアクセスです（プラットフォーム不一致）", "danger")
             return redirect(url_for("main.external_seo_sites"))
-        # APIキー必須
         if not acct.atompub_key_enc:
             flash("このアカウントはAPIキー未取得のため記事生成できません。", "danger")
             return redirect(url_for("main.external_seo_sites"))
         accounts_to_run = [acct]
     else:
-        # サイト内の“準備OK（api_keyあり）”のみを一括対象
         accounts_to_run = (
             ExternalBlogAccount.query
             .filter(
@@ -4571,34 +4558,33 @@ def external_seo_generate_get():
             flash("このサイトで実行可能なアカウント（API取得済）が見つかりませんでした。", "warning")
             return redirect(url_for("main.external_seo_sites"))
 
-    # 実行（複数アカウントに対してキック）
     ok, ng = 0, 0
     failed = []
     for acct in accounts_to_run:
         try:
-            generate_external_seo_articles(
+            # ★ ここを新関数に差し替え（旧: generate_external_seo_articles）
+            _created = generate_and_schedule_external_articles(
                 user_id=current_user.id,
                 site_id=site_id,
-                blog_id=acct.id,   # 既存実装に合わせて account_id を blog_id 引数に渡す
-                account=acct
+                blog_account_id=acct.id,
+                count=100,
+                per_day=10,
+                start_day_jst=None,  # None で「翌日開始」に自動化
             )
             ok += 1
         except Exception as e:
             ng += 1
             failed.append((acct.id, str(e)))
 
-    # フィードバック
     if ok and not ng:
-        # 例：「100記事・1日10件ペース」は既存実装のデフォ想定
-        flash(f"{ok}件のアカウントで外部SEO記事の生成を開始しました（100記事・1日10件ペース）", "success")
+        flash(f"{ok}件のアカウントで外部SEO記事の生成を開始しました（100記事・1日10本・翌日から）。", "success")
     elif ok and ng:
         flash(f"{ok}件開始 / {ng}件失敗しました。", "warning")
     else:
         flash("記事生成の開始に失敗しました。", "danger")
 
-    # 失敗詳細（必要なら軽く通知）
     if failed:
-        for aid, msg in failed[:3]:  # 長すぎると邪魔なので最大3件
+        for aid, msg in failed[:3]:
             flash(f"account_id={aid}: {msg}", "danger")
         if len(failed) > 3:
             flash(f"…他 {len(failed)-3}件", "danger")
@@ -4674,41 +4660,59 @@ def confirm_livedoor_email(task_id):
 from flask import Blueprint, request, redirect, url_for, flash
 from flask_login import login_required, current_user
 from app.models import ExternalBlogAccount
-from app.external_seo_generator import generate_external_seo_articles
+from app.tasks import _run_external_post_job
+
+# 既存の
+# @bp.route("/external-seo/generate/<int:site_id>/<int:blog_id>", methods=["POST"])
+# def external_seo_generate(...):
+# を丸ごと置き換え
 
 @bp.route("/external-seo/generate/<int:site_id>/<int:blog_id>", methods=["POST"])
 @login_required
 def external_seo_generate(site_id, blog_id):
     """
-    外部SEO記事生成ルート
+    既存の /external-seo/generate/<site_id>/<blog_id> を温存したまま、
+    生成＆スケジューリングの新ロジックに差し替え。
+    - 100本生成
+    - 1日10本
+    - スケジュール開始は「生成開始の翌日」
     """
-    # 1. アカウント取得
-    account = ExternalBlogAccount.query.get(blog_id)
-    if not account:
-        flash("外部ブログアカウントが見つかりません。", "danger")
-        return redirect(url_for("main.external_seo_sites"))
+    from flask import redirect, url_for, flash
+    from app.models import ExternalBlogAccount, Site, BlogType
+    from app.external_seo_generator import generate_and_schedule_external_articles
 
-    # 2. site_idの一致確認（セキュリティ）
-    if account.site_id != site_id:
+    # アカウント取得
+    acct = ExternalBlogAccount.query.get_or_404(blog_id)
+
+    # site_id整合性
+    if acct.site_id != site_id:
         flash("不正なアクセスです（サイト不一致）。", "danger")
         return redirect(url_for("main.external_seo_sites"))
 
-    # 3. APIキー確認
-    if not account.atompub_key_enc:
+    # 所有権チェック（管理者はスキップ）
+    site = Site.query.get_or_404(site_id)
+    if (not current_user.is_admin) and (site.user_id != current_user.id):
+        abort(403)
+
+    # APIキー必須
+    if not getattr(acct, "atompub_key_enc", None):
         flash("APIキーが未取得のため記事生成できません。", "danger")
         return redirect(url_for("main.external_seo_sites"))
 
     try:
-        # 4. 外部SEO記事生成開始（account オブジェクトを渡す）
-        generate_external_seo_articles(
+        # ※ start_day_jst を省略 → ジェネレータ側で「翌日開始」に自動化
+        created = generate_and_schedule_external_articles(
             user_id=current_user.id,
             site_id=site_id,
-            blog_id=blog_id,
-            account=account  # ★ 新規追加
+            blog_account_id=acct.id,
+            count=100,
+            per_day=10,
+            start_day_jst=None,
         )
-        flash("外部SEO記事の生成を開始しました（100記事・1日10記事ペース）。", "success")
+        flash(f"外部SEO記事の生成を開始しました（{created}件、1日10本・翌日から投稿）。", "success")
     except Exception as e:
-        flash(f"記事生成開始に失敗しました: {str(e)}", "danger")
+        current_app.logger.exception("[external-seo] generate (legacy route) failed")
+        flash(f"記事生成開始に失敗しました: {e}", "danger")
 
     return redirect(url_for("main.external_seo_sites"))
 
