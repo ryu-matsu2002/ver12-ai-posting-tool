@@ -51,26 +51,24 @@
 let currentType = "site";
 let currentOrder = "desc";
 let currentPeriod = "3m";
-let customStart = "";
-let customEnd = "";
 
 window.addEventListener("DOMContentLoaded", () => {
   loadRanking();
+
   document.querySelectorAll(".tab-btn").forEach(btn => {
     btn.addEventListener("click", () => {
-      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("bg-blue-100", "text-blue-800"));
-      btn.classList.add("bg-blue-100", "text-blue-800");
+      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("bg-blue-100","text-blue-800"));
+      btn.classList.add("bg-blue-100","text-blue-800");
       currentType = btn.dataset.type;
       loadRanking();
     });
   });
+
   document.querySelectorAll(".period-btn").forEach(btn => {
     btn.addEventListener("click", () => {
-      document.querySelectorAll(".period-btn").forEach(b => b.classList.remove("bg-blue-200", "font-bold"));
-      btn.classList.add("bg-blue-200", "font-bold");
-      currentPeriod = btn.dataset.period;
-      customStart = "";
-      customEnd = "";
+      document.querySelectorAll(".period-btn").forEach(b => b.classList.remove("bg-blue-200","font-bold"));
+      btn.classList.add("bg-blue-200","font-bold");
+      currentPeriod = btn.dataset.period;   // 1d/7d/3m...
       loadRanking();
     });
   });
@@ -80,75 +78,103 @@ function toggleCustomDate() {
   document.getElementById("custom-date-box").classList.toggle("hidden");
 }
 
+// ← 新規：カスタム適用
+function reloadRanking() {
+  currentPeriod = "custom";
+  loadRanking();
+}
+
 function toggleSort() {
   currentOrder = currentOrder === "desc" ? "asc" : "desc";
   loadRanking();
 }
 
-function loadRanking() {
-  document.getElementById("ranking-body").innerHTML = "";
-  document.getElementById("loading").classList.remove("hidden");
+function setLoading(on) {
+  document.getElementById("loading").classList[on ? "remove" : "add"]("hidden");
+}
 
-  const start = document.getElementById("start_date")?.value;
-  const end = document.getElementById("end_date")?.value;
+async function loadRanking() {
+  const thead = document.getElementById("ranking-thead");
+  const tbody = document.getElementById("ranking-body");
+  thead.innerHTML = "";
+  tbody.innerHTML = "";
+  setLoading(true);
 
-  let url = `/api/admin/rankings?type=${currentType}&order=${currentOrder}&period=${currentPeriod}`;
-  if (currentPeriod === "custom") {
-    if (start) url += `&start_date=${start}`;
-    if (end) url += `&end_date=${end}`;
-  }
+  try {
+    const start = document.getElementById("start_date")?.value;
+    const end = document.getElementById("end_date")?.value;
 
-  fetch(url)
-    .then(res => res.json())
-    .then(data => {
-      const thead = document.getElementById("ranking-thead");
-      const tbody = document.getElementById("ranking-body");
-      thead.innerHTML = "";
-      tbody.innerHTML = "";
-      document.getElementById("loading").classList.add("hidden");
+    const params = new URLSearchParams({
+      type: currentType,
+      order: currentOrder,
+      period: currentPeriod
+    });
+    if (currentPeriod === "custom") {
+      if (start) params.set("start_date", start);
+      if (end) params.set("end_date", end);
+    }
 
-      if (currentType === "site") {
-        thead.innerHTML = `
-          <tr>
-            <th class="p-2 w-[60px]">順位</th>
-            <th class="p-2 w-[150px]">ユーザー名</th>
-            <th class="p-2 cursor-pointer" onclick="toggleSort()">サイト数 ${currentOrder === "desc" ? "↓" : "↑"}</th>
-          </tr>`;
-        data.forEach((row, i) => {
-          tbody.innerHTML += `
-            <tr class="border-b">
-              <td class="p-2">${i < 3 ? ["🥇", "🥈", "🥉"][i] : `#${i + 1}`}</td>
-              <td class="p-2">${row.last_name} ${row.first_name}</td>
-              <td class="p-2 text-center">${row.site_count}</td>
-            </tr>`;
-        });
-      } else {
-        thead.innerHTML = `
-          <tr>
-            <th class="p-2 w-[60px]">順位</th>
-            <th class="p-2">サイト名</th>
-            <th class="p-2">ユーザー名</th>
-            <th class="p-2 cursor-pointer" onclick="toggleSort()">値 ${currentOrder === "desc" ? "↓" : "↑"}</th>
-          </tr>`;
-        data.forEach((row, i) => {
-          tbody.innerHTML += `
-            <tr class="border-b">
-              <td class="p-2">${i < 3 ? ["🥇", "🥈", "🥉"][i] : `#${i + 1}`}</td>
-              <td class="p-2 text-blue-600 underline"><a href="${row.site_url}" target="_blank">${row.site_name}</a></td>
-              <td class="p-2">${row.user_name}</td>
-              <td class="p-2 text-center">${row.value}</td>
-            </tr>`;
-        });
+    const res = await fetch(`/api/admin/rankings?${params.toString()}`, {
+      credentials: "same-origin",
+      headers: {
+        "Accept": "application/json",
+        "X-Requested-With": "XMLHttpRequest"
       }
+    });
 
+    const ct = res.headers.get("content-type") || "";
+    if (!ct.includes("application/json")) throw new Error(`Unexpected response (status ${res.status})`);
+
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+
+    // サーバは成功時に配列のみ返す実装なので、配列と想定
+    const data = Array.isArray(json) ? json : (json.data || []);
+
+    if (currentType === "site") {
+      thead.innerHTML = `
+        <tr>
+          <th class="p-2 w-[60px]">順位</th>
+          <th class="p-2 w-[150px]">ユーザー名</th>
+          <th class="p-2 cursor-pointer" onclick="toggleSort()">サイト数 ${currentOrder === "desc" ? "↓" : "↑"}</th>
+        </tr>`;
+      if (data.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-gray-500">データが見つかりませんでした。</td></tr>`;
+      } else {
+        tbody.innerHTML = data.map((row, i) => `
+          <tr class="border-b">
+            <td class="p-2">${i < 3 ? ["🥇","🥈","🥉"][i] : `#${i+1}`}</td>
+            <td class="p-2">${row.last_name} ${row.first_name}</td>
+            <td class="p-2 text-center">${row.site_count ?? 0}</td>
+          </tr>`).join("");
+      }
+    } else {
+      thead.innerHTML = `
+        <tr>
+          <th class="p-2 w-[60px]">順位</th>
+          <th class="p-2">サイト名</th>
+          <th class="p-2">ユーザー名</th>
+          <th class="p-2 cursor-pointer" onclick="toggleSort()">値 ${currentOrder === "desc" ? "↓" : "↑"}</th>
+        </tr>`;
       if (data.length === 0) {
         tbody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-gray-500">データが見つかりませんでした。</td></tr>`;
+      } else {
+        tbody.innerHTML = data.map((row, i) => `
+          <tr class="border-b">
+            <td class="p-2">${i < 3 ? ["🥇","🥈","🥉"][i] : `#${i+1}`}</td>
+            <td class="p-2 text-blue-600 underline"><a href="${row.site_url}" target="_blank" rel="noopener">${row.site_name}</a></td>
+            <td class="p-2">${row.user_name}</td>
+            <td class="p-2 text-center">${row.value ?? 0}</td>
+          </tr>`).join("");
       }
-    })
-    .catch(err => {
-      console.error(err);
-      document.getElementById("ranking-body").innerHTML = `<tr><td colspan="4" class="p-4 text-center text-red-600">読み込みに失敗しました</td></tr>`;
-    });
+    }
+  } catch (err) {
+    console.error(err);
+    document.getElementById("ranking-body").innerHTML =
+      `<tr><td colspan="4" class="p-4 text-center text-red-600">読み込みに失敗しました：${err.message}</td></tr>`;
+  } finally {
+    setLoading(false); // ← 失敗時も確実にOFF
+  }
 }
 </script>
 {% endblock %}

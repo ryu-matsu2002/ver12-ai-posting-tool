@@ -1589,44 +1589,60 @@ def regenerate_user_stuck_articles(uid):
 
 
 
-from flask import Blueprint, request, jsonify, Response
+# 先頭の import を修正
+# 既存の import に追加（上の方）
+from flask import Blueprint, request, jsonify, Response, redirect, url_for, render_template
 from flask_login import login_required, current_user
-from sqlalchemy import  desc, asc
-from datetime import datetime, timedelta  # ✅ 修正
+from sqlalchemy import func, desc, asc
+from datetime import datetime, timedelta
 from app import db
 from app.models import User, Site, Article
-import json  # ← 追加
 
-@admin_bp.route("/api/admin/rankings")
+# ← これを先頭の import セクションに追加
+from app.utils.monitor import (
+    get_memory_usage,
+    get_cpu_load,
+    get_latest_restart_log,
+    get_last_restart_time,
+)
+
+# ※ admin_bp は既存の Blueprint を使用
+
+@admin_bp.route("/api/admin/rankings")  # ← フロントのfetch先が /api/admin/rankings ならこのまま
+@login_required
 def admin_rankings():
-    if not current_user.is_admin:
+    # 非管理者ガード（未ログイン時でも安全）
+    if not getattr(current_user, "is_admin", False):
         return jsonify({"error": "管理者のみアクセス可能です"}), 403
 
-    # クエリパラメータ取得
-    rank_type = request.args.get("type", "site")
-    order = request.args.get("order", "desc")
-    period = request.args.get("period", "3m")
+    # クエリ
+    rank_type = (request.args.get("type") or "site").lower()
+    order = (request.args.get("order") or "desc").lower()
+    period = (request.args.get("period") or "3m").lower()
     start_date_str = request.args.get("start_date")
     end_date_str = request.args.get("end_date")
 
-    # 並び順指定
+    # 24h エイリアス対応
+    if period == "24h":
+        period = "1d"
+
     sort_func = asc if order == "asc" else desc
 
-    # 現在時刻
-    now = datetime.datetime.utcnow()
+    # 現在時刻（← 修正：datetime.utcnow()）
+    now = datetime.utcnow()
 
-    # 期間フィルタ処理
     predefined_periods = {
-        "1d": now - timedelta(days=1),
-        "7d": now - timedelta(days=7),
+        "1d":  now - timedelta(days=1),
+        "7d":  now - timedelta(days=7),
         "28d": now - timedelta(days=28),
-        "3m": now - timedelta(days=90),
-        "6m": now - timedelta(days=180),
+        "3m":  now - timedelta(days=90),
+        "6m":  now - timedelta(days=180),
         "12m": now - timedelta(days=365),
         "16m": now - timedelta(days=480),
-        "all": None
+        "all": None,
     }
 
+    # 期間決定
     if period == "custom":
         try:
             start_date = datetime.strptime(start_date_str, "%Y-%m-%d") if start_date_str else None
@@ -1637,121 +1653,116 @@ def admin_rankings():
         start_date = predefined_periods.get(period, now - timedelta(days=90))
         end_date = now
 
-    # ランキングタイプ処理
-    if rank_type == "site":
-        subquery = (
-            db.session.query(
-                User.id.label("user_id"),
-                User.last_name,
-                User.first_name,
-                func.count(Site.id).label("site_count")
+    try:
+        # ── ランキング種別ごと ─────────────────────────────
+        if rank_type == "site":
+            subquery = (
+                db.session.query(
+                    User.id.label("user_id"),
+                    User.last_name,
+                    User.first_name,
+                    func.count(Site.id).label("site_count")
+                )
+                .outerjoin(Site, Site.user_id == User.id)
+                .group_by(User.id, User.last_name, User.first_name)
+                .subquery()
             )
-            .outerjoin(Site, Site.user_id == User.id)
-            .group_by(User.id, User.last_name, User.first_name)
-            .subquery()
-        )
 
-        results = (
-            db.session.query(
-                subquery.c.last_name,
-                subquery.c.first_name,
-                subquery.c.site_count
+            results = (
+                db.session.query(
+                    subquery.c.last_name,
+                    subquery.c.first_name,
+                    subquery.c.site_count
+                )
+                .order_by(sort_func(subquery.c.site_count))
+                .all()
             )
-            .order_by(sort_func(subquery.c.site_count))
-            .all()
-        )
 
-        data = [
-            {
-                "last_name": row.last_name,
-                "first_name": row.first_name,
-                "site_count": row.site_count
-            }
-            for row in results
-        ]
-        return Response(json.dumps(data, ensure_ascii=False), mimetype='application/json')
+            data = [
+                {
+                    "last_name": row.last_name,
+                    "first_name": row.first_name,
+                    "site_count": row.site_count or 0,
+                }
+                for row in results
+            ]
+            return Response(json.dumps(data, ensure_ascii=False), mimetype="application/json")
 
-    elif rank_type in ("impressions", "clicks"):
-        metric_column = Site.impressions if rank_type == "impressions" else Site.clicks
-
-        query = (
-            db.session.query(
-                Site.name.label("site_name"),
-                Site.url.label("site_url"),
-                User.last_name,
-                User.first_name,
-                metric_column.label("value")
+        elif rank_type in ("impressions", "clicks"):
+            metric_column = Site.impressions if rank_type == "impressions" else Site.clicks
+            query = (
+                db.session.query(
+                    Site.name.label("site_name"),
+                    Site.url.label("site_url"),
+                    User.last_name,
+                    User.first_name,
+                    metric_column.label("value")
+                )
+                .join(User, Site.user_id == User.id)
+                .filter(metric_column.isnot(None))
             )
-            .join(User, Site.user_id == User.id)
-            .filter(metric_column.isnot(None))
-        )
+            results = query.order_by(sort_func(metric_column)).all()
+            data = [
+                {
+                    "site_name": row.site_name,
+                    "site_url": row.site_url,
+                    "user_name": f"{row.last_name} {row.first_name}",
+                    "value": row.value or 0,
+                }
+                for row in results
+            ]
+            return Response(json.dumps(data, ensure_ascii=False), mimetype="application/json")
 
-        results = query.order_by(sort_func(metric_column)).all()
-
-        data = [
-            {
-                "site_name": row.site_name,
-                "site_url": row.site_url,
-                "user_name": f"{row.last_name} {row.first_name}",
-                "value": row.value or 0
-            }
-            for row in results
-        ]
-        return Response(json.dumps(data, ensure_ascii=False), mimetype='application/json')
-
-    elif rank_type == "posted_articles":
-        query = (
-            db.session.query(
-                Site.name.label("site_name"),
-                Site.url.label("site_url"),
-                User.last_name,
-                User.first_name,
-                func.count(Article.id).label("value")
+        elif rank_type == "posted_articles":
+            query = (
+                db.session.query(
+                    Site.name.label("site_name"),
+                    Site.url.label("site_url"),
+                    User.last_name,
+                    User.first_name,
+                    func.count(Article.id).label("value")
+                )
+                .join(User, Site.user_id == User.id)
+                .join(Article, Article.site_id == Site.id)
+                .filter(Article.status == "posted")
             )
-            .join(User, Site.user_id == User.id)
-            .join(Article, Article.site_id == Site.id)
-            .filter(Article.status == "posted")
-        )
+            if start_date:
+                query = query.filter(Article.posted_at >= start_date)
+            if end_date:
+                query = query.filter(Article.posted_at <= end_date)
 
-        if start_date:
-            query = query.filter(Article.posted_at >= start_date)
-        if end_date:
-            query = query.filter(Article.posted_at <= end_date)
+            results = (
+                query.group_by(Site.id, Site.name, Site.url, User.last_name, User.first_name)
+                     .order_by(sort_func(func.count(Article.id)))
+                     .all()
+            )
+            data = [
+                {
+                    "site_name": row.site_name,
+                    "site_url": row.site_url,
+                    "user_name": f"{row.last_name} {row.first_name}",
+                    "value": row.value or 0,
+                }
+                for row in results
+            ]
+            return Response(json.dumps(data, ensure_ascii=False), mimetype="application/json")
 
-        query = query.group_by(Site.id, Site.name, Site.url, User.last_name, User.first_name)
-        results = query.order_by(sort_func(func.count(Article.id))).all()
+        else:
+            return jsonify({"error": "不正なランキングタイプです"}), 400
 
-        data = [
-            {
-                "site_name": row.site_name,
-                "site_url": row.site_url,
-                "user_name": f"{row.last_name} {row.first_name}",
-                "value": row.value
-            }
-            for row in results
-        ]
-        return Response(json.dumps(data, ensure_ascii=False), mimetype='application/json')
-
-    else:
-        return jsonify({"error": "不正なランキングタイプです"}), 400
-
-
+    except Exception as e:
+        # 失敗時もJSONで返す（Networkで原因を見える化）
+        current_app.logger.exception("[admin_rankings] server error")
+        return jsonify({"error": "server_error", "detail": str(e)}), 500
 
 
 @admin_bp.route("/admin/ranking-page")
 @login_required
 def admin_ranking_page():
-    if not current_user.is_admin:
+    if not getattr(current_user, "is_admin", False):
         return redirect(url_for("main.dashboard", username=current_user.username))
     return render_template("admin/ranking_page.html")
 
-
-from app.utils.monitor import (
-    get_memory_usage,
-    get_cpu_load,
-    get_latest_restart_log,
-    get_last_restart_time
-)
 
 
 # 監視ページ
