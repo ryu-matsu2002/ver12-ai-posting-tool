@@ -4529,7 +4529,7 @@ def external_seo_generate_get():
     except Exception:
         target_blog_type = BlogType.LIVEDOOR
 
-    accounts_to_run = []
+    # 対象アカウントの決定
     if account_id:
         acct = ExternalBlogAccount.query.get_or_404(account_id)
         if acct.site_id != site_id:
@@ -4549,7 +4549,7 @@ def external_seo_generate_get():
                 and_(
                     ExternalBlogAccount.site_id == site_id,
                     ExternalBlogAccount.blog_type == target_blog_type,
-                    ExternalBlogAccount.atompub_key_enc.isnot(None)
+                    ExternalBlogAccount.atompub_key_enc.isnot(None),
                 )
             )
             .all()
@@ -4558,30 +4558,31 @@ def external_seo_generate_get():
             flash("このサイトで実行可能なアカウント（API取得済）が見つかりませんでした。", "warning")
             return redirect(url_for("main.external_seo_sites"))
 
+    # 実行
     ok, ng = 0, 0
     failed = []
-    total_created = 0  # ← 追加
+    total_created = 0
     for acct in accounts_to_run:
         try:
-            
             created = generate_and_schedule_external_articles(
                 user_id=current_user.id,
                 site_id=site_id,
                 blog_account_id=acct.id,
                 count=100,
                 per_day=10,
-                start_day_jst=None,  # None で「翌日開始」に自動化
+                start_day_jst=None,  # None→「翌日0時基準+1日」で自動設定
             )
-            total_created += int(created or 0)  # ← 追加
+            total_created += int(created or 0)
             ok += 1
         except Exception as e:
             ng += 1
             failed.append((acct.id, str(e)))
 
+    # フィードバック（合計作成数を表示）
     if ok and not ng:
-        flash(f"{ok}件のアカウントで外部SEO記事の生成を開始しました（100記事・1日10本・翌日から）。", "success")
+        flash(f"{ok}件のアカウントで生成を開始（合計 {total_created} 本／1日10本／翌日から）", "success")
     elif ok and ng:
-        flash(f"{ok}件開始 / {ng}件失敗しました。", "warning")
+        flash(f"{ok}件開始 / {ng}件失敗（合計 {total_created} 本を作成）", "warning")
     else:
         flash("記事生成の開始に失敗しました。", "danger")
 
@@ -4592,6 +4593,7 @@ def external_seo_generate_get():
             flash(f"…他 {len(failed)-3}件", "danger")
 
     return redirect(url_for("main.external_seo_sites"))
+
 
 
 from flask import render_template, redirect, url_for, request, session, flash
