@@ -102,9 +102,36 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         return error_html, error_png
 
     try:
-        # 1) ブログ作成ページへ
+                # 1) ブログ作成ページへ
         logger.info("[LD-Recover] ブログ作成ページに遷移")
         await page.goto("https://livedoor.blogcms.jp/member/blog/create", wait_until="load")
+
+        # ★ 追加：ブログタイトルを“サイト名に関連する”名前に置き換える
+        desired_title = None
+        try:
+            desired_title = _craft_blog_title(site)
+            # フィールドを待ってから、既定値を一度クリアして上書き
+            await page.wait_for_selector('#blogTitle, input[name="title"]', timeout=10000)
+            title_selectors = ['#blogTitle', 'input#blogTitle', 'input[name="title"]']
+            for sel in title_selectors:
+                if await page.locator(sel).count() > 0:
+                    el = page.locator(sel)
+                    # まず空に（既定値を消す）
+                    try:
+                        await el.fill("")
+                    except Exception:
+                        pass
+                    # 念のため全選択→Delete でもクリア
+                    try:
+                        await el.press("Control+A"); await el.press("Delete")
+                    except Exception:
+                        pass
+                    await el.fill(desired_title)
+                    logger.info(f"[LD-Recover] ブログタイトルを設定: {desired_title} ({sel})")
+                    break
+        except Exception:
+            logger.warning("[LD-Recover] タイトル入力欄の操作に失敗（非致命）", exc_info=True)
+
 
         # 希望 blog_id の準備（無ければ site.name などから生成）
         if not desired_blog_id:
@@ -224,7 +251,8 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
             "success": True,
             "blog_id": blog_id,
             "api_key": api_key,
-            "endpoint": endpoint
+            "endpoint": endpoint,
+            "blog_title": desired_title  # ← 任意で追加
         }
 
     except Exception as e:

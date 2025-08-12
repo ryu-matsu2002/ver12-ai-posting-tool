@@ -4282,11 +4282,12 @@ def prepare_captcha():
 def submit_captcha():
     from app.services.blog_signup.livedoor_signup import submit_captcha_and_complete
     from app.services.playwright_controller import get_session, delete_session
-    from app.services.blog_signup.crypto_utils import encrypt  # ★ 追加：APIキーを暗号化して保存
+    from app.services.blog_signup.crypto_utils import encrypt  # APIキーを暗号化して保存
     from app.models import Site, ExternalBlogAccount, BlogType
     from app.utils.captcha_dataset_utils import save_captcha_label_pair
     from app import db
     from flask import jsonify, session, request
+    from flask_login import current_user
     import asyncio, logging
 
     logger = logging.getLogger(__name__)
@@ -4300,7 +4301,7 @@ def submit_captcha():
         # データセット保存（学習用）
         save_captcha_label_pair(image_filename, captcha_text)
 
-    # ★ account_id を受け取り、整合性確認
+    # account_id を受け取り、整合性確認
     account_id = request.form.get("account_id", type=int) or session.get("captcha_account_id")
     site_id = session.get("captcha_site_id")
     session_id = session.get("captcha_session_id")
@@ -4329,10 +4330,10 @@ def submit_captcha():
         return jsonify({"status": "error", "message": "セッションが切れています"}), 400
 
     try:
-        # ★ 追加：候補 blog_id をセッションから取り出して渡す（無ければ recover 側で site.name から決定）
+        # 追加：候補 blog_id をセッションから取り出して渡す（無ければ recover 側で site.name から決定）
         desired_blog_id = session.get("captcha_desired_blog_id")
 
-        # CAPTCHA送信 → 後続（メール認証/ブログ作成/API取得）まで実行
+        # CAPTCHA送信 → 認証 → ブログ作成 → APIキー取得（内部で recover）
         result = loop.run_until_complete(
             submit_captcha_and_complete(
                 page, captcha_text,
@@ -4341,16 +4342,17 @@ def submit_captcha():
                 session.get("captcha_password"),
                 session.get("captcha_token"),
                 site,
-                desired_blog_id=desired_blog_id   # ★ 追加
+                desired_blog_id=desired_blog_id
             )
         )
 
-        if result.get("captcha_success"):
+        # ===== 成功条件は「captcha_success かつ api_key を取得」のみ =====
+        if result.get("captcha_success") and (result.get("api_key") or "").strip():
             new_blog_id = (result.get("blog_id") or "").strip() or None
             new_api_key = (result.get("api_key") or "").strip() or None
-            new_endpoint = (result.get("endpoint") or "").strip() or None  # recover 側が返せる場合に備える
+            new_endpoint = (result.get("endpoint") or "").strip() or None  # recover が返す場合あり
 
-            # ▼▼ 重複 blog_id チェック（同サイト・同PFで同じ blog_id を既に持つ行がないか）
+            # 重複 blog_id チェック（同サイト・同PFで同じ blog_id を既に持つ行がないか）
             dup = None
             if new_blog_id:
                 dup = (ExternalBlogAccount.query
@@ -4372,7 +4374,7 @@ def submit_captcha():
             if new_blog_id and hasattr(target, "livedoor_blog_id"):
                 target.livedoor_blog_id = new_blog_id
 
-            # username を空/プレースホルダなら blog_id で補完（存在すれば）
+            # username を空/プレースホルダなら blog_id で補完
             if new_blog_id and hasattr(target, "username"):
                 if not target.username or target.username.startswith("u-"):
                     target.username = new_blog_id
@@ -4382,33 +4384,27 @@ def submit_captcha():
                 try:
                     target.atompub_endpoint = new_endpoint
                 except Exception:
-                    pass  # あればセット、無ければ無視
+                    pass
 
             # APIキー（暗号化して保存）+ 投稿有効化
             if new_api_key and hasattr(target, "atompub_key_enc"):
                 try:
-                    target.atompub_key_enc = encrypt(new_api_key)  # ★ 修正：暗号化
+                    target.atompub_key_enc = encrypt(new_api_key)
                 except Exception:
                     logger.exception("[submit_captcha] APIキーの暗号化に失敗しました")
-                    # 保存できなくても次の判定に備えて続行（step は new_api_key で判定）
                 if hasattr(target, "api_post_enabled"):
                     target.api_post_enabled = True
 
             db.session.commit()
 
-            # 表示用の step 判定（フロントは 'API取得完了' をトリガーにCTAを差し替え）
-            got_api = bool(new_api_key or getattr(target, "atompub_key_enc", None))
-            step = "API取得完了" if got_api else "CAPTCHA突破完了"
-
-            # フロントのポーリングが拾うステータス（★ dup があれば既存IDを返す）
+            # 表示用の step（成功時は常に API取得完了）
             resolved_account_id = target.id
-
             session["captcha_status"] = {
                 "captcha_sent": True,
-                "email_verified": result.get("email_verified", False),
-                "account_created": result.get("account_created", False),
-                "api_key_received": got_api,
-                "step": "既存アカウントに紐付け済み" if dup else step,
+                "email_verified": True,
+                "account_created": True,
+                "api_key_received": True,
+                "step": "既存アカウントに紐付け済み" if dup else "API取得完了",
                 "site_id": site_id,
                 "account_id": resolved_account_id,
             }
@@ -4420,21 +4416,41 @@ def submit_captcha():
                 "account_id": resolved_account_id
             }), 200
 
-        # 失敗時
+        # ===== ここから失敗扱い =====
+        # CAPTCHAは通っても API 未取得なら「作成失敗」とする。
+        # 中途半端なアカウントは削除して“再作成”前提に。
+        try:
+            if acct and not getattr(acct, "atompub_key_enc", None):
+                db.session.delete(acct)
+                db.session.commit()
+                deleted_id = account_id
+            else:
+                deleted_id = None
+        except Exception:
+            db.session.rollback()
+            deleted_id = None
+            logger.exception("[submit_captcha] 部分アカウントの削除に失敗しました")
+
         session["captcha_status"] = {
             "captcha_sent": False,
-            "step": "CAPTCHA認証失敗",
+            "step": "アカウント作成失敗（再作成してください）",
             "site_id": site_id,
-            "account_id": account_id
+            "account_id": None,  # 削除済みなので None
         }
-        return jsonify({"status": "captcha_failed", "site_id": site_id, "account_id": account_id}), 200
+
+        return jsonify({
+            "status": "recreate_required",
+            "message": result.get("error") or "APIキーの取得に失敗しました",
+            "site_id": site_id,
+            "deleted_account_id": deleted_id
+        }), 200
 
     except Exception:
         logger.exception("[submit_captcha] CAPTCHA送信中にエラーが発生しました")
         return jsonify({"status": "error", "message": "CAPTCHA送信に失敗しました"}), 500
 
     finally:
-        # セッション破棄（★ captcha_status は残す → ポーリングのため）
+        # セッション破棄（captcha_status は残す → ポーリングのため）
         try:
             if loop.is_running():
                 loop.run_until_complete(delete_session(session_id))
@@ -4447,6 +4463,7 @@ def submit_captcha():
         for key in list(session.keys()):
             if key.startswith("captcha_") and key != "captcha_status":
                 session.pop(key)
+
 
 
 
