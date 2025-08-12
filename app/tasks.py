@@ -44,7 +44,7 @@ def _auto_post_job(app):
         try:
             pending = (
                 db.session.query(Article)
-                .filter(Article.status == "done", Article.scheduled_at <= now)
+                .filter(Article.status == "done", Article.scheduled_at <= now,Article.source != "external",)
                 .options(selectinload(Article.site))
                 .order_by(Article.scheduled_at.asc())
                 .limit(20)
@@ -62,6 +62,7 @@ def _auto_post_job(app):
                     url = post_to_wp(site, art)
                     art.posted_at = now
                     art.status = "posted"
+                    art.posted_url = url 
                     db.session.commit()
                     current_app.logger.info(f"Auto-posted Article {art.id} -> {url}")
 
@@ -276,46 +277,50 @@ def enqueue_livedoor_signup(site_id: int):
 # --------------------------------------------------------------------------- #
 # 5) 外部SEO ② 投稿ジョブ
 # --------------------------------------------------------------------------- #
+
 def _finalize_external_job(job_id: int):
-    """すべて posted になったら job を完了にする"""
+    """同一サイトの“このジョブ以降に作られた”スケジュールの完了を集計して、全部 posted なら success にする"""
     job = ExternalSEOJob.query.get(job_id)
     if not job:
         return
 
-    total = job.article_cnt
-    posted = (ExternalArticleSchedule.query
+    # このジョブ作成以降に生成されたスケジュールだけを対象にする（同一サイトの別バッチと混ざらないため）
+    q_base = (ExternalArticleSchedule.query
               .join(ExternalBlogAccount,
                     ExternalArticleSchedule.blog_account_id == ExternalBlogAccount.id)
               .filter(ExternalBlogAccount.site_id == job.site_id,
-                      ExternalArticleSchedule.status == "posted")
-              .count())
-    if posted >= total:
-        job.step   = "done"
+                      ExternalArticleSchedule.created_at >= job.created_at))
+
+    total = q_base.count()
+    posted = q_base.filter(ExternalArticleSchedule.status == "posted").count()
+
+    # total が 0 の間は判定しない
+    if total and posted >= total:
+        job.step = "done"
         job.status = "success"
-        db.session.commit()           
+        db.session.commit()
+        
 
 # ──────────────────────────────────────────
 # 外部ブログ投稿ジョブ（外部SEO・キーワード厳密紐付け版）
 # ──────────────────────────────────────────
-def _run_external_post_job(app):
+def _run_external_post_job(app, schedule_id: int | None = None):
     """
     外部SEO記事を外部ブログに投稿するジョブ
     - ExternalArticleSchedule の pending を対象
     - ExternalBlogAccount が LIVEDOOR のみ対応
-    - Article は site_id / source='external' / status='done' に加え、
-      Keyword.keyword と Article.keyword を trim + lower で厳密マッチ
-    - 既に posted 済み/posted_url ありの記事は除外（重複投稿防止）
+    - ✅ Article は sched.article_id でダイレクト取得（keyword 照合は廃止）
+    - 二重投稿防止：Article.posted_url が空のもののみ
     """
     from datetime import datetime
     from flask import current_app
-    from sqlalchemy import func, or_
+    from sqlalchemy import or_
     from app import db
     from app.models import (
         ExternalArticleSchedule,
         ExternalBlogAccount,
         ExternalSEOJob,
         BlogType,
-        Keyword,
         Article,
     )
     from app.services.blog_post.livedoor_post import post_livedoor_article
@@ -324,20 +329,27 @@ def _run_external_post_job(app):
         now = datetime.utcnow()
         current_app.logger.info(f"[ExtPost] Job start at {now}")
 
-        # 投稿対象のスケジュール取得（直近のものから最大10件）
-        rows = (
-            db.session.query(ExternalArticleSchedule, ExternalBlogAccount, Keyword)
-            .join(
-                ExternalBlogAccount,
-                ExternalArticleSchedule.blog_account_id == ExternalBlogAccount.id,
-            )
-            .join(Keyword, ExternalArticleSchedule.keyword_id == Keyword.id)
+        # ← ここを rows_q にして、その後も rows_q を使う
+        rows_q = (
+            db.session.query(ExternalArticleSchedule, ExternalBlogAccount, Article)
+            .join(ExternalBlogAccount, ExternalArticleSchedule.blog_account_id == ExternalBlogAccount.id)
+            .join(Article, ExternalArticleSchedule.article_id == Article.id)
             .filter(
                 ExternalArticleSchedule.status == "pending",
                 ExternalArticleSchedule.scheduled_date <= now,
+                Article.source == "external",
+                or_(Article.posted_url == None, Article.posted_url == ""),  # noqa: E711
+                Article.status == "done",
             )
+        )
+
+        if schedule_id is not None:
+            rows_q = rows_q.filter(ExternalArticleSchedule.id == schedule_id)
+
+        rows = (
+            rows_q
             .order_by(ExternalArticleSchedule.scheduled_date.asc())
-            .limit(10)
+            .limit(1 if schedule_id is not None else 10)
             .all()
         )
 
@@ -345,14 +357,9 @@ def _run_external_post_job(app):
         if not rows:
             return
 
-        for sched, acct, kw in rows:
-            current_app.logger.info(
-                f"[ExtPost] Processing sched_id={sched.id}, keyword='{kw.keyword}', "
-                f"scheduled_date={sched.scheduled_date}, account={acct.username}"
-            )
-
+        for sched, acct, art in rows:
             try:
-                # 対応ブログタイプのみ処理
+                # ブログ種別チェック
                 if acct.blog_type != BlogType.LIVEDOOR:
                     sched.status = "error"
                     sched.message = f"未対応ブログタイプ: {acct.blog_type}"
@@ -362,48 +369,16 @@ def _run_external_post_job(app):
                     )
                     continue
 
-                # 外部SEO専用の記事をキーワード厳密一致で取得
-                # - site_id 一致
-                # - status = done（未投稿）
-                # - source = external（外部SEO）
-                # - posted_url が空 or NULL（重複投稿防止）
-                # - keyword（trim+lower）が Keyword.keyword（trim+lower）と一致
-                target_kw_norm = kw.keyword.strip().lower()
-
-                art = (
-                    db.session.query(Article)
-                    .filter(
-                        Article.site_id == acct.site_id,
-                        Article.status == "done",
-                        Article.source == "external",
-                        or_(Article.posted_url == None, Article.posted_url == ""),  # noqa: E711
-                        func.lower(func.trim(Article.keyword)) == target_kw_norm,
-                    )
-                    .order_by(Article.id.asc())
-                    .first()
-                )
-
-                if not art:
-                    # デバッグ用に候補数をログ（原因切り分けに有用）
-                    total_ext_done = (
-                        db.session.query(Article)
-                        .filter(
-                            Article.site_id == acct.site_id,
-                            Article.status == "done",
-                            Article.source == "external",
-                        )
-                        .count()
-                    )
-                    current_app.logger.warning(
-                        "[ExtPost] Article not found "
-                        f"(site_id={acct.site_id}, kw='{kw.keyword}', ext_done_cnt={total_ext_done})"
-                    )
+                # 追加の安全チェック：記事のサイトとアカウントのサイトが一致しているか
+                if art.site_id != acct.site_id:
                     sched.status = "error"
-                    sched.message = "記事未生成 or キーワード不一致"
+                    sched.message = f"site mismatch: article.site_id={art.site_id} / account.site_id={acct.site_id}"
                     db.session.commit()
+                    current_app.logger.error(
+                        f"[ExtPost] Site mismatch (sched_id={sched.id}, art_id={art.id})"
+                    )
                     continue
 
-                # 投稿処理
                 current_app.logger.info(
                     f"[ExtPost] Posting article_id={art.id} (kw='{art.keyword}') to Livedoor..."
                 )
@@ -415,18 +390,19 @@ def _run_external_post_job(app):
                     sched.posted_url = res.get("url")
                     sched.posted_at = res.get("posted_at")
 
-                    # 記事側も posted にして二重投稿を防止（URLも持っておく）
+                    # 記事側も posted
                     art.status = "posted"
                     if res.get("url"):
                         art.posted_url = res["url"]
+                    art.posted_at = res.get("posted_at") or now
 
-                    # アカウントの投稿カウントを増加
+                    # アカウントの投稿カウント
                     acct.posted_cnt = (acct.posted_cnt or 0) + 1
 
                     db.session.commit()
                     current_app.logger.info(f"[ExtPost] Success: {res.get('url')}")
 
-                    # ジョブ完了判定（最新ジョブのみ見る）
+                    # ジョブ完了判定（最新ジョブのみ）
                     latest_job = (
                         ExternalSEOJob.query.filter_by(site_id=acct.site_id)
                         .order_by(ExternalSEOJob.id.desc())
@@ -434,6 +410,7 @@ def _run_external_post_job(app):
                     )
                     if latest_job:
                         _finalize_external_job(latest_job.id)
+
                 else:
                     # 投稿失敗
                     err = res.get("error") or "unknown error"
@@ -447,6 +424,7 @@ def _run_external_post_job(app):
                 sched.status = "error"
                 sched.message = str(e)
                 db.session.commit()
+
 
 
 

@@ -3915,10 +3915,12 @@ def external_article_delete(article_id):
 @bp.route("/external/schedule/<int:schedule_id>/post_now", methods=["POST"])
 @login_required
 def external_schedule_post_now(schedule_id):
-    from app.models import ExternalArticleSchedule
     from datetime import datetime
-    from app.external_seo_generator import _run_external_post_job
-    from flask import current_app
+    from flask import current_app, request, redirect, url_for, flash, abort
+    from flask_login import current_user
+    from app import db
+    from app.models import ExternalArticleSchedule
+    from app.tasks import _run_external_post_job  # ← ここを修正
 
     sched = ExternalArticleSchedule.query.get_or_404(schedule_id)
     acct = sched.blog_account
@@ -3928,13 +3930,13 @@ def external_schedule_post_now(schedule_id):
     if site.user_id != current_user.id and not current_user.is_admin:
         abort(403)
 
-    # 直ちに実行対象へ
+    # 直ちに実行対象へ（UTC naive）
     sched.scheduled_date = datetime.utcnow()
-    sched.status = "pending"   # ワーカーが拾う状態名に合わせてください
+    sched.status = "pending"
     db.session.commit()
 
     try:
-        # 既存のワーカー実装に合わせて“今あるpending”を処理
+        # pending を処理
         _run_external_post_job(current_app._get_current_object())
         flash("即時投稿を開始しました。しばらくしてページを更新してください。", "success")
     except Exception as e:
@@ -3942,7 +3944,6 @@ def external_schedule_post_now(schedule_id):
         flash(f"即時投稿に失敗しました: {e}", "danger")
 
     return redirect(request.referrer or url_for("main.external_account_articles", acct_id=acct.id))
-
 
 # --- 一括削除: 外部ブログアカウント + 予約 +（安全条件下の）生成記事 ---
 @bp.post("/external/account/<int:acct_id>/delete")

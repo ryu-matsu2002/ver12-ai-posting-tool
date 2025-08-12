@@ -355,21 +355,28 @@ class ExternalArticleSchedule(db.Model):
 
     id               = db.Column(db.Integer, primary_key=True)
     blog_account_id  = db.Column(db.Integer, db.ForeignKey("external_blog_account.id"), nullable=False, index=True)
-    keyword_id = db.Column(db.Integer, db.ForeignKey("keywords.id"), nullable=False, index=True)
-    scheduled_date   = db.Column(db.DateTime, nullable=False)
-    status           = db.Column(db.String(30), default="pending")   # pending / posted / error
+    keyword_id       = db.Column(db.Integer, db.ForeignKey("keywords.id"), nullable=False, index=True)
+    # 追加：同一キーワードから複数記事を許容するため記事IDを持つ
+    article_id       = db.Column(db.Integer, db.ForeignKey("articles.id"), nullable=True, index=True)
+
+    # UTC naive を前提に走査するので index 付与
+    scheduled_date   = db.Column(db.DateTime, nullable=False, index=True)
+    status           = db.Column(db.String(30), default="pending")   # pending / posting / posted / error
     created_at       = db.Column(db.DateTime, default=datetime.utcnow)
-    posted_url       = db.Column(db.String(512), nullable=True)      # ✅ 追加
-    message          = db.Column(db.Text,        nullable=True)      # エラー内容等
-    posted_at        = db.Column(db.DateTime,    nullable=True)
+    posted_url       = db.Column(db.String(512), nullable=True)
+    message          = db.Column(db.Text, nullable=True)
+    posted_at        = db.Column(db.DateTime, nullable=True)
+
     keyword          = db.relationship("Keyword")
+    article          = db.relationship("Article")
 
     __table_args__ = (
-        db.UniqueConstraint("blog_account_id", "keyword_id", name="uq_blog_kw"),  # 同記事重複防止
+        # 旧: db.UniqueConstraint("blog_account_id", "keyword_id", name="uq_blog_kw")
+        db.UniqueConstraint("blog_account_id", "article_id", name="uq_blog_article"),
     )
 
     def __repr__(self):
-        return f"<ExtArticleSched {self.blog_account_id}:{self.keyword_id}>"
+        return f"<ExtArticleSched blog={self.blog_account_id} kw={self.keyword_id} art={self.article_id}>"
 
 # ──── NEW: 外部SEOジョブステータス ────
 class ExternalSEOJob(db.Model):
