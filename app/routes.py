@@ -4560,10 +4560,11 @@ def external_seo_generate_get():
 
     ok, ng = 0, 0
     failed = []
+    total_created = 0  # ← 追加
     for acct in accounts_to_run:
         try:
-            # ★ ここを新関数に差し替え（旧: generate_external_seo_articles）
-            _created = generate_and_schedule_external_articles(
+            
+            created = generate_and_schedule_external_articles(
                 user_id=current_user.id,
                 site_id=site_id,
                 blog_account_id=acct.id,
@@ -4571,6 +4572,7 @@ def external_seo_generate_get():
                 per_day=10,
                 start_day_jst=None,  # None で「翌日開始」に自動化
             )
+            total_created += int(created or 0)  # ← 追加
             ok += 1
         except Exception as e:
             ng += 1
