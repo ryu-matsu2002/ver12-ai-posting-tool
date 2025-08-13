@@ -3675,9 +3675,9 @@ import asyncio, json, time
 @bp.route("/external/accounts")
 @login_required
 def external_accounts():
-    from app.models import ExternalBlogAccount, Site, ExternalArticleSchedule, Keyword, Article, BlogType
+    from app.models import ExternalBlogAccount, Site, ExternalArticleSchedule, BlogType
     from app.services.blog_signup.crypto_utils import decrypt
-    from sqlalchemy import or_, func, case, and_
+    from sqlalchemy import or_, func, case
     from sqlalchemy.orm import aliased
 
     blog_type = request.args.get("blog_type")
@@ -3711,30 +3711,22 @@ def external_accounts():
             ExternalBlogAccount.username.ilike(f"%{search}%"),
         ))
 
-    # 集計に使う別名
+    # 集計に使う別名（※ JOIN は schedule のみ。Keyword/Article には JOIN しない）
     S = aliased(ExternalArticleSchedule)
-    K = aliased(Keyword)
-    A = aliased(Article)
 
-    # 各アカウント行ごとの集計（ここでは1アカウント=1行）
+    # 各アカウント行ごとの集計（1アカウント=1行）
+    # - total_cnt    : COUNT(DISTINCT S.id)
+    # - posted_cnt   : SUM(CASE WHEN S.status='posted' THEN 1 ELSE 0 END)
+    # - generated_cnt: SUM(CASE WHEN S.article_id IS NOT NULL THEN 1 ELSE 0 END)
     per_acc_rows = (
         db.session.query(
             ExternalBlogAccount,
-            func.count(S.id).label("total_cnt"),
+            func.count(func.distinct(S.id)).label("total_cnt"),
             func.sum(case((S.status == "posted", 1), else_=0)).label("posted_cnt"),
-            func.sum(case((A.id != None, 1), else_=0)).label("generated_cnt")  # noqa: E711
+            func.sum(case((S.article_id != None, 1), else_=0)).label("generated_cnt")  # noqa: E711
         )
         .select_from(ExternalBlogAccount)
         .outerjoin(S, S.blog_account_id == ExternalBlogAccount.id)
-        .outerjoin(K, K.id == S.keyword_id)
-        .outerjoin(
-            A,
-            and_(
-                A.keyword == K.keyword,
-                A.site_id == ExternalBlogAccount.site_id,
-                A.source == "external"
-            )
-        )
         .outerjoin(Site, ExternalBlogAccount.site_id == Site.id)
         .filter(base.whereclause)  # ベースのフィルタを適用
         .group_by(ExternalBlogAccount.id)
@@ -3820,6 +3812,7 @@ def external_accounts():
 
 
 
+
 @bp.route("/external/account/<int:acct_id>/articles")
 @login_required
 def external_account_articles(acct_id):
@@ -3833,15 +3826,13 @@ def external_account_articles(acct_id):
     rows = (
         db.session.query(ExternalArticleSchedule, Keyword, Article)
         .join(Keyword, ExternalArticleSchedule.keyword_id == Keyword.id)
-        .outerjoin(
-            Article,
-            Article.id == ExternalArticleSchedule.article_id
-        )
+        .outerjoin(Article, Article.id == ExternalArticleSchedule.article_id)
         .filter(ExternalArticleSchedule.blog_account_id == acct_id)
-        .order_by(ExternalArticleSchedule.scheduled_date.desc())
+        # ▼ 修正：古い順（ASC）＋ タイブレークに schedule.id
+        .order_by(ExternalArticleSchedule.scheduled_date.asc(),
+                  ExternalArticleSchedule.id.asc())
         .all()
     )
-
 
     return render_template(
         "external_articles.html",
