@@ -87,7 +87,8 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                               desired_blog_id: str | None = None) -> dict:
     """
     - Livedoorブログの作成 → AtomPub APIキーを発行・取得
-    - desired_blog_id が指定されれば、可能ならそのIDで作成を試みる
+    - ※ 本サイトでは「ブログタイトル入力 → 作成ボタン」のみで十分なため、
+        blog_id には一切触れない（サイト側の自動採番に委ねる）
     - DBには保存しない（呼び出し元で保存）
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -106,7 +107,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         logger.info("[LD-Recover] ブログ作成ページに遷移")
         await page.goto("https://livedoor.blogcms.jp/member/blog/create", wait_until="load")
 
-        # ★ 追加：ブログタイトルを“サイト名に関連する”名前に置き換える
+        # ブログタイトルを“サイト名に関連する”名前に置き換える（ここだけ触る）
         desired_title = None
         try:
             desired_title = _craft_blog_title(site)
@@ -132,18 +133,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         except Exception:
             logger.warning("[LD-Recover] タイトル入力欄の操作に失敗（非致命）", exc_info=True)
 
-
-        # 希望 blog_id の準備（無ければ site.name などから生成）
-        if not desired_blog_id:
-            base_text = (site.name or site.url or "blog")
-            desired_blog_id = _slugify_ascii(base_text)
-
-        # 2) 希望 blog_id 入力（入力欄があれば）
-        ok = await _try_set_desired_blog_id(page, desired_blog_id)
-        if not ok:
-            logger.warning("[LD-Recover] blog_id 入力に失敗（入力欄不在の可能性）")
-
-        # 3) 「ブログを作成する」をクリック（重複ならメッセージが出る可能性）
+        # 「ブログを作成する」をクリック（blog_id は触らない）
         async def click_create():
             await page.wait_for_selector('input[type="submit"][value="ブログを作成する"]', timeout=10000)
             await page.click('input[type="submit"][value="ブログを作成する"]')
@@ -151,38 +141,19 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
 
         await click_create()
 
-        # 4) 重複時のリトライ（最大5回、-2, -3...）
-        retry = 0
-        while True:
-            # 成功導線「最初のブログを書く」ボタンが出るかを待つ
-            try:
-                await page.wait_for_selector('a.button[href*="edit?utm_source=pcwelcome"]', timeout=5000)
-                break  # 成功
-            except Exception:
-                # エラー文言を検知（日本語のパターンは状況で変化する可能性があるので広めに）
-                content = (await page.content()).lower()
-                dup_hint = any(k in content for k in [
-                    "使用できません", "既に使われています", "存在します", "重複", "invalid", "already"
-                ])
-                if dup_hint and retry < 5:
-                    retry += 1
-                    candidate = f"{desired_blog_id}-{retry}"
-                    logger.info(f"[LD-Recover] blog_idが重複の可能性 → 再試行: {candidate}")
-                    # 入力して再度作成
-                    await _try_set_desired_blog_id(page, candidate)
-                    await click_create()
-                    desired_blog_id = candidate
-                    continue
-                else:
-                    # 失敗
-                    err_html, err_png = await _dump_error("ld_atompub_create_fail")
-                    logger.error("[LD-Recover] ブログ作成に失敗（重複回避不能 or 不明エラー）")
-                    return {
-                        "success": False,
-                        "error": "blog create failed",
-                        "html_path": err_html,
-                        "png_path": err_png
-                    }
+    
+        # 成功導線「最初のブログを書く」ボタンが出るかを待つ（成功のみを待つ）
+        try:
+            await page.wait_for_selector('a.button[href*="edit?utm_source=pcwelcome"]', timeout=15000)
+        except Exception:
+            err_html, err_png = await _dump_error("ld_atompub_create_fail")
+            logger.error("[LD-Recover] ブログ作成に失敗（タイトルのみで遷移せず）")
+            return {
+                "success": False,
+                "error": "blog create failed",
+                "html_path": err_html,
+                "png_path": err_png
+            }
 
         # 5) 「最初のブログを書く」をクリック
         await page.click('a.button[href*="edit?utm_source=pcwelcome"]')
