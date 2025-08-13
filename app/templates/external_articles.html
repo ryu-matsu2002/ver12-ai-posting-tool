@@ -59,7 +59,7 @@
           <span class="px-2 py-1 rounded text-xs font-semibold {{ badge_classes }}">{{ state }}</span>
         </td>
         <td class="px-3 py-2">
-          {% if sched.scheduled_date %}{{ sched.scheduled_date.strftime("%Y-%m-%d %H:%M") }}{% endif %}
+          {% if sched.scheduled_date %}{{ to_jst(sched.scheduled_date).strftime("%Y-%m-%d %H:%M") }}{% endif %}
         </td>
         <td class="px-3 py-2">{{ art.title if art else "" }}</td>
         <td class="px-3 py-2">

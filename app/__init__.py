@@ -16,6 +16,7 @@ from flask_login import LoginManager
 from flask_migrate import Migrate
 from celery import Celery
 from multiprocessing import current_process
+from app.utils.datetime import to_jst  # ← 追加
 
 
 # ── Flask-拡張の“空”インスタンスを先に作成 ───────────
@@ -75,6 +76,11 @@ def create_app() -> Flask:
     app.logger.addHandler(file_handler)
     app.logger.setLevel(logging.INFO)
     app.logger.info("✅ Flaskアプリが初期化されました")  # 明示ログ
+    # --- 追加: Jinja から to_jst() を直接呼べるようにする ---
+    @app.context_processor
+    def _inject_utils():
+        # テンプレートで {{ to_jst(...) }} として呼べます
+        return dict(to_jst=to_jst)
 
     # ─── Blueprints 登録とスケジューラ起動 ───────
     with app.app_context():
