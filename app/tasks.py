@@ -22,6 +22,8 @@ from .models import (Site, Keyword, ExternalSEOJob,
 
 # app/tasks.py （インポートセクションの BlogType などの下あたり）
 from app.services.blog_signup.livedoor_signup import signup as livedoor_signup
+# 既存 import 群の下に追加
+from app.external_seo_generator import generate_and_schedule_external_articles
 
 
 
@@ -267,6 +269,42 @@ def enqueue_livedoor_signup(site_id: int):
     """
     app = current_app._get_current_object()
     executor.submit(_run_livedoor_signup, app, site_id)
+
+
+def _run_generate_and_schedule(app, user_id: int, site_id: int, blog_account_id: int,
+                               count: int = 100, per_day: int = 10, start_day_jst=None):
+    """
+    外部SEO 100本生成＋スケジューリングを“アプリコンテキスト内で”実行するワーカー本体
+    """
+    with app.app_context():
+        try:
+            created = generate_and_schedule_external_articles(
+                user_id=user_id,
+                site_id=site_id,
+                blog_account_id=blog_account_id,
+                count=count,
+                per_day=per_day,
+                start_day_jst=start_day_jst,
+            )
+            current_app.logger.info(
+                "[external-seo] generate+schedule done: site=%s acct=%s created=%s",
+                site_id, blog_account_id, created
+            )
+        except Exception as e:
+            current_app.logger.exception("[external-seo] generate+schedule failed: %s", e)
+
+
+def enqueue_generate_and_schedule(user_id: int, site_id: int, blog_account_id: int,
+                                  count: int = 100, per_day: int = 10, start_day_jst=None):
+    """
+    ルートから呼ぶ軽量関数（スレッドプールで非同期実行）
+    """
+    app = current_app._get_current_object()
+    executor.submit(
+        _run_generate_and_schedule, app,
+        user_id, site_id, blog_account_id, count, per_day, start_day_jst
+    )
+
 
 # --------------------------------------------------------------------------- #
 # 4) 外部SEO ① キュー作成ジョブ

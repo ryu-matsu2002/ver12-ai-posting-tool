@@ -4509,7 +4509,7 @@ def get_captcha_status():
 @login_required
 def external_seo_generate_get():
     from app.models import Site, ExternalBlogAccount, BlogType
-    from app.external_seo_generator import generate_and_schedule_external_articles
+    from app.tasks import enqueue_generate_and_schedule
     from sqlalchemy import and_
 
     site_id = request.args.get("site_id", type=int)
@@ -4564,15 +4564,14 @@ def external_seo_generate_get():
     total_created = 0
     for acct in accounts_to_run:
         try:
-            created = generate_and_schedule_external_articles(
+            enqueue_generate_and_schedule(
                 user_id=current_user.id,
                 site_id=site_id,
                 blog_account_id=acct.id,
                 count=100,
                 per_day=10,
-                start_day_jst=None,  # None→「翌日0時基準+1日」で自動設定
+                start_day_jst=None,   # 翌日開始（関数内のデフォロジックで処理）
             )
-            total_created += int(created or 0)
             ok += 1
         except Exception as e:
             ng += 1
