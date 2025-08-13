@@ -87,8 +87,9 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                               desired_blog_id: str | None = None) -> dict:
     """
     - Livedoorブログの作成 → AtomPub APIキーを発行・取得
-    - ※ 本サイトでは「ブログタイトル入力 → 作成ボタン」のみで十分なため、
-        blog_id には一切触れない（サイト側の自動採番に委ねる）
+    - 原則は「ブログタイトル入力 → 作成ボタン」だけを操作し、blog_id には触れない
+    - ただし、送信後にページ内エラー（重複/必須など）を検知した場合に限り、
+      最小限のフォールバックとして blog_id を入力して再送信を試みる
     - DBには保存しない（呼び出し元で保存）
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -103,7 +104,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         return error_html, error_png
 
     try:
-                # 1) ブログ作成ページへ
+        # 1) ブログ作成ページへ
         logger.info("[LD-Recover] ブログ作成ページに遷移")
         await page.goto("https://livedoor.blogcms.jp/member/blog/create", wait_until="load")
 
@@ -124,7 +125,8 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                         pass
                     # 念のため全選択→Delete でもクリア
                     try:
-                        await el.press("Control+A"); await el.press("Delete")
+                        await el.press("Control+A")
+                        await el.press("Delete")
                     except Exception:
                         pass
                     await el.fill(desired_title)
@@ -138,26 +140,90 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
             await page.wait_for_selector('input[type="submit"][value="ブログを作成する"]', timeout=10000)
             await page.click('input[type="submit"][value="ブログを作成する"]')
             logger.info("[LD-Recover] 『ブログを作成する』ボタンをクリック")
+            # 送信直後の読み込み完了を待つ
+            try:
+                await page.wait_for_load_state("networkidle")
+            except Exception:
+                # networkidle が来なくてもURLは更新されている場合があるため続行
+                pass
+            logger.debug(f"[LD-Recover] after create url={page.url}")
 
         await click_create()
 
-    
-        # 成功導線「最初のブログを書く」ボタンが出るかを待つ（成功のみを待つ）
+        # --- 成功判定を /welcome への遷移に変更（第一条件） ---
+        success = False
         try:
-            await page.wait_for_selector('a.button[href*="edit?utm_source=pcwelcome"]', timeout=15000)
+            await page.wait_for_url(_re.compile(r"/welcome($|[/?#])"), timeout=15000)
+            success = True
+            logger.info("[LD-Recover] /welcome への遷移を確認")
         except Exception:
-            err_html, err_png = await _dump_error("ld_atompub_create_fail")
-            logger.error("[LD-Recover] ブログ作成に失敗（タイトルのみで遷移せず）")
-            return {
-                "success": False,
-                "error": "blog create failed",
-                "html_path": err_html,
-                "png_path": err_png
-            }
+            # 第二条件：ウェルカム画面にある導線（文言差分も許容）
+            try:
+                await page.wait_for_selector('a:has-text("最初のブログを書く"), a.button:has-text("はじめての投稿")', timeout=3000)
+                success = True
+                logger.info("[LD-Recover] welcome 導線（ボタン）の出現を確認")
+            except Exception:
+                pass
 
-        # 5) 「最初のブログを書く」をクリック
-        await page.click('a.button[href*="edit?utm_source=pcwelcome"]')
-        logger.info("[LD-Recover] 『最初のブログを書く』ボタンをクリック完了")
+        if not success:
+            # 同一ページに留まっている＝何らかのバリデーションで弾かれた可能性
+            html_lower = (await page.content()).lower()
+
+            dup_or_required = any(k in html_lower for k in [
+                "使用できません", "既に使われています", "重複", "invalid", "already",
+                "必須", "入力してください"
+            ])
+
+            if dup_or_required:
+                # 最小限のフォールバック：この時だけ blog_id を入れて再試行（最大5通り）
+                base = _slugify_ascii(getattr(site, "name", None) or getattr(site, "url", None) or "blog")
+                candidates = [base] + [f"{base}-{i}" for i in range(1, 6)]
+
+                # blog_id 入力欄があるかを軽く確認（自動採番UIだと存在しない場合もある）
+                has_id_box = False
+                for sel in ['#blogId', 'input[name="blog_id"]', 'input[name="livedoor_blog_id"]', 'input[name="blogId"]', 'input#livedoor_blog_id']:
+                    try:
+                        if await page.locator(sel).count() > 0:
+                            has_id_box = True
+                            break
+                    except Exception:
+                        pass
+
+                if has_id_box:
+                    for cand in candidates:
+                        try:
+                            if await _try_set_desired_blog_id(page, cand):
+                                logger.info(f"[LD-Recover] blog_id 衝突/必須を検知 → 候補で再試行: {cand}")
+                                await click_create()
+                                # 再送信後の成功確認
+                                try:
+                                    await page.wait_for_url(_re.compile(r"/welcome($|[/?#])"), timeout=8000)
+                                    success = True
+                                    logger.info(f"[LD-Recover] /welcome へ遷移（blog_id={cand}）")
+                                    break
+                                except Exception:
+                                    # まだダメなら次候補
+                                    continue
+                        except Exception:
+                            continue
+
+            if not success:
+                # ここまで来たら失敗としてダンプ
+                err_html, err_png = await _dump_error("ld_atompub_create_fail")
+                logger.error("[LD-Recover] ブログ作成に失敗（タイトルのみ or 自動採番不可）")
+                return {
+                    "success": False,
+                    "error": "blog create failed",
+                    "html_path": err_html,
+                    "png_path": err_png
+                }
+
+        # （任意）welcome にある導線があれば押す。無くても次の /member に進めるので best-effort
+        try:
+            await page.click('a:has-text("最初のブログを書く"), a.button:has-text("はじめての投稿")')
+            logger.info("[LD-Recover] 『最初のブログを書く』ボタンをクリック完了")
+        except Exception:
+            pass
 
         # 6) /member に遷移して blog_id を抽出
         await page.goto("https://livedoor.blogcms.jp/member/", wait_until="load")
