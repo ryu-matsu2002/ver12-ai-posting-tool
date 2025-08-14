@@ -95,45 +95,67 @@ def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
     import nest_asyncio
     nest_asyncio.apply()
 
-    # 既に登録済みなら再利用
+    # 既に登録済みなら、その内容を確認して不足があれば後で更新
     account = ExternalBlogAccount.query.filter_by(
         site_id=site.id, blog_type=BlogType.LIVEDOOR
     ).first()
-    if account:
-        return account
 
     # メール生成
     email, _, token = create_inbox()
     if not email or not token:
         logger.error("[LD-Signup] JWTまたはEmailが取得できなかったため処理中断")
-        return {"captcha_success": False, "error": "メール認証用のJWT取得に失敗"}
-    logger.info("[LD-Signup] disposable email = %s", email)
+        raise RuntimeError("メール認証用のJWT/Email取得に失敗")
 
-    # パスワードは一意に
+    logger.info("[LD-Signup] disposable email = %s", email)
     password = generate_safe_password()
     nickname = generate_safe_id(10)
 
-    try:
-        res = asyncio.run(run_livedoor_signup(site, email, token, nickname, password))
-    except Exception as e:
-        logger.error("[LD-Signup] failed: %s", str(e))
-        raise
+    # サインアップ実行（DB保存はここではしない）
+    res = asyncio.run(run_livedoor_signup(site, email, token, nickname, password))
 
-    # DB登録
-    new_account = ExternalBlogAccount(
-        site_id=site.id,
-        blog_type=BlogType.LIVEDOOR,
-        email=email,
-        username=nickname,
-        password=password,
-        livedoor_blog_id=res["blog_id"],
-        atompub_key_enc=encrypt(res["api_key"]),
-        api_post_enabled=True,
-        nickname=nickname,
-    )
-    db.session.add(new_account)
+    # CAPTCHA が必要だったなど、ここで続行できない場合は例外にする
+    if isinstance(res, dict) and res.get("status") == "captcha_required":
+        raise RuntimeError("CAPTCHAが必要なため自動登録を中断しました（手動対応 or 別フローへ）")
+
+    blog_id = res.get("blog_id")
+    api_key = res.get("api_key")
+    if not blog_id or not api_key:
+        raise RuntimeError("livedoor サインアップ結果に blog_id / api_key が含まれていません")
+
+    # ここでのみ DB 保存（アップサート）
+    endpoint = os.getenv("LIVEDOOR_ATOM_ENDPOINT", "https://api.blog.livedoor.com/atom")
+
+    if account is None:
+        account = ExternalBlogAccount(
+            site_id=site.id,
+            blog_type=BlogType.LIVEDOOR,
+            email=email,
+            username=blog_id,              # ← 投稿側の想定に合わせる
+            password=password,
+            nickname=nickname,
+            livedoor_blog_id=blog_id,
+            api_key=api_key,               # ← 平文（互換用）
+            atompub_key_enc=encrypt(api_key),  # ← 暗号化版（安全に参照する実装がある場合に備える）
+            endpoint=endpoint,             # ← AtomPub エンドポイント
+            api_post_enabled=True,
+        )
+        db.session.add(account)
+    else:
+        # 既存行を更新（不足項目を必ず埋める）
+        account.email = account.email or email
+        account.username = blog_id
+        account.password = account.password or password
+        account.nickname = account.nickname or nickname
+        account.livedoor_blog_id = blog_id
+        account.api_key = api_key
+        account.atompub_key_enc = encrypt(api_key)
+        account.endpoint = endpoint
+        account.api_post_enabled = True
+
     db.session.commit()
-    return new_account
+    logger.info(f"[LD-Signup] アカウントをDBに保存しました（id={account.id}, blog_id={blog_id}）")
+    return account
+
 
 
 def signup(site, email_seed: str = "ld"):
@@ -360,25 +382,6 @@ async def run_livedoor_signup(site, email, token, nickname, password,
             await page.screenshot(path=success_png)
             logger.info(f"[LD-Signup] 成功スクリーンショット保存: {success_html}, {success_png}")
 
-            # DB保存処理
-            from app.models import ExternalBlogAccount
-            from app.services.blog_signup.crypto_utils import encrypt
-            from app import db
-            from app.enums import BlogType
-
-            account = ExternalBlogAccount(
-                site_id=site.id,
-                blog_type=BlogType.LIVEDOOR,
-                email=email,
-                username=blog_id,
-                password=password,
-                nickname=nickname,
-                livedoor_blog_id=blog_id,
-                atompub_key_enc=encrypt(api_key),
-            )
-            db.session.add(account)
-            db.session.commit()
-            logger.info(f"[LD-Signup] アカウントをDBに保存しました（id={account.id}）")
 
             return {
                 "blog_id": blog_id,
