@@ -20,6 +20,24 @@ from app.google_client import (
 )
 from .article_generator import _chat, _compose_body, TOKENS, TEMP, _generate  # ★ _generate を流用
 
+# 追加: タイトルのフォールバック生成用
+import re as _re
+def _fallback_title_from_keyword(kw: str) -> str:
+    """タイトルが空のときに必ず返すフォールバック"""
+    kw = (kw or "").strip()
+    if not kw:
+        return "自動生成記事"
+    base = kw[:60]
+    tails = ["の完全ガイド", "の基礎知識", "の始め方", "のポイント", "で失敗しないコツ"]
+    return f"{base}{tails[sum(map(ord, base)) % len(tails)]}"
+
+def _safe_title(proposed: Optional[str], kw: str) -> str:
+    """候補が空/空白ならキーワードからフォールバックを生成し、120文字に収める"""
+    t = (proposed or "").strip()
+    if not t:
+        t = _fallback_title_from_keyword(kw)
+    return t[:120]
+
 # タイムゾーン設定
 JST = timezone(timedelta(hours=9))
 
@@ -449,10 +467,12 @@ def generate_and_schedule_external_articles(
                     when_utc = when_jst.astimezone(timezone.utc)
                     when_naive = when_utc.replace(tzinfo=None)
 
-                    # ★ ここではまだ本文を作らず、枠だけ pending で作成
+                    # ★ 修正: title に必ず非空の仮タイトルを入れる
+                    placeholder_title = _safe_title(None, kw_str)
+
                     art = Article(
                         keyword=kw_str,
-                        title=None,          # タイトルは本文生成の中で補完される想定
+                        title=placeholder_title,   # ← ここを必ず非空に
                         body="",
                         user_id=user_id,
                         site_id=site_id,
@@ -498,13 +518,17 @@ def generate_and_schedule_external_articles(
             art = Article.query.get(aid)
             if not art:
                 return
+            # タイトルが空/空白ならフォールバックで補強（保険）
+            if not art.title or not str(art.title).strip():
+                fixed = _safe_title(None, art.keyword or "")
+                logging.warning("[external-seo] title was empty after generation; used fallback: %r", fixed)
+                art.title = fixed
             # _generate が done まで上げている前提だが、防御的に
             if art.status not in ("done", "gen"):
-                return
+                # 進捗を進める
+                art.status = "done"
+                art.progress = 100
             art.body = (art.body or "") + f"\n\n<a href='{link}' target='_blank'>{link}</a>"
-            # 生成完了としてマーク
-            art.status = "done"
-            art.progress = 100
             art.updated_at = datetime.utcnow()
             db.session.commit()
 
@@ -515,7 +539,6 @@ def generate_and_schedule_external_articles(
                 for aid, link in zip(article_ids, per_article_link)
             ]
             for f in as_completed(futures):
-                # ここで例外があれば raise される → ログに出す
                 try:
                     f.result()
                 except Exception as e:
