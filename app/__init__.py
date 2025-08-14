@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import logging  # ✅ 追加
+import fcntl  # 単一起動のためのファイルロック（Linux）
 from logging.handlers import RotatingFileHandler  # ✅ 追加
 from dotenv import load_dotenv
 load_dotenv()
@@ -103,10 +104,22 @@ def create_app() -> Flask:
         #app.register_blueprint(external_bp)
 
     # ✅ スケジューラー起動（--preload により1回のみ呼ばれる）
-    if os.getenv("SCHEDULER_ENABLED") == "1" and current_process().name == "MainProcess":
-        app.logger.info("✅ init_scheduler() を起動します（is_main_process チェックなし）")
-        from .tasks import init_scheduler
-        init_scheduler(app)
+    # ✅ スケジューラ起動（ファイルロックで“1プロセスだけ”に制限）
+    if os.getenv("SCHEDULER_ENABLED") == "1":
+        lock_path = "/tmp/ai_posting_scheduler.lock"
+        try:  
+            app._scheduler_lockfile = open(lock_path, "w")
+            try:
+               # 取得できたプロセスだけが起動
+               fcntl.flock(app._scheduler_lockfile, fcntl.LOCK_EX | fcntl.LOCK_NB)
+               app.logger.info("✅ SCHEDULER: lock acquired -> init_scheduler() を起動します")
+               from .tasks import init_scheduler
+               init_scheduler(app)
+            except BlockingIOError:
+               app.logger.info("ℹ️ SCHEDULER: lock already held -> 他プロセスで稼働中のためスキップ")
+        except Exception as e:
+            app.logger.exception("⚠️ SCHEDULER: lock 初期化に失敗したためスキップ: %s", e)
+
 
     login_manager.login_view = "main.login"
     return app
