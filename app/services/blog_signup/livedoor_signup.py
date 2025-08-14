@@ -243,7 +243,7 @@ async def run_livedoor_signup(site, email, token, nickname, password,
                               captcha_image_path: str | None = None):
     async with async_playwright() as p:
         browser = await p.chromium.launch(
-            headless=False,
+            headless=True,
             slow_mo=150,
             args=[
                 "--disable-blink-features=AutomationControlled",
