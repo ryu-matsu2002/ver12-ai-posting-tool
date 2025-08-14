@@ -1,4 +1,5 @@
 # app/external_seo_generator.py
+
 import random
 import logging
 from typing import List, Tuple, Set, Iterable, Optional
@@ -9,13 +10,15 @@ import requests
 from flask import current_app
 from xml.etree import ElementTree as ET
 
+from concurrent.futures import ThreadPoolExecutor, as_completed  # ★ 並列化
+
 from app import db
 from app.models import Site, Keyword, Article, ExternalArticleSchedule
 from app.google_client import (
-    fetch_top_queries_for_site,  # impressions降順のquery上位取得（40件）
-    fetch_top_pages_for_site,    # impressions降順のpage上位取得（任意件）
+    fetch_top_queries_for_site,   # impressions降順のquery上位取得（40件）
+    fetch_top_pages_for_site,     # impressions降順のpage上位取得（任意件）
 )
-from .article_generator import _chat, _compose_body, TOKENS, TEMP
+from .article_generator import _chat, _compose_body, TOKENS, TEMP, _generate  # ★ _generate を流用
 
 # タイムゾーン設定
 JST = timezone(timedelta(hours=9))
@@ -171,7 +174,7 @@ def _build_fixed_links(site: Site) -> List[str]:
             url = _page_to_url(p)
             if url and isinstance(url, str):
                 pages.append(url.strip())
-        # base, sales と被ったら除外して補充はしない（3件未満でもOK）
+        # base, sales と被ったら除外（補充はしない）
         for u in pages:
             if u not in fixed:
                 fixed.append(u)
@@ -190,8 +193,7 @@ def _fetch_xml(url: str, timeout: int = 10) -> Optional[ET.Element]:
         resp = requests.get(url, timeout=timeout, headers={"User-Agent": "ai-posting-tool/1.0"})
         if resp.status_code != 200 or not resp.content:
             return None
-        # XML宣言が無い/charsetバリエーション等に強めに
-        return ET.fromstring(resp.content)
+        return ET.fromstring(resp.content)  # XML宣言やcharset差異にも強めに
     except Exception:
         return None
 
@@ -216,6 +218,7 @@ def _collect_all_site_urls(site: Site, max_nested: int = 50, max_total: int = 50
     2) sitemap.xml
     3) wp-sitemap.xml（WP標準）
     4) それでも不足なら GSC page上位（最大1000）
+    5) 最後の保険で WP REST を叩く
     """
     base = site.url.rstrip("/")
     candidates = set()
@@ -231,7 +234,6 @@ def _collect_all_site_urls(site: Site, max_nested: int = 50, max_total: int = 50
         if not root:
             continue
 
-        # index or direct urlset の両方対応
         locs = list(_extract_loc_values(root))
         if any(tag in root.tag for tag in ("sitemapindex", "index")) and locs:
             # nested sitemaps
@@ -302,13 +304,12 @@ def _pick_random_unique(urls: Iterable[str], n: int, excluded: Iterable[str] = (
     pool = [u for u in pool if u not in ex]
     if len(pool) < n:
         logging.error(f"[external_seo] ランダム用URLが不足しています（必要:{n}, 取得:{len(pool)}）。要件を満たせません。")
-        # ここでは不足でも可能な範囲で返す（呼び出し側で検査し、足りなければ例外にする）
         return random.sample(pool, len(pool)) if pool else []
     return random.sample(pool, n)
 
 
 # ===============================
-# 本番：100本生成 + 1日10本スケジューリング
+# 外部SEO：並列生成 + スケジューリング
 # ===============================
 def generate_and_schedule_external_articles(
     user_id: int,
@@ -320,15 +321,11 @@ def generate_and_schedule_external_articles(
 ) -> int:
     """
     外部SEO記事を一括生成し、1日 per_day 本、JST 10:00-21:59 のランダム分でスケジュール登録。
-    要件:
-      - GSCの表示回数が多いキーワード上位40件を取得
-      - 上位20KWは各3本、次の20KWは各2本 → 合計100本
-      - 各記事に付けるリンクは 1記事 = 1リンク
-        - 固定5リンク（base, base/sales, GSC page上位3つ）×各10記事 = 50本
-        - 残り50本はサイト内全URLから重複無しでランダム50本（固定5リンクは除外）
-      - スケジュール開始は「生成開始の翌日」から
-      - ExternalArticleSchedule には article_id を必須で保存
-      - Article.scheduled_at も保存（DBの仕様に合わせUTC naiveで統一）
+    実装（高速化版）:
+      1) まず 100 本分の Article(status="pending") と ExternalArticleSchedule を一気に作成
+      2) その後、本文生成を ThreadPoolExecutor(max_workers=4) で並列実行し、
+         本文末尾にその記事専用リンクを追記して Article.status="done" にする
+      3) 投稿は既存の _run_external_post_job が拾って行う
     """
     app = current_app._get_current_object()
     site = Site.query.get(site_id)
@@ -388,7 +385,6 @@ def generate_and_schedule_external_articles(
     # ランダム50（固定5は除外、同一URL再利用不可）
     all_urls = _collect_all_site_urls(site)
     random50 = _pick_random_unique(all_urls, 50, excluded=set(fixed5))
-
     if len(random50) < 50:
         raise RuntimeError(f"[external_seo] ランダムリンクが50件に満たないため中断しました（{len(random50)}件）。サイトのURL収集設定をご確認ください。")
 
@@ -406,6 +402,10 @@ def generate_and_schedule_external_articles(
     day_offset = 0
     idx = 0
 
+    # 1) まず枠を作成（Article: pending / ExternalArticleSchedule: pending）
+    article_ids: List[int] = []
+    per_article_link: List[str] = []
+
     with app.app_context():
         try:
             while idx < len(gen_queue):
@@ -420,7 +420,7 @@ def generate_and_schedule_external_articles(
                     kw_str = gen_queue[idx]
                     link = link_plan[idx]
 
-                    # Keyword 取得 or 生成
+                    # Keyword 取得 or 生成（external ソース）
                     kobj = (
                         Keyword.query
                         .filter_by(user_id=user_id, site_id=site_id, keyword=kw_str)
@@ -439,31 +439,7 @@ def generate_and_schedule_external_articles(
                         db.session.add(kobj)
                         db.session.flush()
 
-                    # タイトル生成
-                    title_prompt = f"{TITLE_PROMPT}\n\nキーワード: {kw_str}"
-                    title = _chat(
-                        [
-                            {"role": "system", "content": "あなたはSEOに強い日本語ライターです。"},
-                            {"role": "user", "content": title_prompt},
-                        ],
-                        TOKENS["title"],
-                        TEMP["title"],
-                        user_id=user_id,
-                    )
-
-                    # 本文生成
-                    body = _compose_body(
-                        kw=kw_str,
-                        pt=BODY_PROMPT,
-                        format="html",
-                        self_review=False,
-                        user_id=user_id,
-                    )
-
-                    # 1記事=1リンク（本文末尾に付与）
-                    body = (body or "") + f"\n\n<a href='{link}' target='_blank'>{link}</a>"
-
-                    # 当日のスロット（JST） → UTC naive へ。秒はばらす。
+                    # JST → UTC naive に変換（秒はばらす）
                     when_jst = (start_day_jst + timedelta(days=day_offset)).replace(
                         hour=h,
                         minute=m,
@@ -473,30 +449,32 @@ def generate_and_schedule_external_articles(
                     when_utc = when_jst.astimezone(timezone.utc)
                     when_naive = when_utc.replace(tzinfo=None)
 
-                    # Article 生成（外部SEO：source='external'、投稿可能に done）
+                    # ★ ここではまだ本文を作らず、枠だけ pending で作成
                     art = Article(
                         keyword=kw_str,
-                        title=title or kw_str,
-                        body=body or "",
+                        title=None,          # タイトルは本文生成の中で補完される想定
+                        body="",
                         user_id=user_id,
                         site_id=site_id,
-                        status="done",
-                        progress=100,
+                        status="pending",
+                        progress=0,
                         source="external",
-                        scheduled_at=when_naive,  # DB仕様に合わせUTC naiveで統一
+                        scheduled_at=when_naive,
                     )
                     db.session.add(art)
                     db.session.flush()
 
-                    # スケジュール登録（article_idを必須で持つ）
                     sched = ExternalArticleSchedule(
                         blog_account_id=blog_account_id,
-                        article_id=art.id,        # ★ 必須
-                        keyword_id=kobj.id,       # 参照用
+                        article_id=art.id,
+                        keyword_id=kobj.id,
                         scheduled_date=when_naive,
                         status="pending",
                     )
                     db.session.add(sched)
+
+                    article_ids.append(art.id)
+                    per_article_link.append(link)
 
                     created_cnt += 1
                     idx += 1
@@ -504,10 +482,47 @@ def generate_and_schedule_external_articles(
                 day_offset += 1
 
             db.session.commit()
-            logging.info(f"[external_seo] 生成完了: {created_cnt} 件（site_id={site_id}）")
+            logging.info(f"[external_seo] 枠作成完了: {created_cnt} 件（site_id={site_id}）")
+
         except Exception as e:
             db.session.rollback()
-            logging.exception(f"[external_seo] 一括生成中にエラー: {e}")
+            logging.exception(f"[external_seo] 枠作成中にエラー: {e}")
             raise
 
+    # 2) 並列で本文生成 → 本文末尾にリンク追記 → done
+    def _gen_and_append(aid: int, link: str):
+        # タイトル/本文生成（通常記事の実装を流用）
+        _generate(app, aid, TITLE_PROMPT, BODY_PROMPT, format="html", self_review=False, user_id=user_id)
+        # 本文末尾にリンクを追記（短いDB更新）
+        with app.app_context():
+            art = Article.query.get(aid)
+            if not art:
+                return
+            # _generate が done まで上げている前提だが、防御的に
+            if art.status not in ("done", "gen"):
+                return
+            art.body = (art.body or "") + f"\n\n<a href='{link}' target='_blank'>{link}</a>"
+            # 生成完了としてマーク
+            art.status = "done"
+            art.progress = 100
+            art.updated_at = datetime.utcnow()
+            db.session.commit()
+
+    try:
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [
+                executor.submit(_gen_and_append, aid, link)
+                for aid, link in zip(article_ids, per_article_link)
+            ]
+            for f in as_completed(futures):
+                # ここで例外があれば raise される → ログに出す
+                try:
+                    f.result()
+                except Exception as e:
+                    logging.exception(f"[external_seo] 並列生成で例外: {e}")
+    except Exception:
+        # 並列実行自体が落ちても、作成済み枠は残る（再実行や再生成の余地を残す）
+        logging.exception("[external_seo] 並列生成フェーズでエラー")
+
+    logging.info(f"[external_seo] 生成フェーズ完了（site_id={site_id}, total={created_cnt}）")
     return created_cnt

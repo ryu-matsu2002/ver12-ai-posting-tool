@@ -67,7 +67,7 @@ def post_livedoor_article(account, title: str, body_html: str):
 
         username = getattr(account, "username", None) or blog_id
         api_key = _resolve_api_key(account)
-        endpoint = _canon_endpoint(getattr(account, "endpoint", None))
+        endpoint = _canon_endpoint(getattr(account, "atompub_endpoint", None))
 
         api_url = f"{endpoint}/{blog_id}/article"  # 末尾スラ無し
 

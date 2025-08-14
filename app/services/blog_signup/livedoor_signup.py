@@ -123,7 +123,7 @@ def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
         raise RuntimeError("livedoor サインアップ結果に blog_id / api_key が含まれていません")
 
     # ここでのみ DB 保存（アップサート）
-    endpoint = os.getenv("LIVEDOOR_ATOM_ENDPOINT", "https://api.blog.livedoor.com/atom")
+    endpoint = os.getenv("LIVEDOOR_ATOM_ENDPOINT", "https://livedoor.blogcms.jp/atompub")
 
     if account is None:
         account = ExternalBlogAccount(
@@ -134,9 +134,8 @@ def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
             password=password,
             nickname=nickname,
             livedoor_blog_id=blog_id,
-            api_key=api_key,               # ← 平文（互換用）
             atompub_key_enc=encrypt(api_key),  # ← 暗号化版（安全に参照する実装がある場合に備える）
-            endpoint=endpoint,             # ← AtomPub エンドポイント
+            atompub_endpoint=endpoint,   # ← ここを endpoint ではなく atompub_endpoint
             api_post_enabled=True,
         )
         db.session.add(account)
@@ -147,9 +146,8 @@ def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
         account.password = account.password or password
         account.nickname = account.nickname or nickname
         account.livedoor_blog_id = blog_id
-        account.api_key = api_key
         account.atompub_key_enc = encrypt(api_key)
-        account.endpoint = endpoint
+        account.atompub_endpoint = endpoint  # ← 同上
         account.api_post_enabled = True
 
     db.session.commit()
