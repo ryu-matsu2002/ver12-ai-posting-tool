@@ -273,15 +273,41 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         await page.click('button:has-text("実行")')
         logger.info("[LD-Recover] モーダルの『実行』をクリック")
 
-        # 10) 取得
-        await page.wait_for_selector('input.input-xxlarge[readonly]', timeout=10000)
-        endpoint = await page.get_attribute('input.input-xxlarge[readonly]', 'value')
+        # 10) 取得（valueはJSで後から入るため、非空になるまで現在値を待つ & 1回だけ再発行リトライ）
+        async def _read_endpoint_and_key():
+            await page.wait_for_selector('input.input-xxlarge[readonly]', timeout=15000)
+            endpoint_val = await page.locator('input.input-xxlarge[readonly]').input_value()
+            await page.wait_for_selector('input#apiKey', timeout=15000)
+            for _ in range(30):  # 30 * 0.5s = 15s
+                key_val = (await page.locator('input#apiKey').input_value()).strip()
+                if key_val:
+                    return endpoint_val, key_val
+                await asyncio.sleep(0.5)
+            return endpoint_val, ""
 
-        await page.wait_for_selector('input#apiKey', timeout=10000)
-        api_key = await page.get_attribute('input#apiKey', 'value')
+        endpoint, api_key = await _read_endpoint_and_key()
+
+        if not api_key:
+            logger.warning("[LD-Recover] API Keyが空。ページを再読み込みして再発行をリトライします")
+            await page.reload(wait_until="load")
+            await page.wait_for_selector('input#apiKeyIssue', timeout=15000)
+            await page.click('input#apiKeyIssue')
+            await page.wait_for_selector('button:has-text("実行")', timeout=15000)
+            await page.click('button:has-text("実行")')
+            endpoint, api_key = await _read_endpoint_and_key()
+
+        if not api_key:
+            err_html, err_png = await _dump_error("ld_atompub_no_key")
+            logger.error(f"[LD-Recover] API Keyが取得できませんでした。証跡: {err_html}, {err_png}")
+            return {
+                "success": False,
+                "error": "api key empty",
+                "html_path": err_html,
+                "png_path": err_png
+            }
 
         logger.info(f"[LD-Recover] ✅ AtomPub endpoint: {endpoint}")
-        logger.info(f"[LD-Recover] ✅ AtomPub key: {api_key}")
+        logger.info(f"[LD-Recover] ✅ AtomPub key: {api_key[:8]}...")
 
         # 11) 返却（DB保存は呼び出し元が担当）
         return {
