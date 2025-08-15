@@ -9,18 +9,38 @@
     --tcd-dark:#c65ac6;   /* 濃いめ */
     --tcd-darker:#a446a4; /* さらに濃いめ（背景帯） */
     --tcd-light:#ffd4ff;  /* 薄め */
-    --tcd-lighter:#ffecff;/* もっと薄め */
+    --tcd-lighter:#ffecff;/* もっと薄め（ページ余白） */
   }
-  /* ★ 今回の追加：ページ全体の白余白を淡いピンクで */
+
+  /* ★ ページ全体の白余白を淡いピンクに */
   body{
     background-color: var(--tcd-lighter) !important;
   }
+  /* ★ base.html 側の白背景ラッパーもまとめて上書き（このページ限定の上書き） */
+  html,
+  body,
+  main,
+  main.bg-white,         /* Tailwindの bg-white が付いていても上書き */
+  #main,
+  #content,
+  .content,
+  .content-area,
+  .app-main,
+  .app-content,
+  .page-wrapper,
+  .page-content,
+  .container {
+    background-color: var(--tcd-lighter) !important;
+    background-image: none !important;
+  }
+
   /* 全体をWP/TCDの”濃い帯”で囲む */
   .tcd-wrap{
     background: var(--tcd-darker);
     border-radius: 14px;
     padding: 16px;
   }
+
   /* 左のサイト欄＝濃い領域（グラデーション） */
   .tcd-sidebar{
     background: linear-gradient(180deg, var(--tcd-darker) 0%, var(--tcd-dark) 100%);
