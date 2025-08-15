@@ -193,11 +193,14 @@
                 </div>
               {% endif %}
 
+              {# ★ ここをリンク → ボタン(newAccountStart) に修正（BuildError 回避） #}
               <div class="px-5 py-4 border-t">
-                <a href="{{ url_for('main.external_account_new', site_id=s.id, platform='livedoor') }}"
-                   class="btn-success inline-flex items-center px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm">
+                <button type="button"
+                        class="inline-flex items-center px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm"
+                        data-site-id="{{ s.id }}"
+                        onclick="newAccountStart(this)">
                   ＋ アカウント追加
-                </a>
+                </button>
               </div>
             </div>
           </section>
@@ -478,7 +481,6 @@
 
         closeCaptcha();
 
-        // ❶ CAPTCHA自体がNG
         if (data.status === "captcha_failed") {
           alert("CAPTCHA突破に失敗しました。再度お試しください。");
           restoreCaptchaButton(siteId, accountId, "❌ 再挑戦");
@@ -486,7 +488,6 @@
           return;
         }
 
-        // ❷ 完全成功（APIキー取得済み）
         if (data.status === "captcha_success" && data.api_key_received) {
           const sid = data.site_id || siteId;
           const aid = data.account_id || accountId;
@@ -500,14 +501,12 @@
           return;
         }
 
-        // ❸ 想定外 or 再作成要求（API未取得）
         if (data.status === "recreate_required") {
           alert("アカウント作成に失敗しました。『↻ アカウントを再作成』からやり直してください。");
           restoreCaptchaButton(siteId, accountId, "↻ アカウントを再作成");
           return;
         }
 
-        // ❹ 後方互換：API未取得だが success
         if (data.status === "captcha_success") {
           setCaptchaDoneUI(siteId, accountId);
           startProgressPolling();
