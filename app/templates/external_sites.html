@@ -165,7 +165,7 @@
   <div class="flex gap-6">
     {# ========================= 左：サイト選択 ========================= #}
     <aside class="tcd-sidebar w-64">
-      <div class="tcd-side-title">外部SEO | サイト一覧</div>
+      <div class="tcd-side-title">外部SEO |<br>サイト一覧</div>
       <nav class="space-y-1 px-2 pb-4">
         {% for s in sites %}
           {% set _all_accounts = [] %}
@@ -285,7 +285,7 @@
                             data-account-id="{{ acc.id }}"
                             data-platform="livedoor"
                             onclick="handleCaptchaClick(this)">
-                            新規アカウント作成開始
+                            クリックで新規アカウント作成開始
                           </button>
                           <p class="tcd-note">
                             アカウント作成成功確率は<strong>80％</strong>です。作成失敗の場合は
@@ -296,14 +296,18 @@
                           {% if _total > 0 %}
                             <a
                               href="/generate?site_id={{ s.id }}&account_id={{ acc.id }}"
-                              class="w-full inline-flex items-center justify-center btn-lg bg-indigo-600 hover:bg-indigo-700 text-white">
-                              ➕ 追加で記事生成をする
+                              class="w-full inline-flex items-center justify-center btn-lg bg-indigo-600 hover:bg-indigo-700 text-white"
+                              data-account-id="{{ acc.id }}"
+                              onclick="return lockAndGo(this)">
+                              クリックで記事生成を追加する
                             </a>
                           {% else %}
                             <a
                               href="/generate?site_id={{ s.id }}&account_id={{ acc.id }}"
-                              class="w-full inline-flex items-center justify-center btn-lg bg-indigo-600 hover:bg-indigo-700 text-white">
-                              📝 記事生成＆投稿
+                              class="w-full inline-flex items-center justify-center btn-lg bg-indigo-600 hover:bg-indigo-700 text-white"
+                              data-account-id="{{ acc.id }}"
+                              onclick="return lockAndGo(this)">
+                              📝 クリックで記事生成＆投稿
                             </a>
                           {% endif %}
                         {% endif %}
@@ -355,6 +359,52 @@
 
 {% block scripts %}
 <script>
+  /* =========================
+     1回押したら再押下できないワンクリックロック
+     ========================= */
+  function lockKey(aid){ return `gen-lock:${aid}`; }
+
+  function disableLink(el){
+    el.classList.add('opacity-50','pointer-events-none','cursor-not-allowed');
+    // テキストが長い場合もあるのでそのまま消さず、先頭に状態を付ける
+    if(!el.dataset.originalText){ el.dataset.originalText = el.textContent; }
+    el.textContent = '処理中…';
+  }
+
+  function restoreLink(el){
+    el.classList.remove('opacity-50','pointer-events-none','cursor-not-allowed');
+    if(el.dataset.originalText){ el.textContent = el.dataset.originalText; }
+  }
+
+  // クリック時：ロック済みなら無効化、未ロックならロックして遷移許可
+  function lockAndGo(el){
+    const aid = el.getAttribute('data-account-id');
+    if(!aid) return true;
+    const key = lockKey(aid);
+
+    if(localStorage.getItem(key) === '1'){
+      disableLink(el);
+      return false;
+    }
+    localStorage.setItem(key, '1');
+    disableLink(el);
+    return true;
+  }
+
+  // 表示時：ロック済みリンクを無効化
+  document.addEventListener('DOMContentLoaded', () => {
+    // unlock クエリがあれば該当アカウントのロック解除（将来サーバから付与する想定）
+    const u = new URLSearchParams(location.search).get('unlock');
+    if(u){ localStorage.removeItem(lockKey(u)); }
+
+    document.querySelectorAll('a[data-account-id]').forEach(a => {
+      const aid = a.getAttribute('data-account-id');
+      if(localStorage.getItem(lockKey(aid)) === '1'){
+        disableLink(a);
+      }
+    });
+  });
+
   // ───────── 左ナビ：サイト切り替え ─────────
   document.querySelectorAll('.site-nav-link').forEach(el => {
     el.addEventListener('click', () => {
@@ -659,6 +709,8 @@
     a.href = `/generate?site_id=${siteId}&account_id=${accountId}`;
     a.className = "w-full inline-flex items-center justify-center btn-lg bg-indigo-600 hover:bg-indigo-700 text-white";
     a.textContent = "📝 記事生成＆投稿";
+    a.setAttribute('data-account-id', accountId);
+    a.setAttribute('onclick', 'return lockAndGo(this)');
     actionArea.appendChild(a);
   }
 
@@ -713,6 +765,8 @@
               a.href = `/generate?site_id=${sid}&account_id=${aid}`;
               a.className = "w-full inline-flex items-center justify-center btn-lg bg-indigo-600 hover:bg-indigo-700 text-white";
               a.textContent = "📝 記事生成＆投稿";
+              a.setAttribute('data-account-id', aid);
+              a.setAttribute('onclick', 'return lockAndGo(this)');
               actionArea.appendChild(a);
             }
 

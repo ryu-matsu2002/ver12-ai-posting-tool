@@ -4499,6 +4499,8 @@ def get_captcha_status():
 @bp.get("/generate")
 @login_required
 def external_seo_generate_get():
+    from datetime import datetime, timezone
+    from app import db
     from app.models import Site, ExternalBlogAccount, BlogType
     from app.tasks import enqueue_generate_and_schedule
     from sqlalchemy import and_
@@ -4520,7 +4522,7 @@ def external_seo_generate_get():
     except Exception:
         target_blog_type = BlogType.LIVEDOOR
 
-    # 対象アカウントの決定
+    # 対象アカウントの選定
     if account_id:
         acct = ExternalBlogAccount.query.get_or_404(account_id)
         if acct.site_id != site_id:
@@ -4534,6 +4536,7 @@ def external_seo_generate_get():
             return redirect(url_for("main.external_seo_sites"))
         accounts_to_run = [acct]
     else:
+        # まとめ実行：未ロック & API 取得済みのみ候補にする
         accounts_to_run = (
             ExternalBlogAccount.query
             .filter(
@@ -4541,40 +4544,73 @@ def external_seo_generate_get():
                     ExternalBlogAccount.site_id == site_id,
                     ExternalBlogAccount.blog_type == target_blog_type,
                     ExternalBlogAccount.atompub_key_enc.isnot(None),
+                    ExternalBlogAccount.generation_locked.is_(False),
                 )
             )
             .all()
         )
         if not accounts_to_run:
-            flash("このサイトで実行可能なアカウント（API取得済）が見つかりませんでした。", "warning")
+            flash("実行可能なアカウントが見つかりません（API未取得 または 既にロック済み）。", "warning")
             return redirect(url_for("main.external_seo_sites"))
 
-    # 実行
-    ok, ng = 0, 0
+    ok, ng, skipped_locked = 0, 0, 0
     failed = []
-    total_created = 0
+
     for acct in accounts_to_run:
         try:
+            # ---- ここが恒久ロックの肝 ----
+            # 行ロックを取り、二重実行を防ぐ
+            row = (
+                ExternalBlogAccount.query
+                .with_for_update()           # SELECT ... FOR UPDATE
+                .filter_by(id=acct.id)
+                .first()
+            )
+            if not row:
+                skipped_locked += 1
+                continue
+
+            # 既にロック済みならスキップ
+            if row.generation_locked:
+                skipped_locked += 1
+                continue
+
+            # ここで恒久ロックを立てて確定
+            row.generation_locked = True
+            row.generation_locked_at = datetime.now(timezone.utc)
+            db.session.add(row)
+            db.session.commit()             # 先に確定 → 以後は二重実行不可
+
+            # ロック確定後にキュー投入
             enqueue_generate_and_schedule(
                 user_id=current_user.id,
                 site_id=site_id,
-                blog_account_id=acct.id,
+                blog_account_id=row.id,
                 count=100,
                 per_day=10,
-                start_day_jst=None,   # 翌日開始（関数内のデフォロジックで処理）
+                start_day_jst=None,   # 翌日開始（関数内のデフォルトで処理）
             )
             ok += 1
+
         except Exception as e:
+            db.session.rollback()
             ng += 1
             failed.append((acct.id, str(e)))
 
-    # フィードバック（合計作成数を表示）
+    # フィードバック
     if ok and not ng:
-        flash(f"{ok}件のアカウントで生成を開始（合計 {total_created} 本／1日10本／翌日から）", "success")
+        msg = f"{ok}件のアカウントで生成を開始（以後は恒久ロック）"
+        if skipped_locked:
+            msg += f" ／ ロック済みスキップ {skipped_locked}件"
+        flash(msg, "success")
     elif ok and ng:
-        flash(f"{ok}件開始 / {ng}件失敗（合計 {total_created} 本を作成）", "warning")
+        flash(f"{ok}件開始 / {ng}件失敗（ロック済みスキップ {skipped_locked}件）", "warning")
     else:
-        flash("記事生成の開始に失敗しました。", "danger")
+        # 1件も開始できなかった
+        if skipped_locked:
+            flash("すべての対象がロック済みのため実行されませんでした。", "warning")
+        else:
+            flash("記事生成の開始に失敗しました。", "danger")
 
     if failed:
         for aid, msg in failed[:3]:
@@ -4583,7 +4619,6 @@ def external_seo_generate_get():
             flash(f"…他 {len(failed)-3}件", "danger")
 
     return redirect(url_for("main.external_seo_sites"))
-
 
 
 from flask import render_template, redirect, url_for, request, session, flash
