@@ -5,6 +5,10 @@
 {% block content %}
 <h2 class="text-2xl font-bold mb-6">外部SEO記事 編集</h2>
 
+{# 一覧ページURLを安全に組み立て（account_id が無い環境では site_id を使用） #}
+{% set acct_id = (article.account_id if (article.account_id is defined and article.account_id) else article.site_id) %}
+{% set list_url = url_for('main.external_account_articles', acct_id=acct_id) %}
+
 <form method="post">
   <div class="mb-4">
     <label class="block font-semibold mb-1">タイトル</label>
@@ -19,10 +23,17 @@
   </div>
 
   <div class="flex space-x-4">
+    {# ← 追加：記事一覧に戻る（保存の左） #}
+    <a href="{{ list_url }}"
+       class="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50">
+      記事一覧に戻る
+    </a>
+
     <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
       保存
     </button>
-    <a href="{{ request.referrer or url_for('main.external_account_articles', acct_id=article.site_id) }}"
+
+    <a href="{{ request.referrer or list_url }}"
        class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600">
       キャンセル
     </a>

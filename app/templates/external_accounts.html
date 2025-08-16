@@ -41,7 +41,16 @@
     {% set has_accounts = true %}
 
     <h3 class="text-lg font-bold mt-8 mb-2">{{ site.name }}</h3>
-    <table class="w-full text-sm border mb-4">
+    <table class="w-full text-sm border mb-4 table-fixed">
+      {# ★ 6列を均等（16.66%）に固定 #}
+      <colgroup>
+        <col style="width:16.66%">
+        <col style="width:16.66%">
+        <col style="width:16.66%">
+        <col style="width:16.66%">
+        <col style="width:16.66%">
+        <col style="width:16.66%">
+      </colgroup>
       <thead class="bg-gray-100">
         <tr>
           <th class="px-3 py-2">ブログ</th>
@@ -88,7 +97,6 @@
           </th>
 
           <th class="px-3 py-2">記事一覧</th>
-          <th class="px-3 py-2 text-right">操作</th>
         </tr>
       </thead>
       <tbody>
@@ -108,7 +116,7 @@
               </span>
             </td>
 
-            <td class="px-3 py-2 font-mono truncate max-w-[220px]">
+            <td class="px-3 py-2 font-mono truncate">
               {{ a.email }}
             </td>
 
@@ -119,21 +127,6 @@
             <td class="px-3 py-2">
               <a href="{{ url_for('main.external_account_articles', acct_id=a.id) }}"
                  class="text-blue-600 hover:underline">記事一覧</a>
-              {# 任意: 統合件数を見せたい場合 #}
-              {# <span class="ml-2 text-xs text-gray-500">(統合 {{ a._raw_count }} 件)</span> #}
-            </td>
-
-            <td class="px-3 py-2 text-right whitespace-nowrap">
-              <a href="{{ url_for('main.blog_one_click_login', acct_id=a.id) }}"
-                 class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs inline-block">
-                ログイン
-              </a>
-              <button type="button"
-                      class="ml-2 px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-xs copy-cred"
-                      data-user="{{ a.username }}"
-                      data-pass="{{ a.password }}">
-                ID/Pass
-              </button>
             </td>
           </tr>
         {% endfor %}
@@ -145,16 +138,4 @@
 {% if not has_accounts %}
   <p class="text-gray-500">まだ外部ブログアカウントはありません。</p>
 {% endif %}
-
-<script>
-document.querySelectorAll('.copy-cred').forEach(btn => {
-  btn.addEventListener('click', () => {
-    navigator.clipboard.writeText(
-      `ユーザー名: ${btn.dataset.user}\nパスワード: ${btn.dataset.pass}`
-    );
-    btn.textContent = "✔ コピー";
-    setTimeout(() => btn.textContent = "ID/Pass", 1500);
-  });
-});
-</script>
 {% endblock %}

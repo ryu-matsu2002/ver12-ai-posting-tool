@@ -85,13 +85,14 @@
 
           {% if state == '投稿完了' %}
             {% if view_url %}
+              {# ★ 投稿完了 → 記事表示ボタンを青色に変更 #}
               <a href="{{ view_url }}" target="_blank"
-                 class="ml-1 px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs">
+                 class="ml-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs">
                 記事表示
               </a>
             {% elif art %}
               <a href="{{ url_for('main.external_article_preview', article_id=art.id) }}" target="_blank"
-                 class="ml-1 px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs">
+                 class="ml-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs">
                 記事表示
               </a>
             {% endif %}

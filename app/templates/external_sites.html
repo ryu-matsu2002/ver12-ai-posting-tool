@@ -38,15 +38,13 @@
   .tcd-wrap{
     background: var(--tcd-darker);
     border-radius: 14px;
-    /* 枠の厚みを大きく */
-    padding: 28px;
-    /* ページ左右の余白を食い込んで、枠の面積を広げる */
-    margin-left: -12px;
+    padding: 28px;            /* 厚みアップ */
+    margin-left: -12px;       /* 枠を大きく見せるために左右へ食い込む */
     margin-right: -12px;
   }
   @media (min-width: 1024px){
     .tcd-wrap{
-      padding: 36px;          /* 大画面ではさらに太く */
+      padding: 36px;
       margin-left: -18px;
       margin-right: -18px;
     }
@@ -58,11 +56,18 @@
     color:#fff;
     border-radius: 12px;
   }
+  /* ★ 見出しを約3倍の大きさに */
   .tcd-sidebar .tcd-side-title{
     padding: 14px 20px;
-    font-weight: 700;
+    font-weight: 800;
     letter-spacing: .02em;
+    font-size: 2rem;        /* 32px 目安（従来 ~1rem の約3倍） */
+    line-height: 1.2;
   }
+  @media (max-width: 640px){
+    .tcd-sidebar .tcd-side-title{ font-size: 1.6rem; }
+  }
+
   .tcd-sidebar .site-nav-link{
     color:#fff;
     display:block;
@@ -88,15 +93,23 @@
     background:#fff;
     width:100%;
     text-align:left;
-    padding:12px 20px;
+    padding:14px 20px;
     display:flex;
     align-items:center;
     justify-content:space-between;
     border-top:1px solid rgba(0,0,0,.06);
     border-bottom:1px solid rgba(0,0,0,.06);
+    cursor: pointer;
   }
   .tcd-acc-trigger:first-child{ border-top:none; }
-  .tcd-caret{ transition: transform .2s ease; }
+
+  /* ★ 矢印（▼）を大きく＆見やすく */
+  .tcd-caret{
+    font-size: 1.8rem;          /* 目立つサイズ */
+    line-height: 1;
+    color: #4b5563;             /* gray-600 */
+    transition: transform .2s ease;
+  }
 
   /* 右側のカード内リンク＆テキストを見やすく大きく */
   .tcd-title-lg{ font-weight:700; font-size:1.125rem; }        /* 18px */
@@ -116,10 +129,10 @@
   /* アカウントカードの中のメトリクス */
   .tcd-metrics{ color:#374151; font-size:.95rem; gap:1.25rem; }
 
-  /* 追加：アカウント作成ボタン下の説明文 */
+  /* アカウント作成ボタン下の説明文 */
   .tcd-note{
     margin-top: .75rem;         /* 12px */
-    font-size: 0.95rem;         /* 15.2px 前後で“ちょうどよい大きさ” */
+    font-size: 0.95rem;         /* “ちょうどよい大きさ” */
     line-height: 1.6;
     color: #374151;             /* gray-700 */
   }
@@ -217,7 +230,9 @@
           {# アコーディオン（プラットフォーム単位） #}
           <section class="tcd-card overflow-hidden">
             <button class="tcd-acc-trigger accordion-trigger"
-                    data-acc-target="#tab-ld-{{ s.id }}">
+                    data-acc-target="#tab-ld-{{ s.id }}"
+                    aria-controls="tab-ld-{{ s.id }}"
+                    aria-expanded="{% if loop.first %}true{% else %}false{% endif %}">
               <span class="font-semibold">
                 Livedoor
                 <span class="ml-1 text-xs text-gray-500">({{ tab_cnt }})</span>
@@ -272,7 +287,6 @@
                             onclick="handleCaptchaClick(this)">
                             新規アカウント作成開始
                           </button>
-                          {# ★ 説明文を追加（未APIキーのみ） #}
                           <p class="tcd-note">
                             アカウント作成成功確率は<strong>80％</strong>です。作成失敗の場合は
                             <strong>再作成ボタン</strong>を押してください。
@@ -354,21 +368,37 @@
     });
   });
 
-  // ───────── アコーディオン ─────────
+  // ───────── アコーディオン：開く/閉じる両方対応 ─────────
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('.accordion-trigger');
     if (!btn) return;
+
     const targetSel = btn.getAttribute('data-acc-target');
     const panel = document.querySelector(targetSel);
     if (!panel) return;
 
-    const container = btn.closest('section').parentElement;
-    container.querySelectorAll('.accordion-panel').forEach(p => p.classList.add('hidden'));
-    container.querySelectorAll('.accordion-caret').forEach(c => c.classList.remove('rotate-180'));
+    const container = btn.closest('.tcd-card') || btn.parentElement;   // 同じカード内をグルーピング
+    const caret = btn.querySelector('.tcd-caret, .accordion-caret');
+    const isOpen = !panel.classList.contains('hidden');
+
+    if (isOpen) {
+      // すでに開いている → 閉じる
+      panel.classList.add('hidden');
+      if (caret) caret.classList.remove('rotate-180');
+      btn.setAttribute('aria-expanded', 'false');
+      return;
+    }
+
+    // 他を閉じて自分を開く
+    if (container) {
+      container.querySelectorAll('.accordion-panel').forEach(p => p.classList.add('hidden'));
+      container.querySelectorAll('.tcd-caret, .accordion-caret').forEach(c => c.classList.remove('rotate-180'));
+      container.querySelectorAll('.accordion-trigger').forEach(b => b.setAttribute('aria-expanded','false'));
+    }
 
     panel.classList.remove('hidden');
-    const caret = btn.querySelector('.accordion-caret, .tcd-caret');
     if (caret) caret.classList.add('rotate-180');
+    btn.setAttribute('aria-expanded', 'true');
   });
 
   // ───────── ＋アカウント追加（API連携） ─────────
