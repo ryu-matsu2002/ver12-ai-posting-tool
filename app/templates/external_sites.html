@@ -292,26 +292,27 @@
                             <strong>再作成ボタン</strong>を押してください。
                           </p>
                         {% else %}
-                          {% set _total = acc.stat_total|default(0) %}
-                          {% if _total > 0 %}
-                            <a
-                              href="/generate?site_id={{ s.id }}&account_id={{ acc.id }}"
-                              class="w-full inline-flex items-center justify-center btn-lg bg-indigo-600 hover:bg-indigo-700 text-white"
-                              data-account-id="{{ acc.id }}"
-                              onclick="return lockAndGo(this)">
-                              クリックで記事生成を追加する
-                            </a>
+                          {# 一度でも生成済みかを UI 側でも判定してボタンを無効化 #}
+                          {% set _generated_once =
+                               (acc.generation_locked) or
+                               (acc.stat_total|default(0) > 0) or
+                               (acc.stat_generated|default(0) > 0) or
+                               (acc.stat_posted|default(0) > 0) %}
+
+                          {% if _generated_once %}
+                            <button class="w-full btn-lg bg-gray-300 text-gray-600 cursor-not-allowed" disabled>
+                              記事生成は実行済み（再実行不可）
+                             </button>
                           {% else %}
                             <a
                               href="/generate?site_id={{ s.id }}&account_id={{ acc.id }}"
-                              class="w-full inline-flex items-center justify-center btn-lg bg-indigo-600 hover:bg-indigo-700 text-white"
-                              data-account-id="{{ acc.id }}"
-                              onclick="return lockAndGo(this)">
+                              class="w-full inline-flex items-center justify-center btn-lg bg-indigo-600 hover:bg-indigo-700 text-white">
                               📝 クリックで記事生成＆投稿
                             </a>
                           {% endif %}
                         {% endif %}
                       </div>
+
                     </div>
                   {% endfor %}
                 </div>
