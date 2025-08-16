@@ -16,11 +16,11 @@
   body{
     background-color: var(--tcd-lighter) !important;
   }
-  /* ★ base.html 側の白背景ラッパーもまとめて上書き（このページ限定の上書き） */
+  /* ★ base.html 側の白背景ラッパーもまとめて上書き */
   html,
   body,
   main,
-  main.bg-white,         /* Tailwindの bg-white が付いていても上書き */
+  main.bg-white,
   #main,
   #content,
   .content,
@@ -34,11 +34,22 @@
     background-image: none !important;
   }
 
-  /* 全体をWP/TCDの”濃い帯”で囲む */
+  /* 全体をWP/TCDの”濃い帯”で囲む（枠を大きく） */
   .tcd-wrap{
     background: var(--tcd-darker);
     border-radius: 14px;
-    padding: 16px;
+    /* 枠の厚みを大きく */
+    padding: 28px;
+    /* ページ左右の余白を食い込んで、枠の面積を広げる */
+    margin-left: -12px;
+    margin-right: -12px;
+  }
+  @media (min-width: 1024px){
+    .tcd-wrap{
+      padding: 36px;          /* 大画面ではさらに太く */
+      margin-left: -18px;
+      margin-right: -18px;
+    }
   }
 
   /* 左のサイト欄＝濃い領域（グラデーション） */
@@ -62,10 +73,7 @@
   .tcd-sidebar .site-nav-link.active{
     background: rgba(255,255,255,.12);
   }
-  .tcd-sidebar .meta{
-    font-size:11px;
-    opacity:.85;
-  }
+  .tcd-sidebar .meta{ font-size:11px; opacity:.85; }
 
   /* 右側：白カード（TCDの“薄い領域”） */
   .tcd-card{
@@ -87,12 +95,8 @@
     border-top:1px solid rgba(0,0,0,.06);
     border-bottom:1px solid rgba(0,0,0,.06);
   }
-  .tcd-acc-trigger:first-child{
-    border-top:none;
-  }
-  .tcd-caret{
-    transition: transform .2s ease;
-  }
+  .tcd-acc-trigger:first-child{ border-top:none; }
+  .tcd-caret{ transition: transform .2s ease; }
 
   /* 右側のカード内リンク＆テキストを見やすく大きく */
   .tcd-title-lg{ font-weight:700; font-size:1.125rem; }        /* 18px */
@@ -112,9 +116,17 @@
   /* アカウントカードの中のメトリクス */
   .tcd-metrics{ color:#374151; font-size:.95rem; gap:1.25rem; }
 
+  /* 追加：アカウント作成ボタン下の説明文 */
+  .tcd-note{
+    margin-top: .75rem;         /* 12px */
+    font-size: 0.95rem;         /* 15.2px 前後で“ちょうどよい大きさ” */
+    line-height: 1.6;
+    color: #374151;             /* gray-700 */
+  }
+
   /* 画面幅が狭い時の調整 */
   @media (max-width: 1024px){
-    .tcd-wrap{ padding:12px; }
+    .tcd-wrap{ padding:20px; }
   }
 </style>
 
@@ -138,9 +150,7 @@
 
 <div class="tcd-wrap">
   <div class="flex gap-6">
-    {# =========================
-       左：サイト選択（濃い領域）
-       ========================= #}
+    {# ========================= 左：サイト選択 ========================= #}
     <aside class="tcd-sidebar w-64">
       <div class="tcd-side-title">外部SEO | サイト一覧</div>
       <nav class="space-y-1 px-2 pb-4">
@@ -164,15 +174,12 @@
           </a>
         {% endfor %}
       </nav>
-      {# 依頼により左下の「外部ブログアカウント一覧」ボタンは削除 #}
+      {# 左下の「外部ブログアカウント一覧」ボタンは削除 #}
     </aside>
 
-    {# =========================
-       右：サイトごとの内容（薄い領域＝白カード類）
-       ========================= #}
+    {# ========================= 右：内容 ========================= #}
     <main class="flex-1">
       {% for s in sites %}
-        {# アカウント配列 #}
         {% set _all_accounts = [] %}
         {% if s.livedoor_accounts is defined %}
           {% set _all_accounts = s.livedoor_accounts %}
@@ -185,7 +192,7 @@
         {% set tab_cnt = s.ld_count | default(_all_accounts|length) %}
 
         <section id="site-panel-{{ s.id }}" class="site-panel {% if not loop.first %}hidden{% endif %}">
-          {# サイトヘッダー（白カード） #}
+          {# サイトヘッダー #}
           <div class="tcd-card p-5 mb-4">
             <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
               <div class="min-w-0">
@@ -202,12 +209,12 @@
                    class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm border">
                   📒 無料ブログ一覧
                 </a>
-                {# 右上の +アカウント追加 は撤去。下部に同じ機能ボタンを配置します #}
+                {# 右上の +アカウント追加 は撤去（下部に設置） #}
               </div>
             </div>
           </div>
 
-          {# ───────── アコーディオン（プラットフォームごと） ───────── #}
+          {# アコーディオン（プラットフォーム単位） #}
           <section class="tcd-card overflow-hidden">
             <button class="tcd-acc-trigger accordion-trigger"
                     data-acc-target="#tab-ld-{{ s.id }}">
@@ -218,8 +225,7 @@
               <span class="tcd-caret accordion-caret {% if loop.first %}rotate-180{% endif %}">▾</span>
             </button>
 
-            <div id="tab-ld-{{ s.id }}"
-                 class="accordion-panel {% if loop.first %}{% else %}hidden{% endif %}">
+            <div id="tab-ld-{{ s.id }}" class="accordion-panel {% if loop.first %}{% else %}hidden{% endif %}">
               {% if _all_accounts and _all_accounts|length > 0 %}
                 <div class="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                   {% for acc in _all_accounts %}
@@ -266,6 +272,11 @@
                             onclick="handleCaptchaClick(this)">
                             新規アカウント作成開始
                           </button>
+                          {# ★ 説明文を追加（未APIキーのみ） #}
+                          <p class="tcd-note">
+                            アカウント作成成功確率は<strong>80％</strong>です。作成失敗の場合は
+                            <strong>再作成ボタン</strong>を押してください。
+                          </p>
                         {% else %}
                           {% set _total = acc.stat_total|default(0) %}
                           {% if _total > 0 %}
@@ -283,8 +294,6 @@
                           {% endif %}
                         {% endif %}
                       </div>
-
-                      {# 依頼：CTA下の小さい説明文は非表示 #}
                     </div>
                   {% endfor %}
                 </div>
@@ -336,17 +345,16 @@
   document.querySelectorAll('.site-nav-link').forEach(el => {
     el.addEventListener('click', () => {
       const siteId = el.getAttribute('data-site-id');
-      // パネル切替
       document.querySelectorAll('.site-panel').forEach(p => p.classList.add('hidden'));
       const target = document.getElementById('site-panel-' + siteId);
       if (target) target.classList.remove('hidden');
-      // 見た目
+
       document.querySelectorAll('.site-nav-link').forEach(a => a.classList.remove('active'));
       el.classList.add('active');
     });
   });
 
-  // ───────── アコーディオン（WP/TCD風） ─────────
+  // ───────── アコーディオン ─────────
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('.accordion-trigger');
     if (!btn) return;
@@ -354,12 +362,10 @@
     const panel = document.querySelector(targetSel);
     if (!panel) return;
 
-    // 同サイト内の他パネルを閉じる
     const container = btn.closest('section').parentElement;
     container.querySelectorAll('.accordion-panel').forEach(p => p.classList.add('hidden'));
     container.querySelectorAll('.accordion-caret').forEach(c => c.classList.remove('rotate-180'));
 
-    // 対象を開く
     panel.classList.remove('hidden');
     const caret = btn.querySelector('.accordion-caret, .tcd-caret');
     if (caret) caret.classList.add('rotate-180');
@@ -419,16 +425,13 @@
     const panel = document.querySelector(`#tab-ld-${siteId}`);
     if (!panel) return;
 
-    // 重複防止
     if (account && document.getElementById(`acc-card-${account.id}`)) return;
 
-    // 空表示を除去
     const emptyRow = panel.querySelector('.text-sm.text-gray-600, .text-sm.text-gray-500');
     if (emptyRow && emptyRow.textContent.includes('まだLivedoorアカウントはありません')) {
       panel.innerHTML = '';
     }
 
-    // gridの確保
     let grid = panel.querySelector('.grid');
     if (!grid) {
       grid = document.createElement('div');
@@ -472,6 +475,10 @@
           onclick="handleCaptchaClick(this)">
           新規アカウント作成開始
         </button>
+        <p class="tcd-note">
+          アカウント作成成功確率は<strong>80％</strong>です。作成失敗の場合は
+          <strong>再作成ボタン</strong>を押してください。
+        </p>
       </div>
     `;
 
@@ -648,7 +655,7 @@
     const progressText = document.getElementById("progressText");
     if (!progressDiv || !progressText) return;
 
-    progressDiv.classList.remove("hidden");
+    progressDiv.classList.remove('hidden');
     lastStatus = null;
 
     progressInterval = setInterval(() => {
@@ -704,13 +711,11 @@
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || "削除に失敗しました");
 
-      // カードDOMを削除
       const card = document.getElementById(`acc-card-${acctId}`);
       if (card) {
         const panel = card.closest(`[id^="tab-ld-"]`);
         card.remove();
 
-        // パネル（タブ内）にカードが無くなったら空表示に差し替え
         if (panel) {
           const grid = panel.querySelector('.grid');
           const hasCards = grid && grid.children.length > 0;
@@ -720,7 +725,6 @@
         }
       }
 
-      // タブ件数を -1
       try { incrementLdCount(siteId, -1); } catch (_) {}
 
       alert(`削除しました（削除記事: ${data.deleted_articles || 0}）`);
