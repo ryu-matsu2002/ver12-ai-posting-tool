@@ -257,12 +257,12 @@
                                           or (_lc=='default') or (_lc=='untitled') %}
                           {% if _is_ph %}
                             {% set _raw = s.url|default('')|replace('http://','')|replace('https://','')|replace('www.','') %}
-                            {% set _host = (_raw|split('/'))[0] %}
-                            {% set _root = (_host|split('.'))[0] %}
+                            {% set _host = _raw.split('/')[0] %}
+                            {% set _root = _host.split('.')[0] %}
                             {% set _brand = (_root|replace('-', ' ')|replace('_',' ')|upper) %}
                             {% if not _brand %}{% set _brand = s.name|upper %}{% endif %}
                             {% set _title = _brand ~ ' 外部SEO' ~ loop.index %}
-                          {% else %}
+                           {% else %}
                             {% set _title = _raw_nm %}
                           {% endif %}
                           <div class="tcd-title-lg truncate max-w-[280px]">
