@@ -1,35 +1,36 @@
 # scripts/regenerate_external_titles.py
 import sys, os
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))  # ← プロジェクトroot追加
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 import click
 import logging
 from flask import Flask
 from app import create_app, db
-from app.models import Article, Site
+from app.models import Article, Site, ExternalArticleSchedule
 from app.article_generator import _unique_title
 from app.external_seo_generator import TITLE_PROMPT
 
 @click.command()
-@click.option("--site_id", required=True, type=int, help="対象のサイトID")
-def regenerate(site_id):
-    """指定サイトの外部SEO記事タイトルを全件一括で再生成して上書き"""
+@click.option("--blog_account_id", required=True, type=int, help="対象の外部SEOブログアカウントID")
+def regenerate(blog_account_id):
+    """指定の外部SEOブログアカウントの記事タイトルを一括で再生成"""
     app: Flask = create_app()
     with app.app_context():
-        site = Site.query.get(site_id)
-        if not site:
-            click.echo(f"❌ Site not found: {site_id}")
-            sys.exit(1)
+        # ExternalArticleSchedule 経由で記事を特定
+        scheds = (
+            ExternalArticleSchedule.query
+            .filter_by(blog_account_id=blog_account_id)
+            .all()
+        )
+        article_ids = [s.article_id for s in scheds]
 
-        # ✅ 外部SEO記事だけに限定
         articles = (
-            Article.query
-            .filter(Article.site_id == site_id)
+            db.session.query(Article)
+            .filter(Article.id.in_(article_ids))
             .filter(Article.status.in_(["done", "記事生成済み"]))
-            .filter(Article.source == "external")   # ★ ここ追加
             .all()
         )
 
-        click.echo(f"✅ {len(articles)} 件の外部SEO記事を処理開始 (site_id={site_id})")
+        click.echo(f"✅ {len(articles)} 件の外部SEO記事を処理開始 (blog_account_id={blog_account_id})")
 
         for art in articles:
             try:
