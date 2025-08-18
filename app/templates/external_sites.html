@@ -38,8 +38,8 @@
   .tcd-wrap{
     background: var(--tcd-darker);
     border-radius: 14px;
-    padding: 28px;
-    margin-left: -12px;
+    padding: 28px;            /* 厚みアップ */
+    margin-left: -12px;       /* 枠を大きく見せるために左右へ食い込む */
     margin-right: -12px;
   }
   @media (min-width: 1024px){
@@ -56,12 +56,12 @@
     color:#fff;
     border-radius: 12px;
   }
-  /* ★ 見出しを約3倍の大きさに */
+  /* ★ 見出しを約3倍の大きさに。改行は意図的に */
   .tcd-sidebar .tcd-side-title{
     padding: 14px 20px;
     font-weight: 800;
     letter-spacing: .02em;
-    font-size: 2rem;
+    font-size: 2rem;        /* 32px 目安（従来 ~1rem の約3倍） */
     line-height: 1.2;
   }
   @media (max-width: 640px){
@@ -105,38 +105,39 @@
 
   /* ★ 矢印（▼）を大きく＆見やすく */
   .tcd-caret{
-    font-size: 1.8rem;
+    font-size: 1.8rem;          /* 目立つサイズ */
     line-height: 1;
-    color: #4b5563;
+    color: #4b5563;             /* gray-600 */
     transition: transform .2s ease;
   }
 
   /* 右側のカード内リンク＆テキストを見やすく大きく */
-  .tcd-title-lg{ font-weight:700; font-size:1.125rem; }
-  .tcd-link-lg{ color:#1d4ed8; text-decoration:underline; font-size:1rem; }
+  .tcd-title-lg{ font-weight:700; font-size:1.125rem; }        /* 18px */
+  .tcd-link-lg{ color:#1d4ed8; text-decoration:underline; font-size:1rem; } /* 16px */
   .tcd-link-lg:hover{ color:#1e40af; }
 
-  /* CTAボタン */
+  /* CTAボタンはそのまま（サイズだけ少し大きく） */
   .btn-lg{ padding:.5rem 1rem; font-size:1rem; border-radius:.5rem; }
 
-  /* +アカウント追加 */
+  /* +アカウント追加（下部に配置／右上は撤去） */
   .tcd-add-btn{
     border:1px solid rgba(0,0,0,.12);
     background:#fff;
   }
   .tcd-add-btn:hover{ background:#f9fafb; }
 
-  /* メトリクス */
+  /* アカウントカードの中のメトリクス */
   .tcd-metrics{ color:#374151; font-size:.95rem; gap:1.25rem; }
 
   /* アカウント作成ボタン下の説明文 */
   .tcd-note{
-    margin-top: .75rem;
-    font-size: 0.95rem;
+    margin-top: .75rem;         /* 12px */
+    font-size: 0.95rem;         /* “ちょうどよい大きさ” */
     line-height: 1.6;
-    color: #374151;
+    color: #374151;             /* gray-700 */
   }
 
+  /* 画面幅が狭い時の調整 */
   @media (max-width: 1024px){
     .tcd-wrap{ padding:20px; }
   }
@@ -186,6 +187,7 @@
           </a>
         {% endfor %}
       </nav>
+      {# 左下の「外部ブログアカウント一覧」ボタンは削除 #}
     </aside>
 
     {# ========================= 右：内容 ========================= #}
@@ -220,6 +222,7 @@
                    class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm border">
                   📒 無料ブログ一覧
                 </a>
+                {# 右上の +アカウント追加 は撤去（下部に設置） #}
               </div>
             </div>
           </div>
@@ -244,18 +247,29 @@
                     <div id="acc-card-{{ acc.id }}" class="tcd-card p-5 flex flex-col gap-4">
                       <div class="flex items-start justify-between gap-3">
                         <div class="min-w-0">
-                          {# ===== 表示名の決定：blog_title / blog_id → 無ければドメイン語幹＋外部SEOn ===== #}
-                          {% set _nm = acc.blog_title or acc.blog_id %}
-                          {% if not _nm %}
+                          {# ▼▼▼ 表示名ロジック：blog_title/blog_id がプレースホルダならドメイン語幹＋外部SEOn ▼▼▼ #}
+                          {% set _raw_nm = acc.blog_title or acc.blog_id %}
+                          {% set _lc = (_raw_nm|lower) if _raw_nm else '' %}
+                          {% set _is_ph = (not _raw_nm)
+                                          or (_lc[:5]=='site-') or (_lc[:5]=='site_')
+                                          or (_lc[:3]=='acc')  or (_lc[:7]=='account')
+                                          or (_lc[:5]=='blog-') or (_lc=='ai-blog')
+                                          or (_lc=='default') or (_lc=='untitled') %}
+                          {% if _is_ph %}
                             {% set _raw = s.url|default('')|replace('http://','')|replace('https://','')|replace('www.','') %}
                             {% set _host = (_raw|split('/'))[0] %}
                             {% set _root = (_host|split('.'))[0] %}
                             {% set _brand = (_root|replace('-', ' ')|replace('_',' ')|upper) %}
                             {% if not _brand %}{% set _brand = s.name|upper %}{% endif %}
+                            {% set _title = _brand ~ ' 外部SEO' ~ loop.index %}
+                          {% else %}
+                            {% set _title = _raw_nm %}
                           {% endif %}
                           <div class="tcd-title-lg truncate max-w-[280px]">
-                            {{ _nm if _nm else (_brand ~ ' 外部SEO' ~ loop.index) }}
+                            {{ _title }}
                           </div>
+                          {# ▲▲▲ 表示名ロジック ここまで ▲▲▲ #}
+
                           {% if acc.public_url %}
                             <a href="{{ acc.public_url }}" target="_blank"
                                class="tcd-link-lg break-all">{{ acc.public_url }}</a>
@@ -298,7 +312,7 @@
                             <strong>再作成ボタン</strong>を押してください。
                           </p>
                         {% else %}
-                          {# 一度でも生成済みかを UI 側でも判定してボタンを無効化 #}
+                          {# UI 側でも「一度でも生成済み」なら無効化 #}
                           {% set _generated_once =
                                (acc.generation_locked) or
                                (acc.stat_total|default(0) > 0) or
@@ -330,6 +344,7 @@
                 </div>
               {% endif %}
 
+              {# 右上のボタンをこの位置（以前の緑ボタンの位置）に移設 #}
               <div class="px-5 py-4 border-t">
                 <button type="button"
                         class="tcd-add-btn inline-flex items-center px-4 py-2 rounded-lg text-sm"
@@ -378,11 +393,6 @@
     el.textContent = '処理中…';
   }
 
-  function restoreLink(el){
-    el.classList.remove('opacity-50','pointer-events-none','cursor-not-allowed');
-    if(el.dataset.originalText){ el.textContent = el.dataset.originalText; }
-  }
-
   function lockAndGo(el){
     const aid = el.getAttribute('data-account-id');
     if(!aid) return true;
@@ -397,6 +407,7 @@
   }
 
   document.addEventListener('DOMContentLoaded', () => {
+    // unlock クエリがあれば該当アカウントのロック解除（将来サーバ側から付与可）
     const u = new URLSearchParams(location.search).get('unlock');
     if(u){ localStorage.removeItem(lockKey(u)); }
 
@@ -407,6 +418,28 @@
       }
     });
   });
+
+  /* =========================
+     表示名生成ユーティリティ（動的追加でも同じ規則に）
+     ========================= */
+  function brandFromUrl(url){
+    if(!url) return '';
+    try{
+      let u = url.replace(/^https?:\/\//i,'').replace(/^www\./i,'');
+      const host = u.split('/')[0] || '';
+      const root = host.split('.')[0] || '';
+      const brand = root.replace(/[-_]+/g,' ').trim().toUpperCase();
+      return brand || '';
+    }catch(_){ return ''; }
+  }
+  function isPlaceholderName(v){
+    if(!v) return true;
+    const s = String(v).toLowerCase();
+    return /^site[-_]\d+$/.test(s) ||
+           /^acc(ount)?[-_]\d+$/.test(s) ||
+           /^blog[-_]\d+$/.test(s) ||
+           s === 'ai-blog' || s === 'default' || s === 'untitled';
+  }
 
   // ───────── 左ナビ：サイト切り替え ─────────
   document.querySelectorAll('.site-nav-link').forEach(el => {
@@ -421,10 +454,11 @@
     });
   });
 
-  // ───────── アコーディオン ─────────
+  // ───────── アコーディオン：開く/閉じる両方対応 ─────────
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('.accordion-trigger');
     if (!btn) return;
+
     const targetSel = btn.getAttribute('data-acc-target');
     const panel = document.querySelector(targetSel);
     if (!panel) return;
@@ -451,7 +485,7 @@
     btn.setAttribute('aria-expanded', 'true');
   });
 
-  // ───────── ＋アカウント追加 ─────────
+  // ───────── ＋アカウント追加（API連携） ─────────
   async function newAccountStart(button) {
     const siteId = button.getAttribute('data-site-id');
     if (!siteId) return;
@@ -501,21 +535,8 @@
     tabBtn.innerHTML = `Livedoor <span class="ml-1 text-xs text-gray-500">(${n})</span>`;
   }
 
-  // URLからブランド名（ROOF PILATES のように）を抽出
-  function brandFromUrl(url){
-    if(!url) return '';
-    try{
-      let u = url;
-      if(!/^https?:\/\//i.test(u)) u = 'https://' + u;
-      const host = new URL(u).hostname.replace(/^www\./i,'');
-      const root = host.split('.')[0] || host;
-      return root.replace(/[-_]+/g,' ').toUpperCase();
-    }catch(e){
-      const host = url.replace(/^https?:\/\//i,'').replace(/^www\./i,'').split('/')[0];
-      const root = (host||'').split('.')[0] || host || url;
-      return root.replace(/[-_]+/g,' ').toUpperCase();
-    }
-  }
+  function escapeHtml(s){ if(s==null) return ''; return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'","&#039;"); }
+  function escapeAttr(s){ return escapeHtml(s).replaceAll('"','&quot;'); }
 
   function renderNewAccountCard(siteId, account) {
     const panel = document.querySelector(`#tab-ld-${siteId}`);
@@ -540,17 +561,16 @@
     card.id = `acc-card-${acc.id}`;
     card.className = 'tcd-card p-5 flex flex-col gap-4';
 
-    // 表示名決定
+    // 表示名決定（テンプレと同じ規則）
     let displayName = acc.blog_title || acc.blog_id || acc.livedoor_blog_id;
-    if(!displayName){
-      // サイトパネルからURLを拾いブランド名に
+    if (isPlaceholderName(displayName)) {
       let siteUrl = '';
       const sitePanel = panel.closest('.site-panel');
       if (sitePanel) {
         const urlEl = sitePanel.querySelector('.tcd-card .tcd-link-lg[href]');
         if (urlEl) siteUrl = (urlEl.textContent || urlEl.href || '').trim();
       }
-      const brand = brandFromUrl(siteUrl);
+      const brand = brandFromUrl(siteUrl) || 'SITE';
       const order = (grid.children.length || 0) + 1;
       displayName = `${brand} 外部SEO${order}`;
     }
@@ -595,16 +615,13 @@
     grid.prepend(card);
   }
 
-  function escapeHtml(s){ if(s==null) return ''; return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'","&#039;"); }
-  function escapeAttr(s){ return escapeHtml(s).replaceAll('"','&quot;'); }
-
   // ───────── CAPTCHA処理（既存） ─────────
   let progressInterval = null;
   let lastStatus = null;
 
   function handleCaptchaClick(button) {
     const siteId    = button.getAttribute("data-site-id");
-       const accountId = button.getAttribute("data-account-id");
+    const accountId = button.getAttribute("data-account-id");
     const platform  = button.getAttribute("data-platform") || "livedoor";
 
     button.disabled = true;
