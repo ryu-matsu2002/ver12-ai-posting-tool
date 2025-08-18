@@ -2,85 +2,60 @@
 {% block title %}外部SEO | サイト一覧{% endblock %}
 
 {% block content %}
-{# ====== ページ専用配色（TCD配色を #ff89ff 系で再現） ====== #}
+{# ====== ページ専用配色 ====== #}
 <style>
   :root{
-    --tcd-base:#ff89ff;   /* 指定色 */
-    --tcd-dark:#c65ac6;   /* 濃いめ */
-    --tcd-darker:#a446a4; /* さらに濃いめ（背景帯） */
-    --tcd-light:#ffd4ff;  /* 薄め */
-    --tcd-lighter:#ffecff;/* もっと薄め（ページ余白） */
+    --tcd-base:#ff89ff;
+    --tcd-dark:#c65ac6;
+    --tcd-darker:#a446a4;
+    --tcd-light:#ffd4ff;
+    --tcd-lighter:#ffecff;
   }
 
-  /* ★ ページ全体の白余白を淡いピンクに */
-  body{
-    background-color: var(--tcd-lighter) !important;
-  }
-  /* ★ base.html 側の白背景ラッパーもまとめて上書き */
-  html,
-  body,
-  main,
-  main.bg-white,
-  #main,
-  #content,
-  .content,
-  .content-area,
-  .app-main,
-  .app-content,
-  .page-wrapper,
-  .page-content,
-  .container {
+  /* 背景の淡い色 */
+  html, body, main, main.bg-white, #main, #content, .content, .content-area,
+  .app-main, .app-content, .page-wrapper, .page-content, .container {
     background-color: var(--tcd-lighter) !important;
     background-image: none !important;
   }
 
-  /* 全体をWP/TCDの”濃い帯”で囲む（枠を大きく） */
+  /* ★ このページ内だけ最大幅を大きく（ほぼ全幅） */
+  .page-content, .container, .app-content { max-width: 100% !important; }
   .tcd-wrap{
     background: var(--tcd-darker);
     border-radius: 14px;
-    padding: 28px;            /* 厚みアップ */
-    margin-left: -12px;       /* 枠を大きく見せるために左右へ食い込む */
-    margin-right: -12px;
+    padding: 36px;
+    margin: 0 auto;
+    width: 100%;
+    max-width: 1500px;          /* ← 枠を広く */
   }
-  @media (min-width: 1024px){
-    .tcd-wrap{
-      padding: 36px;
-      margin-left: -18px;
-      margin-right: -18px;
-    }
+  @media (max-width: 1024px){
+    .tcd-wrap{ padding: 20px; }
   }
 
-  /* 左のサイト欄＝濃い領域（グラデーション） */
+  /* 左のサイト欄 */
   .tcd-sidebar{
     background: linear-gradient(180deg, var(--tcd-darker) 0%, var(--tcd-dark) 100%);
     color:#fff;
     border-radius: 12px;
   }
-  /* ★ 見出しを約3倍の大きさに。改行は意図的に */
   .tcd-sidebar .tcd-side-title{
     padding: 14px 20px;
     font-weight: 800;
     letter-spacing: .02em;
-    font-size: 2rem;        /* 32px 目安（従来 ~1rem の約3倍） */
+    font-size: 2rem;
     line-height: 1.2;
   }
   @media (max-width: 640px){
     .tcd-sidebar .tcd-side-title{ font-size: 1.6rem; }
   }
-
   .tcd-sidebar .site-nav-link{
-    color:#fff;
-    display:block;
-    border-radius:10px;
-    padding:8px 12px;
+    color:#fff; display:block; border-radius:10px; padding:8px 12px;
   }
   .tcd-sidebar .site-nav-link:hover,
-  .tcd-sidebar .site-nav-link.active{
-    background: rgba(255,255,255,.12);
-  }
-  .tcd-sidebar .meta{ font-size:11px; opacity:.85; }
+  .tcd-sidebar .site-nav-link.active{ background: rgba(255,255,255,.12); }
 
-  /* 右側：白カード（TCDの“薄い領域”） */
+  /* 右側カード */
   .tcd-card{
     background:#fff;
     border:1px solid rgba(0,0,0,.08);
@@ -88,59 +63,28 @@
     box-shadow: 0 1px 2px rgba(0,0,0,.04);
   }
 
-  /* アコーディオンの見出しバー（WPの白いバー） */
   .tcd-acc-trigger{
-    background:#fff;
-    width:100%;
-    text-align:left;
-    padding:14px 20px;
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
+    background:#fff; width:100%; text-align:left; padding:14px 20px;
+    display:flex; align-items:center; justify-content:space-between;
     border-top:1px solid rgba(0,0,0,.06);
     border-bottom:1px solid rgba(0,0,0,.06);
     cursor: pointer;
   }
   .tcd-acc-trigger:first-child{ border-top:none; }
 
-  /* ★ 矢印（▼）を大きく＆見やすく */
-  .tcd-caret{
-    font-size: 1.8rem;          /* 目立つサイズ */
-    line-height: 1;
-    color: #4b5563;             /* gray-600 */
-    transition: transform .2s ease;
-  }
+  .tcd-caret{ font-size:1.8rem; line-height:1; color:#4b5563; transition:transform .2s ease; }
 
-  /* 右側のカード内リンク＆テキストを見やすく大きく */
-  .tcd-title-lg{ font-weight:700; font-size:1.125rem; }        /* 18px */
-  .tcd-link-lg{ color:#1d4ed8; text-decoration:underline; font-size:1rem; } /* 16px */
+  .tcd-title-lg{ font-weight:700; font-size:1.125rem; }
+  .tcd-link-lg{ color:#1d4ed8; text-decoration:underline; font-size:1rem; }
   .tcd-link-lg:hover{ color:#1e40af; }
 
-  /* CTAボタンはそのまま（サイズだけ少し大きく） */
   .btn-lg{ padding:.5rem 1rem; font-size:1rem; border-radius:.5rem; }
 
-  /* +アカウント追加（下部に配置／右上は撤去） */
-  .tcd-add-btn{
-    border:1px solid rgba(0,0,0,.12);
-    background:#fff;
-  }
+  .tcd-add-btn{ border:1px solid rgba(0,0,0,.12); background:#fff; }
   .tcd-add-btn:hover{ background:#f9fafb; }
 
-  /* アカウントカードの中のメトリクス */
   .tcd-metrics{ color:#374151; font-size:.95rem; gap:1.25rem; }
-
-  /* アカウント作成ボタン下の説明文 */
-  .tcd-note{
-    margin-top: .75rem;         /* 12px */
-    font-size: 0.95rem;         /* “ちょうどよい大きさ” */
-    line-height: 1.6;
-    color: #374151;             /* gray-700 */
-  }
-
-  /* 画面幅が狭い時の調整 */
-  @media (max-width: 1024px){
-    .tcd-wrap{ padding:20px; }
-  }
+  .tcd-note{ margin-top:.75rem; font-size:.95rem; line-height:1.6; color:#374151; }
 </style>
 
 {# ───────── flashメッセージ ───────── #}
@@ -168,26 +112,14 @@
       <div class="tcd-side-title">外部SEO |<br>サイト一覧</div>
       <nav class="space-y-1 px-2 pb-4">
         {% for s in sites %}
-          {% set _all_accounts = [] %}
-          {% if s.livedoor_accounts is defined %}
-            {% set _all_accounts = s.livedoor_accounts %}
-          {% elif s.external_accounts is defined %}
-            {% set _all_accounts = s.external_accounts %}
-          {% elif s.accounts is defined %}
-            {% set _all_accounts = s.accounts %}
-          {% endif %}
-          {% set ready_cnt = (_all_accounts | selectattr('api_key') | list) | length %}
-          {% set tab_cnt = s.ld_count | default(_all_accounts|length) %}
-
           <a href="javascript:void(0)"
              class="site-nav-link {% if loop.first %} active {% endif %}"
              data-site-id="{{ s.id }}">
             <div class="truncate font-medium">{{ s.name }}</div>
-            <div class="meta">準備OK {{ ready_cnt }} / {{ tab_cnt }}</div>
+            {# ※ 要望により「準備OK x / y」は非表示 #}
           </a>
         {% endfor %}
       </nav>
-      {# 左下の「外部ブログアカウント一覧」ボタンは削除 #}
     </aside>
 
     {# ========================= 右：内容 ========================= #}
@@ -201,7 +133,6 @@
         {% elif s.accounts is defined %}
           {% set _all_accounts = s.accounts %}
         {% endif %}
-        {% set ready_cnt = (_all_accounts | selectattr('api_key') | list) | length %}
         {% set tab_cnt = s.ld_count | default(_all_accounts|length) %}
 
         <section id="site-panel-{{ s.id }}" class="site-panel {% if not loop.first %}hidden{% endif %}">
@@ -213,16 +144,13 @@
                 {% if s.url %}
                   <a href="{{ s.url }}" class="tcd-link-lg break-all" target="_blank">{{ s.url }}</a>
                 {% endif %}
-                <div class="mt-1 text-sm text-gray-600">
-                  準備OK <span class="font-semibold">{{ ready_cnt }}</span> / {{ tab_cnt }}
-                </div>
+                {# ※ 「準備OK x / y」は削除 #}
               </div>
               <div class="flex items-center gap-2 md:self-start">
                 <a href="{{ url_for('main.external_accounts') }}?site_id={{ s.id }}"
                    class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm border">
                   📒 無料ブログ一覧
                 </a>
-                {# 右上の +アカウント追加 は撤去（下部に設置） #}
               </div>
             </div>
           </div>
@@ -247,7 +175,7 @@
                     <div id="acc-card-{{ acc.id }}" class="tcd-card p-5 flex flex-col gap-4">
                       <div class="flex items-start justify-between gap-3">
                         <div class="min-w-0">
-                          {# ▼▼▼ 表示名ロジック：blog_title/blog_id がプレースホルダならドメイン語幹＋外部SEOn ▼▼▼ #}
+                          {# ▼表示名ロジック（プレースホルダ時はドメイン語幹＋外部SEO） #}
                           {% set _raw_nm = acc.blog_title or acc.blog_id %}
                           {% set _lc = (_raw_nm|lower) if _raw_nm else '' %}
                           {% set _is_ph = (not _raw_nm)
@@ -268,7 +196,6 @@
                           <div class="tcd-title-lg truncate max-w-[280px]">
                             {{ _title }}
                           </div>
-                          {# ▲▲▲ 表示名ロジック ここまで ▲▲▲ #}
 
                           {% if acc.public_url %}
                             <a href="{{ acc.public_url }}" target="_blank"
@@ -312,13 +239,11 @@
                             <strong>再作成ボタン</strong>を押してください。
                           </p>
                         {% else %}
-                          {# UI 側でも「一度でも生成済み」なら無効化 #}
                           {% set _generated_once =
                                (acc.generation_locked) or
                                (acc.stat_total|default(0) > 0) or
                                (acc.stat_generated|default(0) > 0) or
                                (acc.stat_posted|default(0) > 0) %}
-
                           {% if _generated_once %}
                             <button class="w-full btn-lg bg-gray-300 text-gray-600 cursor-not-allowed" disabled>
                               記事生成は実行済み（再実行不可）
@@ -344,7 +269,6 @@
                 </div>
               {% endif %}
 
-              {# 右上のボタンをこの位置（以前の緑ボタンの位置）に移設 #}
               <div class="px-5 py-4 border-t">
                 <button type="button"
                         class="tcd-add-btn inline-flex items-center px-4 py-2 rounded-lg text-sm"
@@ -362,7 +286,7 @@
 </div>
 
 {# =========================================================
-   CAPTCHA入力モーダル（既存）
+   CAPTCHA入力モーダル
    ========================================================= #}
 <div id="captchaModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
   <div class="bg-white p-6 rounded-2xl shadow-lg w-[420px] max-w-[92vw] relative">
@@ -382,17 +306,13 @@
 
 {% block scripts %}
 <script>
-  /* =========================
-     1回押したら再押下できないワンクリックロック
-     ========================= */
+  /* ========== 1回押したら再押下できないワンクリックロック ========== */
   function lockKey(aid){ return `gen-lock:${aid}`; }
-
   function disableLink(el){
     el.classList.add('opacity-50','pointer-events-none','cursor-not-allowed');
     if(!el.dataset.originalText){ el.dataset.originalText = el.textContent; }
     el.textContent = '処理中…';
   }
-
   function lockAndGo(el){
     const aid = el.getAttribute('data-account-id');
     if(!aid) return true;
@@ -406,22 +326,7 @@
     return true;
   }
 
-  document.addEventListener('DOMContentLoaded', () => {
-    // unlock クエリがあれば該当アカウントのロック解除（将来サーバ側から付与可）
-    const u = new URLSearchParams(location.search).get('unlock');
-    if(u){ localStorage.removeItem(lockKey(u)); }
-
-    document.querySelectorAll('a[data-account-id]').forEach(a => {
-      const aid = a.getAttribute('data-account-id');
-      if(localStorage.getItem(lockKey(aid)) === '1'){
-        disableLink(a);
-      }
-    });
-  });
-
-  /* =========================
-     表示名生成ユーティリティ（動的追加でも同じ規則に）
-     ========================= */
+  /* ========== 表示名用ユーティリティ ========== */
   function brandFromUrl(url){
     if(!url) return '';
     try{
@@ -440,25 +345,60 @@
            /^blog[-_]\d+$/.test(s) ||
            s === 'ai-blog' || s === 'default' || s === 'untitled';
   }
+  function escapeHtml(s){ if(s==null) return ''; return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'","&#039;"); }
+  function escapeAttr(s){ return escapeHtml(s).replaceAll('"','&quot;'); }
 
-  // ───────── 左ナビ：サイト切り替え ─────────
-  document.querySelectorAll('.site-nav-link').forEach(el => {
-    el.addEventListener('click', () => {
-      const siteId = el.getAttribute('data-site-id');
-      document.querySelectorAll('.site-panel').forEach(p => p.classList.add('hidden'));
-      const target = document.getElementById('site-panel-' + siteId);
-      if (target) target.classList.remove('hidden');
+  /* ========== 左ナビ：サイト切り替え（選択保持付き） ========== */
+  const SELECT_KEY = 'extseo.selectedSite';
+  function selectSite(siteId, store=true){
+    // パネル切替
+    document.querySelectorAll('.site-panel').forEach(p => p.classList.add('hidden'));
+    const target = document.getElementById('site-panel-' + siteId);
+    if (target) target.classList.remove('hidden');
+    // アクティブ表示
+    document.querySelectorAll('.site-nav-link').forEach(a => a.classList.remove('active'));
+    const nav = document.querySelector(`.site-nav-link[data-site-id="${siteId}"]`);
+    if (nav) nav.classList.add('active');
+    // 保存
+    if (store) sessionStorage.setItem(SELECT_KEY, siteId);
+  }
+  function initialSiteId(){
+    const q = new URLSearchParams(location.search).get('site_id');
+    if(q) return q;
+    const m = String(location.hash||'').match(/site-(\d+)/);
+    if(m) return m[1];
+    const saved = sessionStorage.getItem(SELECT_KEY);
+    if(saved) return saved;
+    const first = document.querySelector('.site-nav-link')?.getAttribute('data-site-id');
+    return first || '';
+  }
 
-      document.querySelectorAll('.site-nav-link').forEach(a => a.classList.remove('active'));
-      el.classList.add('active');
+  document.addEventListener('DOMContentLoaded', () => {
+    // 生成リンクのロック復元
+    const u = new URLSearchParams(location.search).get('unlock');
+    if(u){ localStorage.removeItem(lockKey(u)); }
+    document.querySelectorAll('a[data-account-id]').forEach(a => {
+      const aid = a.getAttribute('data-account-id');
+      if(localStorage.getItem(lockKey(aid)) === '1'){ disableLink(a); }
     });
+
+    // 左ナビのクリックで選択・保存
+    document.querySelectorAll('.site-nav-link').forEach(el => {
+      el.addEventListener('click', () => {
+        const siteId = el.getAttribute('data-site-id');
+        if (siteId) selectSite(siteId, true);
+      });
+    });
+
+    // 初期選択（?site_id / #site- / sessionStorage / 先頭）
+    const initId = initialSiteId();
+    if (initId) selectSite(initId, false);
   });
 
-  // ───────── アコーディオン：開く/閉じる両方対応 ─────────
+  /* ========== アコーディオン ========== */
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('.accordion-trigger');
     if (!btn) return;
-
     const targetSel = btn.getAttribute('data-acc-target');
     const panel = document.querySelector(targetSel);
     if (!panel) return;
@@ -479,16 +419,16 @@
       container.querySelectorAll('.tcd-caret, .accordion-caret').forEach(c => c.classList.remove('rotate-180'));
       container.querySelectorAll('.accordion-trigger').forEach(b => b.setAttribute('aria-expanded','false'));
     }
-
     panel.classList.remove('hidden');
     if (caret) caret.classList.add('rotate-180');
     btn.setAttribute('aria-expanded', 'true');
   });
 
-  // ───────── ＋アカウント追加（API連携） ─────────
+  /* ========== ＋アカウント追加（API連携） ========== */
   async function newAccountStart(button) {
     const siteId = button.getAttribute('data-site-id');
     if (!siteId) return;
+    sessionStorage.setItem(SELECT_KEY, siteId); // ← 遷移/更新でもこのサイトに戻す
 
     button.disabled = true;
     const oldText = button.innerText;
@@ -517,7 +457,6 @@
 
       renderNewAccountCard(data.site_id, data.account);
       try { incrementLdCount(siteId, +1); } catch(_) {}
-
     } catch (err) {
       alert(err.message || "アカウント作成に失敗しました");
     } finally {
@@ -534,9 +473,6 @@
     const n = Math.max(parseInt(m[1] || "0", 10) + delta, 0);
     tabBtn.innerHTML = `Livedoor <span class="ml-1 text-xs text-gray-500">(${n})</span>`;
   }
-
-  function escapeHtml(s){ if(s==null) return ''; return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'","&#039;"); }
-  function escapeAttr(s){ return escapeHtml(s).replaceAll('"','&quot;'); }
 
   function renderNewAccountCard(siteId, account) {
     const panel = document.querySelector(`#tab-ld-${siteId}`);
@@ -561,9 +497,11 @@
     card.id = `acc-card-${acc.id}`;
     card.className = 'tcd-card p-5 flex flex-col gap-4';
 
-    // 表示名決定（テンプレと同じ規則）
+    // 表示名
     let displayName = acc.blog_title || acc.blog_id || acc.livedoor_blog_id;
     if (isPlaceholderName(displayName)) {
+      // 選択保持
+      sessionStorage.setItem(SELECT_KEY, siteId);
       let siteUrl = '';
       const sitePanel = panel.closest('.site-panel');
       if (sitePanel) {
@@ -615,7 +553,7 @@
     grid.prepend(card);
   }
 
-  // ───────── CAPTCHA処理（既存） ─────────
+  /* ========== CAPTCHA処理（既存） ========== */
   let progressInterval = null;
   let lastStatus = null;
 
@@ -623,6 +561,9 @@
     const siteId    = button.getAttribute("data-site-id");
     const accountId = button.getAttribute("data-account-id");
     const platform  = button.getAttribute("data-platform") || "livedoor";
+
+    // 選択保持
+    if (siteId) sessionStorage.setItem(SELECT_KEY, siteId);
 
     button.disabled = true;
     button.innerText = "📷 CAPTCHA取得中…";
@@ -668,10 +609,7 @@
 
   function closeCaptcha() {
     document.getElementById("captchaModal").classList.add("hidden");
-    if (progressInterval) {
-      clearInterval(progressInterval);
-      progressInterval = null;
-    }
+    if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
   }
 
   function submitCaptcha(event) {
@@ -717,10 +655,7 @@
           const aid = data.account_id || accountId;
 
           switchToPostCTA(sid, aid);
-          if (progressInterval) {
-            clearInterval(progressInterval);
-            progressInterval = null;
-          }
+          if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
           alert("アカウント作成とAPIキー取得が完了しました。すぐに投稿を始められます。");
           return;
         }
@@ -750,7 +685,6 @@
   function switchToPostCTA(siteId, accountId) {
     const actionArea = document.getElementById(`actionArea-acc-${accountId}`);
     if (!actionArea) return;
-
     actionArea.innerHTML = "";
     const a = document.createElement("a");
     a.href = `/generate?site_id=${siteId}&account_id=${accountId}`;
@@ -769,7 +703,6 @@
     btn.classList.remove("bg-gray-500");
     btn.classList.add(label && label.includes("❌") ? "bg-red-600" : "bg-green-600");
   }
-
   function setCaptchaDoneUI(siteId, accountId) {
     const btn = document.querySelector(`button[data-site-id="${siteId}"][data-account-id="${accountId}"]`);
     if (!btn) return;
@@ -778,7 +711,6 @@
     btn.classList.remove("bg-gray-500","bg-red-600");
     btn.classList.add("bg-green-500");
   }
-
   function startProgressPolling() {
     const progressDiv  = document.getElementById("progressStatus");
     const progressText = document.getElementById("progressText");
@@ -804,7 +736,6 @@
           if (data.step === "API取得完了" && (data.site_id || siteId) && (data.account_id || accountId)) {
             const sid = data.site_id || siteId;
             const aid = data.account_id || accountId;
-
             const actionArea = document.getElementById(`actionArea-acc-${aid}`);
             if (actionArea) {
               actionArea.innerHTML = "";
@@ -816,7 +747,6 @@
               a.setAttribute('onclick', 'return lockAndGo(this)');
               actionArea.appendChild(a);
             }
-
             clearInterval(progressInterval);
             progressInterval = null;
           }
@@ -827,11 +757,9 @@
         });
     }, 5000);
   }
+  function updateCaptchaStatusUI(data){ /* no-op */ }
 
-  function updateCaptchaStatusUI(data) {
-    // ここでは何もしない
-  }
-
+  /* ========== 削除処理 ========== */
   async function deleteExternalAccount(acctId, siteId) {
     if (!acctId) return;
     if (!confirm("この無料ブログアカウントを削除します。予約と（このアカウントだけが使っている）生成記事も削除します。よろしいですか？")) {
@@ -846,7 +774,6 @@
       if (card) {
         const panel = card.closest(`[id^="tab-ld-"]`);
         card.remove();
-
         if (panel) {
           const grid = panel.querySelector('.grid');
           const hasCards = grid && grid.children.length > 0;
@@ -855,9 +782,7 @@
           }
         }
       }
-
       try { incrementLdCount(siteId, -1); } catch (_) {}
-
       alert(`削除しました（削除記事: ${data.deleted_articles || 0}）`);
     } catch (e) {
       console.error(e);

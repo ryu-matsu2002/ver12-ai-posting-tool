@@ -472,7 +472,7 @@ def generate_and_schedule_external_articles(
 
                     art = Article(
                         keyword=kw_str,
-                        title=placeholder_title,   # ← ここを必ず非空に
+                        title="",   # ← ここを必ず非空に
                         body="",
                         user_id=user_id,
                         site_id=site_id,
@@ -540,26 +540,42 @@ def generate_and_schedule_external_articles(
 
     # 2) 並列で本文生成 → 本文末尾にリンク追記 → done
     def _gen_and_append(aid: int, link: str):
-        # タイトル/本文生成（通常記事の実装を流用）
-        _generate(app, aid, TITLE_PROMPT, BODY_PROMPT, format="html", self_review=False, user_id=user_id)
-        # 本文末尾にリンクを追記（短いDB更新）
+        # 生成前に一度タイトルを空にしておく（既存の仮タイトルが残っているケースに対応）
+        with app.app_context():
+            art0 = Article.query.get(aid)
+            if art0 and art0.title:
+                art0.title = ""
+                db.session.commit()
+
+        # タイトル＋本文生成
+        _generate(app, aid, TITLE_PROMPT, BODY_PROMPT,
+                  format="html", self_review=False, user_id=user_id)
+
+        # 生成後の整形とリンク挿入
         with app.app_context():
             art = Article.query.get(aid)
             if not art:
                 return
-            # タイトルが空/空白ならフォールバックで補強（保険）
-            if not art.title or not str(art.title).strip():
-                fixed = _safe_title(None, art.keyword or "")
-                logging.warning("[external-seo] title was empty after generation; used fallback: %r", fixed)
-                art.title = fixed
-            # _generate が done まで上げている前提だが、防御的に
-            if art.status not in ("done", "gen"):
-                # 進捗を進める
-                art.status = "done"
-                art.progress = 100
+
+            # タイトルの最終整形（プロンプト通りの疑問文に寄せる）
+            t = (art.title or "").strip()
+            if not t:
+                # 万一空ならフォールバック
+                t = _fallback_title_from_keyword(art.keyword or "")
+            if not (t.endswith("？") or t.endswith("?")):
+                t = t + "？"
+            art.title = t
+
+            # 本文の中間にリンク挿入
             art.body = _insert_link_mid(art.body or "", link)
+
+            # ステータス確定
+            if art.status not in ("done", "gen"):
+                art.status = "done"
+            art.progress = 100
             art.updated_at = datetime.utcnow()
             db.session.commit()
+
 
     try:
         with ThreadPoolExecutor(max_workers=4) as executor:

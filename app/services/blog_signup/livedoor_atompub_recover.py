@@ -37,6 +37,67 @@ def _domain_tokens(url: str) -> list[str]:
         words.extend([w for w in p.replace("_", "-").split("-") if w])
     return words
 
+# ===== 抽出用ヘルパーを追加 =====
+
+STOPWORDS_JP = {
+    "株式会社","有限会社","合同会社","公式","オフィシャル","ブログ","サイト","ホームページ",
+    "ショップ","ストア","サービス","工房","教室","情報","案内","チャンネル","通信","マガジン"
+}
+STOPWORDS_EN = {
+    "inc","ltd","llc","official","blog","site","homepage","shop","store",
+    "service","studio","channel","magazine","info","news"
+}
+
+def _name_tokens(name: str) -> list[str]:
+    """サイト名を雑にトークン化（日本語/英語混在対応・記号で分割）"""
+    if not name:
+        return []
+    parts = _re.split(r"[\s\u3000\-/＿_・|｜／]+", str(name))
+    toks: list[str] = []
+    for p in parts:
+        p = p.strip()
+        if not p:
+            continue
+        # 記号を除去しすぎない程度に掃除
+        p = _re.sub(r"[^\w\u3040-\u30FF\u3400-\u9FFFー]+", "", p)
+        if p:
+            toks.append(p)
+    return toks
+
+def _keyword_seed_from_site(site) -> tuple[str | None, bool]:
+    """
+    サイト名/URLから「1語」を安定に選ぶ。
+    戻り値: (seed, is_jp)  /  抽出できなければ (None, False)
+    """
+    name = (getattr(site, "name", "") or "").strip()
+    url  = (getattr(site, "url", "") or "").strip()
+    salt = f"{getattr(site, 'id', '')}-{name}-{url}"
+
+    name_toks = _name_tokens(name)
+    domain_toks = _domain_tokens(url)
+
+    # 日本語と英語で候補を分ける
+    jp_cands = [t for t in name_toks if _has_cjk(t) and t not in STOPWORDS_JP]
+    en_cands = [t for t in (name_toks + domain_toks) if not _has_cjk(t)]
+    en_cands = [t for t in en_cands if t.lower() not in STOPWORDS_EN]
+
+    # 長さフィルタ（1文字や長すぎは除外）
+    jp_cands = [t for t in jp_cands if 2 <= len(t) <= 12]
+    en_cands = [t for t in en_cands if 2 <= len(t) <= 15]
+
+    # 同一サイトでは安定して同じ語を選ぶ（塩＝site.id+name+url）
+    def _pick(stable_list: list[str]) -> str | None:
+        if not stable_list:
+            return None
+        idx = _deterministic_index(salt, len(stable_list))
+        return stable_list[idx]
+
+    seed = _pick(jp_cands) or _pick(en_cands)
+    if seed:
+        return seed, _has_cjk(seed)
+    return None, False
+
+
 def _guess_genre(site) -> tuple[str, bool]:
     """
     サイトからジャンル語(日本語/英語)と日本語フラグを推定。
@@ -123,39 +184,63 @@ def _deterministic_index(salt: str, n: int) -> int:
 
 def _craft_blog_title(site) -> str:
     """
-    サイト名に似すぎない“ジャンル系・別ブランド”のブログ名を生成。
-    - site.name / site.url の両方に対応
-    - 同一サイトでは決定的に同じ候補を選択
-    - サイト名やドメイン語と被る候補は避ける
+    サイト名/URLから1語(seed)を抜き出して、それを軸に“別ブランド感”のブログ名を作る。
+    seed が取れない場合は従来のジャンル推定にフォールバック。
     """
     site_name = (getattr(site, "name", "") or "").strip()
     site_url  = (getattr(site, "url", "")  or "").strip()
     salt = f"{getattr(site, 'id', '')}-{site_name}-{site_url}"
 
+    # 1) まず seed を試す
+    seed, seed_is_jp = _keyword_seed_from_site(site)
+
+    if seed:
+        base_word = seed.strip()
+        cands = _templates_jp(base_word) if seed_is_jp else _templates_en(base_word)
+        # 禁止語（“完全一致のみ”を禁止。seed を含むのはOK）
+        banned_equal = {_norm(site_name)}
+        # ドメイン語そのものと完全一致も禁止（例: "roofpilates" だけ、など）
+        banned_equal.update(_norm(w) for w in _domain_tokens(site_url))
+
+        def acceptable(title: str) -> bool:
+            t = _norm(title)
+            # サイト名（正規化）と完全一致だけ禁止
+            return t not in banned_equal and bool(t)
+
+        idx = _deterministic_index(salt, len(cands))
+        for i in range(len(cands)):
+            title = cands[(idx + i) % len(cands)]
+            if acceptable(title):
+                return title[:48]
+
+        # ここに来ることは稀だが、一応フォールバック
+        return (cands[0] if cands else "研究ノート")[:48]
+
+    # 2) seed が取れないときは従来のジャンル推定で
     topic, is_jp = _guess_genre(site)
     cands = _templates_jp(topic) if is_jp else _templates_en(topic)
 
-    # 似すぎ防止のための禁止語（サイト名＆ドメイン語）
+    # 似すぎ防止（seed が無いので従来どおり強めにブロック）
     banned = {_norm(site_name)}
     banned.update(_norm(w) for w in _domain_tokens(site_url))
 
-    def acceptable(title: str) -> bool:
+    def acceptable2(title: str) -> bool:
         t = _norm(title)
         if not t:
             return False
+        # サイト名/ドメイン語を“含む or 含まれる”は避ける
         return all(b and b not in t and t not in b for b in banned if b)
 
-    # 決定的に1つ選ぶ（似ていたら次へ）
     idx = _deterministic_index(salt, len(cands))
     for i in range(len(cands)):
         title = cands[(idx + i) % len(cands)]
-        if acceptable(title):
+        if acceptable2(title):
             return title[:48]
 
-    # すべてNGなら完全汎用にフォールバック
     fallback = (["研究ノート", "小さな手帖", "覚え書きログ", "メモとアイデア", "作戦会議室"]
                 if is_jp else ["Side Notes", "Little Journal", "Idea Log", "Workshop Notes"])
     return fallback[_deterministic_index(salt, len(fallback))][:48]
+
 
 
 def _slugify_ascii(s: str) -> str:
