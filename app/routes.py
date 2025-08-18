@@ -4599,7 +4599,7 @@ def external_seo_generate_get():
 
     # フィードバック
     if ok and not ng:
-        msg = f"{ok}件のアカウントで生成を開始（以後は恒久ロック）"
+        msg = f"{ok}件のアカウントで生成を開始"
         if skipped_locked:
             msg += f" ／ ロック済みスキップ {skipped_locked}件"
         flash(msg, "success")

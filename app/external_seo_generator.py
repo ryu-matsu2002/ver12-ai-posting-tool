@@ -159,9 +159,9 @@ def _ensure_http_url(u: str) -> str:
     return u.strip()
 
 
-def _base_and_sales(site: Site) -> Tuple[str, str]:
+def _base_and_topic(site: Site) -> Tuple[str, str]:
     base = site.url.rstrip("/")
-    return base, f"{base}/sales"
+    return base, f"{base}/topic"
 
 
 # ===============================
@@ -171,10 +171,10 @@ def _build_fixed_links(site: Site) -> List[str]:
     """
     固定5リンク：
       - base（サイトTOP）
-      - base/sales
+      - base/topic
       - GSC page impressions 上位3件
     """
-    base, sales = _base_and_sales(site)
+    base, sales = _base_and_topic(site)
     fixed = [base, sales]
 
     try:
@@ -509,6 +509,35 @@ def generate_and_schedule_external_articles(
             logging.exception(f"[external_seo] 枠作成中にエラー: {e}")
             raise
 
+
+        # 本文の「中間」にリンクブロックを差し込む
+    def _insert_link_mid(html: str, link: str) -> str:
+    # 「関連情報はこちら：リンク」の形で挿入
+        snippet = (
+            f"<p>関連情報はこちら："
+            f"<a href='{link}' target='_blank' rel='nofollow noopener'>{link}</a>"
+            f"</p>"
+        )
+
+        if not html:
+            return snippet
+
+        # 1) </p> の直後に入れる：段落を保てるので最優先
+        closings = [m.end() for m in _re.finditer(r'</p\s*>', html, flags=_re.I)]
+        if closings:
+            mid = max(0, len(closings) // 2 - 1)  # 真ん中の段落終端の直後
+            pos = closings[mid]
+            return html[:pos] + snippet + html[pos:]
+
+        # 2) 段落が無ければ、ダブル改行でブロック分割して中間に入れる
+        parts = _re.split(r'\n{2,}', html)
+        if len(parts) >= 2:
+            mid = len(parts) // 2
+            return '\n\n'.join(parts[:mid]) + '\n\n' + snippet + '\n\n' + '\n\n'.join(parts[mid:])
+
+        # 3) それも厳しければ末尾に念のため追加（フォールバック）
+        return html + '\n\n' + snippet
+
     # 2) 並列で本文生成 → 本文末尾にリンク追記 → done
     def _gen_and_append(aid: int, link: str):
         # タイトル/本文生成（通常記事の実装を流用）
@@ -528,7 +557,7 @@ def generate_and_schedule_external_articles(
                 # 進捗を進める
                 art.status = "done"
                 art.progress = 100
-            art.body = (art.body or "") + f"\n\n<a href='{link}' target='_blank'>{link}</a>"
+            art.body = _insert_link_mid(art.body or "", link)
             art.updated_at = datetime.utcnow()
             db.session.commit()
 

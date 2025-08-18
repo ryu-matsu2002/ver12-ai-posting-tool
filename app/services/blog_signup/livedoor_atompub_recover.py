@@ -7,6 +7,8 @@ import re as _re
 from app import db
 from app.models import ExternalBlogAccount
 from app.enums import BlogType
+from urllib.parse import urlparse
+
 
 logger = logging.getLogger(__name__)
 
@@ -15,24 +17,146 @@ logger = logging.getLogger(__name__)
 def _has_cjk(s: str) -> bool:
     return bool(_re.search(r"[\u3040-\u30FF\u3400-\u9FFF]", s or ""))
 
+def _norm(s: str) -> str:
+    """比較用：空白/記号を落として小文字化"""
+    s = (s or "").lower()
+    s = _re.sub(r"[\s\-_／|｜/・]+", "", s)
+    return s
+
+def _domain_tokens(url: str) -> list[str]:
+    """ドメインを単語に分割（tld等は除外）"""
+    try:
+        netloc = urlparse(url or "").netloc.lower()
+    except Exception:
+        netloc = ""
+    if ":" in netloc:
+        netloc = netloc.split(":", 1)[0]
+    parts = [p for p in netloc.split(".") if p and p not in ("www", "com", "jp", "net", "org", "co")]
+    words = []
+    for p in parts:
+        words.extend([w for w in p.replace("_", "-").split("-") if w])
+    return words
+
+def _guess_genre(site) -> tuple[str, bool]:
+    """
+    サイトからジャンル語(日本語/英語)と日本語フラグを推定。
+    1) 明示属性（primary_genre_name / genre_name / genre.name など）
+    2) site.name / site.url の語からヒューリスティック
+    """
+    # 1) 明示属性
+    for attr in ("primary_genre_name", "genre_name", "genre", "main_genre", "category", "category_name"):
+        v = getattr(site, attr, None)
+        if isinstance(v, str) and v.strip():
+            txt = v.strip()
+            return txt, _has_cjk(txt)
+        name = getattr(v, "name", None)
+        if isinstance(name, str) and name.strip():
+            txt = name.strip()
+            return txt, _has_cjk(txt)
+
+    # 2) ヒューリスティック
+    name = (getattr(site, "name", "") or "")
+    url  = (getattr(site, "url", "")  or "")
+    txt  = (name + " " + url).lower()
+    toks = set(_domain_tokens(url))
+
+    JP = [
+        ("ピラティス", ("pilates","ピラティス","yoga","体幹","姿勢","fitness","stretch")),
+        ("留学",       ("studyabroad","abroad","留学","ielts","toefl","海外","study")),
+        ("旅行",       ("travel","trip","観光","hotel","onsen","温泉","tour")),
+        ("美容",       ("beauty","esthetic","skin","hair","美容","コスメ","メイク")),
+        ("ビジネス",   ("business","marketing","sales","seo","経営","起業","副業")),
+    ]
+    for label, keys in JP:
+        if any(k in txt for k in keys) or any(k in toks for k in keys):
+            return label, True
+
+    EN = [
+        ("Pilates", ("pilates","yoga","fitness","posture","stretch")),
+        ("Study Abroad", ("studyabroad","abroad","study","ielts","toefl")),
+        ("Travel", ("travel","trip","hotel","onsen","tour")),
+        ("Beauty", ("beauty","esthetic","skin","hair","cosme","makeup")),
+        ("Business", ("business","marketing","sales","seo","startup")),
+    ]
+    for label, keys in EN:
+        if any(k in txt for k in keys) or any(k in toks for k in keys):
+            return label, False
+
+    # どれにも該当しなければ汎用
+    return ("日々", _has_cjk(name) or _has_cjk(url))
+
+def _templates_jp(topic: str) -> list[str]:
+    base = topic.strip() or "日々"
+    return [
+        f"{base}ラボ",
+        f"{base}手帖",
+        f"{base}の覚え書き",
+        f"{base}の小部屋",
+        f"{base}ジャーナル",
+        f"{base}ログ",
+        f"{base}のメモ箱",
+        f"{base}の豆知識",
+        f"{base}の道具箱",
+        f"{base}ノート",
+        f"{base}の作戦室",
+        f"{base}の教室",
+        f"{base}のしおり",
+    ]
+
+def _templates_en(topic: str) -> list[str]:
+    base = topic.strip() or "Notes"
+    return [
+        f"{base} Lab",
+        f"{base} Notes",
+        f"{base} Journal",
+        f"{base} Digest",
+        f"{base} Handbook",
+        f"{base} Playbook",
+        f"{base} Room",
+        f"{base} Hub",
+        f"{base} Notebook",
+        f"{base} Insights",
+    ]
+
+def _deterministic_index(salt: str, n: int) -> int:
+    return abs(sum(ord(c) for c in salt)) % max(n, 1)
+
 def _craft_blog_title(site) -> str:
     """
-    サイト名をベースに、少しだけ変えたブログタイトルを作る。
-    日本語名→「◯◯の記録／メモ／ラボ／ノート」等
-    英語名  → 「◯◯ Journal／Notes／Lab／Digest」等
+    サイト名に似すぎない“ジャンル系・別ブランド”のブログ名を生成。
+    - site.name / site.url の両方に対応
+    - 同一サイトでは決定的に同じ候補を選択
+    - サイト名やドメイン語と被る候補は避ける
     """
-    base = (getattr(site, "name", None) or getattr(site, "url", None) or "Blog").strip()
-    base = base[:30]  # 長過ぎ防止
+    site_name = (getattr(site, "name", "") or "").strip()
+    site_url  = (getattr(site, "url", "")  or "").strip()
+    salt = f"{getattr(site, 'id', '')}-{site_name}-{site_url}"
 
-    if _has_cjk(base):
-        variants = [f"{base}の記録", f"{base}メモ", f"{base}ラボ", f"{base}ノート", f"{base}ブログ"]
-    else:
-        variants = [f"{base} Journal", f"{base} Notes", f"{base} Lab", f"{base} Digest", f"{base} Blog"]
+    topic, is_jp = _guess_genre(site)
+    cands = _templates_jp(topic) if is_jp else _templates_en(topic)
 
-    # 安定的に選ぶ（毎回固定）：base の簡単なハッシュでインデックス決定
-    idx = (sum(ord(c) for c in base) % len(variants))
-    title = variants[idx]
-    return title[:48]  # 入力欄の上限をだいたい意識
+    # 似すぎ防止のための禁止語（サイト名＆ドメイン語）
+    banned = {_norm(site_name)}
+    banned.update(_norm(w) for w in _domain_tokens(site_url))
+
+    def acceptable(title: str) -> bool:
+        t = _norm(title)
+        if not t:
+            return False
+        return all(b and b not in t and t not in b for b in banned if b)
+
+    # 決定的に1つ選ぶ（似ていたら次へ）
+    idx = _deterministic_index(salt, len(cands))
+    for i in range(len(cands)):
+        title = cands[(idx + i) % len(cands)]
+        if acceptable(title):
+            return title[:48]
+
+    # すべてNGなら完全汎用にフォールバック
+    fallback = (["研究ノート", "小さな手帖", "覚え書きログ", "メモとアイデア", "作戦会議室"]
+                if is_jp else ["Side Notes", "Little Journal", "Idea Log", "Workshop Notes"])
+    return fallback[_deterministic_index(salt, len(fallback))][:48]
+
 
 def _slugify_ascii(s: str) -> str:
     """日本語/記号混じり → 半角英数とハイフンの短いスラッグ（先頭英字、長さ20程度）"""
