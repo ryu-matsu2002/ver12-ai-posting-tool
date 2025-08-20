@@ -63,16 +63,23 @@
     box-shadow: 0 1px 2px rgba(0,0,0,.04);
   }
 
+  /* アコーディオン：矢印を左側へ／サイズUP */
   .tcd-acc-trigger{
     background:#fff; width:100%; text-align:left; padding:14px 20px;
-    display:flex; align-items:center; justify-content:space-between;
+    display:flex; align-items:center; gap:12px; /* ← 左アイコンとタイトルを寄せる */
     border-top:1px solid rgba(0,0,0,.06);
     border-bottom:1px solid rgba(0,0,0,.06);
     cursor: pointer;
   }
   .tcd-acc-trigger:first-child{ border-top:none; }
 
-  .tcd-caret{ font-size:1.8rem; line-height:1; color:#4b5563; transition:transform .2s ease; }
+  .tcd-caret{
+    font-size:2.1rem;           /* ← 以前より大きく */
+    line-height:1;
+    color:#4b5563;
+    transition:transform .2s ease;
+    display:inline-block;
+  }
 
   .tcd-title-lg{ font-weight:700; font-size:1.125rem; }
   .tcd-link-lg{ color:#1d4ed8; text-decoration:underline; font-size:1rem; }
@@ -84,7 +91,9 @@
   .tcd-add-btn:hover{ background:#f9fafb; }
 
   .tcd-metrics{ color:#374151; font-size:.95rem; gap:1.25rem; }
-  .tcd-note{ margin-top:.75rem; font-size:.95rem; line-height:1.6; color:#374151; }
+
+  /* dx-blog系のバッジ/ラベルを念のためCSSで隠す（万一別テンプレの要素が混在しても抑止） */
+  .dx-blog, .dx_blog, [data-badge="dx-blog"], .badge-dx-blog { display:none !important; }
 </style>
 
 {# ───────── flashメッセージ ───────── #}
@@ -161,11 +170,11 @@
                     data-acc-target="#tab-ld-{{ s.id }}"
                     aria-controls="tab-ld-{{ s.id }}"
                     aria-expanded="{% if loop.first %}true{% else %}false{% endif %}">
+              <span class="tcd-caret accordion-caret {% if loop.first %}rotate-180{% endif %}">▾</span>
               <span class="font-semibold">
                 Livedoor
                 <span class="ml-1 text-xs text-gray-500">({{ tab_cnt }})</span>
               </span>
-              <span class="tcd-caret accordion-caret {% if loop.first %}rotate-180{% endif %}">▾</span>
             </button>
 
             <div id="tab-ld-{{ s.id }}" class="accordion-panel {% if loop.first %}{% else %}hidden{% endif %}">
@@ -210,7 +219,7 @@
                             data-acct-id="{{ acc.id }}"
                             data-site-id="{{ s.id }}"
                             onclick="deleteExternalAccount(this.dataset.acctId, this.dataset.siteId)"
-                            title="このアカウントと記事を削除">
+                            title="この無料ブログと記事を削除">
                             削除
                           </button>
                         </div>
@@ -232,12 +241,9 @@
                             data-account-id="{{ acc.id }}"
                             data-platform="livedoor"
                             onclick="handleCaptchaClick(this)">
-                            クリックで新規アカウント作成開始
+                            クリックで新規ブログ作成開始
                           </button>
-                          <p class="tcd-note">
-                            アカウント作成成功確率は<strong>80％</strong>です。作成失敗の場合は
-                            <strong>再作成ボタン</strong>を押してください。
-                          </p>
+                          {# 要望により、成功確率80%の注意文を削除 #}
                         {% else %}
                           {% set _generated_once =
                                (acc.generation_locked) or
@@ -254,7 +260,7 @@
                               class="w-full inline-flex items-center justify-center btn-lg bg-indigo-600 hover:bg-indigo-700 text-white"
                               data-account-id="{{ acc.id }}"
                               onclick="return lockAndGo(this)">
-                              📝 クリックで記事生成＆投稿
+                              📝 記事生成＆投稿
                             </a>
                           {% endif %}
                         {% endif %}
@@ -265,7 +271,7 @@
                 </div>
               {% else %}
                 <div class="px-5 py-4 text-sm text-gray-600">
-                  まだLivedoorアカウントはありません。
+                  まだLivedoorブログはありません。
                 </div>
               {% endif %}
 
@@ -274,7 +280,7 @@
                         class="tcd-add-btn inline-flex items-center px-4 py-2 rounded-lg text-sm"
                         data-site-id="{{ s.id }}"
                         onclick="newAccountStart(this)">
-                  ＋ アカウント追加
+                  ＋ ブログ追加
                 </button>
               </div>
             </div>
@@ -393,6 +399,13 @@
     // 初期選択（?site_id / #site- / sessionStorage / 先頭）
     const initId = initialSiteId();
     if (initId) selectSite(initId, false);
+
+    // 念のため：カード内の「dx-blog」単独要素を除去（別テンプレが混ざる場合の保険）
+    document.querySelectorAll('#tab-ld-{{ sites|first.id if sites|length>0 else "" }} .tcd-card, .tcd-card').forEach(card=>{
+      [...card.querySelectorAll('*')].forEach(n=>{
+        if(n.childNodes.length===1 && n.textContent.trim()==='dx-blog'){ n.remove(); }
+      });
+    });
   });
 
   /* ========== アコーディオン ========== */
@@ -424,7 +437,7 @@
     btn.setAttribute('aria-expanded', 'true');
   });
 
-  /* ========== ＋アカウント追加（API連携） ========== */
+  /* ========== ＋ブログ追加（API連携） ========== */
   async function newAccountStart(button) {
     const siteId = button.getAttribute('data-site-id');
     if (!siteId) return;
@@ -458,7 +471,7 @@
       renderNewAccountCard(data.site_id, data.account);
       try { incrementLdCount(siteId, +1); } catch(_) {}
     } catch (err) {
-      alert(err.message || "アカウント作成に失敗しました");
+      alert(err.message || "ブログ作成に失敗しました");
     } finally {
       button.disabled = false;
       button.innerText = oldText;
@@ -471,7 +484,7 @@
     const m = tabBtn.textContent.match(/\((\d+)\)/);
     if (!m) return;
     const n = Math.max(parseInt(m[1] || "0", 10) + delta, 0);
-    tabBtn.innerHTML = `Livedoor <span class="ml-1 text-xs text-gray-500">(${n})</span>`;
+    tabBtn.innerHTML = `<span class="tcd-caret accordion-caret">▾</span><span class="font-semibold"> Livedoor <span class="ml-1 text-xs text-gray-500">(${n})</span></span>`;
   }
 
   function renderNewAccountCard(siteId, account) {
@@ -481,7 +494,7 @@
     if (account && document.getElementById(`acc-card-${account.id}`)) return;
 
     const emptyRow = panel.querySelector('.text-sm.text-gray-600, .text-sm.text-gray-500');
-    if (emptyRow && emptyRow.textContent.includes('まだLivedoorアカウントはありません')) {
+    if (emptyRow && /Livedoor.+ありません|ブログ.+ありません/.test(emptyRow.textContent)) {
       panel.innerHTML = '';
     }
 
@@ -541,19 +554,15 @@
           data-account-id="${acc.id}"
           data-platform="livedoor"
           onclick="handleCaptchaClick(this)">
-          新規アカウント作成開始
+          クリックで新規ブログ作成開始
         </button>
-        <p class="tcd-note">
-          アカウント作成成功確率は<strong>80％</strong>です。作成失敗の場合は
-          <strong>再作成ボタン</strong>を押してください。
-        </p>
       </div>
     `;
 
     grid.prepend(card);
   }
 
-  /* ========== CAPTCHA処理（既存） ========== */
+  /* ========== CAPTCHA処理 ========== */
   let progressInterval = null;
   let lastStatus = null;
 
@@ -656,13 +665,13 @@
 
           switchToPostCTA(sid, aid);
           if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
-          alert("アカウント作成とAPIキー取得が完了しました。すぐに投稿を始められます。");
+          alert("ブログ作成とAPIキー取得が完了しました。すぐに投稿を始められます。");
           return;
         }
 
         if (data.status === "recreate_required") {
-          alert("アカウント作成に失敗しました。『↻ アカウントを再作成』からやり直してください。");
-          restoreCaptchaButton(siteId, accountId, "↻ アカウントを再作成");
+          alert("ブログ作成に失敗しました。「↻ ブログを再作成」からやり直してください。");
+          restoreCaptchaButton(siteId, accountId, "↻ ブログを再作成");
           return;
         }
 
@@ -699,7 +708,7 @@
     const btn = document.querySelector(`button[data-site-id="${siteId}"][data-account-id="${accountId}"]`);
     if (!btn) return;
     btn.disabled = false;
-    btn.innerText = label || "新規アカウント作成開始";
+    btn.innerText = label || "クリックで新規ブログ作成開始";
     btn.classList.remove("bg-gray-500");
     btn.classList.add(label && label.includes("❌") ? "bg-red-600" : "bg-green-600");
   }
@@ -762,7 +771,7 @@
   /* ========== 削除処理 ========== */
   async function deleteExternalAccount(acctId, siteId) {
     if (!acctId) return;
-    if (!confirm("この無料ブログアカウントを削除します。予約と（このアカウントだけが使っている）生成記事も削除します。よろしいですか？")) {
+    if (!confirm("この無料ブログを削除します。予約と（このブログだけが使っている）生成記事も削除します。よろしいですか？")) {
       return;
     }
     try {
@@ -778,7 +787,7 @@
           const grid = panel.querySelector('.grid');
           const hasCards = grid && grid.children.length > 0;
           if (!hasCards) {
-            panel.innerHTML = '<div class="px-5 py-4 text-sm text-gray-600">まだLivedoorアカウントはありません。</div>';
+            panel.innerHTML = '<div class="px-5 py-4 text-sm text-gray-600">まだLivedoorブログはありません。</div>';
           }
         }
       }
