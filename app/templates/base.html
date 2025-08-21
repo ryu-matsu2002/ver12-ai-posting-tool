@@ -183,6 +183,7 @@
   </main>
 
   <!-- JS: 吹き出しアニメーション -->
+  {% block scripts %}
   <script>
     function toggleUserDropdown() {
       const menu = document.getElementById('userDropdown');
@@ -223,6 +224,7 @@
       setTimeout(() => bubble.classList.add('hidden'), 2500);
     }
   </script>
+  {% endblock %}
 
   <style>
     @keyframes walk-back-and-forth {
@@ -282,6 +284,5 @@
     }
 
   </style>
-  {% block scripts %}{% endblock %}
 </body>
 </html>
