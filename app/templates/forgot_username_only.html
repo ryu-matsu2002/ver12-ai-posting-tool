@@ -4,16 +4,25 @@
 <div class="max-w-md mx-auto bg-white shadow rounded p-6 my-10">
   <h1 class="text-xl font-bold mb-4">パスワードをお忘れですか？</h1>
   <p class="text-sm text-gray-600 mb-4">
-    登録時の <b>ユーザー名</b> と <b>メールアドレス</b> を入力してください。<br>
+    登録時の <b>本名（姓・名）</b> と <b>メールアドレス</b> を入力してください。<br>
     一致が確認できると、このまま新しいパスワードの設定画面へ進みます。
   </p>
+
   <form method="post">
     {{ form.hidden_tag() }}
 
-    <label class="block text-sm font-medium mb-1">ユーザー名</label>
-    {{ form.username(class="w-full border rounded px-3 py-2 mb-4", placeholder="例：ryu_matsumoto") }}
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label class="block text-sm font-medium mb-1">姓</label>
+        {{ form.last_name(class="w-full border rounded px-3 py-2", placeholder="例：山田") }}
+      </div>
+      <div>
+        <label class="block text-sm font-medium mb-1">名</label>
+        {{ form.first_name(class="w-full border rounded px-3 py-2", placeholder="例：太郎") }}
+      </div>
+    </div>
 
-    <label class="block text-sm font-medium mb-1">メールアドレス</label>
+    <label class="block text-sm font-medium mb-1 mt-4">メールアドレス</label>
     {{ form.email(class="w-full border rounded px-3 py-2 mb-6", placeholder="例：you@example.com") }}
 
     {{ form.submit(class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded") }}

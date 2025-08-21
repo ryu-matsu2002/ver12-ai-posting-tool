@@ -18,10 +18,13 @@ class LoginForm(FlaskForm):
     password   = PasswordField("パスワード", validators=[DataRequired()])
     submit     = SubmitField("ログイン")
 
-class UsernameEmailResetRequestForm(FlaskForm):
-    username = StringField("ユーザー名", validators=[DataRequired(), Length(min=1, max=50)])
-    email = StringField("メールアドレス", validators=[DataRequired(), Email(), Length(max=120)])
-    submit = SubmitField("続ける")
+# 置き換え（旧 UsernameEmailResetRequestForm は不要）
+class RealNameEmailResetRequestForm(FlaskForm):
+    last_name  = StringField("姓", validators=[DataRequired(), Length(max=50)])
+    first_name = StringField("名", validators=[DataRequired(), Length(max=50)])
+    email      = StringField("メールアドレス", validators=[DataRequired(), Email(), Length(max=120)])
+    submit     = SubmitField("続ける")
+
 
 class PasswordResetSimpleForm(FlaskForm):
     grant = HiddenField()

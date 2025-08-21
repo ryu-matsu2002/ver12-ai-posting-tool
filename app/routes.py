@@ -2026,37 +2026,39 @@ def login():
 # 既存 import に追加
 from flask import render_template, request, redirect, url_for, flash, session, current_app
 from werkzeug.security import generate_password_hash
-import secrets, time
-
-# 既存フォームに追加
-from app.forms import UsernameEmailResetRequestForm, PasswordResetSimpleForm
+import secrets, time, unicodedata
 from app.models import User
 from app import db
+from sqlalchemy import func
+from app.forms import RealNameEmailResetRequestForm, PasswordResetSimpleForm
 
-# ---- Step1: ユーザー名 + メールアドレスを入力（メール送信なし）
+
+def _norm_name(s: str) -> str:
+    # 全角/半角のゆらぎ吸収 + 空白除去（半角/全角スペース両方）
+    if not s:
+        return ""
+    s = unicodedata.normalize("NFKC", s)
+    return s.replace(" ", "").replace("\u3000", "")  # 半角/全角スペース除去
+
 @bp.route("/forgot-password", methods=["GET", "POST"])
 def forgot_password_username_only():
-    form = UsernameEmailResetRequestForm()
+    form = RealNameEmailResetRequestForm()
     if form.validate_on_submit():
-        username = form.username.data.strip()
+        ln = form.last_name.data.strip()
+        fn = form.first_name.data.strip()
         email = form.email.data.strip().lower()
 
-        # ユーザー名とメールの組み合わせが一致するユーザーを探す（メールは小文字比較）
-        user = User.query.filter(
-            db.func.lower(User.email) == email,
-            User.username == username
-        ).first()
+        # メール一致のユーザーを取得（メールは小文字比較）
+        user = User.query.filter(func.lower(User.email) == email).first()
 
-        # アカウント枚挙を避けるためメッセージは固定
-        flash("認証を確認しました。続けて新しいパスワードを設定してください。", "info")
-
-        if user:
+        # 本名一致をサーバ側で厳密チェック（表記ゆれを軽減）
+        if user and _norm_name(user.last_name) == _norm_name(ln) and _norm_name(user.first_name) == _norm_name(fn):
             grant = secrets.token_urlsafe(16)
             session["pw_reset_grant"] = {"uid": user.id, "grant": grant, "ts": time.time()}
             return redirect(url_for("main.reset_password_username_only", grant=grant))
 
-        # 一致しなければ同ページへ戻す（メッセージは同じ）
-        return redirect(url_for("main.forgot_password_username_only"))
+        flash("本名とメールアドレスの組み合わせが確認できませんでした。", "danger")
+        return render_template("forgot_username_only.html", form=form), 400
 
     return render_template("forgot_username_only.html", form=form)
 
