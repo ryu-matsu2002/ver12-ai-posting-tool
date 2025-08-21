@@ -15,7 +15,7 @@
     <div class="relative mb-4">
       {{ form.password(
           id="password",
-          class="w-full border rounded px-3 py-2 pr-12",   # 右にアイコン分の余白
+          class_="w-full border rounded px-3 py-2 pr-12",
           autocomplete="new-password"
       ) }}
       <button
@@ -24,11 +24,12 @@
         aria-label="パスワードの表示切替"
         aria-pressed="false"
         data-target="password">
-        <!-- 目アイコン（open/closed の2つを切替） -->
+        <!-- 目：表示 -->
         <svg class="icon-eye-open h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Z"/>
           <circle cx="12" cy="12" r="3"/>
         </svg>
+        <!-- 目：非表示 -->
         <svg class="icon-eye-closed h-5 w-5 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20C5 20 1 12 1 12a20.77 20.77 0 0 1 5.06-6.94M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a20.77 20.77 0 0 1-3.22 4.33M1 1l22 22"/>
         </svg>
@@ -40,7 +41,7 @@
     <div class="relative mb-6">
       {{ form.password2(
           id="password2",
-          class="w-full border rounded px-3 py-2 pr-12",
+          class_="w-full border rounded px-3 py-2 pr-12",
           autocomplete="new-password"
       ) }}
       <button
@@ -59,33 +60,29 @@
       </button>
     </div>
 
-    {{ form.submit(class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded", value="更新する") }}
+    {{ form.submit(class_="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded", value="更新する") }}
   </form>
+
+  <!-- スクリプトはここに直接置く（auth_base.htmlにscriptsブロックが無くても動くように） -->
+  <script>
+  (function(){
+    function setupToggle(targetId){
+      var input = document.getElementById(targetId);
+      var btn = document.querySelector('[data-target="'+targetId+'"]');
+      if(!input || !btn) return;
+      var eyeOpen = btn.querySelector('.icon-eye-open');
+      var eyeClosed = btn.querySelector('.icon-eye-closed');
+      btn.addEventListener('click', function(){
+        var showing = input.type === 'text';
+        input.type = showing ? 'password' : 'text';
+        btn.setAttribute('aria-pressed', String(!showing));
+        eyeOpen.classList.toggle('hidden', !showing);
+        eyeClosed.classList.toggle('hidden', showing);
+      });
+    }
+    setupToggle('password');
+    setupToggle('password2');
+  })();
+  </script>
 </div>
-{% endblock %}
-
-{% block scripts %}
-<script>
-(function(){
-  function setupToggle(targetId){
-    var input = document.getElementById(targetId);
-    var btn = document.querySelector('[data-target="'+targetId+'"]');
-    if(!input || !btn) return;
-
-    var eyeOpen = btn.querySelector('.icon-eye-open');
-    var eyeClosed = btn.querySelector('.icon-eye-closed');
-
-    btn.addEventListener('click', function(){
-      var showing = input.type === 'text';
-      input.type = showing ? 'password' : 'text';
-      btn.setAttribute('aria-pressed', String(!showing));
-      // アイコン切替
-      eyeOpen.classList.toggle('hidden', !showing);
-      eyeClosed.classList.toggle('hidden', showing);
-    });
-  }
-  setupToggle('password');
-  setupToggle('password2');
-})();
-</script>
 {% endblock %}
