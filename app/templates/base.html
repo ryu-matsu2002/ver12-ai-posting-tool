@@ -186,11 +186,13 @@
   {% block scripts %}
 <script>
   document.addEventListener("DOMContentLoaded", function () {
+    console.log("✅ dropdown script loaded");   // ←追加
     const btn = document.getElementById("userDropdownBtn");
     const menu = document.getElementById("userDropdown");
 
     if (btn && menu) {
       btn.addEventListener("click", function (e) {
+        console.log("✅ ボタンがクリックされました"); // ←追加
         e.stopPropagation();
         menu.classList.toggle("hidden");
       });
