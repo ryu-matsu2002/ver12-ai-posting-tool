@@ -31,19 +31,19 @@
   <!-- ログインボタン -->
   {{ form.submit(class="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded") }}
 
-  <!-- 新規登録リンク -->
+  <!-- 新規登録リンク（ボタンの下） -->
   <p class="text-center text-sm mt-4">
     新規登録は
     <a href="{{ url_for('main.register') }}" class="text-blue-600 hover:underline">こちら</a>
   </p>
+
+  <!-- パスワードをお忘れですか？（新規登録のさらに下） -->
+  <p class="text-center text-sm mt-2">
+    <a class="text-blue-600 hover:underline" href="{{ url_for('main.forgot_password_username_only') }}">
+      パスワードをお忘れですか？
+    </a>
+  </p>
 </form>
-
-<div class="text-center mt-3">
-  <a class="text-blue-600" href="{{ url_for('main.forgot_password_username_only') }}">
-    パスワードをお忘れですか？
-  </a>
-</div>
-
 
 <!-- パスワード表示切り替え -->
 <script>
