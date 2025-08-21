@@ -18,6 +18,19 @@ class LoginForm(FlaskForm):
     password   = PasswordField("パスワード", validators=[DataRequired()])
     submit     = SubmitField("ログイン")
 
+class UsernameResetRequestForm(FlaskForm):
+    username = StringField("ユーザー名", validators=[DataRequired(), Length(min=1, max=50)])
+    # 任意：管理者コードを使うなら入力させる（未使用なら空のままでOK）
+    admin_code = PasswordField("管理者コード（必要な場合のみ）", validators=[Optional()])
+    submit = SubmitField("続ける")
+
+class PasswordResetSimpleForm(FlaskForm):
+    grant = HiddenField()
+    password = PasswordField("新しいパスワード", validators=[DataRequired(), Length(min=8)])
+    password2 = PasswordField("新しいパスワード（確認）",
+                              validators=[DataRequired(), EqualTo("password", message="一致しません")])
+    submit = SubmitField("更新する")
+
 
 class RegisterForm(FlaskForm):
 

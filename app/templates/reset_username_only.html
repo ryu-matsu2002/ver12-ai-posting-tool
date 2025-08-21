@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}新しいパスワード設定{% endblock %}
+{% block content %}
+<div class="max-w-md mx-auto bg-white shadow rounded p-6 my-10">
+  <h1 class="text-xl font-bold mb-4">新しいパスワードを設定</h1>
+  <p class="text-sm text-gray-600 mb-4">ユーザー名: <b>{{ username }}</b></p>
+  <form method="post">
+    {{ form.hidden_tag() }}
+    {{ form.grant(value=grant) }}
+    <label class="block text-sm font-medium mb-1">新しいパスワード</label>
+    {{ form.password(class="w-full border rounded px-3 py-2 mb-4") }}
+
+    <label class="block text-sm font-medium mb-1">新しいパスワード（確認）</label>
+    {{ form.password2(class="w-full border rounded px-3 py-2 mb-6") }}
+
+    {{ form.submit(class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded") }}
+  </form>
+</div>
+{% endblock %}

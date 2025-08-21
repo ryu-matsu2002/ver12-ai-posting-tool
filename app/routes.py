@@ -2023,6 +2023,81 @@ def login():
 
     return render_template("login.html", form=form)
 
+# 既存 import に追加
+from flask import render_template, request, redirect, url_for, flash, session, current_app
+from werkzeug.security import generate_password_hash
+import secrets, time
+
+# 既存フォームに追加
+from app.forms import UsernameResetRequestForm, PasswordResetSimpleForm
+from app.models import User
+from app import db
+
+# ── 設定（任意）：環境変数で ADMIN_RESET_CODE を使う場合は config に置いてください
+# current_app.config["ADMIN_RESET_CODE"] が空 or 未設定なら不要
+
+# ---- Step1: ユーザー名入力のみ（メール送信なし）
+@bp.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password_username_only():
+    form = UsernameResetRequestForm()
+    if form.validate_on_submit():
+        username = form.username.data.strip()
+        admin_code_input = (form.admin_code.data or "").strip()
+        require_code = bool(current_app.config.get("ADMIN_RESET_CODE"))
+
+        if require_code and admin_code_input != current_app.config["ADMIN_RESET_CODE"]:
+            flash("認証に失敗しました。管理者に確認してください。", "danger")
+            return redirect(url_for("main.forgot_password_username_only"))
+
+        user = User.query.filter_by(username=username).first()
+
+        # アカウント枚挙対策：結果は同じメッセージ
+        flash("認証を確認しました。続けて新しいパスワードを設定してください。", "info")
+
+        if user:
+            grant = secrets.token_urlsafe(16)
+            session["pw_reset_grant"] = {"uid": user.id, "grant": grant, "ts": time.time()}
+            return redirect(url_for("main.reset_password_username_only", grant=grant))
+
+        return redirect(url_for("main.forgot_password_username_only"))
+
+    return render_template("forgot_username_only.html", form=form)
+
+# ---- Step2: 新パスワード設定
+@bp.route("/reset-password-simple", methods=["GET", "POST"])
+def reset_password_username_only():
+    # TTL（秒）…未設定なら10分
+    ttl = int(current_app.config.get("USERNAME_ONLY_RESET_TTL", 600))
+    grant = request.args.get("grant") or request.form.get("grant")
+
+    data = session.get("pw_reset_grant")
+    if not data or data.get("grant") != grant or (time.time() - data.get("ts", 0)) > ttl:
+        flash("操作が無効または期限切れです。最初からやり直してください。", "danger")
+        session.pop("pw_reset_grant", None)
+        return redirect(url_for("main.forgot_password_username_only"))
+
+    user = User.query.get(data["uid"])
+    if not user:
+        flash("ユーザーが見つかりません。", "danger")
+        session.pop("pw_reset_grant", None)
+        return redirect(url_for("main.forgot_password_username_only"))
+
+    form = PasswordResetSimpleForm()
+    # hidden に grant を入れる
+    if request.method == "GET":
+        form.grant.data = grant
+
+    if form.validate_on_submit():
+        # ここまで来ていれば EqualTo で一致検証済み
+        new_pw = form.password.data
+        user.password = generate_password_hash(new_pw, method="pbkdf2:sha256", salt_length=16)
+        db.session.commit()
+        session.pop("pw_reset_grant", None)
+        flash("パスワードを更新しました。新しいパスワードでログインしてください。", "success")
+        return redirect(url_for("main.login"))
+
+    return render_template("reset_username_only.html",
+                           form=form, username=user.username, grant=grant)
 
 
 @bp.route("/register", methods=["GET", "POST"])

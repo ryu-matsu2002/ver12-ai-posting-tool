@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}パスワード再設定（ユーザー名）{% endblock %}
+{% block content %}
+<div class="max-w-md mx-auto bg-white shadow rounded p-6 my-10">
+  <h1 class="text-xl font-bold mb-4">パスワードをお忘れですか？</h1>
+  <p class="text-sm text-gray-600 mb-4">
+    登録時の <b>ユーザー名</b> を入力してください。
+  </p>
+  <form method="post">
+    {{ form.hidden_tag() }}
+    <label class="block text-sm font-medium mb-1">ユーザー名</label>
+    {{ form.username(class="w-full border rounded px-3 py-2 mb-4", placeholder="username") }}
+
+    <label class="block text-sm font-medium mb-1">管理者コード（必要な場合のみ）</label>
+    {{ form.admin_code(class="w-full border rounded px-3 py-2 mb-4", placeholder="任意") }}
+
+    {{ form.submit(class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded") }}
+  </form>
+  <div class="text-center mt-4">
+    <a class="text-blue-600" href="{{ url_for('main.login') }}">ログインへ戻る</a>
+  </div>
+</div>
+{% endblock %}
