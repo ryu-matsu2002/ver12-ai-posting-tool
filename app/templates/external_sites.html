@@ -63,16 +63,17 @@
     box-shadow: 0 1px 2px rgba(0,0,0,.04);
   }
 
+  /* ▼アコーディオン：矢印を左に寄せて大きく */
   .tcd-acc-trigger{
     background:#fff; width:100%; text-align:left; padding:14px 20px;
-    display:flex; align-items:center; justify-content:space-between;
+    display:flex; align-items:center; justify-content:flex-start; gap:14px;
     border-top:1px solid rgba(0,0,0,.06);
     border-bottom:1px solid rgba(0,0,0,.06);
     cursor: pointer;
   }
   .tcd-acc-trigger:first-child{ border-top:none; }
 
-  .tcd-caret{ font-size:1.8rem; line-height:1; color:#4b5563; transition:transform .2s ease; }
+  .tcd-caret{ font-size:2.1rem; line-height:1; color:#4b5563; transition:transform .2s ease; }
 
   .tcd-title-lg{ font-weight:700; font-size:1.125rem; }
   .tcd-link-lg{ color:#1d4ed8; text-decoration:underline; font-size:1rem; }
@@ -84,7 +85,6 @@
   .tcd-add-btn:hover{ background:#f9fafb; }
 
   .tcd-metrics{ color:#374151; font-size:.95rem; gap:1.25rem; }
-  .tcd-note{ margin-top:.75rem; font-size:.95rem; line-height:1.6; color:#374151; }
 </style>
 
 {# ───────── flashメッセージ ───────── #}
@@ -116,7 +116,6 @@
              class="site-nav-link {% if loop.first %} active {% endif %}"
              data-site-id="{{ s.id }}">
             <div class="truncate font-medium">{{ s.name }}</div>
-            {# ※ 要望により「準備OK x / y」は非表示 #}
           </a>
         {% endfor %}
       </nav>
@@ -144,7 +143,6 @@
                 {% if s.url %}
                   <a href="{{ s.url }}" class="tcd-link-lg break-all" target="_blank">{{ s.url }}</a>
                 {% endif %}
-                {# ※ 「準備OK x / y」は削除 #}
               </div>
               <div class="flex items-center gap-2 md:self-start">
                 <a href="{{ url_for('main.external_accounts') }}?site_id={{ s.id }}"
@@ -161,11 +159,11 @@
                     data-acc-target="#tab-ld-{{ s.id }}"
                     aria-controls="tab-ld-{{ s.id }}"
                     aria-expanded="{% if loop.first %}true{% else %}false{% endif %}">
+              <span class="tcd-caret accordion-caret {% if loop.first %}rotate-180{% endif %}">▾</span>
               <span class="font-semibold">
                 Livedoor
                 <span class="ml-1 text-xs text-gray-500">({{ tab_cnt }})</span>
               </span>
-              <span class="tcd-caret accordion-caret {% if loop.first %}rotate-180{% endif %}">▾</span>
             </button>
 
             <div id="tab-ld-{{ s.id }}" class="accordion-panel {% if loop.first %}{% else %}hidden{% endif %}">
@@ -175,27 +173,8 @@
                     <div id="acc-card-{{ acc.id }}" class="tcd-card p-5 flex flex-col gap-4">
                       <div class="flex items-start justify-between gap-3">
                         <div class="min-w-0">
-                          {# ▼表示名ロジック（プレースホルダ時はドメイン語幹＋外部SEO） #}
-                          {% set _raw_nm = acc.blog_title or acc.blog_id %}
-                          {% set _lc = (_raw_nm|lower) if _raw_nm else '' %}
-                          {% set _is_ph = (not _raw_nm)
-                                          or (_lc[:5]=='site-') or (_lc[:5]=='site_')
-                                          or (_lc[:3]=='acc')  or (_lc[:7]=='account')
-                                          or (_lc[:5]=='blog-') or (_lc=='ai-blog')
-                                          or (_lc=='default') or (_lc=='untitled') %}
-                          {% if _is_ph %}
-                            {% set _raw = s.url|default('')|replace('http://','')|replace('https://','')|replace('www.','') %}
-                            {% set _host = _raw.split('/')[0] %}
-                            {% set _root = _host.split('.')[0] %}
-                            {% set _brand = (_root|replace('-', ' ')|replace('_',' ')|upper) %}
-                            {% if not _brand %}{% set _brand = s.name|upper %}{% endif %}
-                            {% set _title = _brand ~ ' 外部SEO' ~ loop.index %}
-                           {% else %}
-                            {% set _title = _raw_nm %}
-                          {% endif %}
-                          <div class="tcd-title-lg truncate max-w-[280px]">
-                            {{ _title }}
-                          </div>
+                          {# ▼アカウント表示名は非表示（要望） #}
+                          {# <div class="tcd-title-lg truncate max-w-[280px]">{{ acc.blog_title or acc.blog_id }}</div> #}
 
                           {% if acc.public_url %}
                             <a href="{{ acc.public_url }}" target="_blank"
@@ -210,7 +189,7 @@
                             data-acct-id="{{ acc.id }}"
                             data-site-id="{{ s.id }}"
                             onclick="deleteExternalAccount(this.dataset.acctId, this.dataset.siteId)"
-                            title="このアカウントと記事を削除">
+                            title="この無料ブログと記事を削除">
                             削除
                           </button>
                         </div>
@@ -232,12 +211,9 @@
                             data-account-id="{{ acc.id }}"
                             data-platform="livedoor"
                             onclick="handleCaptchaClick(this)">
-                            クリックで新規アカウント作成開始
+                            クリックで新規ブログ作成開始
                           </button>
-                          <p class="tcd-note">
-                            アカウント作成成功確率は<strong>80％</strong>です。作成失敗の場合は
-                            <strong>再作成ボタン</strong>を押してください。
-                          </p>
+                          {# 成功確率の注記は削除 #}
                         {% else %}
                           {% set _generated_once =
                                (acc.generation_locked) or
@@ -265,7 +241,7 @@
                 </div>
               {% else %}
                 <div class="px-5 py-4 text-sm text-gray-600">
-                  まだLivedoorアカウントはありません。
+                  まだLivedoorブログはありません。
                 </div>
               {% endif %}
 
@@ -274,7 +250,7 @@
                         class="tcd-add-btn inline-flex items-center px-4 py-2 rounded-lg text-sm"
                         data-site-id="{{ s.id }}"
                         onclick="newAccountStart(this)">
-                  ＋ アカウント追加
+                  ＋ ブログ追加
                 </button>
               </div>
             </div>
@@ -326,14 +302,14 @@
     return true;
   }
 
-  /* ========== 表示名用ユーティリティ ========== */
+  /* ========== 表示名用ユーティリティ（現状未使用だが残置） ========== */
   function brandFromUrl(url){
     if(!url) return '';
     try{
       let u = url.replace(/^https?:\/\//i,'').replace(/^www\./i,'');
       const host = u.split('/')[0] || '';
       const root = host.split('.')[0] || '';
-      const brand = root.replace(/[-_]+/g,' ').trim().toUpperCase();
+      const brand = root.replace(/[-_]+/g, ' ').trim().toUpperCase();
       return brand || '';
     }catch(_){ return ''; }
   }
@@ -424,7 +400,7 @@
     btn.setAttribute('aria-expanded', 'true');
   });
 
-  /* ========== ＋アカウント追加（API連携） ========== */
+  /* ========== ＋ブログ追加（API連携） ========== */
   async function newAccountStart(button) {
     const siteId = button.getAttribute('data-site-id');
     if (!siteId) return;
@@ -458,7 +434,7 @@
       renderNewAccountCard(data.site_id, data.account);
       try { incrementLdCount(siteId, +1); } catch(_) {}
     } catch (err) {
-      alert(err.message || "アカウント作成に失敗しました");
+      alert(err.message || "ブログ作成に失敗しました");
     } finally {
       button.disabled = false;
       button.innerText = oldText;
@@ -481,7 +457,7 @@
     if (account && document.getElementById(`acc-card-${account.id}`)) return;
 
     const emptyRow = panel.querySelector('.text-sm.text-gray-600, .text-sm.text-gray-500');
-    if (emptyRow && emptyRow.textContent.includes('まだLivedoorアカウントはありません')) {
+    if (emptyRow && emptyRow.textContent.includes('まだLivedoor')) {
       panel.innerHTML = '';
     }
 
@@ -497,28 +473,12 @@
     card.id = `acc-card-${acc.id}`;
     card.className = 'tcd-card p-5 flex flex-col gap-4';
 
-    // 表示名
-    let displayName = acc.blog_title || acc.blog_id || acc.livedoor_blog_id;
-    if (isPlaceholderName(displayName)) {
-      // 選択保持
-      sessionStorage.setItem(SELECT_KEY, siteId);
-      let siteUrl = '';
-      const sitePanel = panel.closest('.site-panel');
-      if (sitePanel) {
-        const urlEl = sitePanel.querySelector('.tcd-card .tcd-link-lg[href]');
-        if (urlEl) siteUrl = (urlEl.textContent || urlEl.href || '').trim();
-      }
-      const brand = brandFromUrl(siteUrl) || 'SITE';
-      const order = (grid.children.length || 0) + 1;
-      displayName = `${brand} 外部SEO${order}`;
-    }
-
     const url = acc.public_url || '';
 
     card.innerHTML = `
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
-          <div class="tcd-title-lg truncate max-w-[280px]">${escapeHtml(displayName)}</div>
+          <!-- 表示名は非表示 -->
           ${url ? `<a href="${escapeAttr(url)}" target="_blank" class="tcd-link-lg break-all">${escapeHtml(url)}</a>` : ``}
         </div>
         <div class="flex items-center gap-2">
@@ -541,12 +501,8 @@
           data-account-id="${acc.id}"
           data-platform="livedoor"
           onclick="handleCaptchaClick(this)">
-          新規アカウント作成開始
+          新規ブログ作成開始
         </button>
-        <p class="tcd-note">
-          アカウント作成成功確率は<strong>80％</strong>です。作成失敗の場合は
-          <strong>再作成ボタン</strong>を押してください。
-        </p>
       </div>
     `;
 
@@ -656,13 +612,13 @@
 
           switchToPostCTA(sid, aid);
           if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
-          alert("アカウント作成とAPIキー取得が完了しました。すぐに投稿を始められます。");
+          alert("ブログ作成とAPIキー取得が完了しました。すぐに投稿を始められます。");
           return;
         }
 
         if (data.status === "recreate_required") {
-          alert("アカウント作成に失敗しました。『↻ アカウントを再作成』からやり直してください。");
-          restoreCaptchaButton(siteId, accountId, "↻ アカウントを再作成");
+          alert("ブログ作成に失敗しました。『↻ ブログを再作成』からやり直してください。");
+          restoreCaptchaButton(siteId, accountId, "↻ ブログを再作成");
           return;
         }
 
@@ -699,7 +655,7 @@
     const btn = document.querySelector(`button[data-site-id="${siteId}"][data-account-id="${accountId}"]`);
     if (!btn) return;
     btn.disabled = false;
-    btn.innerText = label || "新規アカウント作成開始";
+    btn.innerText = label || "新規ブログ作成開始";
     btn.classList.remove("bg-gray-500");
     btn.classList.add(label && label.includes("❌") ? "bg-red-600" : "bg-green-600");
   }
@@ -762,7 +718,7 @@
   /* ========== 削除処理 ========== */
   async function deleteExternalAccount(acctId, siteId) {
     if (!acctId) return;
-    if (!confirm("この無料ブログアカウントを削除します。予約と（このアカウントだけが使っている）生成記事も削除します。よろしいですか？")) {
+    if (!confirm("この無料ブログを削除します。予約と（このブログだけが使っている）生成記事も削除します。よろしいですか？")) {
       return;
     }
     try {
@@ -778,7 +734,7 @@
           const grid = panel.querySelector('.grid');
           const hasCards = grid && grid.children.length > 0;
           if (!hasCards) {
-            panel.innerHTML = '<div class="px-5 py-4 text-sm text-gray-600">まだLivedoorアカウントはありません。</div>';
+            panel.innerHTML = '<div class="px-5 py-4 text-sm text-gray-600">まだLivedoorブログはありません。</div>';
           }
         }
       }
