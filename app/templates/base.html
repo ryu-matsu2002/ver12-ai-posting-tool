@@ -184,47 +184,50 @@
 
   <!-- JS: 吹き出しアニメーション -->
   {% block scripts %}
-  <script>
-    function toggleUserDropdown() {
-      const menu = document.getElementById('userDropdown');
-      if (menu) menu.classList.toggle('hidden');
+<script>
+  // ✅ グローバルに関数を登録
+  window.toggleUserDropdown = function () {
+    console.log("✅ toggleUserDropdown 実行");
+    const menu = document.getElementById('userDropdown');
+    if (menu) menu.classList.toggle('hidden');
+  };
+
+  document.addEventListener('click', function (e) {
+    const btn = document.getElementById('userDropdownBtn');
+    const menu = document.getElementById('userDropdown');
+    if (btn && menu && !btn.contains(e.target) && !menu.contains(e.target)) {
+      menu.classList.add('hidden');
     }
+  });
 
-    document.addEventListener('click', function (e) {
-      const btn = document.getElementById('userDropdownBtn');
-      const menu = document.getElementById('userDropdown');
-      if (btn && menu && !btn.contains(e.target) && !menu.contains(e.target)) {
-        menu.classList.add('hidden');
-      }
-    });
+  window.toggleTheme = function () {
+    document.documentElement.classList.toggle("dark");
+  };
 
-    function toggleTheme() {
-      document.documentElement.classList.toggle("dark");
-    }
+  const phrases = [
+    "こんにちは。記事、作ろうか？",
+    "画像、ぴったりのを探してくるから待っててね。",
+    "SEOもバッチリ対応中！", "できたよ。いいタイトルでしょ？",
+    "この記事、WordPressに投稿する？", "Stripeの支払いも確認済み。",
+    "未来のトップ10入り、いっしょに目指そう。"
+  ];
 
-    const phrases = [
-      "こんにちは。記事、作ろうか？",
-      "画像、ぴったりのを探してくるから待っててね。",
-      "SEOもバッチリ対応中！", "できたよ。いいタイトルでしょ？",
-      "この記事、WordPressに投稿する？", "Stripeの支払いも確認済み。",
-      "未来のトップ10入り、いっしょに目指そう。"
-    ];
+  window.robotTalk = function () {
+    const robot = document.getElementById('robotImage');
+    const bubble = document.getElementById('speechBubble');
+    if (!robot || !bubble) return;
 
-    function robotTalk() {
-      const robot = document.getElementById('robotImage');
-      const bubble = document.getElementById('speechBubble');
-      if (!robot || !bubble) return;
+    robot.classList.add('dance-animation');
+    setTimeout(() => robot.classList.remove('dance-animation'), 1000);
 
-      robot.classList.add('dance-animation');
-      setTimeout(() => robot.classList.remove('dance-animation'), 1000);
+    const random = phrases[Math.floor(Math.random() * phrases.length)];
+    bubble.textContent = random;
+    bubble.classList.remove('hidden');
+    setTimeout(() => bubble.classList.add('hidden'), 2500);
+  };
+</script>
+{% endblock %}
 
-      const random = phrases[Math.floor(Math.random() * phrases.length)];
-      bubble.textContent = random;
-      bubble.classList.remove('hidden');
-      setTimeout(() => bubble.classList.add('hidden'), 2500);
-    }
-  </script>
-  {% endblock %}
 
   <style>
     @keyframes walk-back-and-forth {
