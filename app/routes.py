@@ -2029,29 +2029,25 @@ from werkzeug.security import generate_password_hash
 import secrets, time
 
 # 既存フォームに追加
-from app.forms import UsernameResetRequestForm, PasswordResetSimpleForm
+from app.forms import UsernameEmailResetRequestForm, PasswordResetSimpleForm
 from app.models import User
 from app import db
 
-# ── 設定（任意）：環境変数で ADMIN_RESET_CODE を使う場合は config に置いてください
-# current_app.config["ADMIN_RESET_CODE"] が空 or 未設定なら不要
-
-# ---- Step1: ユーザー名入力のみ（メール送信なし）
+# ---- Step1: ユーザー名 + メールアドレスを入力（メール送信なし）
 @bp.route("/forgot-password", methods=["GET", "POST"])
 def forgot_password_username_only():
-    form = UsernameResetRequestForm()
+    form = UsernameEmailResetRequestForm()
     if form.validate_on_submit():
         username = form.username.data.strip()
-        admin_code_input = (form.admin_code.data or "").strip()
-        require_code = bool(current_app.config.get("ADMIN_RESET_CODE"))
+        email = form.email.data.strip().lower()
 
-        if require_code and admin_code_input != current_app.config["ADMIN_RESET_CODE"]:
-            flash("認証に失敗しました。管理者に確認してください。", "danger")
-            return redirect(url_for("main.forgot_password_username_only"))
+        # ユーザー名とメールの組み合わせが一致するユーザーを探す（メールは小文字比較）
+        user = User.query.filter(
+            db.func.lower(User.email) == email,
+            User.username == username
+        ).first()
 
-        user = User.query.filter_by(username=username).first()
-
-        # アカウント枚挙対策：結果は同じメッセージ
+        # アカウント枚挙を避けるためメッセージは固定
         flash("認証を確認しました。続けて新しいパスワードを設定してください。", "info")
 
         if user:
@@ -2059,9 +2055,11 @@ def forgot_password_username_only():
             session["pw_reset_grant"] = {"uid": user.id, "grant": grant, "ts": time.time()}
             return redirect(url_for("main.reset_password_username_only", grant=grant))
 
+        # 一致しなければ同ページへ戻す（メッセージは同じ）
         return redirect(url_for("main.forgot_password_username_only"))
 
     return render_template("forgot_username_only.html", form=form)
+
 
 # ---- Step2: 新パスワード設定
 @bp.route("/reset-password-simple", methods=["GET", "POST"])

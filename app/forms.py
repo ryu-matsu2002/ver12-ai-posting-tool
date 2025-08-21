@@ -18,10 +18,9 @@ class LoginForm(FlaskForm):
     password   = PasswordField("パスワード", validators=[DataRequired()])
     submit     = SubmitField("ログイン")
 
-class UsernameResetRequestForm(FlaskForm):
+class UsernameEmailResetRequestForm(FlaskForm):
     username = StringField("ユーザー名", validators=[DataRequired(), Length(min=1, max=50)])
-    # 任意：管理者コードを使うなら入力させる（未使用なら空のままでOK）
-    admin_code = PasswordField("管理者コード（必要な場合のみ）", validators=[Optional()])
+    email = StringField("メールアドレス", validators=[DataRequired(), Email(), Length(max=120)])
     submit = SubmitField("続ける")
 
 class PasswordResetSimpleForm(FlaskForm):
