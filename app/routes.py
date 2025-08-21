@@ -3277,19 +3277,31 @@ def delete_article(id):
 @bp.route("/<username>/articles/<int:id>/retry", methods=["POST"])
 @login_required
 def retry_article(username, id):
-    # 認可チェック：他ユーザーの記事は再生成できない
     art = Article.query.get_or_404(id)
     if art.user_id != current_user.id or username != current_user.username:
         abort(403)
 
-    # ステータスと進捗を初期化してキューに戻す
+    if not art.title_prompt or not art.body_prompt:
+        flash("この記事は再生成できません（プロンプト未保存）", "error")
+        return redirect(url_for("main.view_articles", username=username))
+
     art.status = "pending"
     art.progress = 0
     art.updated_at = datetime.utcnow()
     db.session.commit()
 
-    flash("記事を再生成キューに戻しました。しばらくお待ちください。", "success")
+    # バックグラウンドで再生成
+    from app.article_generator import _generate
+    app = current_app._get_current_object()
+    threading.Thread(
+        target=_generate,
+        args=(app, art.id, art.title_prompt, art.body_prompt),
+        daemon=True
+    ).start()
+
+    flash("記事の再生成を開始しました。しばらくお待ちください。", "success")
     return redirect(url_for("main.view_articles", username=username))
+
 
 
 @bp.post("/articles/bulk-delete")

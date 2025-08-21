@@ -195,3 +195,9 @@
   }
 </style>
 {% endblock %}
+{% block scripts %}
+  {{ super() }}
+  <script>
+    console.log("✅ Dashboard scripts loaded");
+  </script>
+{% endblock %}

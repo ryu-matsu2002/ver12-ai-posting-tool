@@ -422,7 +422,9 @@ def enqueue_generation(
                             status="pending",
                             progress=0,
                             scheduled_at=next(slots, None),
-                            source=source if source else (kobj.source if kobj else None)  # ★ 修正
+                            source=source if source else (kobj.source if kobj else None),  # ★ 修正
+                            title_prompt=title_prompt,
+                            body_prompt=body_prompt
                         )
                         db.session.add(art)
                         db.session.flush()
@@ -452,7 +454,7 @@ def enqueue_generation(
                     # pass
 
             # ▼ 並列生成処理（本文などを非同期で）
-            with ThreadPoolExecutor(max_workers=4) as executor:
+            with ThreadPoolExecutor(max_workers=10) as executor:
                 futures = [
                     executor.submit(_generate, app, aid, title_prompt, body_prompt, format, self_review, user_id=user_id)  # ✅ user_id を渡す)
                     for aid in ids

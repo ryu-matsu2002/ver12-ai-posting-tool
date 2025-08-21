@@ -143,6 +143,9 @@ class Article(db.Model):
 
     source = db.Column(db.String(50), default="manual")  # "manual", "gsc", "other"
 
+    title_prompt = db.Column(db.Text, nullable=True)   # 生成時に使ったタイトルプロンプト
+    body_prompt  = db.Column(db.Text, nullable=True)   # 生成時に使った本文プロンプト
+
     # タイムゾーン対応カラム (UTC保持、表示時にJSTに変換)
     created_at   = db.Column(
         DateTime(timezone=True),
