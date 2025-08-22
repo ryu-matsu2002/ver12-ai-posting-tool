@@ -13,6 +13,19 @@ from urllib.parse import urlparse
 logger = logging.getLogger(__name__)
 
 # ファイル先頭の import 群の近くに追加
+def _deterministic_index(salt: str, n: int) -> int:
+    """
+    salt（文字列）から 0..n-1 の安定インデックスを決める。
+    - ランタイム/プロセスを跨いでも同じ salt, n なら同じ値
+    - n <= 0 の場合は 0
+    """
+    if n <= 0:
+        return 0
+    # 32bit rolling hash（Python の hash は起動ごとに変わるため使わない）
+    acc = 0
+    for ch in str(salt):
+        acc = (acc * 131 + ord(ch)) & 0xFFFFFFFF
+    return acc % n
 
 def _has_cjk(s: str) -> bool:
     return bool(_re.search(r"[\u3040-\u30FF\u3400-\u9FFF]", s or ""))
@@ -146,99 +159,136 @@ def _guess_genre(site) -> tuple[str, bool]:
     # どれにも該当しなければ汎用
     return ("日々", _has_cjk(name) or _has_cjk(url))
 
+# ===============================
+# ★ 追加：類似度判定（“似すぎ”ブロック）
+# ===============================
+def _too_similar_to_site(title: str, site) -> bool:
+    """
+    タイトルがサイト名/ドメイン由来語と似すぎなら True。
+    - 正規化同士の完全一致
+    - 片方がもう片方を包含
+    - ドメイン語幹（tokens）が含まれる/含まれる
+    """
+    t = _norm(title)
+    site_name = (getattr(site, "name", "") or "")
+    site_url  = (getattr(site, "url", "")  or "")
+    n = _norm(site_name)
+
+    if not t:
+        return True
+
+    # 完全一致 / 包含
+    if t == n or (t and n and (t in n or n in t)):
+        return True
+
+    # ドメイン語幹との照合
+    toks = set(_domain_tokens(site_url))
+    toks |= {w for w in _name_tokens(site_name) if not _has_cjk(w)}  # 英字トークンも禁止寄り
+    toks = {_norm(w) for w in toks if w}
+
+    for w in toks:
+        if not w:
+            continue
+        if w in t or t in w:
+            return True
+
+    return False
+
+
+# ===============================
+# ★ 修正：日本語テンプレを“ブログ風”に寄せる
+# ===============================
 def _templates_jp(topic: str) -> list[str]:
-    base = topic.strip() or "日々"
+    base = (topic or "").strip() or "日々"
+    # “ブログ”を含む語尾を優先（上から順に試す）
     return [
-        f"{base}ラボ",
-        f"{base}手帖",
+        f"{base}ブログ",
+        f"{base}ブログ日記",
+        f"{base}のブログ",
+        f"{base}の記録ブログ",
+        f"{base}の暮らしブログ",
+        f"{base}のメモ帳",
         f"{base}の覚え書き",
-        f"{base}の小部屋",
-        f"{base}ジャーナル",
-        f"{base}ログ",
-        f"{base}のメモ箱",
-        f"{base}の豆知識",
-        f"{base}の道具箱",
+        f"{base}のジャーナル",
+        f"{base}手帖",
         f"{base}ノート",
-        f"{base}の作戦室",
-        f"{base}の教室",
-        f"{base}のしおり",
+        f"{base}の小部屋",
+        f"{base}ログ",
     ]
 
+# 英語テンプレは使わないが、残しておく（呼ばれない想定）
 def _templates_en(topic: str) -> list[str]:
     base = topic.strip() or "Notes"
-    return [
-        f"{base} Lab",
-        f"{base} Notes",
-        f"{base} Journal",
-        f"{base} Digest",
-        f"{base} Handbook",
-        f"{base} Playbook",
-        f"{base} Room",
-        f"{base} Hub",
-        f"{base} Notebook",
-        f"{base} Insights",
-    ]
+    return [f"{base} Blog"]  # ダミー（呼ばれない想定）
 
-def _deterministic_index(salt: str, n: int) -> int:
-    return abs(sum(ord(c) for c in salt)) % max(n, 1)
 
+# ===============================
+# ★ 追加：日本語ベース語の決定
+# ===============================
+def _japanese_base_word(site) -> str:
+    """
+    1) まずジャンル推定で日本語ラベルを取得（ピラティス/旅行/美容/ビジネス…）
+    2) 取れなければ「日々」
+    ※ “サイト名そのもの”は使わない（似すぎ回避）
+    """
+    topic, is_jp = _guess_genre(site)
+    if _has_cjk(topic):
+        return topic.strip()
+    return "日々"
+
+
+# ===============================
+# ★ 差し替え：必ず日本語 & 似すぎ禁止のブログ名にする
+# ===============================
 def _craft_blog_title(site) -> str:
     """
-    サイト名/URLから1語(seed)を抜き出して、それを軸に“別ブランド感”のブログ名を作る。
-    seed が取れない場合は従来のジャンル推定にフォールバック。
+    仕様：
+      - 生成結果は必ず“日本語”
+      - 元サイト名やドメインに“似すぎない”
+      - かならず“ブログっぽい”語尾（～ブログ 等）を含める
+      - 同一サイトでは決定論的に安定
     """
     site_name = (getattr(site, "name", "") or "").strip()
     site_url  = (getattr(site, "url", "")  or "").strip()
     salt = f"{getattr(site, 'id', '')}-{site_name}-{site_url}"
 
-    # 1) まず seed を試す
-    seed, seed_is_jp = _keyword_seed_from_site(site)
+    # 1) 日本語のベース語（ジャンルラベル優先）
+    base_word = _japanese_base_word(site)
 
-    if seed:
-        base_word = seed.strip()
-        cands = _templates_jp(base_word) if seed_is_jp else _templates_en(base_word)
-        # 禁止語（“完全一致のみ”を禁止。seed を含むのはOK）
-        banned_equal = {_norm(site_name)}
-        # ドメイン語そのものと完全一致も禁止（例: "roofpilates" だけ、など）
-        banned_equal.update(_norm(w) for w in _domain_tokens(site_url))
+    # 2) 候補群（日本語テンプレのみ）
+    cands = _templates_jp(base_word)
 
-        def acceptable(title: str) -> bool:
-            t = _norm(title)
-            # サイト名（正規化）と完全一致だけ禁止
-            return t not in banned_equal and bool(t)
+    # 3) “似すぎ”禁止セット（強め）
+    banned_equal = {_norm(site_name)}
+    banned_equal.update(_norm(w) for w in _domain_tokens(site_url))
 
-        idx = _deterministic_index(salt, len(cands))
-        for i in range(len(cands)):
-            title = cands[(idx + i) % len(cands)]
-            if acceptable(title):
-                return title[:48]
-
-        # ここに来ることは稀だが、一応フォールバック
-        return (cands[0] if cands else "研究ノート")[:48]
-
-    # 2) seed が取れないときは従来のジャンル推定で
-    topic, is_jp = _guess_genre(site)
-    cands = _templates_jp(topic) if is_jp else _templates_en(topic)
-
-    # 似すぎ防止（seed が無いので従来どおり強めにブロック）
-    banned = {_norm(site_name)}
-    banned.update(_norm(w) for w in _domain_tokens(site_url))
-
-    def acceptable2(title: str) -> bool:
-        t = _norm(title)
-        if not t:
+    def acceptable(title: str) -> bool:
+        # 空/None
+        if not title or not title.strip():
             return False
-        # サイト名/ドメイン語を“含む or 含まれる”は避ける
-        return all(b and b not in t and t not in b for b in banned if b)
+        # 完全一致の禁止
+        if _norm(title) in banned_equal:
+            return False
+        # 類似（包含/ドメイン語幹）の禁止
+        if _too_similar_to_site(title, site):
+            return False
+        # 日本語強制
+        if not _has_cjk(title):
+            return False
+        # “ブログっぽさ”の担保（語に「ブログ」が含まれることを最低条件に）
+        if "ブログ" not in title:
+            return False
+        return True
 
+    # 4) salt で開始位置を決め、順送りで最初に通ったもの
     idx = _deterministic_index(salt, len(cands))
     for i in range(len(cands)):
         title = cands[(idx + i) % len(cands)]
-        if acceptable2(title):
+        if acceptable(title):
             return title[:48]
 
-    fallback = (["研究ノート", "小さな手帖", "覚え書きログ", "メモとアイデア", "作戦会議室"]
-                if is_jp else ["Side Notes", "Little Journal", "Idea Log", "Workshop Notes"])
+    # 5) 最終フォールバック（必ず日本語＆ブログ語尾）
+    fallback = [f"{base_word}ブログ", f"{base_word}のブログ", "日々ブログ", "小さなブログ記録"]
     return fallback[_deterministic_index(salt, len(fallback))][:48]
 
 
