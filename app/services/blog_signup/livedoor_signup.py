@@ -439,47 +439,124 @@ async def launch_livedoor_and_capture_captcha(
 
 async def submit_captcha_and_complete(page, captcha_text: str, email: str, nickname: str,
                                       password: str, token: str, site,
-                                      desired_blog_id: str | None = None) -> dict:  # ★ 追加
-
+                                      desired_blog_id: str | None = None) -> dict:
     """
     CAPTCHAを入力・送信し、メール認証・アカウント作成を完了。
+    - #captcha を「見える・編集可」まで待機
+    - 送信ボタンは複数セレクタでフォールバック
+    - 押下後は成功/失敗DOM or networkidle で確定判定
     """
     from datetime import datetime
-    from app.models import ExternalBlogAccount
-    from app.services.blog_signup.crypto_utils import encrypt
-    from app import db
-    from app.enums import BlogType
+    from pathlib import Path
+    import asyncio
+    import re
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     try:
-        # ✅ CAPTCHA送信
-        logger.info(f"[LD-Signup] CAPTCHA入力中: {captcha_text}")
-        await page.fill("#captcha", captcha_text)
-        await page.click('input[id="commit-button"]')
-        await page.wait_for_timeout(2000)
+        # 1) CAPTCHAの入力欄を確実に待つ
+        logger.info("[LD-Signup] CAPTCHA入力待機開始")
+        await page.wait_for_selector("#captcha", state="visible", timeout=15000)
+        c_input = page.locator("#captcha")
+        await c_input.wait_for(state="visible", timeout=5000)
+        await c_input.focus()
+        await page.wait_for_timeout(150)  # 微小ディレイ
+
+        # 2) 入力（全選択→上書き）
+        norm_text = (captcha_text or "").replace(" ", "").replace("　", "")
+        logger.info(f"[LD-Signup] CAPTCHA手入力（整形後）: {norm_text}")
+        await c_input.fill("")                 # 空に
+        # OS差異回避のため二段構え
+        try:
+            await page.keyboard.press("Control+A")
+        except Exception:
+            try:
+                await page.keyboard.press("Meta+A")
+            except Exception:
+                pass
+        await c_input.type(norm_text, delay=50)
+
+        # 3) 送信ボタン探索（複数候補）
+        submit_candidates = [
+            '#commit-button',
+            'input#commit-button',
+            'input[name="commit"]',
+            'input[type="submit"][value="登録"]',
+            'input[type="submit"]',
+        ]
+        commit = None
+        for sel in submit_candidates:
+            loc = page.locator(sel)
+            if await loc.count():
+                try:
+                    await loc.first.wait_for(state="visible", timeout=3000)
+                    commit = loc.first
+                    break
+                except Exception:
+                    pass
+
+        if commit:
+            logger.info("[LD-Signup] 完了ボタンをクリック")
+            await commit.click()
+        else:
+            # フォーム submit フォールバック
+            logger.warning("[LD-Signup] 送信ボタン不検出 → form.submit() フォールバック")
+            await page.evaluate("""
+                () => {
+                  const f = document.querySelector('form');
+                  if (f) f.submit();
+                }
+            """)
+
+        # 4) 押下後の状態確定（成功/失敗/不明）
+        try:
+            await page.wait_for_load_state("networkidle", timeout=15000)
+        except Exception:
+            pass
 
         html = await page.content()
-        current_url = page.url
+        url_now = page.url
 
-        # CAPTCHA突破判定
-        if "仮登録メール" not in html and not current_url.endswith("/register/done"):
-            error_html = f"/tmp/ld_captcha_failed_{timestamp}.html"
-            error_png = f"/tmp/ld_captcha_failed_{timestamp}.png"
-            Path(error_html).write_text(html, encoding="utf-8")
-            await page.screenshot(path=error_png)
-            logger.warning(f"[LD-Signup] CAPTCHA失敗 ➜ HTML: {error_html}, PNG: {error_png}")
-            return {
-                "captcha_success": False,
-                "html_path": error_html,
-                "png_path": error_png
-            }
+        success_re = re.compile(r"(仮登録メール|確認メール)", re.S)
+        error_candidates = [
+            ".error", ".errors", ".alert", ".attention", "#error", "#errors",
+            "div:has-text('CAPTCHA')",
+        ]
 
-        # ✅ メール認証リンク取得
-        logger.info("[LD-Signup] メール確認リンク取得中...")
+        # まずは即時判定
+        if (success_re.search(html) is None) and (not url_now.endswith("/register/done")):
+            # 失敗DOMの有無
+            for sel in error_candidates:
+                try:
+                    if await page.locator(sel).is_visible():
+                        fail_html = f"/tmp/ld_captcha_failed_{timestamp}.html"
+                        fail_png  = f"/tmp/ld_captcha_failed_{timestamp}.png"
+                        Path(fail_html).write_text(html, encoding="utf-8")
+                        await page.screenshot(path=fail_png, full_page=True)
+                        logger.warning(f"[LD-Signup] CAPTCHA失敗DOM検出 ➜ HTML: {fail_html}, PNG: {fail_png}")
+                        return {"captcha_success": False, "error": "CAPTCHA突破失敗",
+                                "html_path": fail_html, "png_path": fail_png}
+                except Exception:
+                    pass
+
+            # もう少しだけ待って最終評価
+            await page.wait_for_timeout(1500)
+            html = await page.content()
+            url_now = page.url
+            if (success_re.search(html) is None) and (not url_now.endswith("/register/done")):
+                unk_html = f"/tmp/ld_captcha_post_unknown_{timestamp}.html"
+                unk_png  = f"/tmp/ld_captcha_post_unknown_{timestamp}.png"
+                Path(unk_html).write_text(html, encoding="utf-8")
+                await page.screenshot(path=unk_png, full_page=True)
+                logger.error(f"[LD-Signup] CAPTCHA送信後の状態不明 ➜ HTML: {unk_html}, PNG: {unk_png}")
+                return {"captcha_success": False, "error": "CAPTCHA送信後の状態不明",
+                        "html_path": unk_html, "png_path": unk_png}
+
+        logger.info("[LD-Signup] CAPTCHA突破 → メール確認へ")
+
+        # 5) メール確認リンク取得（少し余裕を持って待つ）
         url = None
-        for i in range(3):
-            logger.info(f"[LD-Signup] メール取得リトライ {i+1}/3")
+        for i in range(4):
             u = await poll_latest_link_gw(token)
             if u:
                 url = u
@@ -489,38 +566,51 @@ async def submit_captcha_and_complete(page, captcha_text: str, email: str, nickn
         if not url:
             html = await page.content()
             err_html = f"/tmp/ld_email_link_fail_{timestamp}.html"
-            err_png = f"/tmp/ld_email_link_fail_{timestamp}.png"
+            err_png  = f"/tmp/ld_email_link_fail_{timestamp}.png"
             Path(err_html).write_text(html, encoding="utf-8")
-            await page.screenshot(path=err_png)
+            await page.screenshot(path=err_png, full_page=True)
             logger.error(f"[LD-Signup] メールリンク取得失敗 ➜ HTML: {err_html}, PNG: {err_png}")
             return {"captcha_success": False, "error": "メール認証に失敗"}
 
-        # ✅ 認証リンクへ遷移
         await page.goto(url)
-        await page.wait_for_timeout(2000)
+        try:
+            await page.wait_for_load_state("networkidle", timeout=15000)
+        except Exception:
+            pass
+        logger.info(f"[LD-Signup] ✅ 認証リンクにアクセス成功: {url}")
 
-        # ✅ AtomPub情報取得（直接recover_atompub_keyで処理）
-        logger.info("[LD-Signup] AtomPub作成ルートに移行")
-        recover_result = await recover_atompub_key(page, nickname, email, password, site, desired_blog_id=desired_blog_id)
-
+        # 6) AtomPub recover（既存処理）
+        recover_result = await recover_atompub_key(
+            page, nickname, email, password, site, desired_blog_id=desired_blog_id
+        )
         if not recover_result["success"]:
             return {
                 "captcha_success": True,
                 "error": recover_result.get("error", "AtomPub再取得に失敗"),
                 "html_path": recover_result.get("html_path"),
-                "png_path": recover_result.get("png_path")
+                "png_path": recover_result.get("png_path"),
             }
-        
-        
+
         return {
             "captcha_success": True,
             "blog_id": recover_result["blog_id"],
-            "api_key": recover_result["api_key"]
+            "api_key": recover_result["api_key"],
         }
 
     except Exception as e:
-        logger.exception("[LD-Signup] CAPTCHA送信 or 登録失敗")
-        return {"captcha_success": False, "error": str(e)}
+        logger.exception("[LD-Signup] CAPTCHA送信 or 登録処理で例外")
+        # 例外時もダンプ
+        try:
+            html = await page.content()
+            ex_html = f"/tmp/ld_captcha_exception_{timestamp}.html"
+            ex_png  = f"/tmp/ld_captcha_exception_{timestamp}.png"
+            Path(ex_html).write_text(html, encoding="utf-8")
+            await page.screenshot(path=ex_png, full_page=True)
+            return {"captcha_success": False, "error": str(e),
+                    "html_path": ex_html, "png_path": ex_png}
+        except Exception:
+            return {"captcha_success": False, "error": str(e)}
+
 
 
 import re
