@@ -8,7 +8,7 @@ from typing import Dict, Optional
 from pathlib import Path
 from datetime import datetime
 import logging
-
+import os
 from playwright.async_api import async_playwright
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,7 @@ class PlaywrightController:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
         self._ready_evt = threading.Event()
+        self._boot_evt = threading.Event()   # ★ ブート完了イベントを追加
 
         self._p = None           # async_playwright() の start() 結果
         self._browser = None     # 単一ブラウザ（セッションごとに context）
@@ -63,6 +64,7 @@ class PlaywrightController:
         self._ready_evt.wait()
 
     async def _bootstrap(self):
+        logger.info("[PW-Controller] bootstrap start")
         self._p = await async_playwright().start()
         # headless=True でOK。必要なら args を追加
         self._browser = await self._p.chromium.launch(headless=True, args=[
@@ -72,6 +74,8 @@ class PlaywrightController:
             "--disable-dev-shm-usage",
         ])
         logger.info("[PW-Controller] browser launched")
+        # ブート完了を通知（スレッドセーフ）
+        self._boot_evt.set()
 
     async def _teardown(self):
         try:
@@ -104,12 +108,19 @@ class PlaywrightController:
     # ↓ prepare_captcha 相当：CAPTCHA画像を取得してファイル名を返す
     def start_session_sync(self, session_id: str, email: str, nickname: str, password: str,
                            desired_blog_id: Optional[str], timeout: float = 90.0) -> dict:
+        # ブート完了を待つ（タイムアウトは同じ値を使う）
+        if not self._boot_evt.wait(timeout=timeout):
+            raise TimeoutError("Playwright controller bootstrap timed out")
+        logger.info(f"[PW-Controller] start_session_sync called (session_id={session_id})")
         fut = self._submit(self._start_session(session_id, email, nickname, password, desired_blog_id))
         return fut.result(timeout=timeout)
 
     # ↓ submit_captcha 相当：同じ page で続行、APIキーまで取得して返す
     def submit_captcha_sync(self, session_id: str, captcha_text: str, token: str, site,
                             timeout: float = 240.0) -> dict:
+        if not self._boot_evt.is_set():
+            raise RuntimeError("Playwright controller is not bootstrapped")
+        logger.info(f"[PW-Controller] submit_captcha_sync called (session_id={session_id})")
         fut = self._submit(self._submit_captcha(session_id, captcha_text, token, site))
         return fut.result(timeout=timeout)
 
@@ -124,7 +135,8 @@ class PlaywrightController:
     # ---------- 内部コルーチン本体 ----------
     async def _start_session(self, session_id: str, email: str, nickname: str, password: str,
                              desired_blog_id: Optional[str]) -> dict:
-        CAPTCHA_SAVE_DIR = Path("app/static/captchas")
+        app_root = Path(os.environ.get("APP_ROOT", ".")).resolve()
+        CAPTCHA_SAVE_DIR = app_root / "app" / "static" / "captchas"
         CAPTCHA_SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
         s = _LDSession(session_id)
@@ -145,6 +157,7 @@ class PlaywrightController:
 
         s.page = await s.context.new_page()
         try:
+            logger.info(f"[PW-Controller] _start_session: goto register/input (session_id={session_id})")
             await s.page.goto("https://member.livedoor.com/register/input", wait_until="load")
             await s.page.fill('input[name="livedoor_id"]', nickname)
             await s.page.fill('input[name="password"]', password)
@@ -164,7 +177,8 @@ class PlaywrightController:
             self._sessions[session_id] = s
             s.created_filename = filename
             return {"filename": filename}
-        except Exception:
+        except Exception as e:
+            logger.exception(f"[PW-Controller] _start_session failed: {e}")
             # 失敗時は context を閉じる
             try:
                 await s.context.close()
@@ -221,7 +235,10 @@ class PlaywrightController:
             return {"captcha_success": False, "error": "メール認証に失敗"}
 
         await s.page.goto(url)
-        await s.page.wait_for_load_state("networkidle")
+        try:
+            await s.page.wait_for_load_state("networkidle", timeout=15000)
+        except Exception:
+            pass
 
         # AtomPub回収（必要に応じて desired_blog_id を渡す）
         rec = await recover_atompub_key(
