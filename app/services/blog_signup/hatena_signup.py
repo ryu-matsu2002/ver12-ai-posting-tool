@@ -30,8 +30,6 @@ async def signup_hatena_account(site, job_id=None):
 
 
 def register_blog_account(site, email_seed="htn") -> ExternalBlogAccount:
-    import nest_asyncio
-    nest_asyncio.apply()
 
     account = ExternalBlogAccount.query.filter_by(
         site_id=site.id, blog_type=BlogType.HATENA

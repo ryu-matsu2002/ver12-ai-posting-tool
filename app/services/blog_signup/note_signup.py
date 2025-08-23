@@ -30,8 +30,6 @@ async def signup_note_account(site, job_id=None):
 
 
 def register_blog_account(site, email_seed="note") -> ExternalBlogAccount:
-    import nest_asyncio
-    nest_asyncio.apply()
 
     # すでにアカウントが存在する場合はスキップ
     account = ExternalBlogAccount.query.filter_by(

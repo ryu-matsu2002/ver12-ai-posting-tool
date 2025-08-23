@@ -113,10 +113,11 @@ async def poll_latest_link_tm_async(
         "Authorization": f"Bearer {jwt}",
     }
 
-    deadline = asyncio.get_event_loop().time() + timeout
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
 
     async with httpx.AsyncClient(headers=headers, timeout=20) as client:
-        while asyncio.get_event_loop().time() < deadline:
+        while loop.time() < deadline:
             try:
                 r = await client.get(f"{BASE}/messages")
                 r.raise_for_status()

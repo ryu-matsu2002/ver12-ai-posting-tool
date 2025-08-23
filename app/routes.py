@@ -55,6 +55,24 @@ bp = Blueprint("main", __name__)
 admin_bp = Blueprint("admin", __name__)
 
 
+# routes.py 冒頭の import 群の下あたりに追加
+def _run_coro_sync(coro):
+    import asyncio
+    try:
+        return asyncio.run(coro)
+    except RuntimeError as e:
+        # 既にイベントループが走っている特殊環境向けフォールバック
+        if "asyncio.run() cannot be called from a running event loop" in str(e):
+            loop = asyncio.new_event_loop()
+            try:
+                asyncio.set_event_loop(loop)
+                return loop.run_until_complete(coro)
+            finally:
+                asyncio.set_event_loop(None)
+                loop.close()
+        raise
+
+
 @bp.route('/robots.txt')
 def robots_txt():
     return send_from_directory('static', 'robots.txt')
@@ -4300,14 +4318,30 @@ def prepare_captcha():
         desired_blog_id = None
 
     session_id = str(uuid4())
+    
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import nest_asyncio; nest_asyncio.apply()
-        result = loop.run_until_complete(
-            # ★ desired_blog_id を渡す
-            launch_livedoor_and_capture_captcha(email, nickname, password, session_id, desired_blog_id=desired_blog_id)
+        # ---- ここを差し替え ----
+        coro = launch_livedoor_and_capture_captcha(
+            email, nickname, password, session_id, desired_blog_id=desired_blog_id
         )
+
+        try:
+            # 通常はこちら（同期関数 → コルーチン実行）
+            result = asyncio.run(coro)
+        except RuntimeError as e:
+            # まれに「既にループが走っている」環境向けフォールバック
+            if "asyncio.run() cannot be called from a running event loop" in str(e):
+                loop = asyncio.new_event_loop()
+                try:
+                    asyncio.set_event_loop(loop)
+                    result = loop.run_until_complete(coro)
+                finally:
+                    asyncio.set_event_loop(None)
+                    loop.close()
+            else:
+                raise
+        # ---- ここまで ----
+
     except Exception:
         logger.exception("[prepare_captcha] CAPTCHA生成で例外が発生")
         return jsonify({"captcha_url": None, "error": "CAPTCHAの準備に失敗しました",
@@ -4394,13 +4428,11 @@ def submit_captcha():
 
     # CAPTCHAセッションから Playwrightページ取得
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import nest_asyncio; nest_asyncio.apply()
-        page = loop.run_until_complete(get_session(session_id))
-    except RuntimeError:
-        loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop)
-        page = loop.run_until_complete(get_session(session_id))
+        page = _run_coro_sync(get_session(session_id))
+    except Exception:
+        logger.exception("[submit_captcha] Playwrightセッション取得に失敗しました")
+        return jsonify({"status": "error", "message": "セッションが切れています"}), 400
+
 
     if not page:
         return jsonify({"status": "error", "message": "セッションが切れています"}), 400
@@ -4410,7 +4442,7 @@ def submit_captcha():
         desired_blog_id = session.get("captcha_desired_blog_id")
 
         # CAPTCHA送信 → 認証 → ブログ作成 → APIキー取得（内部で recover）
-        result = loop.run_until_complete(
+        result = _run_coro_sync(
             submit_captcha_and_complete(
                 page, captcha_text,
                 session.get("captcha_email"),
@@ -4533,12 +4565,15 @@ def submit_captcha():
     finally:
         # セッション破棄（captcha_status は残す → ポーリングのため）
         try:
-            if loop.is_running():
-                loop.run_until_complete(delete_session(session_id))
-            else:
-                loop.run_until_complete(delete_session(session_id))
+            _run_coro_sync(delete_session(session_id))
         except Exception:
             pass
+
+        # captcha_* を掃除。ただし captcha_status は残す
+        for key in list(session.keys()):
+            if key.startswith("captcha_") and key != "captcha_status":
+                session.pop(key)
+
 
         # captcha_* を掃除。ただし captcha_status は残す
         for key in list(session.keys()):

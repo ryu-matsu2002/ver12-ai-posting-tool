@@ -92,8 +92,6 @@ def generate_safe_password(n=12) -> str:
 
 
 def register_blog_account(site, email_seed: str = "ld") -> ExternalBlogAccount:
-    import nest_asyncio
-    nest_asyncio.apply()
 
     # 既に登録済みなら、その内容を確認して不足があれば後で更新
     account = ExternalBlogAccount.query.filter_by(
