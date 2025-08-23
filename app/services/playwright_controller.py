@@ -9,7 +9,6 @@ from pathlib import Path
 from datetime import datetime
 import logging
 
-from flask import current_app
 from playwright.async_api import async_playwright
 
 logger = logging.getLogger(__name__)
@@ -125,14 +124,10 @@ class PlaywrightController:
     # ---------- 内部コルーチン本体 ----------
     async def _start_session(self, session_id: str, email: str, nickname: str, password: str,
                              desired_blog_id: Optional[str]) -> dict:
-        from flask import current_app
-        CAPTCHA_SAVE_DIR = Path(current_app.root_path) / "static" / "captchas"
+        CAPTCHA_SAVE_DIR = Path("app/static/captchas")
         CAPTCHA_SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
         s = _LDSession(session_id)
-        s.email = email
-        s.nickname = nickname
-        s.password = password
         s.desired_blog_id = desired_blog_id
 
         s.context = await self._browser.new_context(

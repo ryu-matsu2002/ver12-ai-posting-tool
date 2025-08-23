@@ -58,43 +58,6 @@ admin_bp = Blueprint("admin", __name__)
 # routes.py (先頭付近に追加/置換)
 # routes.py
 
-# 置き換え：routes.py 冒頭のヘルパ
-def _run_coro_sync(coro_or_fn, *args, timeout: float | None = None, **kwargs):
-    """
-    同期文脈から安全にコルーチンを実行するヘルパ。
-    - coro_or_fn は「コルーチン関数」または「コルーチンオブジェクト」のどちらでも可
-    - timeout(秒) を指定すると asyncio.wait_for でタイムアウトをかける
-    - 既にイベントループが走っている環境でも新規ループに隔離して実行
-    """
-    import asyncio
-    from inspect import iscoroutine, iscoroutinefunction
-
-    async def _runner():
-        if iscoroutinefunction(coro_or_fn):
-            coro = coro_or_fn(*args, **kwargs)
-        elif iscoroutine(coro_or_fn):
-            # 既にコルーチンオブジェクトならそのまま使う（args/kwargsは無視）
-            coro = coro_or_fn
-        else:
-            raise TypeError("coro_or_fn must be a coroutine function or coroutine object")
-
-        if timeout is not None:
-            return await asyncio.wait_for(coro, timeout=timeout)
-        return await coro
-
-    try:
-        return asyncio.run(_runner())
-    except RuntimeError as e:
-        # 他所でループが走っている場合のフォールバック
-        if "asyncio.run() cannot be called from a running event loop" in str(e):
-            loop = asyncio.new_event_loop()
-            try:
-                asyncio.set_event_loop(loop)
-                return loop.run_until_complete(_runner())
-            finally:
-                asyncio.set_event_loop(None)
-                loop.close()
-        raise
 
 
 @bp.route('/robots.txt')
@@ -4724,10 +4687,11 @@ def confirm_email_manual(task_id):
         return redirect(url_for("main.index"))
 
     # 認証リンクをポーリングで直接取得（本文ではなくURLを返す関数）
+    import asyncio
     try:
-        verification_url = _run_coro_sync(
-            poll_latest_link_tm_async(token, max_attempts=30, interval=5),
-            timeout=180.0,
+        # ここは Playwright と無関係の httpx/async 処理なので個別ループでOK
+        verification_url = asyncio.run(
+            poll_latest_link_tm_async(token, max_attempts=30, interval=5)
         )
     except Exception:
         current_app.logger.exception("[confirm_email_manual] 認証メールの取得に失敗")
