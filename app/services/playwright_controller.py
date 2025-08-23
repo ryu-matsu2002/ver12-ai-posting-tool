@@ -61,3 +61,25 @@ async def close_session(session_id: str) -> None:
         pass
 
     logger.debug("[PW-Controller] closed session %s", session_id)
+# --- backward compatibility wrappers for routes.py ---
+
+def get_session(session_id: str):
+    """routes.py 互換: load_session() の別名"""
+    try:
+        return load_session(session_id)  # 既存関数
+    except NameError:
+        # 念のため: 古い環境で load_session 未定義なら None 返し
+        return None
+
+def delete_session(session_id: str):
+    """routes.py 互換: close_session() を同期的に呼ぶラッパ"""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # もし既にイベントループが動いている場合は非同期タスクで破棄
+            return asyncio.create_task(close_session(session_id))
+        else:
+            return loop.run_until_complete(close_session(session_id))
+    except RuntimeError:
+        # ループが無ければ新規に回して実行
+        return asyncio.run(close_session(session_id))
