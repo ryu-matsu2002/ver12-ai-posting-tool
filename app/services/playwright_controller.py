@@ -1,85 +1,52 @@
 # app/services/playwright_controller.py
 import asyncio
 import logging
-from typing import Dict, Optional
+import os
+from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
-logger.info("[PW-Controller] bootstrap start")
 
-# セッションをメモリに保持（単一ワーカー前提）
-_SESSIONS: Dict[str, dict] = {}
-_LOCK = asyncio.Lock()
+# 単一ワーカー前提のインメモリ保管
+captcha_sessions: Dict[str, Any] = {}
+_lock = asyncio.Lock()
 
 async def store_session(session_id: str, page) -> None:
-    """
-    Playwrightのpage(と関連context/browser)をsession_idで保持。
-    """
-    context = getattr(page, "context", None)
-    browser = getattr(context, "browser", None) if context else None
-    async with _LOCK:
-        _SESSIONS[session_id] = {"page": page, "context": context, "browser": browser}
-    logger.debug("[PW-Controller] stored session %s", session_id)
+    async with _lock:
+        captcha_sessions[session_id] = page
+    logger.debug("[PW-Controller] store pid=%s id=%s", os.getpid(), session_id)
 
-def load_session(session_id: str):
-    """
-    保存したpageを取得。存在しなければNone。
-    """
-    data = _SESSIONS.get(session_id)
-    return data["page"] if data else None
+async def get_session(session_id: str):
+    # awaitable として呼べることが重要（run_until_complete対応）
+    page = captcha_sessions.get(session_id)
+    logger.debug("[PW-Controller] get   pid=%s id=%s hit=%s",
+                 os.getpid(), session_id, bool(page))
+    return page
 
-def has_session(session_id: str) -> bool:
-    return session_id in _SESSIONS
+async def delete_session(session_id: str) -> None:
+    async with _lock:
+        page = captcha_sessions.pop(session_id, None)
 
-async def close_session(session_id: str) -> None:
-    """
-    page/context/browser を可能な範囲でクローズして登録を削除。
-    """
-    async with _LOCK:
-        data = _SESSIONS.pop(session_id, None)
-
-    if not data:
+    if not page:
         return
 
-    page = data.get("page")
-    context = data.get("context")
-    browser = data.get("browser")
-
+    # できる限り丁寧にクローズ
     try:
-        if page:
+        ctx = getattr(page, "context", None)
+        brw = getattr(ctx, "browser", None) if ctx else None
+
+        try:
             await page.close()
+        except Exception:
+            pass
+        try:
+            if ctx:
+                await ctx.close()
+        except Exception:
+            pass
+        try:
+            if brw:
+                await brw.close()
+        except Exception:
+            pass
     except Exception:
-        pass
-    try:
-        if context:
-            await context.close()
-    except Exception:
-        pass
-    try:
-        if browser:
-            await browser.close()
-    except Exception:
-        pass
-
-    logger.debug("[PW-Controller] closed session %s", session_id)
-# --- backward compatibility wrappers for routes.py ---
-
-def get_session(session_id: str):
-    """routes.py 互換: load_session() の別名"""
-    try:
-        return load_session(session_id)  # 既存関数
-    except NameError:
-        # 念のため: 古い環境で load_session 未定義なら None 返し
-        return None
-
-def delete_session(session_id: str):
-    """routes.py 互換: close_session() を同期的に呼ぶラッパ"""
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # もし既にイベントループが動いている場合は非同期タスクで破棄
-            return asyncio.create_task(close_session(session_id))
-        else:
-            return loop.run_until_complete(close_session(session_id))
-    except RuntimeError:
-        # ループが無ければ新規に回して実行
-        return asyncio.run(close_session(session_id))
+        logger.exception("[PW-Controller] delete_session close failed id=%s", session_id)

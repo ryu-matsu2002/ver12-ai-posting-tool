@@ -4374,8 +4374,9 @@ def prepare_captcha():
 def submit_captcha():
     from app.services.blog_signup.livedoor_signup import submit_captcha_and_complete
     from app.services.playwright_controller import get_session, delete_session
-    from app.services.blog_signup.crypto_utils import encrypt  # APIキーを暗号化して保存
-    from app.models import Site, ExternalBlogAccount, BlogType
+    from app.services.blog_signup.crypto_utils import encrypt
+    from app.models import Site, ExternalBlogAccount
+    from app.enums import BlogType  # ★ ここを修正
     from app.utils.captcha_dataset_utils import save_captcha_label_pair
     from app import db
     from flask import jsonify, session, request
@@ -4384,16 +4385,30 @@ def submit_captcha():
 
     logger = logging.getLogger(__name__)
 
+    # --- ヘルパ: 安全にイベントループを用意 ---
+    def ensure_loop():
+        try:
+            # すでに実行中なら nest_asyncio があれば適用してネスト許容
+            loop = asyncio.get_running_loop()
+            try:
+                import nest_asyncio
+                nest_asyncio.apply()
+            except Exception:
+                pass  # 無くてもOK（通常WSGIでは走っていない）
+            return loop
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            return loop
+
     captcha_text = request.form.get("captcha_text")
     if not captcha_text:
         return jsonify({"status": "error", "message": "CAPTCHA文字列が入力されていません"}), 400
 
     image_filename = session.get("captcha_image_filename")
     if captcha_text and image_filename:
-        # データセット保存（学習用）
         save_captcha_label_pair(image_filename, captcha_text)
 
-    # account_id を受け取り、整合性確認
     account_id = request.form.get("account_id", type=int) or session.get("captcha_account_id")
     site_id = session.get("captcha_site_id")
     session_id = session.get("captcha_session_id")
@@ -4408,24 +4423,17 @@ def submit_captcha():
     if (not current_user.is_admin) and (site.user_id != current_user.id):
         return jsonify({"status": "error", "message": "権限がありません"}), 403
 
-    # CAPTCHAセッションから Playwrightページ取得
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import nest_asyncio; nest_asyncio.apply()
-        page = loop.run_until_complete(get_session(session_id))
-    except RuntimeError:
-        loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop)
-        page = loop.run_until_complete(get_session(session_id))
+    loop = ensure_loop()
 
+    # Playwright ページ取得
+    page = loop.run_until_complete(get_session(session_id))
     if not page:
         return jsonify({"status": "error", "message": "セッションが切れています"}), 400
 
     try:
-        # 候補 blog_id をセッションから取り出して渡す（無ければ recover 側で site.name から決定）
         desired_blog_id = session.get("captcha_desired_blog_id")
 
-        # CAPTCHA送信 → 認証 → ブログ作成 → APIキー取得（内部で recover）
+        # CAPTCHA送信 → 認証 → ブログ作成 → APIキー取得
         result = loop.run_until_complete(
             submit_captcha_and_complete(
                 page, captcha_text,
@@ -4438,13 +4446,11 @@ def submit_captcha():
             )
         )
 
-        # ===== 成功条件は「captcha_success かつ api_key を取得」のみ =====
         if result.get("captcha_success") and (result.get("api_key") or "").strip():
             new_blog_id = (result.get("blog_id") or "").strip() or None
             new_api_key = (result.get("api_key") or "").strip() or None
-            new_endpoint = (result.get("endpoint") or "").strip() or None  # recover が返す場合あり
+            new_endpoint = (result.get("endpoint") or "").strip() or None
 
-            # 重複 blog_id チェック（同サイト・同PFで同じ blog_id を既に持つ行がないか）
             dup = None
             if new_blog_id:
                 dup = (ExternalBlogAccount.query
@@ -4456,29 +4462,20 @@ def submit_captcha():
                        )
                        .first())
 
-            target = dup or acct  # 書き込み対象。重複があれば既存 dup を優先
+            target = dup or acct
 
-            # 進捗フラグ
             if hasattr(target, "is_captcha_completed"):
                 target.is_captcha_completed = True
-
-            # blog_id
             if new_blog_id and hasattr(target, "livedoor_blog_id"):
                 target.livedoor_blog_id = new_blog_id
-
-            # username を空/プレースホルダなら blog_id で補完
             if new_blog_id and hasattr(target, "username"):
                 if not target.username or target.username.startswith("u-"):
                     target.username = new_blog_id
-
-            # AtomPub endpoint（列があれば）
             if new_endpoint and hasattr(target, "atompub_endpoint"):
                 try:
                     target.atompub_endpoint = new_endpoint
                 except Exception:
                     pass
-
-            # APIキー（暗号化して保存）+ 投稿有効化
             if new_api_key and hasattr(target, "atompub_key_enc"):
                 try:
                     target.atompub_key_enc = encrypt(new_api_key)
@@ -4489,10 +4486,7 @@ def submit_captcha():
 
             db.session.commit()
 
-            # ←← ここでフロント用のフラグを算出（未定義バグを修正）
             got_api = bool(new_api_key or getattr(target, "atompub_key_enc", None))
-
-            # 表示用の step（成功時は常に API取得完了）
             resolved_account_id = target.id
             session["captcha_status"] = {
                 "captcha_sent": True,
@@ -4509,13 +4503,11 @@ def submit_captcha():
                 "step": session["captcha_status"]["step"],
                 "site_id": site_id,
                 "account_id": resolved_account_id,
-                "api_key_received": got_api,                       # ← フロント即時切替用
+                "api_key_received": got_api,
                 "next_cta": "ready_to_post" if got_api else "captcha_done"
             }), 200
 
-        # ===== ここから失敗扱い =====
-        # CAPTCHAは通っても API 未取得なら「作成失敗」とする。
-        # 中途半端なアカウントは削除して“再作成”前提に。
+        # 失敗パス
         try:
             if acct and not getattr(acct, "atompub_key_enc", None):
                 db.session.delete(acct)
@@ -4532,7 +4524,7 @@ def submit_captcha():
             "captcha_sent": False,
             "step": "アカウント作成失敗（再作成してください）",
             "site_id": site_id,
-            "account_id": None,  # 削除済みなので None
+            "account_id": None,
         }
 
         return jsonify({
@@ -4547,19 +4539,17 @@ def submit_captcha():
         return jsonify({"status": "error", "message": "CAPTCHA送信に失敗しました"}), 500
 
     finally:
-        # セッション破棄（captcha_status は残す → ポーリングのため）
+        # Playwright セッション破棄（1回だけでOK）
         try:
-            if loop.is_running():
-                loop.run_until_complete(delete_session(session_id))
-            else:
-                loop.run_until_complete(delete_session(session_id))
+            loop.run_until_complete(delete_session(session_id))
         except Exception:
             pass
 
-        # captcha_* を掃除。ただし captcha_status は残す
+        # captcha_* を掃除（captcha_status は残す）
         for key in list(session.keys()):
             if key.startswith("captcha_") and key != "captcha_status":
                 session.pop(key)
+
 
 
 
