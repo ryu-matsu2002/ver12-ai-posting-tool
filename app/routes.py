@@ -4320,27 +4320,12 @@ def prepare_captcha():
     session_id = str(uuid4())
     
     try:
-        # ---- ここを差し替え ----
-        coro = launch_livedoor_and_capture_captcha(
-            email, nickname, password, session_id, desired_blog_id=desired_blog_id
+        # ── ここをヘルパで一発実行（get_event_loop / run_until_complete を使わない） ──
+        result = _run_coro_sync(
+            launch_livedoor_and_capture_captcha(
+                email, nickname, password, session_id, desired_blog_id=desired_blog_id
+            )
         )
-
-        try:
-            # 通常はこちら（同期関数 → コルーチン実行）
-            result = asyncio.run(coro)
-        except RuntimeError as e:
-            # まれに「既にループが走っている」環境向けフォールバック
-            if "asyncio.run() cannot be called from a running event loop" in str(e):
-                loop = asyncio.new_event_loop()
-                try:
-                    asyncio.set_event_loop(loop)
-                    result = loop.run_until_complete(coro)
-                finally:
-                    asyncio.set_event_loop(None)
-                    loop.close()
-            else:
-                raise
-        # ---- ここまで ----
 
     except Exception:
         logger.exception("[prepare_captcha] CAPTCHA生成で例外が発生")
