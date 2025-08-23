@@ -55,22 +55,27 @@ bp = Blueprint("main", __name__)
 admin_bp = Blueprint("admin", __name__)
 
 
-# routes.py 冒頭の import 群の下あたりに追加
-def _run_coro_sync(coro):
+# routes.py (先頭付近に追加/置換)
+def _run_coro_sync(coro, timeout: float | None = None):
     import asyncio
+    async def _runner():
+        if timeout is None:
+            return await coro
+        return await asyncio.wait_for(coro, timeout=timeout)
     try:
-        return asyncio.run(coro)
+        return asyncio.run(_runner())
     except RuntimeError as e:
-        # 既にイベントループが走っている特殊環境向けフォールバック
+        # Jupyterや既存ループ環境へのフォールバック
         if "asyncio.run() cannot be called from a running event loop" in str(e):
             loop = asyncio.new_event_loop()
             try:
                 asyncio.set_event_loop(loop)
-                return loop.run_until_complete(coro)
+                return loop.run_until_complete(_runner())
             finally:
                 asyncio.set_event_loop(None)
                 loop.close()
         raise
+
 
 
 @bp.route('/robots.txt')
@@ -4324,7 +4329,8 @@ def prepare_captcha():
         result = _run_coro_sync(
             launch_livedoor_and_capture_captcha(
                 email, nickname, password, session_id, desired_blog_id=desired_blog_id
-            )
+            ),
+            timeout=90.0,        # ← ここ重要。ハング切断
         )
 
     except Exception:
@@ -4413,7 +4419,7 @@ def submit_captcha():
 
     # CAPTCHAセッションから Playwrightページ取得
     try:
-        page = _run_coro_sync(get_session(session_id))
+        page = _run_coro_sync(get_session(session_id), timeout=15.0)
     except Exception:
         logger.exception("[submit_captcha] Playwrightセッション取得に失敗しました")
         return jsonify({"status": "error", "message": "セッションが切れています"}), 400
@@ -4436,7 +4442,8 @@ def submit_captcha():
                 session.get("captcha_token"),
                 site,
                 desired_blog_id=desired_blog_id
-            )
+             ),
+             timeout=180.0,    # 取得～API発行は長め
         )
 
         # ===== 成功条件は「captcha_success かつ api_key を取得」のみ =====
@@ -4550,7 +4557,7 @@ def submit_captcha():
     finally:
         # セッション破棄（captcha_status は残す → ポーリングのため）
         try:
-            _run_coro_sync(delete_session(session_id))
+             _run_coro_sync(delete_session(session_id), timeout=10.0)
         except Exception:
             pass
 
