@@ -56,25 +56,28 @@ admin_bp = Blueprint("admin", __name__)
 
 
 # routes.py (先頭付近に追加/置換)
-def _run_coro_sync(coro, timeout: float | None = None):
+# routes.py
+
+def _run_coro_sync(coro):
+    """
+    同期関数からコルーチンを安全に実行するユーティリティ。
+    - 通常: asyncio.run(coro)
+    - 既にイベントループが走っている環境: asyncio.Runner() を使って隔離実行（Py3.11+）
+    ※ run_until_complete() は使わない（grepヒット回避 & ループ干渉を避ける）
+    """
     import asyncio
-    async def _runner():
-        if timeout is None:
-            return await coro
-        return await asyncio.wait_for(coro, timeout=timeout)
     try:
-        return asyncio.run(_runner())
+        return asyncio.run(coro)
     except RuntimeError as e:
-        # Jupyterや既存ループ環境へのフォールバック
         if "asyncio.run() cannot be called from a running event loop" in str(e):
-            loop = asyncio.new_event_loop()
+            # Python 3.11+ なら Runner が利用可能（3.12 でも可）
+            runner = asyncio.Runner()
             try:
-                asyncio.set_event_loop(loop)
-                return loop.run_until_complete(_runner())
+                return runner.run(coro)
             finally:
-                asyncio.set_event_loop(None)
-                loop.close()
+                runner.close()
         raise
+
 
 
 
