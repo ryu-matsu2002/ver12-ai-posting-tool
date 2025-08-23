@@ -58,27 +58,43 @@ admin_bp = Blueprint("admin", __name__)
 # routes.py (先頭付近に追加/置換)
 # routes.py
 
-def _run_coro_sync(coro):
+# 置き換え：routes.py 冒頭のヘルパ
+def _run_coro_sync(coro_or_fn, *args, timeout: float | None = None, **kwargs):
     """
-    同期関数からコルーチンを安全に実行するユーティリティ。
-    - 通常: asyncio.run(coro)
-    - 既にイベントループが走っている環境: asyncio.Runner() を使って隔離実行（Py3.11+）
-    ※ run_until_complete() は使わない（grepヒット回避 & ループ干渉を避ける）
+    同期文脈から安全にコルーチンを実行するヘルパ。
+    - coro_or_fn は「コルーチン関数」または「コルーチンオブジェクト」のどちらでも可
+    - timeout(秒) を指定すると asyncio.wait_for でタイムアウトをかける
+    - 既にイベントループが走っている環境でも新規ループに隔離して実行
     """
     import asyncio
+    from inspect import iscoroutine, iscoroutinefunction
+
+    async def _runner():
+        if iscoroutinefunction(coro_or_fn):
+            coro = coro_or_fn(*args, **kwargs)
+        elif iscoroutine(coro_or_fn):
+            # 既にコルーチンオブジェクトならそのまま使う（args/kwargsは無視）
+            coro = coro_or_fn
+        else:
+            raise TypeError("coro_or_fn must be a coroutine function or coroutine object")
+
+        if timeout is not None:
+            return await asyncio.wait_for(coro, timeout=timeout)
+        return await coro
+
     try:
-        return asyncio.run(coro)
+        return asyncio.run(_runner())
     except RuntimeError as e:
+        # 他所でループが走っている場合のフォールバック
         if "asyncio.run() cannot be called from a running event loop" in str(e):
-            # Python 3.11+ なら Runner が利用可能（3.12 でも可）
-            runner = asyncio.Runner()
+            loop = asyncio.new_event_loop()
             try:
-                return runner.run(coro)
+                asyncio.set_event_loop(loop)
+                return loop.run_until_complete(_runner())
             finally:
-                runner.close()
+                asyncio.set_event_loop(None)
+                loop.close()
         raise
-
-
 
 
 @bp.route('/robots.txt')
@@ -4568,13 +4584,6 @@ def submit_captcha():
         for key in list(session.keys()):
             if key.startswith("captcha_") and key != "captcha_status":
                 session.pop(key)
-
-
-        # captcha_* を掃除。ただし captcha_status は残す
-        for key in list(session.keys()):
-            if key.startswith("captcha_") and key != "captcha_status":
-                session.pop(key)
-
 
 
 @bp.route("/captcha_status", methods=["GET"])
