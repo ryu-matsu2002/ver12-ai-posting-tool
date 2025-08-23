@@ -4709,27 +4709,36 @@ def external_seo_generate_get():
 
 
 from flask import render_template, redirect, url_for, request, session, flash
-from app.services.blog_signup.livedoor_signup import poll_latest_link_gw, extract_verification_url
+from app.services.blog_signup.livedoor_signup import extract_verification_url
+from app.services.mail_utils.mail_tm import poll_latest_link_tm_async  # ★ 追加
 
-@bp.route('/confirm_email_manual/<task_id>')
+@bp.route("/confirm_email_manual/<task_id>")
 def confirm_email_manual(task_id):
     """
     CAPTCHA後、認証リンクをユーザーに手動で表示する画面。
     """
-    # メール受信（最大30回ポーリング） ← 既存関数を再利用
-    email_body = poll_latest_link_gw(task_id=task_id, max_attempts=30, interval=5)
+    # セッションに保存してある mail.tm の JWT を使う（prepare_captcha で格納済み）
+    token = session.get("captcha_token")
+    if not token:
+        flash("メール受信トークンが見つかりません。最初からやり直してください。", "danger")
+        return redirect(url_for("main.index"))
 
-    if email_body:
-        # 認証URLを抽出
-        verification_url = extract_verification_url(email_body)
-        if verification_url:
-            return render_template("confirm_email.html", verification_url=verification_url)
-        else:
-            flash("認証リンクが見つかりませんでした", "danger")
-            return redirect(url_for('dashboard'))
+    # 認証リンクをポーリングで直接取得（本文ではなくURLを返す関数）
+    try:
+        verification_url = _run_coro_sync(
+            poll_latest_link_tm_async(token, max_attempts=30, interval=5),
+            timeout=180.0,
+        )
+    except Exception:
+        current_app.logger.exception("[confirm_email_manual] 認証メールの取得に失敗")
+        verification_url = None
+
+    if verification_url:
+        return render_template("confirm_email.html", verification_url=verification_url)
     else:
-        flash("認証メールを取得できませんでした", "danger")
-        return redirect(url_for('dashboard'))
+        flash("確認メールが見つかりませんでした。少し時間をおいて再試行してください。", "warning")
+        return render_template("confirm_email.html", verification_url=None)
+
 
 from flask import request, session, redirect, url_for, flash
 from app.services.blog_signup.livedoor_signup import fetch_livedoor_credentials
