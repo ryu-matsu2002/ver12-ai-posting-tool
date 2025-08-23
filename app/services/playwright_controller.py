@@ -36,7 +36,7 @@ class PlaywrightController:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
         self._ready_evt = threading.Event()
-        self._boot_evt = threading.Event()   # ★ ブート完了イベントを追加
+        self._boot_evt = threading.Event()   # ブート完了イベント
 
         self._p = None           # async_playwright() の start() 結果
         self._browser = None     # 単一ブラウザ（セッションごとに context）
@@ -135,19 +135,26 @@ class PlaywrightController:
     # ---------- 内部コルーチン本体 ----------
     async def _start_session(self, session_id: str, email: str, nickname: str, password: str,
                              desired_blog_id: Optional[str]) -> dict:
+        # 保存先を APP_ROOT 配下に固定（未設定なら CWD）
         app_root = Path(os.environ.get("APP_ROOT", ".")).resolve()
         CAPTCHA_SAVE_DIR = app_root / "app" / "static" / "captchas"
         CAPTCHA_SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
         s = _LDSession(session_id)
+        # ★ recover_atompub_key で使うのでセッションに保持（現状コードに抜けていた点）
+        s.email = email
+        s.nickname = nickname
+        s.password = password
         s.desired_blog_id = desired_blog_id
 
+        logger.info(f"[PW-Controller] _start_session: new_context (session_id={session_id})")
         s.context = await self._browser.new_context(
             viewport={"width": 1280, "height": 800},
             user_agent=("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"),
             locale="ja-JP",
         )
+        logger.info(f"[PW-Controller] _start_session: add_init_script")
         await s.context.add_init_script("""
             Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
             window.navigator.chrome = { runtime: {} };
@@ -155,16 +162,23 @@ class PlaywrightController:
             Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
         """)
 
+        logger.info(f"[PW-Controller] _start_session: new_page")
         s.page = await s.context.new_page()
         try:
             logger.info(f"[PW-Controller] _start_session: goto register/input (session_id={session_id})")
             await s.page.goto("https://member.livedoor.com/register/input", wait_until="load")
+            logger.info(f"[PW-Controller] _start_session: page loaded")
+
+            # 入力欄がロードされていることを念のため待機
+            await s.page.wait_for_selector('input[name="livedoor_id"]', timeout=15000)
+
             await s.page.fill('input[name="livedoor_id"]', nickname)
             await s.page.fill('input[name="password"]', password)
             await s.page.fill('input[name="password2"]', password)
             await s.page.fill('input[name="email"]', email)
             await s.page.click('input[value="ユーザー情報を登録"]')
 
+            logger.info(f"[PW-Controller] _start_session: wait_for #captcha-img")
             await s.page.wait_for_selector("#captcha-img", timeout=10000)
 
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -178,7 +192,17 @@ class PlaywrightController:
             s.created_filename = filename
             return {"filename": filename}
         except Exception as e:
-            logger.exception(f"[PW-Controller] _start_session failed: {e}")
+            # 例外時は HTML/PNG をダンプ
+            try:
+                html = await s.page.content()
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                eh = f"/tmp/ld_prepare_exception_{ts}.html"
+                ep = f"/tmp/ld_prepare_exception_{ts}.png"
+                Path(eh).write_text(html, encoding="utf-8")
+                await s.page.screenshot(path=ep)
+                logger.error(f"[PW-Controller] _start_session failed: {e} (dumped {eh}, {ep})")
+            except Exception:
+                logger.exception(f"[PW-Controller] _start_session failed (no dump): {e}")
             # 失敗時は context を閉じる
             try:
                 await s.context.close()
