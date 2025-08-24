@@ -1,36 +1,38 @@
-# app/services/playwright_controller.py
 import asyncio
 import threading
+import time
 from typing import Any, Dict, Optional
+from concurrent.futures import TimeoutError as FutureTimeout
 
 # --- 内部状態 ---
 _captcha_sessions: Dict[str, Any] = {}
 _loop: Optional[asyncio.AbstractEventLoop] = None
 _loop_thread: Optional[threading.Thread] = None
-_lock = threading.Lock()  # dict への同時アクセス保護（保険）
+_loop_ready = threading.Event()   # ← 追加：ループ準備完了シグナル
+_lock = threading.Lock()          # dict への同時アクセス保護
 
 # --- バックグラウンドイベントループを常駐起動 ---
 def _start_loop_in_thread() -> None:
     global _loop, _loop_thread
-    if _loop and _loop.is_running():
+    if _loop_thread and _loop_thread.is_alive():
         return
 
     def runner():
         global _loop
         _loop = asyncio.new_event_loop()
         asyncio.set_event_loop(_loop)
+        _loop_ready.set()         # ← ループ作成完了を通知
         _loop.run_forever()
 
+    _loop_ready.clear()
     _loop_thread = threading.Thread(target=runner, name="pw-controller-loop", daemon=True)
     _loop_thread.start()
 
 _start_loop_in_thread()
 
-
 # ========= ここから async API（Playwright 側から使う） =========
 
 async def store_session(session_id: str, page: Any) -> None:
-    # Playwright 実行スレッドから await される想定
     with _lock:
         _captcha_sessions[session_id] = page
 
@@ -41,31 +43,37 @@ async def get_session(session_id: str) -> Optional[Any]:
 async def delete_session(session_id: str) -> None:
     with _lock:
         page = _captcha_sessions.pop(session_id, None)
-    # page.close() は await が必要（Playwright の Page は async close）
     if page:
         try:
             await page.close()
         except Exception:
-            # close 失敗は無視してよい（ブラウザ側で既に閉じている等）
             pass
-
 
 # ========= ここから同期ラッパ（Flask など同期コードから使う） =========
 
-def _ensure_loop_ready() -> asyncio.AbstractEventLoop:
-    # バックグラウンドループ起動保証
+def _ensure_loop_ready(timeout: float = 5.0) -> asyncio.AbstractEventLoop:
+    """
+    バックグラウンドイベントループの起動を待機して返す。
+    """
     _start_loop_in_thread()
+    # ループができるまで待つ（最大 timeout 秒）
+    if not _loop_ready.wait(timeout=timeout):
+        raise RuntimeError("Background asyncio loop failed to start in time")
     assert _loop is not None
     return _loop
 
-def run_coro_sync(coro):
+def run_coro_sync(coro, timeout: Optional[float] = None):
     """
-    同期コードから async 関数を実行して結果を返す。
-    （gthread ワーカーの別スレッドでも安全）
+    同期コードから async を安全に実行。
+    gthread の別スレッドからでも OK。
     """
     loop = _ensure_loop_ready()
     fut = asyncio.run_coroutine_threadsafe(coro, loop)
-    return fut.result()
+    try:
+        return fut.result(timeout=timeout)
+    except FutureTimeout:
+        fut.cancel()
+        raise
 
 def store_session_sync(session_id: str, page: Any) -> None:
     run_coro_sync(store_session(session_id, page))
