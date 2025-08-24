@@ -230,3 +230,39 @@ def confirm_email_manual(task_id):
     else:
         flash("認証メールを取得できませんでした", "danger")
         return redirect(url_for('dashboard'))
+
+# --- legacy compatibility shim ---------------------------------------------
+from pathlib import Path
+
+def register_blog_account(site, email_seed: str = "ld"):
+    """
+    🔧 互換：旧フロー呼び出し対策（起動時importエラー防止用）
+    実運用は新フロー /prepare_captcha → /submit_captcha を使ってください。
+    呼ばれた場合は「CAPTCHAが必要」というレガシー互換レスポンスを返します。
+    """
+    # 既存のメール作成ユーティリティを使って最低限の情報を用意
+    from app.services.mail_utils.mail_gw import create_inbox
+    email, token = create_inbox()
+    livedoor_id = generate_safe_id()
+    password    = generate_safe_password()
+
+    # 新APIで CAPTCHA 準備だけ実行（画像を保存し、セッションを確保）
+    try:
+        session_id, img_abs = prepare_captcha(email, livedoor_id, password)
+        img_name = Path(img_abs).name
+    except Exception:
+        # ここで落ちても、少なくとも起動時の import は通っているのでアプリは動きます
+        # 呼び出し元は新フローに移行してください
+        raise RuntimeError("register_blog_account は非推奨です。/prepare_captcha → /submit_captcha を使ってください。")
+
+    # 旧フローが期待していた形に“近い”返り値（フロントが旧実装でも破綻しにくい）
+    return {
+        "status": "captcha_required",
+        "captcha_url": f"/static/captchas/{img_name}",
+        "email": email,
+        "nickname": livedoor_id,
+        "password": password,
+        "token": token,
+        "session_id": session_id,
+    }
+# ---------------------------------------------------------------------------
