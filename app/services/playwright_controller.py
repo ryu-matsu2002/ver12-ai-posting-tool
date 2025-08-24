@@ -1,73 +1,19 @@
+# app/services/playwright_controller.py
 import asyncio
 import threading
-import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 from concurrent.futures import TimeoutError as FutureTimeout
 
-# --- 内部状態 ---
-_captcha_sessions: Dict[str, Any] = {}
-_loop: Optional[asyncio.AbstractEventLoop] = None
-_loop_thread: Optional[threading.Thread] = None
-_loop_ready = threading.Event()   # ← 追加：ループ準備完了シグナル
-_lock = threading.Lock()          # dict への同時アクセス保護
+# セッションは (page, owner_loop) を保存
+_Session = Tuple[Any, asyncio.AbstractEventLoop]
 
-# --- バックグラウンドイベントループを常駐起動 ---
-def _start_loop_in_thread() -> None:
-    global _loop, _loop_thread
-    if _loop_thread and _loop_thread.is_alive():
-        return
+_captcha_sessions: Dict[str, _Session] = {}
+_lock = threading.Lock()
 
-    def runner():
-        global _loop
-        _loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(_loop)
-        _loop_ready.set()         # ← ループ作成完了を通知
-        _loop.run_forever()
-
-    _loop_ready.clear()
-    _loop_thread = threading.Thread(target=runner, name="pw-controller-loop", daemon=True)
-    _loop_thread.start()
-
-_start_loop_in_thread()
-
-# ========= ここから async API（Playwright 側から使う） =========
-
-async def store_session(session_id: str, page: Any) -> None:
-    with _lock:
-        _captcha_sessions[session_id] = page
-
-async def get_session(session_id: str) -> Optional[Any]:
-    with _lock:
-        return _captcha_sessions.get(session_id)
-
-async def delete_session(session_id: str) -> None:
-    with _lock:
-        page = _captcha_sessions.pop(session_id, None)
-    if page:
-        try:
-            await page.close()
-        except Exception:
-            pass
-
-# ========= ここから同期ラッパ（Flask など同期コードから使う） =========
-
-def _ensure_loop_ready(timeout: float = 5.0) -> asyncio.AbstractEventLoop:
-    """
-    バックグラウンドイベントループの起動を待機して返す。
-    """
-    _start_loop_in_thread()
-    # ループができるまで待つ（最大 timeout 秒）
-    if not _loop_ready.wait(timeout=timeout):
-        raise RuntimeError("Background asyncio loop failed to start in time")
-    assert _loop is not None
-    return _loop
-
-def run_coro_sync(coro, timeout: Optional[float] = None):
-    """
-    同期コードから async を安全に実行。
-    gthread の別スレッドからでも OK。
-    """
-    loop = _ensure_loop_ready()
+# ---- 汎用: 任意の loop で coro を同期実行 ----
+def _run_in_loop_sync(loop: asyncio.AbstractEventLoop, coro, timeout: Optional[float] = None):
+    if loop.is_closed():
+        raise RuntimeError("Owner event loop is closed")
     fut = asyncio.run_coroutine_threadsafe(coro, loop)
     try:
         return fut.result(timeout=timeout)
@@ -75,11 +21,48 @@ def run_coro_sync(coro, timeout: Optional[float] = None):
         fut.cancel()
         raise
 
-def store_session_sync(session_id: str, page: Any) -> None:
-    run_coro_sync(store_session(session_id, page))
+# ========= async API（Playwright 側から使う） =========
+async def store_session(session_id: str, page: Any) -> None:
+    owner_loop = asyncio.get_running_loop()   # ← page を作った “そのループ”
+    with _lock:
+        _captcha_sessions[session_id] = (page, owner_loop)
 
-def get_session_sync(session_id: str) -> Optional[Any]:
-    return run_coro_sync(get_session(session_id))
+async def get_session(session_id: str) -> Optional[_Session]:
+    with _lock:
+        return _captcha_sessions.get(session_id)
+
+async def delete_session(session_id: str) -> None:
+    # ページと所有ループを取り出して、所有ループ上で close する
+    with _lock:
+        sess = _captcha_sessions.pop(session_id, None)
+
+    if not sess:
+        return
+
+    page, owner_loop = sess
+    try:
+        # page.close() は “その page を作ったループ” で
+        await asyncio.wrap_future(
+            asyncio.run_coroutine_threadsafe(page.close(), owner_loop)
+        )
+    except Exception:
+        pass
+
+# ========= 同期ラッパ（Flask などから使う） =========
+def get_session_sync(session_id: str) -> Optional[_Session]:
+    # get はどのループでもよいので “今のスレッド” の一時ループで実行
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(get_session(session_id))
+    finally:
+        loop.close()
+
+def run_on_owner_loop_sync(owner_loop: asyncio.AbstractEventLoop, coro, timeout: Optional[float] = None):
+    return _run_in_loop_sync(owner_loop, coro, timeout=timeout)
 
 def delete_session_sync(session_id: str) -> None:
-    run_coro_sync(delete_session(session_id))
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(delete_session(session_id))
+    finally:
+        loop.close()
