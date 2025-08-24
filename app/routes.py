@@ -4374,7 +4374,7 @@ def prepare_captcha():
 def submit_captcha():
     from app.services.blog_signup.livedoor_signup import submit_captcha_and_complete
     # 重要：owner loop で実行するための同期ラッパ群（最新版）
-    from app.services.playwright_controller import (
+    from app.services.pw_controller import (
         get_session_sync,          # -> (page, owner_loop) or None
         delete_session_sync,       # session_id をクローズ（owner loop 上で page.close()）
         run_on_owner_loop_sync,    # owner_loop 上で coro を同期実行

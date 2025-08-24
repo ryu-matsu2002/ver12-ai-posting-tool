@@ -18,6 +18,8 @@ from flask_migrate import Migrate
 from celery import Celery
 from multiprocessing import current_process
 from app.utils.datetime import to_jst  # ← 追加
+# app/__init__.py の先頭 import 群のどこか（Flask拡張の init より前でOK）
+from app.services.pw_controller import pwctl  # ⬅ 追加：長寿命Playwrightコントローラ
 
 
 # ── Flask-拡張の“空”インスタンスを先に作成 ───────────
@@ -119,6 +121,17 @@ def create_app() -> Flask:
                app.logger.info("ℹ️ SCHEDULER: lock already held -> 他プロセスで稼働中のためスキップ")
         except Exception as e:
             app.logger.exception("⚠️ SCHEDULER: lock 初期化に失敗したためスキップ: %s", e)
+
+    # ⬇⬇⬇ ここを追加 ⬇⬇⬇
+    @app.before_first_request
+    def _start_pw_controller_once():
+        try:
+            headless = os.getenv("PWCTL_HEADLESS", "1") == "1"
+            pwctl.start(headless=headless)
+            app.logger.info("✅ PWController started (headless=%s)", headless)
+        except Exception as e:
+            app.logger.exception("⚠️ PWController start failed: %s", e)
+    # ⬆⬆⬆ ここまで ⬆⬆⬆        
 
 
     login_manager.login_view = "main.login"
