@@ -4386,6 +4386,7 @@ def submit_captcha():
     from app import db
     from flask import jsonify, session, request
     from flask_login import current_user
+    from concurrent.futures import TimeoutError as FuturesTimeoutError
     import logging
 
     logger = logging.getLogger(__name__)
@@ -4426,18 +4427,20 @@ def submit_captcha():
 
     page, owner_loop = sess
 
-    # ★ ここを追加：実行前にループ健全性チェック（コルーチンを作る前）
+    # 実行前にループ健全性チェック（コルーチンを作る前）
     if owner_loop is None or owner_loop.is_closed():
         try:
-            delete_session_sync(session_id)  # リソース掃除（close はスキップされる実装に後述で修正）
+            delete_session_sync(session_id)
         except Exception:
             pass
         return jsonify({"status": "error", "message": "セッションの実行ループが無効です。最初からやり直してください。"}), 400
 
-    try:
-        desired_blog_id = session.get("captcha_desired_blog_id")
+    # ← ← ← あなたのコードでは抜けていたので復活させます
+    desired_blog_id = session.get("captcha_desired_blog_id")
 
-        # ★ ここが肝：page を作成した “owner_loop” 上で async 処理を実行する
+    try:
+        # ---- ここは run_on_owner_loop_sync だけを守る小さめの try/except ----
+        logger.info("[submit_captcha] start run_on_owner_loop_sync (owner_loop=%r)", owner_loop)
         result = run_on_owner_loop_sync(
             submit_captcha_and_complete(
                 page, captcha_text,
@@ -4448,14 +4451,18 @@ def submit_captcha():
                 site,
                 desired_blog_id=desired_blog_id
             ),
-            timeout=120,  # ← 任意（秒数を指定したい場合）
-            loop=owner_loop   
+            timeout=300,  # 例: 300秒
+            loop=owner_loop
+        )
+        logger.info(
+            "[submit_captcha] run_on_owner_loop_sync finished: keys=%s",
+            list(result.keys()) if isinstance(result, dict) else type(result)
         )
 
         # ===== 成功パス（CAPTCHA成功 かつ APIキー取得）=====
         if result.get("captcha_success") and (result.get("api_key") or "").strip():
-            new_blog_id = (result.get("blog_id") or "").strip() or None
-            new_api_key = (result.get("api_key") or "").strip() or None
+            new_blog_id  = (result.get("blog_id") or "").strip() or None
+            new_api_key  = (result.get("api_key") or "").strip() or None
             new_endpoint = (result.get("endpoint") or "").strip() or None
 
             # 同サイト・同PFで blog_id 重複があれば既存を優先
@@ -4550,10 +4557,27 @@ def submit_captcha():
             "deleted_account_id": deleted_id
         }), 200
 
+    except FuturesTimeoutError:
+        logger.exception("[submit_captcha] CAPTCHA処理がタイムアウト")
+        try:
+            delete_session_sync(session_id)
+        except Exception:
+            pass
+        return jsonify({"status": "error", "message": "CAPTCHA処理がタイムアウトしました。もう一度お試しください。"}), 504
+    except RuntimeError as e:
+        logger.exception("[submit_captcha] 実行ループエラー: %s", e)
+        try:
+            delete_session_sync(session_id)
+        except Exception:
+            pass
+        return jsonify({"status": "error", "message": "実行ループの異常を検知しました。最初からやり直してください。"}), 400
     except Exception:
-        logger.exception("[submit_captcha] CAPTCHA送信中にエラーが発生しました")
+        logger.exception("[submit_captcha] CAPTCHA送信実行中に例外")
+        try:
+            delete_session_sync(session_id)
+        except Exception:
+            pass
         return jsonify({"status": "error", "message": "CAPTCHA送信に失敗しました"}), 500
-
     finally:
         # Playwright セッション破棄（内部で owner_loop 上の page.close() を実行）
         try:
@@ -4565,6 +4589,7 @@ def submit_captcha():
         for key in list(session.keys()):
             if key.startswith("captcha_") and key != "captcha_status":
                 session.pop(key)
+
 
 
 
