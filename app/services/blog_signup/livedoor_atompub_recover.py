@@ -326,9 +326,9 @@ async def _try_set_desired_blog_id(page, desired: str) -> bool:
         return False
 
 # ─────────────────────────────────────────────
-# 追加：フレーム横断ユーティリティ
+# 追加：フレーム横断ユーティリティ（※フォールバック専用で使う）
 # ─────────────────────────────────────────────
-async def _find_in_any_frame(page, selectors, timeout_ms=15000):
+async def _find_in_any_frame(page, selectors, timeout_ms=8000):
     """
     全フレームを走査して、最初に見つかった (frame, selector) を返す。
     見つからなければ (None, None)。
@@ -336,8 +336,7 @@ async def _find_in_any_frame(page, selectors, timeout_ms=15000):
     deadline = asyncio.get_event_loop().time() + (timeout_ms / 1000)
     while asyncio.get_event_loop().time() < deadline:
         try:
-            frames = page.frames
-            for fr in frames:
+            for fr in page.frames:
                 for sel in selectors:
                     try:
                         if await fr.locator(sel).count() > 0:
@@ -348,83 +347,6 @@ async def _find_in_any_frame(page, selectors, timeout_ms=15000):
             pass
         await asyncio.sleep(0.25)
     return None, None
-
-async def _set_title_and_submit(page, desired_title: str) -> bool:
-    """
-    タイトル入力欄と『ブログを作成』ボタンを“全フレームから”探して送信する。
-    """
-    title_sels = [
-        '#blogTitle', 'input#blogTitle', 'input[name="title"]',
-        'input#title', 'input[name="blogTitle"]', 'input[name="blog_title"]',
-    ]
-    create_btn_sels = [
-        'input[type="submit"][value="ブログを作成する"]',
-        'input[type="submit"][value*="ブログを作成"]',
-        'input[type="submit"][value*="ブログ作成"]',
-        'input[type="submit"][value*="作成"]',
-        'input[type="submit"][value*="登録"]',
-        '#commit-button',
-        'button[type="submit"]',
-        'button:has-text("ブログを作成")',
-        'button:has-text("作成")',
-        'button:has-text("登録")',
-        'a.button:has-text("ブログを作成")',
-    ]
-
-    # 1) タイトル欄を全フレームから探す
-    fr, sel = await _find_in_any_frame(page, title_sels, timeout_ms=15000)
-    if not fr:
-        logger.warning("[LD-Recover] タイトル入力欄が見つかりません（iframe/ウィザード仕様の可能性）")
-        return False
-
-    try:
-        el = fr.locator(sel)
-        try:
-            await el.fill("")
-        except Exception:
-            pass
-        try:
-            await el.press("Control+A")
-            await el.press("Delete")
-        except Exception:
-            pass
-        await el.fill(desired_title)
-        logger.info("[LD-Recover] ブログタイトルを設定: %s (%s)", desired_title, sel)
-    except Exception:
-        logger.warning("[LD-Recover] タイトル入力に失敗", exc_info=True)
-        return False
-
-    # 2) 送信ボタンを全フレームから探してクリック
-    fr_btn, btn_sel = await _find_in_any_frame(page, create_btn_sels, timeout_ms=8000)
-    if not fr_btn:
-        logger.warning("[LD-Recover] 作成ボタンが見つかりません（UI変更の可能性）")
-        return False
-
-    try:
-        await fr_btn.click(btn_sel, timeout=8000)
-        logger.info("[LD-Recover] 『ブログを作成』ボタンをクリック: %s", btn_sel)
-        try:
-            await page.wait_for_load_state("networkidle", timeout=15000)
-        except Exception:
-            pass
-    except Exception:
-        logger.warning("[LD-Recover] 作成ボタンクリック失敗", exc_info=True)
-        return False
-
-    return True
-
-async def _success_hint_in_frames(page) -> bool:
-    """
-    フレーム内に成功/ウェルカム導線があるかの簡易ヒント検出
-    """
-    hints = [
-        'a:has-text("最初のブログを書く")',
-        'a.button:has-text("はじめての投稿")',
-        ':has-text("ようこそ")',
-        ':has-text("ブログが作成されました")',
-    ]
-    fr, sel = await _find_in_any_frame(page, hints, timeout_ms=4000)
-    return bool(fr)
 
 # ─────────────────────────────────────────────
 # メイン：ブログ作成→AtomPub APIキー取得
@@ -452,6 +374,117 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
             pass
         return error_html, error_png
 
+    # ── 内部：タイトル設定＋送信（まずメインフレーム、ダメならフォールバックで全フレーム）
+    async def _set_title_and_submit(desired_title: str) -> bool:
+        title_primary = ['#blogTitle', 'input[name="title"]', 'input#title']
+        btn_primary = [
+            'input[type="submit"][value="ブログを作成する"]',
+            'input[type="submit"][value*="ブログを作成"]',
+            'input[type="submit"][value*="ブログ作成"]',
+            'input[type="submit"][value*="作成"]',
+            '#commit-button',
+            'button[type="submit"]',
+        ]
+        title_fallback = title_primary + ['input[name="blogTitle"]', 'input[name="blog_title"]']
+        btn_fallback = btn_primary + [
+            'button:has-text("ブログを作成")',
+            'button:has-text("作成")',
+            'button:has-text("登録")',
+            'a.button:has-text("ブログを作成")',
+        ]
+
+        # 0) ページ安定化（body or タイトルいずれか）
+        try:
+            logger.info("[LD-Recover] create画面の安定化待ち（body or #blogTitle）")
+            await page.wait_for_selector('body#blogCreateIndex, input#blogTitle, input[name="title"]', timeout=15000)
+        except Exception:
+            logger.warning("[LD-Recover] body/タイトル初期待機に失敗（続行）")
+
+        # 1) メインフレームでタイトル欄を直探索
+        for sel in title_primary:
+            try:
+                loc = page.locator(sel)
+                if await loc.count() > 0:
+                    logger.info("[LD-Recover] タイトル入力欄（メインフレーム）検出: %s", sel)
+                    try:
+                        await loc.wait_for(state="visible", timeout=6000)
+                    except Exception:
+                        pass
+                    try:
+                        await loc.fill("")
+                    except Exception:
+                        pass
+                    try:
+                        await loc.press("Control+A")
+                        await loc.press("Delete")
+                    except Exception:
+                        pass
+                    await loc.fill(desired_title)
+                    logger.info("[LD-Recover] ブログタイトルを設定: %s", desired_title)
+                    break
+            except Exception:
+                continue
+        else:
+            # 2) 見つからなければ全フレームでフォールバック探索
+            logger.warning("[LD-Recover] タイトル欄がメインで見つからず → フレーム横断フォールバック")
+            fr, sel = await _find_in_any_frame(page, title_fallback, timeout_ms=12000)
+            if not fr:
+                logger.warning("[LD-Recover] タイトル欄が全フレームでも見つからず")
+                return False
+            try:
+                el = fr.locator(sel)
+                try:
+                    await el.fill("")
+                except Exception:
+                    pass
+                try:
+                    await el.press("Control+A")
+                    await el.press("Delete")
+                except Exception:
+                    pass
+                await el.fill(desired_title)
+                logger.info("[LD-Recover] ブログタイトルを設定(frame内): %s (%s)", desired_title, sel)
+            except Exception:
+                logger.warning("[LD-Recover] フレーム内タイトル入力に失敗", exc_info=True)
+                return False
+
+        # 3) メインフレームで送信ボタンを直探索
+        for bsel in btn_primary:
+            try:
+                bloc = page.locator(bsel)
+                if await bloc.count() > 0:
+                    logger.info("[LD-Recover] 送信ボタン（メインフレーム）検出: %s", bsel)
+                    await bloc.click(timeout=8000)
+                    logger.info("[LD-Recover] 『ブログを作成』クリック（メイン）")
+                    try:
+                        await page.wait_for_load_state("networkidle", timeout=15000)
+                    except Exception:
+                        pass
+                    return True
+            except Exception:
+                continue
+
+        # 4) 見つからなければフレーム横断でクリック
+        logger.warning("[LD-Recover] 送信ボタンがメインで見つからず → フレーム横断フォールバック")
+        fr_btn, btn_sel = await _find_in_any_frame(page, btn_fallback, timeout_ms=8000)
+        if not fr_btn:
+            logger.warning("[LD-Recover] 送信ボタンが全フレームでも見つからず")
+            return False
+        try:
+            await fr_btn.click(btn_sel, timeout=8000)
+            logger.info("[LD-Recover] 『ブログを作成』クリック（frame内）: %s", btn_sel)
+            try:
+                await page.wait_for_load_state("networkidle", timeout=15000)
+            except Exception:
+                pass
+            return True
+        except Exception:
+            logger.warning("[LD-Recover] 送信ボタンクリック失敗", exc_info=True)
+            return False
+
+    # ─────────────────────────────────────────
+    # ここから本処理
+    # ─────────────────────────────────────────
     try:
         # 1) ブログ作成ページへ
         logger.info("[LD-Recover] ブログ作成ページに遷移")
@@ -461,18 +494,19 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         except Exception:
             pass
 
-        # 2) ブログタイトルを設定し送信（iframe対応）
+        # 2) ブログタイトルを設定し送信（まずメイン→フォールバック）
         try:
             desired_title = _craft_blog_title(site)
         except Exception:
             desired_title = "日々ブログ"
 
-        ok_submit = await _set_title_and_submit(page, desired_title)
+        logger.info("[LD-Recover] タイトル設定＆送信開始")
+        ok_submit = await _set_title_and_submit(desired_title)
         if not ok_submit:
-            err_html, err_png = await _dump_error("ld_create_ui_changed")
+            err_html, err_png = await _dump_error("ld_create_ui_notfound")
             return {
                 "success": False,
-                "error": "ブログ作成UIが見つからない（DOM/iframe変更）",
+                "error": "ブログ作成UIが見つからない/クリック不可（DOM/iframe変更の可能性）",
                 "html_path": err_html,
                 "png_path": err_png,
             }
@@ -484,17 +518,21 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
             success = True
             logger.info("[LD-Recover] /welcome への遷移を確認")
         except Exception:
-            try:
-                if await _success_hint_in_frames(page):
-                    success = True
-                    logger.info("[LD-Recover] welcome 導線の出現を確認（frame内）")
-            except Exception:
-                pass
+            # フォールバック：welcome系要素の出現
+            hints = [
+                'a:has-text("最初のブログを書く")',
+                'a.button:has-text("はじめての投稿")',
+                ':has-text("ようこそ")',
+                ':has-text("ブログが作成されました")',
+            ]
+            fr, sel = await _find_in_any_frame(page, hints, timeout_ms=5000)
+            if fr:
+                logger.info("[LD-Recover] welcome 導線の出現を確認（frame内）")
+                success = True
 
         if not success:
             # 同一ページに留まっている＝何らかのバリデーションで弾かれた可能性
             html_lower = (await page.content()).lower()
-
             dup_or_required = any(k in html_lower for k in [
                 "使用できません", "既に使われています", "重複", "invalid", "already",
                 "必須", "入力してください"
@@ -519,37 +557,37 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                     for cand in candidates:
                         try:
                             if await _try_set_desired_blog_id(page, cand):
-                                logger.info(f"[LD-Recover] blog_id 衝突/必須を検知 → 候補で再試行: {cand}")
-                                # 再送信用に「作成」ボタンも押し直す（フレーム対応）
-                                if not await _set_title_and_submit(page, desired_title):
+                                logger.info(f"[LD-Recover] blog_id 衝突/必須 → 候補で再送信: {cand}")
+                                if not await _set_title_and_submit(desired_title):
                                     continue
-                                # 再送信後の成功確認
                                 try:
                                     await page.wait_for_url(_re.compile(r"/welcome($|[/?#])"), timeout=8000)
                                     success = True
                                     logger.info(f"[LD-Recover] /welcome へ遷移（blog_id={cand}）")
                                     break
                                 except Exception:
-                                    try:
-                                        if await _success_hint_in_frames(page):
-                                            success = True
-                                            logger.info(f"[LD-Recover] welcome 導線（blog_id={cand}）")
-                                            break
-                                    except Exception:
-                                        pass
+                                    hints = [
+                                        'a:has-text("最初のブログを書く")',
+                                        'a.button:has-text("はじめての投稿")',
+                                    ]
+                                    fr2, sel2 = await _find_in_any_frame(page, hints, timeout_ms=3000)
+                                    if fr2:
+                                        success = True
+                                        logger.info(f"[LD-Recover] welcome 導線検出（blog_id={cand}）")
+                                        break
                         except Exception:
                             continue
 
-            if not success:
-                # ここまで来たら失敗としてダンプ
-                err_html, err_png = await _dump_error("ld_atompub_create_fail")
-                logger.error("[LD-Recover] ブログ作成に失敗（タイトルのみ or 自動採番不可）")
-                return {
-                    "success": False,
-                    "error": "blog create failed",
-                    "html_path": err_html,
-                    "png_path": err_png
-                }
+        if not success:
+            # ここまで来たら失敗としてダンプ
+            err_html, err_png = await _dump_error("ld_atompub_create_fail")
+            logger.error("[LD-Recover] ブログ作成に失敗（タイトルのみ or 自動採番不可）")
+            return {
+                "success": False,
+                "error": "blog create failed",
+                "html_path": err_html,
+                "png_path": err_png
+            }
 
         # 4) （任意）welcome にある導線があれば押す。無くても次の /member に進めるので best-effort
         try:
@@ -559,7 +597,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
             ], timeout_ms=2000)
             if fr and sel:
                 await fr.click(sel, timeout=3000)
-                logger.info("[LD-Recover] 『最初のブログを書く』ボタンをクリック完了")
+                logger.info("[LD-Recover] 『最初のブログを書く』をクリック（任意）")
         except Exception:
             pass
 
@@ -632,7 +670,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         endpoint, api_key = await _read_endpoint_and_key()
 
         if not api_key:
-            logger.warning("[LD-Recover] API Keyが空。ページを再読み込みして再発行をリトライします")
+            logger.warning("[LD-Recover] API Keyが空。ページを再読み込みして再発行をリトライ")
             await page.reload(wait_until="load")
             await page.wait_for_selector('input#apiKeyIssue', timeout=15000)
             await page.click('input#apiKeyIssue')
