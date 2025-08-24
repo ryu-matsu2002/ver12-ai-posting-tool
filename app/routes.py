@@ -4440,7 +4440,8 @@ def submit_captcha():
                 site,
                 desired_blog_id=desired_blog_id
             ),
-            timeout=60,  # ← 任意（秒数を指定したい場合）
+            timeout=120,  # ← 任意（秒数を指定したい場合）
+            loop=owner_loop   
         )
 
         # ===== 成功パス（CAPTCHA成功 かつ APIキー取得）=====
