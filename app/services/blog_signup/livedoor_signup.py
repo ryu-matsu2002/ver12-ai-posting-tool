@@ -273,8 +273,22 @@ def register_blog_account(site, email_seed: str = "ld"):
         "token": token,
         "session_id": session_id,
     }
-# ---------------------------------------------------------------------------
-# 旧コードが import する別名（薄いラッパー）
+
+# --- backward-compat exports (for legacy imports in tasks/routes) -----------
 def signup(site, email_seed: str = "ld"):
-    # 互換シムに委譲
+    """旧コード向けの互換API。内部では register_blog_account を呼ぶだけ。"""
     return register_blog_account(site, email_seed=email_seed)
+
+# 既にモジュール先頭で poll_latest_link_gw を import して module-global に置いているので、
+# routes から `from ...livedoor_signup import poll_latest_link_gw` も有効のままです。
+# （名前がグローバルに存在していれば import 対象にできます）
+__all__ = [
+    # 新API
+    "prepare_captcha", "submit_captcha",
+    "generate_safe_id", "generate_safe_password", "suggest_livedoor_blog_id",
+    # 互換API
+    "register_blog_account", "signup",
+    # ルート互換で使う補助
+    "poll_latest_link_gw", "extract_verification_url",
+]
+
