@@ -122,15 +122,17 @@ def create_app() -> Flask:
             app.logger.exception("⚠️ SCHEDULER: lock 初期化に失敗したためスキップ: %s", e)
 
     # ⬇⬇⬇ ここを追加 ⬇⬇⬇
-    @app.before_first_request
+    # ⬇ 置き換え
+    @app.before_serving
     def _start_pw_controller_once():
         try:
-            from app.services.pw_controller import pwctl  # ⬅ 追加：長寿命Playwrightコントローラ
+            from app.services.pw_controller import pwctl  # type: ignore
             headless = os.getenv("PWCTL_HEADLESS", "1") == "1"
             pwctl.start(headless=headless)
             app.logger.info("✅ PWController started (headless=%s)", headless)
         except Exception as e:
             app.logger.exception("⚠️ PWController start failed: %s", e)
+
     # ⬆⬆⬆ ここまで ⬆⬆⬆        
 
 
