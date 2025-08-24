@@ -3,14 +3,16 @@ from datetime import datetime
 from pathlib import Path
 import logging
 import re as _re
-from typing import Optional, Dict, List, Tuple
 
+from app import db
+from app.models import ExternalBlogAccount
+from app.enums import BlogType
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────
-# 汎用ヘルパ
+# 安定インデックス・文字種判定・正規化などのユーティリティ
 # ─────────────────────────────────────────────
 def _deterministic_index(salt: str, n: int) -> int:
     """
@@ -26,10 +28,8 @@ def _deterministic_index(salt: str, n: int) -> int:
         acc = (acc * 131 + ord(ch)) & 0xFFFFFFFF
     return acc % n
 
-
 def _has_cjk(s: str) -> bool:
     return bool(_re.search(r"[\u3040-\u30FF\u3400-\u9FFF]", s or ""))
-
 
 def _norm(s: str) -> str:
     """比較用：空白/記号を落として小文字化"""
@@ -37,8 +37,7 @@ def _norm(s: str) -> str:
     s = _re.sub(r"[\s\-_／|｜/・]+", "", s)
     return s
 
-
-def _domain_tokens(url: str) -> List[str]:
+def _domain_tokens(url: str) -> list[str]:
     """ドメインを単語に分割（tld等は除外）"""
     try:
         netloc = urlparse(url or "").netloc.lower()
@@ -47,28 +46,29 @@ def _domain_tokens(url: str) -> List[str]:
     if ":" in netloc:
         netloc = netloc.split(":", 1)[0]
     parts = [p for p in netloc.split(".") if p and p not in ("www", "com", "jp", "net", "org", "co")]
-    words: List[str] = []
+    words = []
     for p in parts:
         words.extend([w for w in p.replace("_", "-").split("-") if w])
     return words
 
-
+# ─────────────────────────────────────────────
+# サイト名トークン化・ジャンル推定・日本語タイトル生成
+# ─────────────────────────────────────────────
 STOPWORDS_JP = {
-    "株式会社", "有限会社", "合同会社", "公式", "オフィシャル", "ブログ", "サイト", "ホームページ",
-    "ショップ", "ストア", "サービス", "工房", "教室", "情報", "案内", "チャンネル", "通信", "マガジン"
+    "株式会社","有限会社","合同会社","公式","オフィシャル","ブログ","サイト","ホームページ",
+    "ショップ","ストア","サービス","工房","教室","情報","案内","チャンネル","通信","マガジン"
 }
 STOPWORDS_EN = {
-    "inc", "ltd", "llc", "official", "blog", "site", "homepage", "shop", "store",
-    "service", "studio", "channel", "magazine", "info", "news"
+    "inc","ltd","llc","official","blog","site","homepage","shop","store",
+    "service","studio","channel","magazine","info","news"
 }
 
-
-def _name_tokens(name: str) -> List[str]:
+def _name_tokens(name: str) -> list[str]:
     """サイト名を雑にトークン化（日本語/英語混在対応・記号で分割）"""
     if not name:
         return []
     parts = _re.split(r"[\s\u3000\-/＿_・|｜／]+", str(name))
-    toks: List[str] = []
+    toks: list[str] = []
     for p in parts:
         p = p.strip()
         if not p:
@@ -79,14 +79,13 @@ def _name_tokens(name: str) -> List[str]:
             toks.append(p)
     return toks
 
-
-def _keyword_seed_from_site(site) -> Tuple[Optional[str], bool]:
+def _keyword_seed_from_site(site) -> tuple[str | None, bool]:
     """
     サイト名/URLから「1語」を安定に選ぶ。
     戻り値: (seed, is_jp)  /  抽出できなければ (None, False)
     """
     name = (getattr(site, "name", "") or "").strip()
-    url = (getattr(site, "url", "") or "").strip()
+    url  = (getattr(site, "url", "") or "").strip()
     salt = f"{getattr(site, 'id', '')}-{name}-{url}"
 
     name_toks = _name_tokens(name)
@@ -101,7 +100,8 @@ def _keyword_seed_from_site(site) -> Tuple[Optional[str], bool]:
     jp_cands = [t for t in jp_cands if 2 <= len(t) <= 12]
     en_cands = [t for t in en_cands if 2 <= len(t) <= 15]
 
-    def _pick(stable_list: List[str]) -> Optional[str]:
+    # 同一サイトでは安定して同じ語を選ぶ（塩＝site.id+name+url）
+    def _pick(stable_list: list[str]) -> str | None:
         if not stable_list:
             return None
         idx = _deterministic_index(salt, len(stable_list))
@@ -112,8 +112,7 @@ def _keyword_seed_from_site(site) -> Tuple[Optional[str], bool]:
         return seed, _has_cjk(seed)
     return None, False
 
-
-def _guess_genre(site) -> Tuple[str, bool]:
+def _guess_genre(site) -> tuple[str, bool]:
     """
     サイトからジャンル語(日本語/英語)と日本語フラグを推定。
     1) 明示属性（primary_genre_name / genre_name / genre.name など）
@@ -132,27 +131,27 @@ def _guess_genre(site) -> Tuple[str, bool]:
 
     # 2) ヒューリスティック
     name = (getattr(site, "name", "") or "")
-    url = (getattr(site, "url", "") or "")
-    txt = (name + " " + url).lower()
+    url  = (getattr(site, "url", "")  or "")
+    txt  = (name + " " + url).lower()
     toks = set(_domain_tokens(url))
 
     JP = [
-        ("ピラティス", ("pilates", "ピラティス", "yoga", "体幹", "姿勢", "fitness", "stretch")),
-        ("留学", ("studyabroad", "abroad", "留学", "ielts", "toefl", "海外", "study")),
-        ("旅行", ("travel", "trip", "観光", "hotel", "onsen", "温泉", "tour")),
-        ("美容", ("beauty", "esthetic", "skin", "hair", "美容", "コスメ", "メイク")),
-        ("ビジネス", ("business", "marketing", "sales", "seo", "経営", "起業", "副業")),
+        ("ピラティス", ("pilates","ピラティス","yoga","体幹","姿勢","fitness","stretch")),
+        ("留学",       ("studyabroad","abroad","留学","ielts","toefl","海外","study")),
+        ("旅行",       ("travel","trip","観光","hotel","onsen","温泉","tour")),
+        ("美容",       ("beauty","esthetic","skin","hair","美容","コスメ","メイク")),
+        ("ビジネス",   ("business","marketing","sales","seo","経営","起業","副業")),
     ]
     for label, keys in JP:
         if any(k in txt for k in keys) or any(k in toks for k in keys):
             return label, True
 
     EN = [
-        ("Pilates", ("pilates", "yoga", "fitness", "posture", "stretch")),
-        ("Study Abroad", ("studyabroad", "abroad", "study", "ielts", "toefl")),
-        ("Travel", ("travel", "trip", "hotel", "onsen", "tour")),
-        ("Beauty", ("beauty", "esthetic", "skin", "hair", "cosme", "makeup")),
-        ("Business", ("business", "marketing", "sales", "seo", "startup")),
+        ("Pilates", ("pilates","yoga","fitness","posture","stretch")),
+        ("Study Abroad", ("studyabroad","abroad","study","ielts","toefl")),
+        ("Travel", ("travel","trip","hotel","onsen","tour")),
+        ("Beauty", ("beauty","esthetic","skin","hair","cosme","makeup")),
+        ("Business", ("business","marketing","sales","seo","startup")),
     ]
     for label, keys in EN:
         if any(k in txt for k in keys) or any(k in toks for k in keys):
@@ -160,7 +159,6 @@ def _guess_genre(site) -> Tuple[str, bool]:
 
     # どれにも該当しなければ汎用
     return ("日々", _has_cjk(name) or _has_cjk(url))
-
 
 def _too_similar_to_site(title: str, site) -> bool:
     """
@@ -171,7 +169,7 @@ def _too_similar_to_site(title: str, site) -> bool:
     """
     t = _norm(title)
     site_name = (getattr(site, "name", "") or "")
-    site_url = (getattr(site, "url", "") or "")
+    site_url  = (getattr(site, "url", "")  or "")
     n = _norm(site_name)
 
     if not t:
@@ -194,8 +192,7 @@ def _too_similar_to_site(title: str, site) -> bool:
 
     return False
 
-
-def _templates_jp(topic: str) -> List[str]:
+def _templates_jp(topic: str) -> list[str]:
     base = (topic or "").strip() or "日々"
     return [
         f"{base}ブログ",
@@ -212,11 +209,9 @@ def _templates_jp(topic: str) -> List[str]:
         f"{base}ログ",
     ]
 
-
-def _templates_en(topic: str) -> List[str]:
+def _templates_en(topic: str) -> list[str]:
     base = topic.strip() or "Notes"
     return [f"{base} Blog"]  # ダミー（呼ばれない想定）
-
 
 def _japanese_base_word(site) -> str:
     """
@@ -229,7 +224,6 @@ def _japanese_base_word(site) -> str:
         return topic.strip()
     return "日々"
 
-
 def _craft_blog_title(site) -> str:
     """
     仕様：
@@ -239,7 +233,7 @@ def _craft_blog_title(site) -> str:
       - 同一サイトでは決定論的に安定
     """
     site_name = (getattr(site, "name", "") or "").strip()
-    site_url = (getattr(site, "url", "") or "").strip()
+    site_url  = (getattr(site, "url", "")  or "").strip()
     salt = f"{getattr(site, 'id', '')}-{site_name}-{site_url}"
 
     # 1) 日本語のベース語（ジャンルラベル優先）
@@ -265,7 +259,7 @@ def _craft_blog_title(site) -> str:
         # 日本語強制
         if not _has_cjk(title):
             return False
-        # “ブログっぽさ”の担保（語に「ブログ」が含まれることを最低条件に）
+        # “ブログっぽさ”担保
         if "ブログ" not in title:
             return False
         return True
@@ -277,11 +271,13 @@ def _craft_blog_title(site) -> str:
         if acceptable(title):
             return title[:48]
 
-    # 5) 最終フォールバック（必ず日本語＆ブログ語尾）
+    # 5) 最終フォールバック
     fallback = [f"{base_word}ブログ", f"{base_word}のブログ", "日々ブログ", "小さなブログ記録"]
     return fallback[_deterministic_index(salt, len(fallback))][:48]
 
-
+# ─────────────────────────────────────────────
+# blog_id スラッグ生成・入力欄設定ヘルパ
+# ─────────────────────────────────────────────
 def _slugify_ascii(s: str) -> str:
     """日本語/記号混じり → 半角英数とハイフンの短いスラッグ（先頭英字、長さ20程度）"""
     try:
@@ -303,10 +299,6 @@ def _slugify_ascii(s: str) -> str:
         s = (s + "-blog")[:20]
     return s
 
-
-# ─────────────────────────────────────────────
-# Playwright 補助
-# ─────────────────────────────────────────────
 async def _try_set_desired_blog_id(page, desired: str) -> bool:
     """
     ブログ作成画面で希望 blog_id を入力する。
@@ -333,47 +325,39 @@ async def _try_set_desired_blog_id(page, desired: str) -> bool:
     except Exception:
         return False
 
-
-async def _maybe_accept_agreement(page) -> None:
-    """規約チェック・同意画面などがあれば best-effort で突破"""
-    # チェックボックス
-    for sel in [
-        'input[type="checkbox"][name*="agree"]',
-        'input[type="checkbox"][id*="agree"]',
-    ]:
+# ─────────────────────────────────────────────
+# 追加：フレーム横断ユーティリティ
+# ─────────────────────────────────────────────
+async def _find_in_any_frame(page, selectors, timeout_ms=15000):
+    """
+    全フレームを走査して、最初に見つかった (frame, selector) を返す。
+    見つからなければ (None, None)。
+    """
+    deadline = asyncio.get_event_loop().time() + (timeout_ms / 1000)
+    while asyncio.get_event_loop().time() < deadline:
         try:
-            await page.check(sel, timeout=2000)
-            logger.info("[LD-Recover] checked agreement: %s", sel)
-            break
+            frames = page.frames
+            for fr in frames:
+                for sel in selectors:
+                    try:
+                        if await fr.locator(sel).count() > 0:
+                            return fr, sel
+                    except Exception:
+                        continue
         except Exception:
             pass
+        await asyncio.sleep(0.25)
+    return None, None
 
-    # 同意/次へ/OK
-    for sel in [
-        'input[type="submit"][value*="同意"]',
-        'input[type="submit"][value*="進む"]',
-        'button:has-text("同意")',
-        'button:has-text("次へ")',
-        'a:has-text("同意")',
-        'a:has-text("次へ")',
-    ]:
-        try:
-            await page.click(sel, timeout=2000)
-            logger.info("[LD-Recover] clicked agreement/next: %s", sel)
-            await page.wait_for_load_state("networkidle", timeout=8000)
-            break
-        except Exception:
-            pass
-
-
-async def _on_blog_create_page(page) -> None:
-    if "blog/create" not in page.url:
-        await page.goto("https://livedoor.blogcms.jp/member/blog/create", wait_until="load")
-
-
-async def _click_create_button(page) -> bool:
-    """『ブログを作成する』系のボタンを柔軟にクリック"""
-    candidates = [
+async def _set_title_and_submit(page, desired_title: str) -> bool:
+    """
+    タイトル入力欄と『ブログを作成』ボタンを“全フレームから”探して送信する。
+    """
+    title_sels = [
+        '#blogTitle', 'input#blogTitle', 'input[name="title"]',
+        'input#title', 'input[name="blogTitle"]', 'input[name="blog_title"]',
+    ]
+    create_btn_sels = [
         'input[type="submit"][value="ブログを作成する"]',
         'input[type="submit"][value*="ブログを作成"]',
         'input[type="submit"][value*="ブログ作成"]',
@@ -381,263 +365,83 @@ async def _click_create_button(page) -> bool:
         'input[type="submit"][value*="登録"]',
         '#commit-button',
         'button[type="submit"]',
+        'button:has-text("ブログを作成")',
         'button:has-text("作成")',
         'button:has-text("登録")',
+        'a.button:has-text("ブログを作成")',
     ]
-    for sel in candidates:
+
+    # 1) タイトル欄を全フレームから探す
+    fr, sel = await _find_in_any_frame(page, title_sels, timeout_ms=15000)
+    if not fr:
+        logger.warning("[LD-Recover] タイトル入力欄が見つかりません（iframe/ウィザード仕様の可能性）")
+        return False
+
+    try:
+        el = fr.locator(sel)
         try:
-            await page.wait_for_selector(sel, timeout=6000)
-            await page.click(sel, timeout=6000)
-            logger.info("[LD-Recover] クリック: %s", sel)
-            try:
-                await page.wait_for_load_state("networkidle", timeout=15000)
-            except Exception:
-                pass
-            return True
-        except Exception:
-            continue
-    return False
-
-
-async def _success_after_create(page) -> bool:
-    """作成成功の判定（URL/導線/ダッシュボード遷移など複数の基準）"""
-    # 1) /welcome
-    try:
-        await page.wait_for_url(_re.compile(r"/welcome($|[/?#])"), timeout=8000)
-        logger.info("[LD-Recover] /welcome への遷移を確認")
-        return True
-    except Exception:
-        pass
-
-    # 2) member ダッシュボード系
-    if "livedoor.blogcms.jp/member/" in page.url:
-        logger.info("[LD-Recover] member 画面に遷移: %s", page.url)
-        return True
-
-    # 3) welcome ボタンなど
-    try:
-        await page.wait_for_selector(
-            'a:has-text("最初のブログを書く"), a.button:has-text("はじめての投稿")',
-            timeout=4000
-        )
-        logger.info("[LD-Recover] welcome 導線（ボタン）の出現を確認")
-        return True
-    except Exception:
-        pass
-
-    return False
-
-
-async def _find_member_blog_config_link(page) -> Optional[str]:
-    """
-    /member 画面から blog 設定リンクの href を探す。
-    失敗時は None。
-    """
-    # 直接の title 属性
-    try:
-        if await page.locator('a[title="ブログ設定"]').count() > 0:
-            href = await page.get_attribute('a[title="ブログ設定"]', 'href')
-            if href:
-                return href
-    except Exception:
-        pass
-
-    # href パターン
-    try:
-        loc = page.locator('a[href*="/member/blog/"][href$="/config/"]')
-        if await loc.count() > 0:
-            href = await loc.first.get_attribute('href')
-            if href:
-                return href
-    except Exception:
-        pass
-
-    # リンクテキスト（日本語揺れに弱いが一応）
-    for txt in ["ブログ設定", "設定", "Config", "Settings"]:
-        try:
-            loc = page.locator(f'a:has-text("{txt}")')
-            if await loc.count() > 0:
-                href = await loc.first.get_attribute('href')
-                if href and "/member/blog/" in href and "/config/" in href:
-                    return href
+            await el.fill("")
         except Exception:
             pass
+        try:
+            await el.press("Control+A")
+            await el.press("Delete")
+        except Exception:
+            pass
+        await el.fill(desired_title)
+        logger.info("[LD-Recover] ブログタイトルを設定: %s (%s)", desired_title, sel)
+    except Exception:
+        logger.warning("[LD-Recover] タイトル入力に失敗", exc_info=True)
+        return False
 
-    return None
+    # 2) 送信ボタンを全フレームから探してクリック
+    fr_btn, btn_sel = await _find_in_any_frame(page, create_btn_sels, timeout_ms=8000)
+    if not fr_btn:
+        logger.warning("[LD-Recover] 作成ボタンが見つかりません（UI変更の可能性）")
+        return False
 
+    try:
+        await fr_btn.click(btn_sel, timeout=8000)
+        logger.info("[LD-Recover] 『ブログを作成』ボタンをクリック: %s", btn_sel)
+        try:
+            await page.wait_for_load_state("networkidle", timeout=15000)
+        except Exception:
+            pass
+    except Exception:
+        logger.warning("[LD-Recover] 作成ボタンクリック失敗", exc_info=True)
+        return False
 
-async def _open_api_settings(page, blog_id: Optional[str]) -> bool:
+    return True
+
+async def _success_hint_in_frames(page) -> bool:
     """
-    API/AtomPub 設定ページへ遷移。リンクテキスト/URLが変わっても複数パターンで辿る
+    フレーム内に成功/ウェルカム導線があるかの簡易ヒント検出
     """
-    # 1) blog_id があれば直接 URL を試す
-    direct_urls = []
-    if blog_id:
-        direct_urls += [
-            f"https://livedoor.blogcms.jp/member/blog/{blog_id}/api",
-            f"https://livedoor.blogcms.jp/member/blog/{blog_id}/atompub",
-        ]
-    # 2) 旧来の汎用候補
-    direct_urls += [
-        "https://livedoor.blogcms.jp/member/api/atompub",
-        "https://livedoor.blogcms.jp/member/api",
+    hints = [
+        'a:has-text("最初のブログを書く")',
+        'a.button:has-text("はじめての投稿")',
+        ':has-text("ようこそ")',
+        ':has-text("ブログが作成されました")',
     ]
-    for u in direct_urls:
-        try:
-            await page.goto(u, wait_until="load", timeout=10000)
-            if "api" in page.url or "atom" in page.url:
-                logger.info("[LD-Recover] API設定ページ（直接URL）: %s", page.url)
-                return True
-        except Exception:
-            continue
-
-    # 3) UI ナビから当てる
-    link_texts = ["API", "AtomPub", "API設定", "AtomPub設定", "API Key", "キー発行"]
-    for txt in link_texts:
-        try:
-            await page.click(f'a:has-text("{txt}")', timeout=5000)
-            await page.wait_for_load_state("networkidle", timeout=10000)
-            if "api" in page.url or "atom" in page.url:
-                logger.info("[LD-Recover] API設定ページ（UI経由）: %s", page.url)
-                return True
-        except Exception:
-            continue
-
-    # 4) CSS クラスから（従来）
-    try:
-        await page.wait_for_selector('a.configIdxApi[title="API Keyの発行・確認"]', timeout=5000)
-        await page.click('a.configIdxApi[title="API Keyの発行・確認"]', timeout=5000)
-        await page.wait_for_load_state("load")
-        if "api" in page.url or "atom" in page.url:
-            logger.info("[LD-Recover] API設定ページ（configIdxApi）: %s", page.url)
-            return True
-    except Exception:
-        pass
-
-    return False
-
-
-async def _extract_endpoint_and_key(page) -> Tuple[Optional[str], Optional[str]]:
-    """
-    ページから AtomPub エンドポイントと API Key を読み取る。
-    - 既に発行済みの場合はクリック前に読めることもあるため、先に読む
-    - 未発行なら『発行する』→『実行』で発行してから読む
-    """
-    async def _read() -> Tuple[Optional[str], Optional[str]]:
-        endpoint = None
-        key = None
-
-        # endpoint 候補
-        endpoint_sel = [
-            'input.input-xxlarge[readonly]',
-            'input#atompubUrl',
-            'input[name="atompub_url"]',
-            'input[name="endpoint"]',
-            '#endpoint',
-            '#atompub-url',
-        ]
-        for sel in endpoint_sel:
-            try:
-                if await page.locator(sel).count() > 0:
-                    endpoint = (await page.locator(sel).first.input_value()).strip()
-                    if endpoint:
-                        break
-            except Exception:
-                continue
-
-        # key 候補
-        key_sel = [
-            'input#apiKey',
-            'input[name="api_key"]',
-            '#api_key',
-            '.api-key',
-        ]
-        for sel in key_sel:
-            try:
-                if await page.locator(sel).count() > 0:
-                    key = (await page.locator(sel).first.input_value()).strip()
-                    if key:
-                        break
-            except Exception:
-                continue
-
-        # どうしても取れない場合はページ全体からそれっぽいトークンを拾う（最後の手段）
-        if not key:
-            try:
-                html = await page.content()
-                m = _re.search(r"\b[A-Za-z0-9]{24,64}\b", html)
-                if m:
-                    key = m.group(0)
-            except Exception:
-                pass
-
-        return endpoint, key
-
-    # 既に値があるか先に読む
-    endpoint, api_key = await _read()
-    if api_key:
-        return endpoint, api_key
-
-    # 未発行なら『発行する』→『実行』
-    try:
-        if await page.locator('input#apiKeyIssue').count() > 0:
-            await page.click('input#apiKeyIssue', timeout=15000)
-            logger.info("[LD-Recover] 『発行する』をクリック")
-            if await page.locator('button:has-text("実行")').count() > 0:
-                await page.click('button:has-text("実行")', timeout=15000)
-                logger.info("[LD-Recover] モーダルの『実行』をクリック")
-    except Exception:
-        logger.warning("[LD-Recover] APIキー発行ボタンのクリックに失敗（既に発行済みの可能性）", exc_info=True)
-
-    # 値が入るまで一定時間ポーリング
-    try:
-        for _ in range(30):  # 15秒
-            endpoint, api_key = await _read()
-            if api_key:
-                return endpoint, api_key
-            await asyncio.sleep(0.5)
-    except Exception:
-        pass
-
-    # リロード・再発行リトライ（1回）
-    try:
-        await page.reload(wait_until="load")
-        if await page.locator('input#apiKeyIssue').count() > 0:
-            await page.click('input#apiKeyIssue', timeout=15000)
-            if await page.locator('button:has-text("実行")').count() > 0:
-                await page.click('button:has-text("実行")', timeout=15000)
-        for _ in range(30):
-            endpoint, api_key = await _read()
-            if api_key:
-                return endpoint, api_key
-            await asyncio.sleep(0.5)
-    except Exception:
-        pass
-
-    return endpoint, api_key
-
+    fr, sel = await _find_in_any_frame(page, hints, timeout_ms=4000)
+    return bool(fr)
 
 # ─────────────────────────────────────────────
-# メイン：recover_atompub_key
+# メイン：ブログ作成→AtomPub APIキー取得
 # ─────────────────────────────────────────────
-async def recover_atompub_key(
-    page,
-    nickname: str,
-    email: str,
-    password: str,
-    site,
-    desired_blog_id: Optional[str] = None
-) -> Dict:
+async def recover_atompub_key(page, nickname: str, email: str, password: str, site,
+                              desired_blog_id: str | None = None) -> dict:
     """
-    メール認証後の状態で呼ばれる前提。
-    1) ブログ作成（ID重複時はエラーメッセージ検出しつつ最小限のフォールバック）
-    2) member 画面から blog_id を把握
-    3) API設定ページへ遷移
-    4) APIキー抽出
+    - Livedoorブログの作成 → AtomPub APIキーを発行・取得
+    - 原則は「ブログタイトル入力 → 作成ボタン」だけを操作し、blog_id には触れない
+    - ただし、送信後にページ内エラー（重複/必須など）を検知した場合に限り、
+      最小限のフォールバックとして blog_id を入力して再送信を試みる
+    - DBには保存しない（呼び出し元で保存）
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    async def _dump_error(prefix: str) -> Tuple[str, str]:
+    # 失敗時保存用ヘルパ
+    async def _dump_error(prefix: str):
         html = await page.content()
         error_html = f"/tmp/{prefix}_{timestamp}.html"
         error_png = f"/tmp/{prefix}_{timestamp}.png"
@@ -651,62 +455,57 @@ async def recover_atompub_key(
     try:
         # 1) ブログ作成ページへ
         logger.info("[LD-Recover] ブログ作成ページに遷移")
-        await _on_blog_create_page(page)
-        await _maybe_accept_agreement(page)
+        await page.goto("https://livedoor.blogcms.jp/member/blog/create", wait_until="load")
+        try:
+            await page.wait_for_load_state("networkidle", timeout=15000)
+        except Exception:
+            pass
 
-        # タイトルを設定
-        desired_title = None
+        # 2) ブログタイトルを設定し送信（iframe対応）
         try:
             desired_title = _craft_blog_title(site)
-            await page.wait_for_selector('#blogTitle, input[name="title"]', timeout=15000)
-            for sel in ['#blogTitle', 'input#blogTitle', 'input[name="title"]']:
-                try:
-                    if await page.locator(sel).count() > 0:
-                        el = page.locator(sel)
-                        try:
-                            await el.fill("")
-                        except Exception:
-                            pass
-                        try:
-                            await el.press("Control+A")
-                            await el.press("Delete")
-                        except Exception:
-                            pass
-                        await el.fill(desired_title)
-                        logger.info("[LD-Recover] ブログタイトルを設定: %s (%s)", desired_title, sel)
-                        break
-                except Exception:
-                    continue
         except Exception:
-            logger.warning("[LD-Recover] タイトル入力欄の操作に失敗（非致命）", exc_info=True)
+            desired_title = "日々ブログ"
 
-        # 作成ボタン
-        if not await _click_create_button(page):
-            err_html, err_png = await _dump_error("ld_create_button_missing")
+        ok_submit = await _set_title_and_submit(page, desired_title)
+        if not ok_submit:
+            err_html, err_png = await _dump_error("ld_create_ui_changed")
             return {
                 "success": False,
-                "error": "ブログ作成ボタンが見つかりません",
+                "error": "ブログ作成UIが見つからない（DOM/iframe変更）",
                 "html_path": err_html,
-                "png_path": err_png
+                "png_path": err_png,
             }
 
-        # 成功判定
-        success = await _success_after_create(page)
+        # 3) 成功判定：/welcome への遷移 or 成功導線の出現
+        success = False
+        try:
+            await page.wait_for_url(_re.compile(r"/welcome($|[/?#])"), timeout=15000)
+            success = True
+            logger.info("[LD-Recover] /welcome への遷移を確認")
+        except Exception:
+            try:
+                if await _success_hint_in_frames(page):
+                    success = True
+                    logger.info("[LD-Recover] welcome 導線の出現を確認（frame内）")
+            except Exception:
+                pass
+
         if not success:
             # 同一ページに留まっている＝何らかのバリデーションで弾かれた可能性
             html_lower = (await page.content()).lower()
+
             dup_or_required = any(k in html_lower for k in [
                 "使用できません", "既に使われています", "重複", "invalid", "already",
                 "必須", "入力してください"
             ])
 
             if dup_or_required:
-                # 最小限のフォールバック：blog_id 入力欄があるときだけ入れて再送信
+                # 最小限のフォールバック：この時だけ blog_id を入れて再試行（最大5通り）
                 base = _slugify_ascii(getattr(site, "name", None) or getattr(site, "url", None) or "blog")
-                candidates = [desired_blog_id] if desired_blog_id else []
-                candidates += [base] + [f"{base}-{i}" for i in range(1, 6)]
+                candidates = [base] + [f"{base}-{i}" for i in range(1, 6)]
 
-                # blog_id 入力欄がある？
+                # blog_id 入力欄があるかを軽く確認（自動採番UIだと存在しない場合もある）
                 has_id_box = False
                 for sel in ['#blogId', 'input[name="blog_id"]', 'input[name="livedoor_blog_id"]', 'input[name="blogId"]', 'input#livedoor_blog_id']:
                     try:
@@ -718,21 +517,31 @@ async def recover_atompub_key(
 
                 if has_id_box:
                     for cand in candidates:
-                        if not cand:
-                            continue
                         try:
                             if await _try_set_desired_blog_id(page, cand):
-                                logger.info("[LD-Recover] blog_id 衝突/必須を検知 → 候補で再試行: %s", cand)
-                                # もう一度ボタン
-                                await _click_create_button(page)
-                                success = await _success_after_create(page)
-                                if success:
-                                    logger.info("[LD-Recover] ブログ作成成功（blog_id=%s）", cand)
+                                logger.info(f"[LD-Recover] blog_id 衝突/必須を検知 → 候補で再試行: {cand}")
+                                # 再送信用に「作成」ボタンも押し直す（フレーム対応）
+                                if not await _set_title_and_submit(page, desired_title):
+                                    continue
+                                # 再送信後の成功確認
+                                try:
+                                    await page.wait_for_url(_re.compile(r"/welcome($|[/?#])"), timeout=8000)
+                                    success = True
+                                    logger.info(f"[LD-Recover] /welcome へ遷移（blog_id={cand}）")
                                     break
+                                except Exception:
+                                    try:
+                                        if await _success_hint_in_frames(page):
+                                            success = True
+                                            logger.info(f"[LD-Recover] welcome 導線（blog_id={cand}）")
+                                            break
+                                    except Exception:
+                                        pass
                         except Exception:
                             continue
 
             if not success:
+                # ここまで来たら失敗としてダンプ
                 err_html, err_png = await _dump_error("ld_atompub_create_fail")
                 logger.error("[LD-Recover] ブログ作成に失敗（タイトルのみ or 自動採番不可）")
                 return {
@@ -742,61 +551,98 @@ async def recover_atompub_key(
                     "png_path": err_png
                 }
 
-        # welcome にボタンがあれば押す（任意）
+        # 4) （任意）welcome にある導線があれば押す。無くても次の /member に進めるので best-effort
         try:
-            await page.click('a:has-text("最初のブログを書く"), a.button:has-text("はじめての投稿")', timeout=3000)
-            logger.info("[LD-Recover] 『最初のブログを書く』ボタンをクリック完了")
+            fr, sel = await _find_in_any_frame(page, [
+                'a:has-text("最初のブログを書く")',
+                'a.button:has-text("はじめての投稿")',
+            ], timeout_ms=2000)
+            if fr and sel:
+                await fr.click(sel, timeout=3000)
+                logger.info("[LD-Recover] 『最初のブログを書く』ボタンをクリック完了")
         except Exception:
             pass
 
-        # 2) /member に遷移して blog_id を抽出
+        # 5) /member に遷移して blog_id を抽出
         await page.goto("https://livedoor.blogcms.jp/member/", wait_until="load")
-        blog_url = await _find_member_blog_config_link(page)
+        blog_url = await page.get_attribute('a[title="ブログ設定"]', 'href')  # 例: /blog/king123/config/
         if not blog_url:
-            # 末端UIが変わっている可能性 → 現在 URL から推測
-            # 例: https://livedoor.blogcms.jp/member/blog/{blog_id}/xxx
-            m = _re.search(r"/member/blog/([^/]+)/", page.url)
-            fallback_blog_id = m.group(1) if m else None
-            if not fallback_blog_id:
-                err_html, err_png = await _dump_error("ld_atompub_member_fail")
-                return {
-                    "success": False,
-                    "error": "member page missing blog link",
-                    "html_path": err_html,
-                    "png_path": err_png
-                }
-            blog_id = fallback_blog_id
-            config_url = f"https://livedoor.blogcms.jp/member/blog/{blog_id}/config/"
-        else:
-            blog_id = blog_url.split("/")[2] if "/blog/" in blog_url else None
-            if not blog_id:
-                # /member/blog/{id}/config/ 想定
-                m = _re.search(r"/member/blog/([^/]+)/", blog_url)
-                blog_id = m.group(1) if m else None
-            config_url = f"https://livedoor.blogcms.jp{blog_url}" if blog_url.startswith("/") else blog_url
-
-        logger.info("[LD-Recover] ブログIDを取得: %s", blog_id)
-
-        await page.goto(config_url, wait_until="load")
-
-        # 3) API設定ページへ
-        ok = await _open_api_settings(page, blog_id)
-        if not ok:
-            err_html, err_png = await _dump_error("ld_atompub_open_api_fail")
-            logger.error("[LD-Recover] API設定ページに到達できませんでした")
+            err_html, err_png = await _dump_error("ld_atompub_member_fail")
             return {
                 "success": False,
-                "error": "API設定ページに到達できませんでした",
+                "error": "member page missing blog link",
+                "html_path": err_html,
+                "png_path": err_png
+            }
+        blog_id = blog_url.split("/")[2]  # "king123"
+        logger.info(f"[LD-Recover] ブログIDを取得: {blog_id}")
+
+        # 6) 設定ページ → AtomPub 発行ページへ
+        config_url = f"https://livedoor.blogcms.jp{blog_url}"
+        await page.goto(config_url, wait_until="load")
+
+        await page.wait_for_selector('a.configIdxApi[title="API Keyの発行・確認"]', timeout=10000)
+        await page.click('a.configIdxApi[title="API Keyの発行・確認"]')
+
+        await page.wait_for_load_state("load")
+        logger.info(f"[LD-Recover] AtomPub設定ページに遷移: {page.url}")
+
+        if "member" in page.url:
+            err_html, err_png = await _dump_error("ld_atompub_redirect_fail")
+            logger.error(f"[LD-Recover] AtomPubページが開けず /member にリダイレクト: {page.url}")
+            return {
+                "success": False,
+                "error": "redirected to member",
                 "html_path": err_html,
                 "png_path": err_png
             }
 
-        # 4) エンドポイント & APIキー抽出（必要なら発行）
-        endpoint, api_key = await _extract_endpoint_and_key(page)
+        # 7) スクショ
+        success_png = f"/tmp/ld_atompub_page_{timestamp}.png"
+        try:
+            await page.screenshot(path=success_png, full_page=True)
+        except Exception:
+            try:
+                await page.screenshot(path=success_png)
+            except Exception:
+                pass
+        logger.info(f"[LD-Recover] AtomPubページのスクリーンショット保存: {success_png}")
+
+        # 8) APIキー発行
+        await page.wait_for_selector('input#apiKeyIssue', timeout=10000)
+        await page.click('input#apiKeyIssue')
+        logger.info("[LD-Recover] 『発行する』をクリック")
+
+        await page.wait_for_selector('button:has-text("実行")', timeout=10000)
+        await page.click('button:has-text("実行")')
+        logger.info("[LD-Recover] モーダルの『実行』をクリック")
+
+        # 9) 取得（valueはJSで後から入るため、非空になるまで現在値を待つ & 1回だけ再発行リトライ）
+        async def _read_endpoint_and_key():
+            await page.wait_for_selector('input.input-xxlarge[readonly]', timeout=15000)
+            endpoint_val = await page.locator('input.input-xxlarge[readonly]').input_value()
+            await page.wait_for_selector('input#apiKey', timeout=15000)
+            for _ in range(30):  # 30 * 0.5s = 15s
+                key_val = (await page.locator('input#apiKey').input_value()).strip()
+                if key_val:
+                    return endpoint_val, key_val
+                await asyncio.sleep(0.5)
+            return endpoint_val, ""
+
+        endpoint, api_key = await _read_endpoint_and_key()
+
+        if not api_key:
+            logger.warning("[LD-Recover] API Keyが空。ページを再読み込みして再発行をリトライします")
+            await page.reload(wait_until="load")
+            await page.wait_for_selector('input#apiKeyIssue', timeout=15000)
+            await page.click('input#apiKeyIssue')
+            await page.wait_for_selector('button:has-text("実行")', timeout=15000)
+            await page.click('button:has-text("実行")')
+            endpoint, api_key = await _read_endpoint_and_key()
 
         if not api_key:
             err_html, err_png = await _dump_error("ld_atompub_no_key")
-            logger.error("[LD-Recover] API Keyが取得できませんでした。証跡: %s, %s", err_html, err_png)
+            logger.error(f"[LD-Recover] API Keyが取得できませんでした。証跡: {err_html}, {err_png}")
             return {
                 "success": False,
                 "error": "api key empty",
@@ -804,27 +650,16 @@ async def recover_atompub_key(
                 "png_path": err_png
             }
 
-        if not endpoint:
-            # 既定候補にフォールバック
-            endpoint = "https://livedoor.blogcms.jp/atompub"
+        logger.info(f"[LD-Recover] ✅ AtomPub endpoint: {endpoint}")
+        logger.info(f"[LD-Recover] ✅ AtomPub key: {api_key[:8]}...")
 
-        # スクリーンショット（成功時の証跡）
-        success_png = f"/tmp/ld_atompub_page_{timestamp}.png"
-        try:
-            await page.screenshot(path=success_png, full_page=True)
-            logger.info("[LD-Recover] AtomPubページのスクリーンショット保存: %s", success_png)
-        except Exception:
-            pass
-
-        logger.info("[LD-Recover] ✅ AtomPub endpoint: %s", endpoint)
-        logger.info("[LD-Recover] ✅ AtomPub key: %s...", api_key[:8])
-
+        # 10) 返却（DB保存は呼び出し元が担当）
         return {
             "success": True,
             "blog_id": blog_id,
             "api_key": api_key,
             "endpoint": endpoint,
-            "blog_title": desired_title
+            "blog_title": desired_title  # 任意
         }
 
     except Exception as e:
