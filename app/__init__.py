@@ -121,11 +121,10 @@ def create_app() -> Flask:
         except Exception as e:
             app.logger.exception("⚠️ SCHEDULER: lock 初期化に失敗したためスキップ: %s", e)
 
-    # ⬇⬇⬇ ここを追加 ⬇⬇⬇
-    # ⬇ 置き換え
-    @app.before_serving
+    # === PWController 起動（フックを動的に選択して登録）========================
     def _start_pw_controller_once():
         try:
+            # 🔸遅延 import（循環importを避ける）
             from app.services.pw_controller import pwctl  # type: ignore
             headless = os.getenv("PWCTL_HEADLESS", "1") == "1"
             pwctl.start(headless=headless)
@@ -133,7 +132,18 @@ def create_app() -> Flask:
         except Exception as e:
             app.logger.exception("⚠️ PWController start failed: %s", e)
 
-    # ⬆⬆⬆ ここまで ⬆⬆⬆        
+    # Flask のバージョン差を吸収して“存在するフック”に登録
+    _hook = getattr(app, "before_serving", None) or getattr(app, "before_first_request", None)
+    if callable(_hook):
+        _hook(_start_pw_controller_once)
+    else:
+        # どちらのフックも無い超古い/超新しい派生環境向けフォールバック
+        try:
+            _start_pw_controller_once()
+        except Exception:
+            app.logger.exception("⚠️ PWController immediate start failed")
+# ========================================================================
+       
 
 
     login_manager.login_view = "main.login"
