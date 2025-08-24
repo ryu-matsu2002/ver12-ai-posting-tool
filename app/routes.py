@@ -4755,7 +4755,8 @@ def external_seo_generate_get():
 
 
 from flask import render_template, redirect, url_for, request, session, flash
-from app.services.blog_signup.livedoor_signup import poll_latest_link_gw, extract_verification_url
+from app.services.mail_utils.mail_tm import poll_latest_link_tm_async as poll_latest_link_gw
+from app.services.blog_signup.livedoor_signup import extract_verification_url
 
 @bp.route('/confirm_email_manual/<task_id>')
 def confirm_email_manual(task_id):

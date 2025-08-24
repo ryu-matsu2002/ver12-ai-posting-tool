@@ -21,6 +21,13 @@ from app.models import ExternalBlogAccount
 from app.services.pw_controller import pwctl  # ← 長寿命Playwright
 from playwright.async_api import Page, TimeoutError as PWTimeoutError
 
+# 互換: 旧ルートが livedoor_signup から直接 import していた名前を再輸出
+from app.services.mail_utils.mail_tm import (
+    create_inbox as _create_inbox_gw,
+    poll_latest_link_tm_async as poll_latest_link_gw,
+)
+
+
 logger = logging.getLogger(__name__)
 
 # このモジュール用の Blueprint（既存をそのまま維持）
