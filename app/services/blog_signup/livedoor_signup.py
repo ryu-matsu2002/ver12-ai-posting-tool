@@ -28,6 +28,7 @@ from app.services.mail_utils.mail_tm import (
 )
 
 
+
 logger = logging.getLogger(__name__)
 
 # このモジュール用の Blueprint（既存をそのまま維持）
@@ -273,3 +274,7 @@ def register_blog_account(site, email_seed: str = "ld"):
         "session_id": session_id,
     }
 # ---------------------------------------------------------------------------
+# 旧コードが import する別名（薄いラッパー）
+def signup(site, email_seed: str = "ld"):
+    # 互換シムに委譲
+    return register_blog_account(site, email_seed=email_seed)
