@@ -4426,6 +4426,14 @@ def submit_captcha():
 
     page, owner_loop = sess
 
+    # ★ ここを追加：実行前にループ健全性チェック（コルーチンを作る前）
+    if owner_loop is None or owner_loop.is_closed():
+        try:
+            delete_session_sync(session_id)  # リソース掃除（close はスキップされる実装に後述で修正）
+        except Exception:
+            pass
+        return jsonify({"status": "error", "message": "セッションの実行ループが無効です。最初からやり直してください。"}), 400
+
     try:
         desired_blog_id = session.get("captcha_desired_blog_id")
 

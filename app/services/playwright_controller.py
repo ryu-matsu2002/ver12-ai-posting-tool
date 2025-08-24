@@ -170,24 +170,29 @@ async def get_session(session_id: str) -> Optional[Tuple[Any, Optional[asyncio.A
     return sess
 
 
-async def delete_session(session_id: str) -> None:
-    """
-    async 側：保存された owner_loop 上で close する必要があるが、
-    ここは「今いるループで」await できるので通常の close を試す。
-    もし作成ループと異なることでエラーになる場合は、呼び出し元で
-    delete_session_sync() を使うのが安全。
-    """
+def delete_session_sync(session_id: str) -> None:
     with _map_lock:
         sess = _captcha_sessions.pop(session_id, None)
 
     if not sess:
         return
 
-    page = sess[0] if isinstance(sess, tuple) else sess
+    if not isinstance(sess, tuple):
+        page, owner_loop = sess, None
+    else:
+        page, owner_loop = sess
+
     if page is None:
         return
 
+    # ★ ここで“まだ”コルーチンを作らない。まずループ健全性を判定
+    if owner_loop is None or owner_loop.is_closed():
+        # ループ不明/終了時は close を諦める（リークは dict から既に除去済み）
+        return
+
+    # ここで初めてコルーチンを生成して実行
     try:
-        await page.close()
+        run_on_owner_loop_sync(page.close(), timeout=10.0, loop=owner_loop)
     except Exception:
+        # close 失敗は無視（既に閉じている等）
         pass
