@@ -4431,19 +4431,16 @@ def submit_captcha():
 
         # ★ ここが肝：page を作成した “owner_loop” 上で async 処理を実行する
         result = run_on_owner_loop_sync(
-            owner_loop,
             submit_captcha_and_complete(
-                page,
-                captcha_text,
+                page, captcha_text,
                 session.get("captcha_email"),
                 session.get("captcha_nickname"),
                 session.get("captcha_password"),
                 session.get("captcha_token"),
                 site,
-                desired_blog_id=desired_blog_id,
+                desired_blog_id=desired_blog_id
             ),
-            # 必要ならタイムアウト（秒）を指定：例）120
-            # timeout=120,
+            timeout=60,  # ← 任意（秒数を指定したい場合）
         )
 
         # ===== 成功パス（CAPTCHA成功 かつ APIキー取得）=====
