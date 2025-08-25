@@ -10,6 +10,7 @@ PWController: Playwright をアプリ稼働中ずっと保持する長寿命コ�
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import threading
@@ -25,6 +26,55 @@ logger = logging.getLogger(__name__)
 # セッション保存先（storage_state の JSON を置く場所）
 SESS_DIR = Path("/tmp/captcha_sessions")
 SESS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _human_age_sec(ts: float) -> str:
+    try:
+        return f"{int(time.time() - ts)}s"
+    except Exception:
+        return "n/a"
+
+
+def _find_latest_state_json(max_age_sec: int = 3600, prefer_member_cookie: bool = True) -> Optional[str]:
+    """
+    直近で更新された storage_state JSON を返す（フォールバック用）。
+    - max_age_sec 以内のものを採用
+    - prefer_member_cookie=True の場合、member.livedoor.com の Cookie を含むものを優先
+    """
+    try:
+        candidates = sorted(SESS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if not candidates:
+            return None
+
+        def has_member_cookie(path: Path) -> bool:
+            if not prefer_member_cookie:
+                return True
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                for c in (data.get("cookies") or []):
+                    d = c.get("domain") or ""
+                    if "member.livedoor.com" in d:
+                        return True
+            except Exception:
+                pass
+            return False
+
+        now = time.time()
+
+        # まず条件に合うもの（member cookie あり）を探す
+        for p in candidates:
+            age = now - p.stat().st_mtime
+            if age <= max_age_sec and has_member_cookie(p):
+                return str(p)
+
+        # 見つからなければ年齢条件だけで妥協
+        for p in candidates:
+            age = now - p.stat().st_mtime
+            if age <= max_age_sec:
+                return str(p)
+    except Exception:
+        logger.exception("[pwctl] _find_latest_state_json failed (ignored)")
+    return None
 
 
 class PWController:
@@ -182,27 +232,59 @@ class PWController:
         storage_state_path: Optional[str] = None,
         user_agent: Optional[str] = None,
         provider: Optional[str] = None,
+        # 追加：パス未指定時に直近の state を自動採用するフォールバック
+        auto_load_latest: bool = True,
+        # 追加：古すぎる state は採用しない（デフォルト 1 時間）
+        latest_state_max_age_sec: int = 3600,
     ) -> Tuple[str, Page]:
         """
         storage_state を引き継いで context/page を生成。新しい session_id を返す。
+        - storage_state_path が与えられればそれを採用し、ログに [pwctl] load_storage_state を出す
+        - それが無い場合でも auto_load_latest=True なら /tmp/captcha_sessions の直近 JSON を採用
         """
         await self._ensure_browser()
 
-        ctx_kwargs: Dict[str, Any] = {}
+        # ここで sid を先に払い出しておく（セッション管理のキー）
+        sid = str(uuid.uuid4())
+
+        # storage_state の決定
+        chosen_state: Optional[str] = None
+        chosen_note: str = ""
         if storage_state_path and os.path.exists(storage_state_path):
-            ctx_kwargs["storage_state"] = storage_state_path
+            chosen_state = storage_state_path
+            try:
+                mtime = Path(chosen_state).stat().st_mtime
+                chosen_note = f"(explicit; age={_human_age_sec(mtime)})"
+            except Exception:
+                chosen_note = "(explicit)"
+        elif auto_load_latest:
+            latest = _find_latest_state_json(max_age_sec=latest_state_max_age_sec, prefer_member_cookie=True)
+            if latest and os.path.exists(latest):
+                chosen_state = latest
+                try:
+                    mtime = Path(chosen_state).stat().st_mtime
+                    chosen_note = f"(auto; age={_human_age_sec(mtime)})"
+                except Exception:
+                    chosen_note = "(auto)"
+
+        ctx_kwargs: Dict[str, Any] = {}
+        if chosen_state:
+            ctx_kwargs["storage_state"] = chosen_state
+            logger.info("[pwctl] load_storage_state: sid=%s -> %s %s", sid, chosen_state, chosen_note)
+        else:
+            logger.info("[pwctl] load_storage_state: sid=%s -> (none)", sid)
+
         if user_agent:
             ctx_kwargs["user_agent"] = user_agent
 
         context: BrowserContext = await self._browser.new_context(**ctx_kwargs)  # type: ignore[arg-type]
         page: Page = await context.new_page()
 
-        sid = str(uuid.uuid4())
         with self._sessions_lock:
             self.sessions[sid] = {
                 "context": context,
                 "page": page,
-                "storage_state_path": storage_state_path,
+                "storage_state_path": chosen_state,
                 "provider": provider,
                 "step": "init",
                 "created_at": time.time(),
@@ -268,6 +350,14 @@ class PWController:
         ctx_kwargs: Dict[str, Any] = {}
         if path and os.path.exists(path):
             ctx_kwargs["storage_state"] = path
+            try:
+                mtime = Path(path).stat().st_mtime
+                note = f"(age={_human_age_sec(mtime)})"
+            except Exception:
+                note = ""
+            logger.info("[pwctl] load_storage_state: sid=%s -> %s %s", session_id, path, note)
+        else:
+            logger.info("[pwctl] load_storage_state: sid=%s -> (none)", session_id)
 
         context: BrowserContext = await self._browser.new_context(**ctx_kwargs)  # type: ignore[arg-type]
         page: Page = await context.new_page()
