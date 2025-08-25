@@ -168,6 +168,9 @@ async def _ld_submit(page: Page, captcha_text: str, session_id: str) -> bool:
 
     await pwctl.set_step(session_id, "captcha_submitted")
     logger.info("[LD-Signup] reached /register/done (sid=%s)", session_id)
+    # ★重要★: ログイン完了直後の storage_state を保存。
+    # これにより revive() 実行時にも「未ログイン状態」に戻らず、/member/blog/create に到達できる。
+    await pwctl.save_storage_state(session_id)
     return True
 
 # ─────────────────────────────────────────────
@@ -1007,6 +1010,8 @@ def create_blog_and_fetch_api_key(session_id: str, *, nickname: str, email: str,
         page = pwctl.run(pwctl.revive(session_id))
         if page is None:
             raise RuntimeError(f"signup session not found (sid={session_id})")
+    # 保険: 現時点の state を保存（ワーカー切替や後続 revive 時もログイン状態を維持）
+    pwctl.run(pwctl.save_storage_state(session_id))
 
     result = pwctl.run(recover_atompub_key(
         page=page,
