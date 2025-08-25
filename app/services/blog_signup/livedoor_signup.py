@@ -4,17 +4,12 @@
 * Playwright を長寿命コントローラ（pwctl）で管理
 * 2段階フロー:
   - prepare_captcha(): 入力→CAPTCHA画像の保存（セッション保持）
-  - submit_captcha(): CAPTCHA送信→/register/done待機→（以降はメール確認/キー回収まで実行）
+  - submit_captcha(): CAPTCHA送信→/register/done待機→（以降はメール確認/キー回収の差込点）
 """
 from __future__ import annotations
 
 import logging
 import time
-import os
-import json
-import re as _re
-import inspect
-from types import SimpleNamespace
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -32,61 +27,17 @@ from app.services.mail_utils.mail_tm import (
     poll_latest_link_tm_async as poll_latest_link_gw,
 )
 
+
+
 logger = logging.getLogger(__name__)
 
 # このモジュール用の Blueprint（既存をそのまま維持）
 bp = Blueprint("livedoor_signup", __name__, url_prefix="/livedoor-signup")
 
 # ─────────────────────────────────────────────
-# 共有ディレクトリ（CAPTCHAとseedファイル）
-# ─────────────────────────────────────────────
-CAPTCHA_DIR = Path("app/static/captchas")
-CAPTCHA_DIR.mkdir(parents=True, exist_ok=True)
-
-# pw_controller と同じ場所を使ってセッション紐付けの seed を保存する
-SESS_DIR = Path("/tmp/captcha_sessions")
-SESS_DIR.mkdir(parents=True, exist_ok=True)
-
-def _seed_path(session_id: str) -> Path:
-    return SESS_DIR / f"{session_id}.seed.json"
-
-def _save_seed(session_id: str, payload: dict) -> None:
-    try:
-        _seed_path(session_id).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-        logger.info("[LD-Signup] seed saved sid=%s keys=%s", session_id, list(payload.keys()))
-    except Exception:
-        logger.exception("[LD-Signup] failed to save seed sid=%s", session_id)
-
-def _load_seed(session_id: str) -> Optional[dict]:
-    p = _seed_path(session_id)
-    if not p.exists():
-        logger.warning("[LD-Signup] seed not found sid=%s", session_id)
-        return None
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
-        logger.exception("[LD-Signup] failed to load seed sid=%s", session_id)
-        return None
-
-def _update_seed_fields(session_id: str, **fields) -> None:
-    """
-    prepare_captcha() 実行“後”に、mail.tm の token / task_id などを追記するためのヘルパ。
-    既存の seed を読み出して差分だけ上書き保存する。
-    """
-    data = _load_seed(session_id) or {}
-    changed = False
-    for k, v in fields.items():
-        if v is not None:
-            if data.get(k) != v:
-                data[k] = v
-                changed = True
-    if changed:
-        _save_seed(session_id, data)
-        logger.info("[LD-Signup] seed updated sid=%s fields=%s", session_id, [k for k, v in fields.items() if v is not None])
-
-# ─────────────────────────────────────────────
 # 補助ユーティリティ（既存ロジックをそのまま活かす）
 # ─────────────────────────────────────────────
+import re as _re
 try:
     from unidecode import unidecode
 except Exception:
@@ -139,56 +90,20 @@ def generate_safe_password(n=12) -> str:
             return password
 
 # ─────────────────────────────────────────────
-# メール本文/テキストから認証URLを頑健に抽出（verify と email_auth/commit の両対応）
-# ─────────────────────────────────────────────
-def _extract_activation_url(text: str) -> Optional[str]:
-    if not text:
-        return None
-    patterns = [
-        r"https://member\.livedoor\.com/email_auth/commit/[A-Za-z0-9]+/[A-Za-z0-9]+",
-        r"https://member\.livedoor\.com/verify/[A-Za-z0-9]+",
-    ]
-    for pat in patterns:
-        m = _re.search(pat, text)
-        if m:
-            return m.group(0)
-    return None
-
-# ─────────────────────────────────────────────
 # 新：CAPTCHA準備（セッション確保＆画像保存）— 同期API
 # ─────────────────────────────────────────────
-def prepare_captcha(email_addr: str, livedoor_id: str, password: str, *, site=None) -> Tuple[str, str]:
+CAPTCHA_DIR = Path("app/static/captchas")
+CAPTCHA_DIR.mkdir(parents=True, exist_ok=True)
+
+def prepare_captcha(email_addr: str, livedoor_id: str, password: str) -> Tuple[str, str]:
     """
     LiveDoor 会員登録フォームに入力→送信→CAPTCHAが出たら要素スクショを保存。
     返り値: (session_id, captcha_image_path)
-    ※ 後段で使う seed（email/nickname/password/任意のsite情報）をセッションに紐付けて保存。
     """
     sid, page = pwctl.run(pwctl.create_session(provider="livedoor"))
     img_path = pwctl.run(_ld_prepare(page, email_addr, livedoor_id, password, sid))
     # 復旧用に storage_state を保存（ワーカー跨ぎ/復活にも強くする）
     pwctl.run(pwctl.save_storage_state(sid))
-
-    # 後続の recover で使う seed を保存（site は必要最小限の dict 化）
-    site_view = None
-    if site is not None:
-        site_view = {
-            "id": getattr(site, "id", None),
-            "name": getattr(site, "name", None),
-            "url": getattr(site, "url", None),
-            "primary_genre_name": getattr(site, "primary_genre_name", None),
-            "genre_name": getattr(site, "genre_name", None),
-            "category": getattr(site, "category", None),
-        }
-    _save_seed(sid, {
-        "email": email_addr,
-        "nickname": livedoor_id,
-        "password": password,
-        "site": site_view,
-        # 将来の拡張用スロット（ここでは未設定。あとから _update_seed_fields で追記する）
-        "mailtm_task_id": getattr(site, "mailtm_task_id", None) if site else None,
-        "mailtm_token": getattr(site, "mailtm_token", None) if site else None,
-    })
-
     return sid, img_path
 
 async def _ld_prepare(page: Page, email_addr: str, livedoor_id: str, password: str, session_id: str) -> str:
@@ -222,11 +137,8 @@ async def _ld_prepare(page: Page, email_addr: str, livedoor_id: str, password: s
 # ─────────────────────────────────────────────
 def submit_captcha(session_id: str, captcha_text: str) -> bool:
     """
-    CAPTCHA文字列を送信し、/register/done に到達したら、
-    * 可能ならメール認証リンクへ遷移（poll_latest_link_gw を多態に呼ぶ）
-    * 続けて recover_atompub_key() を呼んでブログ作成→APIキー取得
-    * 成果を ExternalBlogAccount に保存
-    までを行う。いずれかの段階で致命失敗したら False。
+    CAPTCHA文字列を送信し、/register/done に到達したら True。
+    以降（メール認証→APIキー取得）は本関数内の“差込点”であなたの既存処理を呼び出してください。
     """
     page = pwctl.run(pwctl.get_page(session_id))
     if page is None:
@@ -235,162 +147,8 @@ def submit_captcha(session_id: str, captcha_text: str) -> bool:
         if page is None:
             raise RuntimeError(f"signup session not found (sid={session_id})")
 
-    # seed の読込
-    seed = _load_seed(session_id) or {}
-    email = seed.get("email")
-    nickname = seed.get("nickname")
-    password = seed.get("password")
-    site_view = seed.get("site") or {}
-    site_ns = SimpleNamespace(**{k: site_view.get(k) for k in ("id", "name", "url", "primary_genre_name", "genre_name", "category")})
-
     ok = pwctl.run(_ld_submit(page, captcha_text, session_id))
-    if not ok:
-        return False
-
-    # 内部ヘルパ：メールをポーリングして URL を取りに行く（token / task_id / email の順に）
-    def _try_fetch_activation_url(max_attempts: int = 24, interval: int = 5) -> Optional[str]:
-        candidates = []
-        try:
-            if seed.get("mailtm_token"):
-                candidates.append(poll_latest_link_gw(token=seed["mailtm_token"], max_attempts=max_attempts, interval=interval))
-        except TypeError:
-            pass
-        try:
-            if seed.get("mailtm_task_id"):
-                candidates.append(poll_latest_link_gw(task_id=seed["mailtm_task_id"], max_attempts=max_attempts, interval=interval))
-        except TypeError:
-            pass
-        try:
-            if email:
-                candidates.append(poll_latest_link_gw(email=email, max_attempts=max_attempts, interval=interval))
-        except TypeError:
-            pass
-        if not candidates:
-            try:
-                candidates.append(poll_latest_link_gw())
-            except TypeError:
-                pass
-
-        materialized: list = []
-        for res in candidates:
-            if inspect.iscoroutine(res):
-                try:
-                    res = pwctl.run(res)
-                except Exception:
-                    res = None
-            materialized.append(res)
-
-        for obj in materialized:
-            if not obj:
-                continue
-            if isinstance(obj, str):
-                u = _extract_activation_url(obj) or (obj if obj.startswith("http") else None)
-                if u:
-                    return u
-            elif isinstance(obj, dict):
-                for key in ("url", "link", "activation_url", "auth_url"):
-                    u = obj.get(key)
-                    if isinstance(u, str) and u.startswith("http"):
-                        return u
-                for _, val in obj.items():
-                    if isinstance(val, str):
-                        u = _extract_activation_url(val)
-                        if u:
-                            return u
-        return None
-
-    # ─────────────────────────────────────────
-    # メール認証（可能な限り実施。取得できなければスキップして次へ）
-    # ─────────────────────────────────────────
-    try:
-        activation_url = _try_fetch_activation_url(max_attempts=24, interval=5)
-        if activation_url:
-            logger.info("[LD-Signup] activation URL detected: %s", activation_url)
-            pwctl.run(page.goto(activation_url, wait_until="load"))
-            pwctl.run(pwctl.set_step(session_id, "email_verified"))
-        else:
-            logger.warning("[LD-Signup] activation URL not found. proceed anyway (sid=%s)", session_id)
-    except Exception:
-        # 認証できなくても recover 側でblog_createに挑む（失敗時は recover がダンプ群を残す）
-        logger.exception("[LD-Signup] email verification step failed (ignored) sid=%s", session_id)
-
-    # ─────────────────────────────────────────
-    # ブログ作成 → AtomPub キー取得 → DB保存
-    # ─────────────────────────────────────────
-    def _save_account_and_log(result: dict) -> bool:
-        if not result or not result.get("success"):
-            logger.error("[LD-Signup] recover_atompub_key failed: %s", result)
-            return False
-
-        blog_id  = result.get("blog_id")
-        api_key  = result.get("api_key")
-        endpoint = result.get("endpoint")
-
-        acct = db.session.query(ExternalBlogAccount).filter(
-            ExternalBlogAccount.blog_type == BlogType.LIVEDOOR,
-            ExternalBlogAccount.email == email
-        ).one_or_none()
-
-        if not acct:
-            acct = ExternalBlogAccount(blog_type=BlogType.LIVEDOOR, email=email)
-            db.session.add(acct)
-
-        if hasattr(acct, "livedoor_blog_id"):
-            acct.livedoor_blog_id = blog_id
-        if hasattr(acct, "livedoor_api_key"):
-            acct.livedoor_api_key = api_key
-        if hasattr(acct, "livedoor_endpoint"):
-            acct.livedoor_endpoint = endpoint
-        if hasattr(acct, "email_verified"):
-            acct.email_verified = True
-        if hasattr(acct, "blog_created"):
-            acct.blog_created = True
-
-        db.session.commit()
-        pwctl.run(pwctl.set_step(session_id, "api_key_ok"))
-        logger.info("[LD-Signup] ✅ blog_id=%s api_key[8]=%s...", blog_id, (api_key or "")[:8])
-        return True
-
-    try:
-        from app.services.blog_signup.livedoor_atompub_recover import recover_atompub_key
-
-        # 1回目
-        result = pwctl.run(recover_atompub_key(
-            page=page,
-            nickname=nickname or "guest",
-            email=email or "",
-            password=password or "",
-            site=site_ns,
-            desired_blog_id=None
-        ))
-
-        # もし「メール未認証」で弾かれたら、ここで再ポーリング→再実行（保険）
-        if result and (result.get("error") == "email_auth_required" or result.get("need_email_auth")):
-            logger.warning("[LD-Signup] need_email_auth returned. retrying mail poll & activation (sid=%s)", session_id)
-            try:
-                activation_url_retry = _try_fetch_activation_url(max_attempts=36, interval=5)
-                if activation_url_retry:
-                    logger.info("[LD-Signup] activation URL (retry) detected: %s", activation_url_retry)
-                    pwctl.run(page.goto(activation_url_retry, wait_until="load"))
-                    pwctl.run(pwctl.set_step(session_id, "email_verified_retry"))
-                    # 再実行
-                    result = pwctl.run(recover_atompub_key(
-                        page=page,
-                        nickname=nickname or "guest",
-                        email=email or "",
-                        password=password or "",
-                        site=site_ns,
-                        desired_blog_id=None
-                    ))
-            except Exception:
-                logger.exception("[LD-Signup] retry activation failed (ignored) sid=%s", session_id)
-
-        return _save_account_and_log(result)
-
-    except Exception:
-        logger.exception("[LD-Signup] save account failed (sid=%s)", session_id)
-        # recover 内で失敗時は HTML/PNG が保存される想定
-        return False
+    return ok
 
 async def _ld_submit(page: Page, captcha_text: str, session_id: str) -> bool:
     logger.info("[LD-Signup] submit captcha (sid=%s)", session_id)
@@ -415,6 +173,26 @@ async def _ld_submit(page: Page, captcha_text: str, session_id: str) -> bool:
 
     await pwctl.set_step(session_id, "captcha_submitted")
     logger.info("[LD-Signup] reached /register/done (sid=%s)", session_id)
+
+    # ─────────────────────────────────────────
+    # 差込点①：メール認証リンクを取得して開く（あなたの既存実装を呼ぶ）
+    # 例:
+    # from app.services.mail_utils.mail_tm import poll_latest_link_tm_async
+    # activation_url = await poll_latest_link_tm_async(token, timeout_sec=120)
+    # if not activation_url: return False
+    # await page.goto(activation_url, wait_until="load")
+    # await pwctl.set_step(session_id, "email_verified")
+    # ─────────────────────────────────────────
+
+    # ─────────────────────────────────────────
+    # 差込点②：AtomPub/APIキー取得～DB保存（既存 recover を利用）
+    # 例:
+    # from app.services.blog_signup.livedoor_atompub_recover import recover_atompub_key
+    # result = await recover_atompub_key(page, nickname, email, password, site, desired_blog_id=None)
+    # if not result.get("success"): return False
+    # await pwctl.set_step(session_id, "api_key_ok")
+    # ─────────────────────────────────────────
+
     return True
 
 # ─────────────────────────────────────────────
@@ -422,14 +200,11 @@ async def _ld_submit(page: Page, captcha_text: str, session_id: str) -> bool:
 # ─────────────────────────────────────────────
 import re
 def extract_verification_url(email_body: str) -> str | None:
-    """
-    旧互換：/verify/ のみを見る簡易抽出。
-    新実装では _extract_activation_url() が /email_auth/commit/ も拾う。
-    """
     pattern = r"https://member\.livedoor\.com/verify/[a-zA-Z0-9]+"
     m = re.search(pattern, email_body)
     return m.group(0) if m else None
 
+import json, os
 TEMP_DIR = "/tmp/livedoor_tasks"
 os.makedirs(TEMP_DIR, exist_ok=True)
 
@@ -449,7 +224,6 @@ def fetch_livedoor_credentials(task_id: str) -> dict | None:
 def confirm_email_manual(task_id):
     """
     CAPTCHA後、認証リンクをユーザーに手動で表示する画面（既存フローを維持）。
-    旧実装互換：poll_latest_link_gw がメール本文を返す想定のまま。
     """
     from app.services.mail_utils.mail_tm import poll_latest_link_tm_async as poll_latest_link_gw
     email_body = poll_latest_link_gw(task_id=task_id, max_attempts=30, interval=5)
@@ -466,23 +240,23 @@ def confirm_email_manual(task_id):
         return redirect(url_for('dashboard'))
 
 # --- legacy compatibility shim ---------------------------------------------
+from pathlib import Path
+
 def register_blog_account(site, email_seed: str = "ld"):
     """
     🔧 互換：旧フロー呼び出し対策（起動時importエラー防止用）
     実運用は新フロー /prepare_captcha → /submit_captcha を使ってください。
     呼ばれた場合は「CAPTCHAが必要」というレガシー互換レスポンスを返します。
     """
-    # mail.tm バックエンドを直接使用（token 取得のため）
-    email, token = _create_inbox_gw()
+    # 既存のメール作成ユーティリティを使って最低限の情報を用意
+    from app.services.mail_utils.mail_gw import create_inbox
+    email, token = create_inbox()
     livedoor_id = generate_safe_id()
     password    = generate_safe_password()
 
-    # CAPTCHA 準備（画像を保存し、セッションを確保）
+    # 新APIで CAPTCHA 準備だけ実行（画像を保存し、セッションを確保）
     try:
-        session_id, img_abs = prepare_captcha(email, livedoor_id, password, site=site)
-        # ★ 重要：ここで seed に mailtm_token を追記（submit_captcha で必ず使えるようにする）
-        _update_seed_fields(session_id, mailtm_token=token, email=email)
-        logger.info("[LD-Signup] seed updated with mailtm_token (sid=%s)", session_id)
+        session_id, img_abs = prepare_captcha(email, livedoor_id, password)
         img_name = Path(img_abs).name
     except Exception:
         # ここで落ちても、少なくとも起動時の import は通っているのでアプリは動きます
@@ -517,3 +291,4 @@ __all__ = [
     # ルート互換で使う補助
     "poll_latest_link_gw", "extract_verification_url",
 ]
+
