@@ -473,6 +473,8 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
         'button:has-text("登録")',
         'a.button:has-text("ブログを作成")',
         'a:has-text("ブログを作成")',
+        'button:has-text("ブログを開設")',
+        'a:has-text("ブログを開設")',
     ]
 
     # --- 1) メインフレームで厳密に待つ ---
@@ -630,6 +632,48 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
             await page.wait_for_load_state("networkidle", timeout=15000)
         except Exception:
             pass
+                # === 追加：到達確認のダンプと中間導線の踏破 ===
+        try:
+            logger.info("[LD-Recover] create到達: url=%s title=%s", page.url, (await page.title()))
+            # いま何が表示されているか毎回ダンプ（原因特定のため最初の1枚だけ）
+            try:
+                await page.screenshot(path="/tmp/ld_create_landing.png", full_page=True)
+                Path("/tmp/ld_create_landing.html").write_text(await page.content(), encoding="utf-8")
+                logger.info("[LD-Recover] dump: /tmp/ld_create_landing.png /tmp/ld_create_landing.html")
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+        # 中間画面の代表パターンを踏む（あれば押す / 無ければスキップ）
+        interstitial_sels = [
+            'button:has-text("同意して進む")',
+            'button:has-text("同意")',
+            'a:has-text("無料でブログを始める")',
+            'a:has-text("ブログの作成を開始")',
+            'a:has-text("新しくブログを作成")',
+            'button:has-text("ブログの作成")',
+            'a.button:has-text("ブログを作成")',
+        ]
+        for sel in interstitial_sels:
+            try:
+                loc = page.locator(sel).first
+                if await loc.count() > 0 and await loc.is_visible():
+                    logger.info("[LD-Recover] 中間導線をクリック: %s", sel)
+                    await _wait_enabled_and_click(page, loc, timeout=7000, label_for_log=f"interstitial {sel}")
+                    try:
+                        async with page.expect_navigation(timeout=8000):
+                            pass
+                    except Exception:
+                        pass
+                    try:
+                        await page.wait_for_load_state("networkidle", timeout=10000)
+                    except Exception:
+                        pass
+                    break  # 1つ踏めれば十分
+            except Exception:
+                continue
+
         # ★ ここを追加：メール認証未完了の早期検知
         if "need_email_auth" in page.url:
             logger.warning("[LD-Recover] email auth required before blog creation: %s", page.url)
