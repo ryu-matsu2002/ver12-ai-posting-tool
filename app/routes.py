@@ -4358,6 +4358,8 @@ def submit_captcha():
     from app import db
     from flask import jsonify, session, request
     import logging, contextlib, asyncio
+    
+
     logger = logging.getLogger(__name__)
 
     captcha_text = request.form.get("captcha_text")
@@ -4441,14 +4443,17 @@ def submit_captcha():
         if not page:
             raise RuntimeError("Playwright セッションが消失しました")
 
+        # 認証URLへ遷移（これも pwctl のループ上で）
         pwctl.run(page.goto(activation_url, wait_until="load"))
-        result = asyncio.run(recover_atompub_key(
-            page,
-            session.get("captcha_nickname"),
-            session.get("captcha_email"),
-            session.get("captcha_password"),
-            site,
-            desired_blog_id=session.get("captcha_desired_blog_id")
+
+        # ★ ここを asyncio.run(...) ではなく pwctl.run(...) にするのがポイント
+        result = pwctl.run(recover_atompub_key(
+            page=page,
+            nickname=session.get("captcha_nickname"),
+            email=session.get("captcha_email"),
+            password=session.get("captcha_password"),
+            site=site,
+            desired_blog_id=session.get("captcha_desired_blog_id"),
         ))
 
         if not result or not result.get("success"):
