@@ -388,27 +388,30 @@ async def _find_in_any_frame(page, selectors, timeout_ms=15000):
     return None, None
 
 async def _wait_enabled_and_click(page, locator, *, timeout=8000, label_for_log=""):
-    """
-    クリックの堅牢化: visible/attached/enabled を確認し、通常→force→DOMクリックの順に試す。
-    """
     try:
         await locator.wait_for(state="visible", timeout=timeout)
     except Exception:
-        # attached だけは確認しておく
         try:
             await locator.wait_for(state="attached", timeout=int(timeout/2))
         except Exception:
             pass
-    # enabled/表示状態
-    try:
-        await page.wait_for_function(
-            """(el) => el && !el.disabled && el.offsetParent !== null""",
-            arg=locator, timeout=timeout
-        )
-    except Exception:
-        pass
 
-    # スクロール & フォーカス
+    # ★ ElementHandle を取得
+    try:
+        handle = await locator.element_handle()
+    except Exception:
+        handle = None
+
+    # enabled/表示状態
+    if handle:
+        try:
+            await page.wait_for_function(
+                "(el) => el && !el.disabled && el.offsetParent !== null",
+                arg=handle, timeout=timeout
+            )
+        except Exception:
+            pass
+
     try:
         await locator.scroll_into_view_if_needed(timeout=1500)
     except Exception:
@@ -429,13 +432,16 @@ async def _wait_enabled_and_click(page, locator, *, timeout=8000, label_for_log=
             logger.info("[LD-Recover] clicked %s (force)", label_for_log or "")
             return True
         except Exception:
-            try:
-                await page.evaluate("(el)=>el.click()", locator)
-                logger.info("[LD-Recover] clicked %s (evaluate)", label_for_log or "")
-                return True
-            except Exception:
-                logger.warning("[LD-Recover] click failed %s", label_for_log, exc_info=True)
-                return False
+            if handle:
+                try:
+                    await page.evaluate("(el)=>el.click()", handle)
+                    logger.info("[LD-Recover] clicked %s (evaluate)", label_for_log or "")
+                    return True
+                except Exception:
+                    pass
+            logger.warning("[LD-Recover] click failed %s", label_for_log, exc_info=True)
+            return False
+
 
 async def _set_title_and_submit(page, desired_title: str) -> bool:
     """
@@ -624,6 +630,15 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
             await page.wait_for_load_state("networkidle", timeout=15000)
         except Exception:
             pass
+        # ★ ここを追加：メール認証未完了の早期検知
+        if "need_email_auth" in page.url:
+            logger.warning("[LD-Recover] email auth required before blog creation: %s", page.url)
+            return {
+                "success": False,
+                "error": "email_auth_required",
+                "need_email_auth": True,
+                "where": page.url,
+            }
 
         # 2) ブログタイトルを設定し送信（まずメイン→フォールバック）
         try:
@@ -803,7 +818,8 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
             blog_id = None
         if not blog_id:
             # 念のためDOMから推測
-            blog_id = (await page.url).split("/blog/")[1].split("/")[0] if "/blog/" in (await page.url) else "unknown"
+            cur_url = page.url
+            blog_id = cur_url.split("/blog/")[1].split("/")[0] if "/blog/" in cur_url else "unknown"
         logger.info(f"[LD-Recover] ブログIDを取得: {blog_id}")
 
         # 6) 設定ページ → AtomPub 発行ページへ
