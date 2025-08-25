@@ -632,18 +632,16 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
             await page.wait_for_load_state("networkidle", timeout=15000)
         except Exception:
             pass
-                # === 追加：到達確認のダンプと中間導線の踏破 ===
+        # === 追加：到達確認のダンプと中間導線の踏破 ===
         try:
             logger.info("[LD-Recover] create到達: url=%s title=%s", page.url, (await page.title()))
             # いま何が表示されているか毎回ダンプ（原因特定のため最初の1枚だけ）
-            try:
-                await page.screenshot(path="/tmp/ld_create_landing.png", full_page=True)
-                Path("/tmp/ld_create_landing.html").write_text(await page.content(), encoding="utf-8")
-                logger.info("[LD-Recover] dump: /tmp/ld_create_landing.png /tmp/ld_create_landing.html")
-            except Exception:
-                pass
+            await page.screenshot(path="/tmp/ld_create_landing.png", full_page=True)
+            Path("/tmp/ld_create_landing.html").write_text(await page.content(), encoding="utf-8")
+            logger.info("[LD-Recover] dump: /tmp/ld_create_landing.png /tmp/ld_create_landing.html")
         except Exception:
-            pass
+                pass
+        
 
         # 中間画面の代表パターンを踏む（あれば押す / 無ければスキップ）
         interstitial_sels = [
