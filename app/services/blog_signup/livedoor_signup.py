@@ -68,6 +68,22 @@ def _load_seed(session_id: str) -> Optional[dict]:
         logger.exception("[LD-Signup] failed to load seed sid=%s", session_id)
         return None
 
+def _update_seed_fields(session_id: str, **fields) -> None:
+    """
+    prepare_captcha() 実行“後”に、mail.tm の token / task_id などを追記するためのヘルパ。
+    既存の seed を読み出して差分だけ上書き保存する。
+    """
+    data = _load_seed(session_id) or {}
+    changed = False
+    for k, v in fields.items():
+        if v is not None:
+            if data.get(k) != v:
+                data[k] = v
+                changed = True
+    if changed:
+        _save_seed(session_id, data)
+        logger.info("[LD-Signup] seed updated sid=%s fields=%s", session_id, [k for k, v in fields.items() if v is not None])
+
 # ─────────────────────────────────────────────
 # 補助ユーティリティ（既存ロジックをそのまま活かす）
 # ─────────────────────────────────────────────
@@ -168,7 +184,7 @@ def prepare_captcha(email_addr: str, livedoor_id: str, password: str, *, site=No
         "nickname": livedoor_id,
         "password": password,
         "site": site_view,
-        # 将来の拡張用に mail.tm の task_id や token を載せるスロットを先に用意（無くても動く）
+        # 将来の拡張用スロット（ここでは未設定。あとから _update_seed_fields で追記する）
         "mailtm_task_id": getattr(site, "mailtm_task_id", None) if site else None,
         "mailtm_token": getattr(site, "mailtm_token", None) if site else None,
     })
@@ -231,90 +247,69 @@ def submit_captcha(session_id: str, captcha_text: str) -> bool:
     if not ok:
         return False
 
-    # ─────────────────────────────────────────
-    # メール認証（可能な限り実施。取得できなければスキップして次へ）
-    # ─────────────────────────────────────────
-    try:
-        activation_url = None
-
-        # 返り値がURLなのか本文なのかに依らず取得できるように冗長に試す
-        # 1) 代表的な引数パターンで呼んでみる
+    # 内部ヘルパ：メールをポーリングして URL を取りに行く（token / task_id / email の順に）
+    def _try_fetch_activation_url(max_attempts: int = 24, interval: int = 5) -> Optional[str]:
         candidates = []
         try:
-            # token 指定
             if seed.get("mailtm_token"):
-                res = poll_latest_link_gw(token=seed["mailtm_token"], max_attempts=24, interval=5)
-                candidates.append(res)
+                candidates.append(poll_latest_link_gw(token=seed["mailtm_token"], max_attempts=max_attempts, interval=interval))
         except TypeError:
             pass
         try:
-            # task_id 指定
             if seed.get("mailtm_task_id"):
-                res = poll_latest_link_gw(task_id=seed["mailtm_task_id"], max_attempts=24, interval=5)
-                candidates.append(res)
+                candidates.append(poll_latest_link_gw(task_id=seed["mailtm_task_id"], max_attempts=max_attempts, interval=interval))
         except TypeError:
             pass
         try:
-            # email 指定（実装側で対応していれば拾える）
             if email:
-                res = poll_latest_link_gw(email=email, max_attempts=24, interval=5)
-                candidates.append(res)
+                candidates.append(poll_latest_link_gw(email=email, max_attempts=max_attempts, interval=interval))
         except TypeError:
             pass
-
-        # 候補が空（＝どの呼び方も非対応）の場合、ダメ元でシグネチャ無し呼び出し
         if not candidates:
             try:
-                res = poll_latest_link_gw()
-                candidates.append(res)
+                candidates.append(poll_latest_link_gw())
             except TypeError:
                 pass
 
-        # coroutine だったら実行して中身を得る
         materialized: list = []
         for res in candidates:
             if inspect.iscoroutine(res):
                 try:
-                    res = pwctl.run(res)  # 内部ループでawait
+                    res = pwctl.run(res)
                 except Exception:
                     res = None
             materialized.append(res)
 
-        # 返り値の型に応じてURL抽出
         for obj in materialized:
             if not obj:
                 continue
             if isinstance(obj, str):
-                # 文字列ならそのままURLか、本文
                 u = _extract_activation_url(obj) or (obj if obj.startswith("http") else None)
                 if u:
-                    activation_url = u
-                    break
+                    return u
             elif isinstance(obj, dict):
-                # dictならよくあるキーを総当たり
                 for key in ("url", "link", "activation_url", "auth_url"):
                     u = obj.get(key)
                     if isinstance(u, str) and u.startswith("http"):
-                        activation_url = u
-                        break
-                if not activation_url:
-                    # dictの中の本文をざっと見る
-                    for key, val in obj.items():
-                        if isinstance(val, str):
-                            u = _extract_activation_url(val)
-                            if u:
-                                activation_url = u
-                                break
-                if activation_url:
-                    break
+                        return u
+                for _, val in obj.items():
+                    if isinstance(val, str):
+                        u = _extract_activation_url(val)
+                        if u:
+                            return u
+        return None
 
+    # ─────────────────────────────────────────
+    # メール認証（可能な限り実施。取得できなければスキップして次へ）
+    # ─────────────────────────────────────────
+    try:
+        activation_url = _try_fetch_activation_url(max_attempts=24, interval=5)
         if activation_url:
             logger.info("[LD-Signup] activation URL detected: %s", activation_url)
             pwctl.run(page.goto(activation_url, wait_until="load"))
             pwctl.run(pwctl.set_step(session_id, "email_verified"))
         else:
             logger.warning("[LD-Signup] activation URL not found. proceed anyway (sid=%s)", session_id)
-
     except Exception:
         # 認証できなくても recover 側でblog_createに挑む（失敗時は recover がダンプ群を残す）
         logger.exception("[LD-Signup] email verification step failed (ignored) sid=%s", session_id)
@@ -322,18 +317,7 @@ def submit_captcha(session_id: str, captcha_text: str) -> bool:
     # ─────────────────────────────────────────
     # ブログ作成 → AtomPub キー取得 → DB保存
     # ─────────────────────────────────────────
-    try:
-        from app.services.blog_signup.livedoor_atompub_recover import recover_atompub_key
-
-        result = pwctl.run(recover_atompub_key(
-            page=page,
-            nickname=nickname or "guest",
-            email=email or "",
-            password=password or "",
-            site=site_ns,
-            desired_blog_id=None
-        ))
-
+    def _save_account_and_log(result: dict) -> bool:
         if not result or not result.get("success"):
             logger.error("[LD-Signup] recover_atompub_key failed: %s", result)
             return False
@@ -342,7 +326,6 @@ def submit_captcha(session_id: str, captcha_text: str) -> bool:
         api_key  = result.get("api_key")
         endpoint = result.get("endpoint")
 
-        # ★ DB保存（一般的な列名。存在しない列は無視して安全に代入）
         acct = db.session.query(ExternalBlogAccount).filter(
             ExternalBlogAccount.blog_type == BlogType.LIVEDOOR,
             ExternalBlogAccount.email == email
@@ -368,9 +351,45 @@ def submit_captcha(session_id: str, captcha_text: str) -> bool:
         logger.info("[LD-Signup] ✅ blog_id=%s api_key[8]=%s...", blog_id, (api_key or "")[:8])
         return True
 
+    try:
+        from app.services.blog_signup.livedoor_atompub_recover import recover_atompub_key
+
+        # 1回目
+        result = pwctl.run(recover_atompub_key(
+            page=page,
+            nickname=nickname or "guest",
+            email=email or "",
+            password=password or "",
+            site=site_ns,
+            desired_blog_id=None
+        ))
+
+        # もし「メール未認証」で弾かれたら、ここで再ポーリング→再実行（保険）
+        if result and (result.get("error") == "email_auth_required" or result.get("need_email_auth")):
+            logger.warning("[LD-Signup] need_email_auth returned. retrying mail poll & activation (sid=%s)", session_id)
+            try:
+                activation_url_retry = _try_fetch_activation_url(max_attempts=36, interval=5)
+                if activation_url_retry:
+                    logger.info("[LD-Signup] activation URL (retry) detected: %s", activation_url_retry)
+                    pwctl.run(page.goto(activation_url_retry, wait_until="load"))
+                    pwctl.run(pwctl.set_step(session_id, "email_verified_retry"))
+                    # 再実行
+                    result = pwctl.run(recover_atompub_key(
+                        page=page,
+                        nickname=nickname or "guest",
+                        email=email or "",
+                        password=password or "",
+                        site=site_ns,
+                        desired_blog_id=None
+                    ))
+            except Exception:
+                logger.exception("[LD-Signup] retry activation failed (ignored) sid=%s", session_id)
+
+        return _save_account_and_log(result)
+
     except Exception:
         logger.exception("[LD-Signup] save account failed (sid=%s)", session_id)
-        # recover内で失敗時はHTML/PNGが保存される想定
+        # recover 内で失敗時は HTML/PNG が保存される想定
         return False
 
 async def _ld_submit(page: Page, captcha_text: str, session_id: str) -> bool:
@@ -453,15 +472,17 @@ def register_blog_account(site, email_seed: str = "ld"):
     実運用は新フロー /prepare_captcha → /submit_captcha を使ってください。
     呼ばれた場合は「CAPTCHAが必要」というレガシー互換レスポンスを返します。
     """
-    # 既存のメール作成ユーティリティを使って最低限の情報を用意
-    from app.services.mail_utils.mail_gw import create_inbox
-    email, token = create_inbox()
+    # mail.tm バックエンドを直接使用（token 取得のため）
+    email, token = _create_inbox_gw()
     livedoor_id = generate_safe_id()
     password    = generate_safe_password()
 
-    # 新APIで CAPTCHA 準備だけ実行（画像を保存し、セッションを確保）
+    # CAPTCHA 準備（画像を保存し、セッションを確保）
     try:
         session_id, img_abs = prepare_captcha(email, livedoor_id, password, site=site)
+        # ★ 重要：ここで seed に mailtm_token を追記（submit_captcha で必ず使えるようにする）
+        _update_seed_fields(session_id, mailtm_token=token, email=email)
+        logger.info("[LD-Signup] seed updated with mailtm_token (sid=%s)", session_id)
         img_name = Path(img_abs).name
     except Exception:
         # ここで落ちても、少なくとも起動時の import は通っているのでアプリは動きます
