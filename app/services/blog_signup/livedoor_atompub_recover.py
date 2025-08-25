@@ -3,11 +3,11 @@ from datetime import datetime
 from pathlib import Path
 import logging
 import re as _re
+from urllib.parse import urlparse, urljoin
 
 from app import db
 from app.models import ExternalBlogAccount
 from app.enums import BlogType
-from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -331,8 +331,8 @@ async def _try_set_desired_blog_id(page, desired: str) -> bool:
 # 追加：オーバーレイ/クッキーバナーを閉じる（あっても無視安全）
 async def _maybe_close_overlays(page):
     selectors = [
-        'button#iubenda-cs-accept-btn',          # iubenda よくあるID
-        'button#iubenda-cs-accept',              # 変種
+        'button#iubenda-cs-accept-btn',
+        'button#iubenda-cs-accept',
         'button:has-text("同意")',
         'button:has-text("許可")',
         'button:has-text("OK")',
@@ -346,7 +346,7 @@ async def _maybe_close_overlays(page):
                 await page.locator(sel).first.click(timeout=1000)
         except Exception:
             pass
-    # 透明オーバーレイの一般除去（pointer-events: all な全画面DIV）
+    # 透明オーバーレイの一般除去
     try:
         await page.evaluate("""
             (() => {
@@ -367,9 +367,8 @@ async def _maybe_close_overlays(page):
     except Exception:
         pass
 
-
 async def _find_in_any_frame(page, selectors, timeout_ms=15000):
-    """（既存）全フレーム走査。ログを少し強化。"""
+    """全フレーム走査。最初に見つかったframeとselectorを返す。"""
     logger.info("[LD-Recover] frame-scan start selectors=%s timeout=%sms", selectors[:2], timeout_ms)
     deadline = asyncio.get_event_loop().time() + (timeout_ms / 1000)
     while asyncio.get_event_loop().time() < deadline:
@@ -388,6 +387,55 @@ async def _find_in_any_frame(page, selectors, timeout_ms=15000):
     logger.warning("[LD-Recover] frame-scan timeout selectors=%s", selectors[:3])
     return None, None
 
+async def _wait_enabled_and_click(page, locator, *, timeout=8000, label_for_log=""):
+    """
+    クリックの堅牢化: visible/attached/enabled を確認し、通常→force→DOMクリックの順に試す。
+    """
+    try:
+        await locator.wait_for(state="visible", timeout=timeout)
+    except Exception:
+        # attached だけは確認しておく
+        try:
+            await locator.wait_for(state="attached", timeout=int(timeout/2))
+        except Exception:
+            pass
+    # enabled/表示状態
+    try:
+        await page.wait_for_function(
+            """(el) => el && !el.disabled && el.offsetParent !== null""",
+            arg=locator, timeout=timeout
+        )
+    except Exception:
+        pass
+
+    # スクロール & フォーカス
+    try:
+        await locator.scroll_into_view_if_needed(timeout=1500)
+    except Exception:
+        pass
+    try:
+        await locator.focus()
+    except Exception:
+        pass
+
+    # クリック多段
+    try:
+        await locator.click(timeout=timeout)
+        logger.info("[LD-Recover] clicked %s (normal)", label_for_log or "")
+        return True
+    except Exception:
+        try:
+            await locator.click(timeout=timeout, force=True)
+            logger.info("[LD-Recover] clicked %s (force)", label_for_log or "")
+            return True
+        except Exception:
+            try:
+                await page.evaluate("(el)=>el.click()", locator)
+                logger.info("[LD-Recover] clicked %s (evaluate)", label_for_log or "")
+                return True
+            except Exception:
+                logger.warning("[LD-Recover] click failed %s", label_for_log, exc_info=True)
+                return False
 
 async def _set_title_and_submit(page, desired_title: str) -> bool:
     """
@@ -395,7 +443,8 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
     1) まずメインフレームで厳密に待つ
     2) ダメなら全フレーム走査
     3) クリック前にスクロール＆フォーカス
-    4) どこで失敗してもログ＋スクショ
+    4) クリックは多段（normal→force→evaluate）
+    5) どこで失敗してもログ＋スクショ
     """
     await _maybe_close_overlays(page)
 
@@ -403,6 +452,7 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
     title_fallback = [
         '#blogTitle', 'input#blogTitle', 'input[name="title"]',
         'input#title', 'input[name="blogTitle"]', 'input[name="blog_title"]',
+        'input[placeholder*="ブログ"]', 'input[placeholder*="タイトル"]',
     ]
     create_btn_sels = [
         'input[type="submit"][value="ブログを作成する"]',
@@ -416,6 +466,7 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
         'button:has-text("作成")',
         'button:has-text("登録")',
         'a.button:has-text("ブログを作成")',
+        'a:has-text("ブログを作成")',
     ]
 
     # --- 1) メインフレームで厳密に待つ ---
@@ -445,10 +496,9 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
 
         if not found:
             # --- 2) 全フレーム走査 ---
-            fr, sel = await _find_in_any_frame(page, title_fallback, timeout_ms=15000)
+            fr, sel = await _find_in_any_frame(page, title_fallback, timeout_ms=20000)
             if not fr:
                 logger.warning("[LD-Recover] タイトル入力欄が見つからない（DOM/iframe変更の可能性）")
-                # デバッグ用スクショ
                 try:
                     await page.screenshot(path="/tmp/ld_title_not_found.png", full_page=True)
                     logger.info("[LD-Recover] dump: /tmp/ld_title_not_found.png")
@@ -482,15 +532,19 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
     try:
         # まずメインフレーム
         btn = None
+        btn_sel = None
         for sel in create_btn_sels:
             loc = page.locator(sel).first
-            if await loc.count() > 0:
-                btn = loc
-                btn_sel = sel
-                break
+            try:
+                if await loc.count() > 0:
+                    btn = loc
+                    btn_sel = sel
+                    break
+            except Exception:
+                continue
         if btn is None:
             # 全フレーム
-            fr_btn, btn_sel = await _find_in_any_frame(page, create_btn_sels, timeout_ms=8000)
+            fr_btn, btn_sel = await _find_in_any_frame(page, create_btn_sels, timeout_ms=10000)
             if not fr_btn:
                 logger.warning("[LD-Recover] 作成ボタンが見つからない（UI変更の可能性）")
                 try:
@@ -501,34 +555,37 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
                 return False
             btn = fr_btn.locator(btn_sel).first
 
-        # スクロール → フォーカス → クリック
-        try:
-            await btn.scroll_into_view_if_needed(timeout=2000)
-        except Exception:
-            pass
-        try:
-            await btn.focus()
-        except Exception:
-            pass
+        # クリックの堅牢化
+        clicked = await _wait_enabled_and_click(page, btn, timeout=8000, label_for_log=f"create-button {btn_sel}")
+        if not clicked:
+            try:
+                await page.screenshot(path="/tmp/ld_button_click_error.png", full_page=True)
+            except Exception:
+                pass
+            return False
 
-        await btn.click(timeout=8000)
         logger.info("[LD-Recover] 『ブログを作成』ボタンをクリック: %s", btn_sel)
+
+        # ナビゲーション待ち（発火しないケースもあるので両待機）
+        try:
+            async with page.expect_navigation(timeout=12000):
+                pass
+        except Exception:
+            pass
         try:
             await page.wait_for_load_state("networkidle", timeout=15000)
         except Exception:
             pass
 
     except Exception:
-        logger.warning("[LD-Recover] 作成ボタンクリック失敗", exc_info=True)
+        logger.warning("[LD-Recover] 作成ボタンクリック処理で例外", exc_info=True)
         try:
-            await page.screenshot(path="/tmp/ld_button_click_error.png", full_page=True)
-            logger.info("[LD-Recover] dump: /tmp/ld_button_click_error.png")
+            await page.screenshot(path="/tmp/ld_button_click_exception.png", full_page=True)
         except Exception:
             pass
         return False
 
     return True
-
 
 # ─────────────────────────────────────────────
 # メイン：ブログ作成→AtomPub APIキー取得
@@ -556,7 +613,6 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
             pass
         return error_html, error_png
 
-    
     # ─────────────────────────────────────────
     # ここから本処理
     # ─────────────────────────────────────────
@@ -600,7 +656,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                 ':has-text("ようこそ")',
                 ':has-text("ブログが作成されました")',
             ]
-            fr, sel = await _find_in_any_frame(page, hints, timeout_ms=5000)
+            fr, sel = await _find_in_any_frame(page, hints, timeout_ms=6000)
             if fr:
                 logger.info("[LD-Recover] welcome 導線の出現を確認（frame内）")
                 success = True
@@ -636,7 +692,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                                 if not await _set_title_and_submit(page, desired_title):
                                     continue
                                 try:
-                                    await page.wait_for_url(_re.compile(r"/welcome($|[/?#])"), timeout=8000)
+                                    await page.wait_for_url(_re.compile(r"/welcome($|[/?#])"), timeout=9000)
                                     success = True
                                     logger.info(f"[LD-Recover] /welcome へ遷移（blog_id={cand}）")
                                     break
@@ -645,7 +701,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                                         'a:has-text("最初のブログを書く")',
                                         'a.button:has-text("はじめての投稿")',
                                     ]
-                                    fr2, sel2 = await _find_in_any_frame(page, hints, timeout_ms=3000)
+                                    fr2, sel2 = await _find_in_any_frame(page, hints, timeout_ms=4000)
                                     if fr2:
                                         success = True
                                         logger.info(f"[LD-Recover] welcome 導線検出（blog_id={cand}）")
@@ -669,17 +725,65 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
             fr, sel = await _find_in_any_frame(page, [
                 'a:has-text("最初のブログを書く")',
                 'a.button:has-text("はじめての投稿")',
-            ], timeout_ms=2000)
+            ], timeout_ms=2500)
             if fr and sel:
-                await fr.click(sel, timeout=3000)
-                logger.info("[LD-Recover] 『最初のブログを書く』をクリック（任意）")
+                try:
+                    await _wait_enabled_and_click(fr, fr.locator(sel).first, timeout=3000, label_for_log="welcome-next")
+                    logger.info("[LD-Recover] 『最初のブログを書く』をクリック（任意）")
+                except Exception:
+                    pass
         except Exception:
             pass
 
-        # 5) /member に遷移して blog_id を抽出
+        # 5) /member に遷移して blog_id を抽出（リンク検出を堅牢化）
         await page.goto("https://livedoor.blogcms.jp/member/", wait_until="load")
-        blog_url = await page.get_attribute('a[title="ブログ設定"]', 'href')  # 例: /blog/king123/config/
-        if not blog_url:
+        try:
+            await page.wait_for_load_state("networkidle", timeout=10000)
+        except Exception:
+            pass
+
+        # 「ブログ設定」リンクのセレクタ候補
+        blog_settings_selectors = [
+            'a[title="ブログ設定"]',
+            'a:has-text("ブログ設定")',
+            'a[href^="/blog/"][href$="/config/"]',
+            'a[href*="/config/"]'
+        ]
+
+        link_el = None
+        href = None
+
+        # メインフレーム優先
+        for sel in blog_settings_selectors:
+            try:
+                loc = page.locator(sel).first
+                if await loc.count() > 0:
+                    # visible まで待ってから href を取る
+                    try:
+                        await loc.wait_for(state="visible", timeout=8000)
+                    except Exception:
+                        pass
+                    href = await loc.get_attribute("href")
+                    if href:
+                        link_el = loc
+                        break
+            except Exception:
+                continue
+
+        # 無ければ全フレーム走査
+        if not href:
+            fr, sel = await _find_in_any_frame(page, blog_settings_selectors, timeout_ms=12000)
+            if fr:
+                loc = fr.locator(sel).first
+                try:
+                    await loc.wait_for(state="visible", timeout=6000)
+                except Exception:
+                    pass
+                href = await loc.get_attribute("href")
+                if href:
+                    link_el = loc
+
+        if not href:
             err_html, err_png = await _dump_error("ld_atompub_member_fail")
             return {
                 "success": False,
@@ -687,17 +791,65 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                 "html_path": err_html,
                 "png_path": err_png
             }
-        blog_id = blog_url.split("/")[2]  # "king123"
+
+        # href 正規化（相対→絶対）
+        config_url = urljoin("https://livedoor.blogcms.jp/", href)
+        # /blog/{id}/config/ から blog_id を抽出
+        try:
+            parts = href.split("/")
+            # 例: /blog/king123/config/ → ["", "blog", "king123", "config", ""]
+            blog_id = parts[2] if len(parts) > 2 else None
+        except Exception:
+            blog_id = None
+        if not blog_id:
+            # 念のためDOMから推測
+            blog_id = (await page.url).split("/blog/")[1].split("/")[0] if "/blog/" in (await page.url) else "unknown"
         logger.info(f"[LD-Recover] ブログIDを取得: {blog_id}")
 
         # 6) 設定ページ → AtomPub 発行ページへ
-        config_url = f"https://livedoor.blogcms.jp{blog_url}"
         await page.goto(config_url, wait_until="load")
+        try:
+            await page.wait_for_load_state("networkidle", timeout=10000)
+        except Exception:
+            pass
 
-        await page.wait_for_selector('a.configIdxApi[title="API Keyの発行・確認"]', timeout=10000)
-        await page.click('a.configIdxApi[title="API Keyの発行・確認"]')
+        # 「API Keyの発行・確認」リンクに複数セレクタで対応
+        api_nav_selectors = [
+            'a.configIdxApi[title="API Keyの発行・確認"]',
+            'a[title*="API Key"]',
+            'a:has-text("API Key")',
+            'a:has-text("API Keyの発行")',
+        ]
+        api_link = None
+        for sel in api_nav_selectors:
+            try:
+                loc = page.locator(sel).first
+                if await loc.count() > 0:
+                    api_link = loc
+                    break
+            except Exception:
+                continue
+        if api_link is None:
+            fr, sel = await _find_in_any_frame(page, api_nav_selectors, timeout_ms=8000)
+            if fr:
+                api_link = fr.locator(sel).first
 
-        await page.wait_for_load_state("load")
+        if api_link is None:
+            err_html, err_png = await _dump_error("ld_atompub_nav_fail")
+            logger.error("[LD-Recover] AtomPub設定ページへのリンクが見つからない")
+            return {
+                "success": False,
+                "error": "api nav link not found",
+                "html_path": err_html,
+                "png_path": err_png
+            }
+
+        await _wait_enabled_and_click(page, api_link, timeout=8000, label_for_log="api-nav")
+        try:
+            await page.wait_for_load_state("load", timeout=10000)
+        except Exception:
+            pass
+
         logger.info(f"[LD-Recover] AtomPub設定ページに遷移: {page.url}")
 
         if "member" in page.url:
@@ -722,18 +874,32 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         logger.info(f"[LD-Recover] AtomPubページのスクリーンショット保存: {success_png}")
 
         # 8) APIキー発行
-        await page.wait_for_selector('input#apiKeyIssue', timeout=10000)
-        await page.click('input#apiKeyIssue')
+        await page.wait_for_selector('input#apiKeyIssue', timeout=12000)
+        await _wait_enabled_and_click(page, page.locator('input#apiKeyIssue').first, timeout=6000, label_for_log="api-issue")
         logger.info("[LD-Recover] 『発行する』をクリック")
 
-        await page.wait_for_selector('button:has-text("実行")', timeout=10000)
-        await page.click('button:has-text("実行")')
+        await page.wait_for_selector('button:has-text("実行")', timeout=12000)
+        await _wait_enabled_and_click(page, page.locator('button:has-text("実行")').first, timeout=6000, label_for_log="api-issue-confirm")
         logger.info("[LD-Recover] モーダルの『実行』をクリック")
 
         # 9) 取得（valueはJSで後から入るため、非空になるまで現在値を待つ & 1回だけ再発行リトライ）
         async def _read_endpoint_and_key():
-            await page.wait_for_selector('input.input-xxlarge[readonly]', timeout=15000)
-            endpoint_val = await page.locator('input.input-xxlarge[readonly]').input_value()
+            # endpoint の候補セレクタを冗長化
+            endpoint_selectors = [
+                'input.input-xxlarge[readonly]',
+                'input[readonly][name*="endpoint"]',
+                'input[readonly][id*="endpoint"]',
+            ]
+            endpoint_val = ""
+            for sel in endpoint_selectors:
+                try:
+                    await page.wait_for_selector(sel, timeout=8000)
+                    endpoint_val = await page.locator(sel).first.input_value()
+                    if endpoint_val:
+                        break
+                except Exception:
+                    continue
+
             await page.wait_for_selector('input#apiKey', timeout=15000)
             for _ in range(30):  # 30 * 0.5s = 15s
                 key_val = (await page.locator('input#apiKey').input_value()).strip()
@@ -747,10 +913,14 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         if not api_key:
             logger.warning("[LD-Recover] API Keyが空。ページを再読み込みして再発行をリトライ")
             await page.reload(wait_until="load")
+            try:
+                await page.wait_for_load_state("networkidle", timeout=8000)
+            except Exception:
+                pass
             await page.wait_for_selector('input#apiKeyIssue', timeout=15000)
-            await page.click('input#apiKeyIssue')
+            await _wait_enabled_and_click(page, page.locator('input#apiKeyIssue').first, timeout=6000, label_for_log="api-issue-retry")
             await page.wait_for_selector('button:has-text("実行")', timeout=15000)
-            await page.click('button:has-text("実行")')
+            await _wait_enabled_and_click(page, page.locator('button:has-text("実行")').first, timeout=6000, label_for_log="api-issue-confirm-retry")
             endpoint, api_key = await _read_endpoint_and_key()
 
         if not api_key:
