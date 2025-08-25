@@ -168,9 +168,21 @@ async def _ld_submit(page: Page, captcha_text: str, session_id: str) -> bool:
 
     await pwctl.set_step(session_id, "captcha_submitted")
     logger.info("[LD-Signup] reached /register/done (sid=%s)", session_id)
-    # ★重要★: ログイン完了直後の storage_state を保存。
-    # これにより revive() 実行時にも「未ログイン状態」に戻らず、/member/blog/create に到達できる。
-    await pwctl.save_storage_state(session_id)
+
+    # --- ここを追加：/register/done の直後に blogcms 側へ一度入ってクッキーを確立 ---
+    try:
+        await page.goto("https://livedoor.blogcms.jp/member/", wait_until="load")
+        try:
+            await page.wait_for_load_state("networkidle", timeout=10_000)
+        except Exception:
+            pass
+        # SSO で blogcms.jp のセッションが張られた状態を保存
+        from app.services.pw_controller import pwctl as _pwctl  # 循環参照回避のためローカル import
+        await _pwctl.save_storage_state(session_id)
+        logger.info("[LD-Signup] post-done: saved storage_state including blogcms cookies (sid=%s)", session_id)
+    except Exception:
+        logger.warning("[LD-Signup] post-done blogcms warm-up failed (sid=%s)", session_id, exc_info=True)
+
     return True
 
 # ─────────────────────────────────────────────
