@@ -11,6 +11,10 @@ from app.enums import BlogType
 
 logger = logging.getLogger(__name__)
 
+# ビルド識別（デプロイ反映チェック用）
+BUILD_TAG = "2025-08-25T11:07 selector_patch"
+logger.info(f"[LD-Recover] loaded build {BUILD_TAG}")
+
 # ─────────────────────────────────────────────
 # 安定インデックス・文字種判定・正規化などのユーティリティ
 # ─────────────────────────────────────────────
@@ -469,12 +473,14 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
         '#commit-button',
         'button[type="submit"]',
         'button:has-text("ブログを作成")',
+        'button:has-text("ブログを開設")',
+        'button:has-text("ブログを始める")',
         'button:has-text("作成")',
         'button:has-text("登録")',
         'a.button:has-text("ブログを作成")',
         'a:has-text("ブログを作成")',
-        'button:has-text("ブログを開設")',
         'a:has-text("ブログを開設")',
+        'a:has-text("ブログを始める")',
     ]
 
     # --- 1) メインフレームで厳密に待つ ---
@@ -508,8 +514,9 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
             if not fr:
                 logger.warning("[LD-Recover] タイトル入力欄が見つからない（DOM/iframe変更の可能性）")
                 try:
-                    await page.screenshot(path="/tmp/ld_title_not_found.png", full_page=True)
-                    logger.info("[LD-Recover] dump: /tmp/ld_title_not_found.png")
+                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    await page.screenshot(path=f"/tmp/ld_title_not_found_{ts}.png", full_page=True)
+                    logger.info("[LD-Recover] dump: /tmp/ld_title_not_found_%s.png", ts)
                 except Exception:
                     pass
                 return False
@@ -530,8 +537,9 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
     except Exception:
         logger.warning("[LD-Recover] タイトル入力に失敗", exc_info=True)
         try:
-            await page.screenshot(path="/tmp/ld_title_fill_error.png", full_page=True)
-            logger.info("[LD-Recover] dump: /tmp/ld_title_fill_error.png")
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            await page.screenshot(path=f"/tmp/ld_title_fill_error_{ts}.png", full_page=True)
+            logger.info("[LD-Recover] dump: /tmp/ld_title_fill_error_%s.png", ts)
         except Exception:
             pass
         return False
@@ -556,8 +564,9 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
             if not fr_btn:
                 logger.warning("[LD-Recover] 作成ボタンが見つからない（UI変更の可能性）")
                 try:
-                    await page.screenshot(path="/tmp/ld_button_not_found.png", full_page=True)
-                    logger.info("[LD-Recover] dump: /tmp/ld_button_not_found.png")
+                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    await page.screenshot(path=f"/tmp/ld_button_not_found_{ts}.png", full_page=True)
+                    logger.info("[LD-Recover] dump: /tmp/ld_button_not_found_%s.png", ts)
                 except Exception:
                     pass
                 return False
@@ -567,7 +576,9 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
         clicked = await _wait_enabled_and_click(page, btn, timeout=8000, label_for_log=f"create-button {btn_sel}")
         if not clicked:
             try:
-                await page.screenshot(path="/tmp/ld_button_click_error.png", full_page=True)
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                await page.screenshot(path=f"/tmp/ld_button_click_error_{ts}.png", full_page=True)
+                logger.info("[LD-Recover] dump: /tmp/ld_button_click_error_%s.png", ts)
             except Exception:
                 pass
             return False
@@ -588,7 +599,9 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
     except Exception:
         logger.warning("[LD-Recover] 作成ボタンクリック処理で例外", exc_info=True)
         try:
-            await page.screenshot(path="/tmp/ld_button_click_exception.png", full_page=True)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            await page.screenshot(path=f"/tmp/ld_button_click_exception_{ts}.png", full_page=True)
+            logger.info("[LD-Recover] dump: /tmp/ld_button_click_exception_%s.png", ts)
         except Exception:
             pass
         return False
@@ -632,24 +645,27 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
             await page.wait_for_load_state("networkidle", timeout=15000)
         except Exception:
             pass
+
         # === 追加：到達確認のダンプと中間導線の踏破 ===
         try:
             logger.info("[LD-Recover] create到達: url=%s title=%s", page.url, (await page.title()))
             # いま何が表示されているか毎回ダンプ（原因特定のため最初の1枚だけ）
-            await page.screenshot(path="/tmp/ld_create_landing.png", full_page=True)
-            Path("/tmp/ld_create_landing.html").write_text(await page.content(), encoding="utf-8")
-            logger.info("[LD-Recover] dump: /tmp/ld_create_landing.png /tmp/ld_create_landing.html")
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            await page.screenshot(path=f"/tmp/ld_create_landing_{ts}.png", full_page=True)
+            Path(f"/tmp/ld_create_landing_{ts}.html").write_text(await page.content(), encoding="utf-8")
+            logger.info("[LD-Recover] dump: /tmp/ld_create_landing_%s.png /tmp/ld_create_landing_%s.html", ts, ts)
         except Exception:
-                pass
-        
+            pass
 
         # 中間画面の代表パターンを踏む（あれば押す / 無ければスキップ）
         interstitial_sels = [
             'button:has-text("同意して進む")',
             'button:has-text("同意")',
+            'button:has-text("許可")',
             'a:has-text("無料でブログを始める")',
             'a:has-text("ブログの作成を開始")',
             'a:has-text("新しくブログを作成")',
+            'a:has-text("ブログを始める")',
             'button:has-text("ブログの作成")',
             'a.button:has-text("ブログを作成")',
         ]
