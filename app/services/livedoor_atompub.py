@@ -24,7 +24,9 @@ from app.services.blog_signup.crypto_utils import decrypt
 logger = logging.getLogger(__name__)
 
 
-# 先頭の import 群の下あたりに追加
+# ---------------------------------------------------------------------
+# URLユーティリティ
+# ---------------------------------------------------------------------
 def _entry_base(endpoint: str | None, blog_id: str) -> str:
     """
     endpoint が '.../atompub' でも '.../atompub/<blog_id>' でも
@@ -35,23 +37,21 @@ def _entry_base(endpoint: str | None, blog_id: str) -> str:
         base = f"{base}/{blog_id}"
     return f"{base}/entry"
 
-# ---------------------------------------------------------------------
-# ユーティリティ
-# ---------------------------------------------------------------------
-def _auth(blog_id: str, api_key_enc: str) -> HTTPBasicAuth:
-    """暗号化済み AtomPub Key を復号して Basic 認証オブジェクトに変換"""
-    api_key = decrypt(api_key_enc)
-    return HTTPBasicAuth(blog_id, api_key)
-
 
 def _endpoint(blog_id: str, resource: str = "article") -> str:
     """
-    AtomPub エンドポイントを生成.
+    LiveDoor独自のREST風エンドポイントを生成.
     resource:
         - "article"                → 記事コレクション（POST で新規）
         - f"article/{article_id}"  → 特定記事（PUT / DELETE）
     """
     return f"https://livedoor.blogcms.jp/atom/blog/{blog_id}/{resource}"
+
+
+def _auth(blog_id: str, api_key_enc: str) -> HTTPBasicAuth:
+    """暗号化済み AtomPub Key を復号して Basic 認証オブジェクトに変換"""
+    api_key = decrypt(api_key_enc)
+    return HTTPBasicAuth(blog_id, api_key)
 
 
 def _build_entry_xml(
@@ -101,34 +101,41 @@ def post_entry(
     categories: Optional[List[str]] = None,
     draft: bool = False,
     timeout: int = 30,
-    endpoint: Optional[str] = None,   # ★ 追加
+    endpoint: Optional[str] = None,
 ) -> Tuple[int, str]:
     """
     新規記事を投稿し `(article_id, public_url)` を返す。
-    失敗時は HTTPError を送出。
+    AtomPub形式とREST形式の両方を試す（フォールバックあり）。
     """
     xml_body = _build_entry_xml(title, content, categories, draft)
-    url = _entry_base(endpoint, blog_id)  # ★ 置き換え（常に …/atompub/<blog_id>/entry）
-    logger.info("[AtomPub] POST %s", url)
 
-    resp = requests.post(
-        url,
-        data=xml_body.encode("utf-8"),
-        headers={"Content-Type": "application/atom+xml; charset=utf-8"},
-        auth=_auth(blog_id, api_key_enc),
-        timeout=timeout,
-    )
-    resp.raise_for_status()
+    primary_url = _entry_base(endpoint, blog_id)   # …/atompub/<id>/entry
+    alt_url     = _endpoint(blog_id, "article")    # …/atom/blog/<id>/article
 
-    # レスポンス XML から ARTICLE_ID と URL を抽出
+    resp = None
+    for i, url in enumerate((primary_url, alt_url)):
+        logger.info("[AtomPub] POST %s (try=%d)", url, i+1)
+        resp = requests.post(
+            url,
+            data=xml_body.encode("utf-8"),
+            headers={"Content-Type": "application/atom+xml; charset=utf-8"},
+            auth=_auth(blog_id, api_key_enc),
+            timeout=timeout,
+        )
+        if resp.status_code in (404, 410) and i == 0:
+            logger.warning("[AtomPub] POST %s -> %s, fallback to %s",
+                           resp.status_code, url, alt_url)
+            continue
+        resp.raise_for_status()
+        break
+
     entry = xmltodict.parse(resp.text)["entry"]
-    article_id = int(entry["id"].split(".")[-1])  # tag:.blogcms.jp,XXXX:article-xxxx.<ID>
+    article_id = int(entry["id"].split(".")[-1])
     public_url = next(
         link["@href"]
         for link in entry["link"]
         if link["@rel"] == "alternate" and link["@type"] == "text/html"
     )
-
     logger.info("[AtomPub] Posted article_id=%s", article_id)
     return article_id, public_url
 
@@ -141,18 +148,27 @@ def update_entry(
     content: Optional[str] = None,
     categories: Optional[List[str]] = None,
     timeout: int = 30,
-    endpoint: Optional[str] = None,   # ★ 追加
+    endpoint: Optional[str] = None,
 ) -> None:
-    """既存記事を更新（全文 PUT）。"""
+    """既存記事を更新（全文 PUT）。フォールバックあり。"""
     if not (title or content or categories):
         raise ValueError("update_entry: 変更点がありません")
 
-    # 現行記事を GET → 差し替え（タイトルだけ更新などのため）
-    base = _entry_base(endpoint, blog_id)           # …/atompub/<blog_id>/entry
-    get_url = f"{base}/{article_id}"         
-    r = requests.get(get_url, auth=_auth(blog_id, api_key_enc), timeout=timeout)
-    r.raise_for_status()
-    entry = xmltodict.parse(r.text)["entry"]
+    primary_base = _entry_base(endpoint, blog_id)
+    alt_base     = _endpoint(blog_id, "article")
+
+    # GET
+    resp = None
+    for i, base in enumerate((primary_base, alt_base)):
+        get_url = f"{base}/{article_id}"
+        logger.info("[AtomPub] GET %s (try=%d)", get_url, i+1)
+        resp = requests.get(get_url, auth=_auth(blog_id, api_key_enc), timeout=timeout)
+        if resp.status_code in (404, 410) and i == 0:
+            continue
+        resp.raise_for_status()
+        break
+
+    entry = xmltodict.parse(resp.text)["entry"]
 
     if title:
         entry["title"] = title
@@ -162,17 +178,23 @@ def update_entry(
         entry["category"] = [{"@term": c.strip()} for c in categories]
 
     put_xml = xmltodict.unparse({"entry": entry}, pretty=True)
-    put_url = f"{base}/{article_id}"  
-    logger.info("[AtomPub] PUT %s", put_url)
 
-    pr = requests.put(
-        put_url,
-        data=put_xml.encode("utf-8"),
-        headers={"Content-Type": "application/atom+xml; charset=utf-8"},
-        auth=_auth(blog_id, api_key_enc),
-        timeout=timeout,
-    )
-    pr.raise_for_status()
+    # PUT
+    for i, base in enumerate((primary_base, alt_base)):
+        put_url = f"{base}/{article_id}"
+        logger.info("[AtomPub] PUT %s (try=%d)", put_url, i+1)
+        pr = requests.put(
+            put_url,
+            data=put_xml.encode("utf-8"),
+            headers={"Content-Type": "application/atom+xml; charset=utf-8"},
+            auth=_auth(blog_id, api_key_enc),
+            timeout=timeout,
+        )
+        if pr.status_code in (404, 410) and i == 0:
+            continue
+        pr.raise_for_status()
+        break
+
     logger.info("[AtomPub] Updated article_id=%s", article_id)
 
 
@@ -181,11 +203,19 @@ def delete_entry(
     api_key_enc: str,
     article_id: int,
     timeout: int = 30,
-    endpoint: Optional[str] = None,   # ★ 追加
+    endpoint: Optional[str] = None,
 ) -> None:
-    """記事を削除。成功すれば 204 No Content。"""
-    url = f"{_entry_base(endpoint, blog_id)}/{article_id}"   # ★ 置き換え
-    logger.info("[AtomPub] DELETE %s", url)
-    resp = requests.delete(url, auth=_auth(blog_id, api_key_enc), timeout=timeout)
-    resp.raise_for_status()
+    """記事を削除。フォールバックあり。"""
+    primary_base = _entry_base(endpoint, blog_id)
+    alt_base     = _endpoint(blog_id, "article")
+
+    for i, base in enumerate((primary_base, alt_base)):
+        url = f"{base}/{article_id}"
+        logger.info("[AtomPub] DELETE %s (try=%d)", url, i+1)
+        resp = requests.delete(url, auth=_auth(blog_id, api_key_enc), timeout=timeout)
+        if resp.status_code in (404, 410) and i == 0:
+            continue
+        resp.raise_for_status()
+        break
+
     logger.info("[AtomPub] Deleted article_id=%s", article_id)
