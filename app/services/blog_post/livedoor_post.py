@@ -13,14 +13,29 @@ from app.services.blog_signup.crypto_utils import decrypt  # 復号はフォー�
 
 def _canon_endpoint(ep: str | None) -> str:
     """
-    AtomPubエンドポイントを正規化（末尾スラッシュ除去）。
+    AtomPubエンドポイントを正規化（常に .../atompub に揃える）。
+    endpoint に /<blog_id> や /article が付いて保存されていても削ぎ落とす。
     """
     ep = (ep or "").strip()
     if not ep:
-        # 既定：livedoor公式のAtomPubエンドポイント
-        # ※ 以前 blogcms ドメイン直指定にしていたが、endpointカラムを優先して使う
         ep = os.getenv("LIVEDOOR_ATOM_ENDPOINT", "https://livedoor.blogcms.jp/atompub")
-    return ep.rstrip("/")
+
+    ep = ep.rstrip("/")
+
+    # livedoor.blogcms.jp の /atompub 配下に余計なパスが付いていたら /atompub に戻す
+    m = re.match(r"^(https://livedoor\.blogcms\.jp/atompub)(?:/.*)?$", ep)
+    if m:
+        return m.group(1)
+
+    # それ以外が来ても保険でベースに固定
+    return "https://livedoor.blogcms.jp/atompub"
+
+def _norm_blog_id(raw: str) -> str:
+    s = (raw or "").strip().lower()
+    s = re.sub(r"[^a-z0-9\-]", "-", s)
+    s = re.sub(r"-{2,}", "-", s).strip("-")
+    return s
+
 
 
 def _resolve_api_key(account) -> str:
@@ -61,20 +76,22 @@ def post_livedoor_article(account, title: str, body_html: str):
     account: ExternalBlogAccount
     """
     try:
-        blog_id = getattr(account, "livedoor_blog_id", None)
-        if not blog_id:
+        raw_blog_id = getattr(account, "livedoor_blog_id", None)
+        if not raw_blog_id:
             raise ValueError("livedoor_blog_id が設定されていません")
 
-        username = getattr(account, "username", None) or blog_id
+        blog_id = _norm_blog_id(raw_blog_id)
+
+        username = blog_id
         api_key = _resolve_api_key(account)
         endpoint = _canon_endpoint(getattr(account, "atompub_endpoint", None))
 
-        api_url = f"{endpoint}/{blog_id}/article"  # 末尾スラ無し
+        # ✅ 最終URLは必ず .../atompub/<blog_id>/article の形になる
+        api_url = f"{endpoint}/{blog_id}/article"
 
         # CDATA 安全化
         safe_body_html = (body_html or "").replace("]]>", "]]]]><![CDATA[>")
 
-        # AtomPub ペイロード
         xml_payload = f"""<?xml version="1.0" encoding="utf-8"?>
 <entry xmlns="http://www.w3.org/2005/Atom">
   <title>{escape(title or "")}</title>
@@ -88,11 +105,10 @@ def post_livedoor_article(account, title: str, body_html: str):
         auth = HTTPBasicAuth(username, api_key)
 
         logging.info(
-            "[LivedoorPost] 投稿開始 blog_id=%s endpoint=%s user=%s key_len=%s",
-            blog_id, endpoint, username, len(api_key),
+            "[LivedoorPost] 投稿開始 blog_id=%s endpoint=%s url=%s user=%s key_len=%s",
+            blog_id, endpoint, api_url, username, len(api_key),
         )
 
-        # タイムアウト付きで軽くリトライ（5xxのみ）
         last_res = None
         for attempt in range(2):
             res = requests.post(
@@ -111,17 +127,16 @@ def post_livedoor_article(account, title: str, body_html: str):
                 continue
             break
 
-        # 失敗時の詳細
         if last_res is not None and last_res.status_code == 401:
             logging.error(
-                "[LivedoorPost] 認証失敗(401): endpoint=%s blog_id=%s user=%s body=%s",
-                endpoint, blog_id, username, last_res.text[:500]
+                "[LivedoorPost] 認証失敗(401): endpoint=%s url=%s blog_id=%s user=%s body=%s",
+                endpoint, api_url, blog_id, username, last_res.text[:500]
             )
             return {"ok": False, "error": f"401: Invalid Authenticate (endpoint={endpoint})"}
 
         status = getattr(last_res, "status_code", "NA")
         body = getattr(last_res, "text", "")[:500]
-        logging.error("[LivedoorPost] 投稿失敗 status=%s body=%s", status, body)
+        logging.error("[LivedoorPost] 投稿失敗 status=%s url=%s body=%s", status, api_url, body)
         return {"ok": False, "error": f"{status}: {body}"}
 
     except Exception as e:
