@@ -87,23 +87,7 @@
   .tcd-metrics{ color:#374151; font-size:.95rem; gap:1.25rem; }
 </style>
 
-{# ───────── flashメッセージ ───────── #}
-{% with messages = get_flashed_messages(with_categories=true) %}
-  {% if messages %}
-    <div class="mb-4 space-y-2">
-      {% for category, message in messages %}
-        <div class="px-4 py-2 rounded text-white
-                    {% if category == 'success' %} bg-green-600
-                    {% elif category == 'danger' %} bg-red-600
-                    {% elif category == 'warning' %} bg-yellow-500 text-black
-                    {% else %} bg-gray-600
-                    {% endif %}">
-          {{ message }}
-        </div>
-      {% endfor %}
-    </div>
-  {% endif %}
-{% endwith %}
+
 
 <div class="tcd-wrap">
   <div class="flex gap-6">
@@ -287,7 +271,7 @@
   function disableLink(el){
     el.classList.add('opacity-50','pointer-events-none','cursor-not-allowed');
     if(!el.dataset.originalText){ el.dataset.originalText = el.textContent; }
-    el.textContent = '処理中…';
+    el.textContent = '生成中…';
   }
   function lockAndGo(el){
     const aid = el.getAttribute('data-account-id');
