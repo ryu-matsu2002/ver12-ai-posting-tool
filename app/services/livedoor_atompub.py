@@ -23,6 +23,18 @@ from app.services.blog_signup.crypto_utils import decrypt
 
 logger = logging.getLogger(__name__)
 
+
+# 先頭の import 群の下あたりに追加
+def _entry_base(endpoint: str | None, blog_id: str) -> str:
+    """
+    endpoint が '.../atompub' でも '.../atompub/<blog_id>' でも
+    最終的に '.../atompub/<blog_id>/entry' を返す
+    """
+    base = (endpoint or "https://livedoor.blogcms.jp/atompub").rstrip("/")
+    if not base.endswith(f"/{blog_id}"):
+        base = f"{base}/{blog_id}"
+    return f"{base}/entry"
+
 # ---------------------------------------------------------------------
 # ユーティリティ
 # ---------------------------------------------------------------------
@@ -89,13 +101,14 @@ def post_entry(
     categories: Optional[List[str]] = None,
     draft: bool = False,
     timeout: int = 30,
+    endpoint: Optional[str] = None,   # ★ 追加
 ) -> Tuple[int, str]:
     """
     新規記事を投稿し `(article_id, public_url)` を返す。
     失敗時は HTTPError を送出。
     """
     xml_body = _build_entry_xml(title, content, categories, draft)
-    url = _endpoint(blog_id, "article")
+    url = _entry_base(endpoint, blog_id)  # ★ 置き換え（常に …/atompub/<blog_id>/entry）
     logger.info("[AtomPub] POST %s", url)
 
     resp = requests.post(
@@ -128,13 +141,15 @@ def update_entry(
     content: Optional[str] = None,
     categories: Optional[List[str]] = None,
     timeout: int = 30,
+    endpoint: Optional[str] = None,   # ★ 追加
 ) -> None:
     """既存記事を更新（全文 PUT）。"""
     if not (title or content or categories):
         raise ValueError("update_entry: 変更点がありません")
 
     # 現行記事を GET → 差し替え（タイトルだけ更新などのため）
-    get_url = _endpoint(blog_id, f"article/{article_id}")
+    base = _entry_base(endpoint, blog_id)           # …/atompub/<blog_id>/entry
+    get_url = f"{base}/{article_id}"         
     r = requests.get(get_url, auth=_auth(blog_id, api_key_enc), timeout=timeout)
     r.raise_for_status()
     entry = xmltodict.parse(r.text)["entry"]
@@ -147,7 +162,7 @@ def update_entry(
         entry["category"] = [{"@term": c.strip()} for c in categories]
 
     put_xml = xmltodict.unparse({"entry": entry}, pretty=True)
-    put_url = _endpoint(blog_id, f"article/{article_id}")
+    put_url = f"{base}/{article_id}"  
     logger.info("[AtomPub] PUT %s", put_url)
 
     pr = requests.put(
@@ -166,9 +181,10 @@ def delete_entry(
     api_key_enc: str,
     article_id: int,
     timeout: int = 30,
+    endpoint: Optional[str] = None,   # ★ 追加
 ) -> None:
     """記事を削除。成功すれば 204 No Content。"""
-    url = _endpoint(blog_id, f"article/{article_id}")
+    url = f"{_entry_base(endpoint, blog_id)}/{article_id}"   # ★ 置き換え
     logger.info("[AtomPub] DELETE %s", url)
     resp = requests.delete(url, auth=_auth(blog_id, api_key_enc), timeout=timeout)
     resp.raise_for_status()
