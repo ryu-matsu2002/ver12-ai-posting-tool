@@ -4,7 +4,8 @@
 {% block content %}
 <style>
   :root{
-    --tcd-base:#f3e7f8;
+    /* 要望：ベースカラーのみ #ff89ff に変更（他は現状維持） */
+    --tcd-base:#ff89ff;
     --tcd-dark:#b98ccf;
     --tcd-darker:#9b73b8;
     --tcd-light:#f7effb;
@@ -81,6 +82,7 @@
   #siteList::before,#siteList::after,
   .sites-scroll::before,.sites-scroll::after,
   .prop-card::before,.prop-card::after{ content:none !important; display:none !important; }
+
   .tcd-side-title{
     padding: 14px 18px 8px;
     font-weight: 800; letter-spacing: .02em;
@@ -200,6 +202,26 @@
 
   .accordion-panel{ background: transparent; }
   .site-panel{ content-visibility:auto; contain-intrinsic-size: 800px 600px; }
+
+  /* ====== “白いピース” を確実に無効化（最下部に配置して勝たせる） ====== */
+  #siteList .prop-card::before,
+  #siteList .prop-card::after{
+    content: none !important;
+    display: none !important;
+    background: none !important;
+    box-shadow: none !important;
+    -webkit-mask: none !important;
+    mask: none !important;
+  }
+  /* 念のため、カード自体にも余計な背景画像/マスクを禁止 */
+  #siteList .prop-card{
+    background-image: none !important;
+    -webkit-mask: none !important;
+    mask: none !important;
+    overflow: hidden; /* 断片がはみ出さないよう保険 */
+  }
+  /* Chrome の合成滲み対策（必要に応じて） */
+  #siteList { transform: translateZ(0); }
 </style>
 
 {% set ALLOW_MULTI_BLOG_USER_IDS = [1, 2, 5] %}
