@@ -185,8 +185,8 @@
         {% for s in sites %}
           {# ドメインを生成（簡易） #}
           {% set _url = s.url|default('')|replace('https://','')|replace('http://','')|replace('www.','') %}
-          {% set _domain = (_url|split('/'))[0] if _url else '' %}
-
+          {% set _clean = (_url|replace('http://','')|replace('https://','')|replace('www.','')) %}
+          {% set _domain = _clean.split('/')[0] if _clean else '' %}
           {# プラットフォーム件数（既存データからのフォールバック） #}
           {% set _livedoor_accounts = [] %}
           {% if s.livedoor_accounts is defined %}
