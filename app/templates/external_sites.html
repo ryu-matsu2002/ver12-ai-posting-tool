@@ -10,21 +10,26 @@
     --tcd-light:#ffd4ff;
     --tcd-lighter:#ffecff;
 
-    /* 右ペインの見やすさ強化 */
+    /* 右ペイン */
     --pane-bg:#fff6fb;
     --pane-card:#ffffff;
     --pane-border:rgba(0,0,0,.08);
 
-    /* 右のカード領域の色（ご要望：白背景と分ける） */
+    /* 右のカード帯（色つきゾーン） */
     --card-zone-bg:#ffe9f5;
+    --card-zone-border:#f7c5e6;
+
+    /* 無料ブログ（アコーディオン枠）の強調色 */
+    --acc-frame:#f3a3d5;
+    --acc-frame-soft:#fde7f3;
   }
 
-  /* ✅ 全ページ幅シフト防止（開閉時も幅が動かない） */
+  /* ✅ 幅シフト防止＆左端の白余白を完全除去 */
   html{ scrollbar-gutter: stable both-edges; }
-  body{ overflow-y: scroll; } /* 常に縦スクロール確保で幅固定 */
+  html, body{ margin:0 !important; }
+  body{ overflow-y: scroll; } /* 縦スクロール常時確保で幅固定 */
 
-  /* ✅ このページだけコンテンツ左右のパディング/マージンを0にして
-        2枚目の「左メニューの左の白い余白」を除去 */
+  /* このページの左右余白を0に（テーマ側の余白を打ち消す） */
   .page-content, .app-content, .page-wrapper, .app-main,
   .content, .content-area, .container{
     padding-left: 0 !important;
@@ -92,21 +97,21 @@
   }
   .side-search input::placeholder{ color: rgba(255,255,255,.85); }
 
-  /* サイトリスト（3枚目の白い棒を完全排除） */
+  /* サイトリスト（白い棒対策） */
   .sites-scroll{
     position: relative;
     overflow: auto;
     padding: 0 12px 14px;
     max-height: calc(100vh - 280px);
     background: transparent;
-    mask-image: none;  
+    mask-image: none;
     -webkit-mask-image: none; /* Edge/Chromeの塗り欠け対策 */
   }
   .sites-scroll::-webkit-scrollbar{ width: 6px; }
   .sites-scroll::-webkit-scrollbar-thumb{ background: rgba(255,255,255,.45); border-radius: 999px; }
   .sites-scroll::-webkit-scrollbar-track{ background: transparent; }
 
-  /* サイトカード：列そろえのためグリッド化（高さブレなし/白棒抑止） */
+  /* サイトカード（列揃え＆はみ出し抑止） */
   .prop-card{
     background: rgba(255,255,255,.16);
     border: 1px solid rgba(255,255,255,.15);
@@ -116,27 +121,28 @@
     transition: background .12s ease, border-color .12s ease, box-shadow .12s ease;
     cursor: pointer;
     display: grid;
-    grid-template-rows: auto auto; /* 1:ヘッダ行、2:ドメイン */
+    grid-template-rows: auto auto; /* 1:ヘッダ, 2:ドメイン */
     row-gap: 6px;
-    overflow: hidden; /* 余計なはみ出しをカット（白い形対策） */
-    background-clip: padding-box; /* 角の描画滲み対策 */
+    overflow: hidden;
+    background-clip: padding-box;
   }
   .prop-card:hover{ background: rgba(255,255,255,.22); border-color: rgba(255,255,255,.28); }
   .prop-card:focus{ outline: none; }
-  .prop-card.active{ box-shadow: inset 0 0 0 2px #ffffff; } /* 見た目だけ強調（サイズ不変） */
+  .prop-card.active{ box-shadow: inset 0 0 0 2px #ffffff; }
 
-  /* サイト名とバッジを列そろえ（サイト名幅は固定、超えたら自動改行） */
+  /* サイト名とバッジ（サイト名は固定幅、バッジは折り返して全表示） */
   .prop-head{
     display:grid;
-    grid-template-columns: 320px 1fr; /* ✅ サイト名固定幅 */
+    grid-template-columns: 320px 1fr;        /* ✅ サイト名固定幅 */
     align-items: center;
     column-gap: 10px;
     min-height: 28px;
   }
+  .prop-head > * { min-width: 0; }           /* 子の正しい縮小を許可 */
   .prop-name{
     font-weight: 800;
     line-height: 1.35;
-    white-space: normal;         /* ✅ すべて表示（省略しない） */
+    white-space: normal;                     /* ✅ すべて表示（省略しない） */
     word-break: break-word;
   }
   .prop-domain{
@@ -145,10 +151,11 @@
     word-break: break-all;
   }
 
-  /* バッジ（1行で横並び・折り返さない） */
+  /* バッジ：折り返し可（切れないように） */
   .pf-row-inline{
-    display:flex; align-items:center; gap:6px;
-    flex-wrap: nowrap; white-space: nowrap; overflow: hidden;
+    display:flex; align-items:center; gap:6px 6px;
+    flex-wrap: wrap;               /* ✅ 折り返し可 */
+    white-space: normal;           /* ✅ 切れない */
   }
   .pf-badge{
     display:inline-flex; align-items:center; gap:6px;
@@ -171,7 +178,7 @@
   .pf-ame{ background: linear-gradient(135deg,#16a34a,#22c55e); color:#062b0f; }
   .pf-ame .pf-count{ background: rgba(0,0,0,.12); color:#0a3114; }
 
-  /* 右側ペイン（白背景とカード帯を分離し、左と幅を揃える） */
+  /* 右側ペイン */
   .right-outer{
     background: var(--pane-bg);
     border-radius: 12px;
@@ -180,25 +187,39 @@
     flex-direction: column;
     gap: 14px;
   }
-  /* カード帯（色付きゾーン） */
+
+  /* カード帯（色付きゾーン）→ 白背景と分離して視認性UP */
   .card-zone{
     background: var(--card-zone-bg);
+    border: 2px solid var(--card-zone-border);
     border-radius: 12px;
     padding: 12px;
   }
 
+  /* 共通カード */
   .tcd-card{
     background: var(--pane-card);
     border:1px solid var(--pane-border);
     border-radius: 12px;
     box-shadow: 0 1px 2px rgba(0,0,0,.04);
   }
+
+  /* 無料ブログ（Livedoorなど）の枠を色付きでわかりやすく */
+  .tcd-card:has(.tcd-acc-trigger){
+    border-color: var(--acc-frame);
+    box-shadow: 0 0 0 2px var(--acc-frame-soft) inset;
+    background: linear-gradient(0deg, #fff 0%, #fff 100%); /* 中身は白 */
+  }
   .tcd-acc-trigger{
-    background:#fff; width:100%; text-align:left; padding:14px 20px;
+    width:100%; text-align:left; padding:14px 20px;
     display:flex; align-items:center; justify-content:flex-start; gap:14px;
-    border-top:1px solid rgba(0,0,0,.06);
-    border-bottom:1px solid rgba(0,0,0,.06);
+    background:#fff;
+    border-top:1px solid var(--acc-frame);
+    border-bottom:1px solid var(--acc-frame);
+    border-left:4px solid var(--tcd-dark);  /* 左にアクセント */
     cursor: pointer;
+    border-radius: 10px; /* 内側の角を少し丸める */
+    margin: 8px;         /* 周囲に余白（枠が見やすく） */
   }
   .tcd-caret{ font-size:2.1rem; line-height:1; color:#4b5563; transition:transform .2s ease; }
   .tcd-title-lg{ font-weight:700; font-size:1.125rem; }
@@ -208,18 +229,17 @@
   .tcd-add-btn{ border:1px solid rgba(0,0,0,.12); background:#fff; }
   .tcd-add-btn:hover{ background:#f9fafb; }
 
-  /* ✅ メトリクスは常に1行/折り返しなし（5枚目の要望） */
+  /* メトリクスは1行で（改行しない） */
   .tcd-metrics{
     color:#374151; font-size:.95rem; gap:1.25rem;
     display:flex; align-items:center; flex-wrap:nowrap; white-space:nowrap;
   }
   .tcd-metrics > div{ white-space:nowrap; }
 
-  /* ✅ 初回以外は遅延レンダ（体感高速/1秒目標の一助） */
+  /* 遅延レンダ（体感高速） */
   .site-panel{ content-visibility:auto; contain-intrinsic-size: 800px 600px; }
 
-  /* ✅ 開閉しても左右の枠が動かないよう、右側の最小高さを確保
-        （折り畳み時でもカード帯の面積が変わらず、横幅も固定） */
+  /* 開閉しても左右の枠が動かないよう最小高さ確保 */
   #sitePanes{ min-height: 520px; }
 </style>
 
@@ -244,9 +264,9 @@
              data-site-url="{{ s.url | e }}"
              data-search="{{ (s.name ~ ' ' ~ _raw) | e }}">
             <div class="prop-head">
-              <!-- ✅ サイト名は固定幅320px、長い場合は自動改行して全表示 -->
+              <!-- ✅ サイト名固定幅（長い場合は改行して全表示） -->
               <div class="prop-name" title="{{ s.name }}">{{ s.name }}</div>
-              <!-- ✅ 無料ブログのバッジ：サイト名の横に1行で並べる -->
+              <!-- ✅ 無料ブログのバッジ：サイト名の横。折り返し可で全表示 -->
               <div class="pf-row-inline" aria-label="無料ブログカウント">
                 <span class="pf-badge pf-ld">ライブドア <span class="pf-count">{{ s.ld_count|default(0) }}</span></span>
                 <span class="pf-badge pf-note">note <span class="pf-count">{{ s.note_count|default(0) }}</span></span>
@@ -297,6 +317,7 @@
               </div>
             </div>
 
+            <!-- 無料ブログ（色付き枠） -->
             <section class="tcd-card overflow-hidden">
               <button class="tcd-acc-trigger accordion-trigger"
                       data-acc-target="#tab-ld-{{ s.id }}"
@@ -335,7 +356,7 @@
                           </div>
                         </div>
 
-                        <!-- ✅ 1行で表示（改行しない） -->
+                        <!-- 1行で表示（改行しない） -->
                         <div class="tcd-metrics">
                           <div>投稿完了: <span class="font-semibold">{{ acc.stat_posted|default(0) }}</span></div>
                           <div>記事生成済み: <span class="font-semibold">{{ acc.stat_generated|default(0) }}</span></div>
@@ -444,6 +465,7 @@
               </div>
             </div>
 
+            <!-- 無料ブログ（色付き枠） -->
             <section class="tcd-card overflow-hidden">
               <button class="tcd-acc-trigger accordion-trigger"
                       data-acc-target="#tab-ld-{{ s.id }}"
