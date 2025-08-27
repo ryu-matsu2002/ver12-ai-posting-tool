@@ -2,7 +2,7 @@
 {% block title %}外部SEO | サイト一覧{% endblock %}
 
 {% block content %}
-{# ====== ページ専用配色 / レイアウト ====== #}
+{# ====== ページ専用配色・レイアウト ====== #}
 <style>
   :root{
     --tcd-base:#ff89ff;
@@ -11,127 +11,174 @@
     --tcd-light:#ffd4ff;
     --tcd-lighter:#ffecff;
 
-    /* プラットフォームカラー（必要に応じて追加） */
-    --plat-ld:#16a34a;    /* Livedoor: green-600 */
-    --plat-note:#111827;  /* Note:    gray-900 */
-    --plat-ame:#06b6d4;   /* Ameba:   cyan-500 */
+    /* バッジ色 */
+    --badge-livedoor-bg:#e8f1ff;
+    --badge-livedoor-fg:#1d4ed8;
+    --badge-note-bg:#eeeeee;
+    --badge-note-fg:#111111;
+    --badge-ameblo-bg:#e8fbe8;
+    --badge-ameblo-fg:#16a34a;
   }
 
-  /* 背景の淡い色 */
+  /* 背景 */
   html, body, main, main.bg-white, #main, #content, .content, .content-area,
   .app-main, .app-content, .page-wrapper, .page-content, .container {
     background-color: var(--tcd-lighter) !important;
     background-image: none !important;
   }
 
-  /* ★ このページ内だけ最大幅を大きく（ほぼ全幅） */
+  /* ページ枠を広く */
   .page-content, .container, .app-content { max-width: 100% !important; }
   .tcd-wrap{
     background: var(--tcd-darker);
     border-radius: 14px;
-    padding: 36px;
+    padding: 28px;
     margin: 0 auto;
     width: 100%;
     max-width: 1500px;
   }
   @media (max-width: 1024px){
-    .tcd-wrap{ padding: 20px; }
+    .tcd-wrap{ padding: 18px; }
   }
 
-  /* ===== 左サイド（GSCのプロパティ一覧風） ===== */
-  .prop-sidebar{
+  .tcd-stage{
+    display:flex; gap:14px;
+  }
+
+  /* ── 左：サイト欄（幅を広く、折返し表示、スクロールを細く） ── */
+  .tcd-sidebar{
     background: linear-gradient(180deg, var(--tcd-darker) 0%, var(--tcd-dark) 100%);
     color:#fff;
     border-radius: 12px;
-    width: clamp(280px, 24vw, 360px);   /* ★ 幅を拡張して見切れ防止 */
-    display:flex;
-    flex-direction:column;
-    overflow:hidden;
+    flex:0 0 420px;     /* ← 幅拡張（以前 16rem） */
+    max-height: calc(100vh - 220px);
+    display:flex; flex-direction:column;
   }
-  .prop-side-head{
-    padding: 14px 16px 8px 16px;
+  @media (max-width: 1280px){
+    .tcd-sidebar{ flex-basis: 360px; }
   }
-  .prop-title{
+  @media (max-width: 1024px){
+    .tcd-stage{ flex-direction:column; }
+    .tcd-sidebar{ flex-basis:auto; max-height:none; }
+  }
+
+  .tcd-side-title{
+    padding: 14px 16px 8px;
     font-weight: 800;
     letter-spacing: .02em;
-    font-size: 1.6rem;
+    font-size: 1.75rem;
     line-height: 1.2;
   }
-  .prop-search-wrap{
-    position: sticky;
-    top: 0;
-    background: linear-gradient(180deg, var(--tcd-darker) 0%, var(--tcd-dark) 100%);
-    padding: 10px 12px 12px 12px;
-    z-index: 1;
-    border-top-left-radius:12px;
-    border-top-right-radius:12px;
-  }
+
+  /* 検索 */
   .prop-search{
+    padding: 0 12px 10px;
+  }
+  .prop-search input{
     width:100%;
-    border-radius: 10px;
-    border: 1px solid rgba(255,255,255,.25);
-    background: rgba(255,255,255,.12);
-    padding: 8px 12px;
-    color: #fff;
-    outline: none;
-  }
-  .prop-search::placeholder{ color: rgba(255,255,255,.8); }
-
-  .prop-list{
-    padding: 6px 6px 10px 6px;
-    overflow: auto;
-    max-height: calc(100vh - 240px);
-  }
-
-  .prop-item{
-    display:flex; align-items:center; gap:10px;
-    padding: 8px 10px;
-    border-radius: 10px;
-    color:#fff; text-decoration:none;
-  }
-  .prop-item:hover{ background: rgba(255,255,255,.12); }
-  .prop-item.active{
-    background: rgba(255,255,255,.18);
-    box-shadow: inset 3px 0 0 0 rgba(255,255,255,.65);
-  }
-
-  .prop-icon{
-    width:28px; height:28px; border-radius: 9999px;
     background: rgba(255,255,255,.2);
-    display:inline-flex; align-items:center; justify-content:center;
-    font-weight:700;
+    border: 1px solid rgba(255,255,255,.25);
+    color:#fff;
+    border-radius: 10px;
+    padding: 10px 12px;
+    outline:none;
   }
-  .prop-texts{ min-width:0; flex: 1; }
+  .prop-search input::placeholder{ color: rgba(255,255,255,.85); }
+
+  /* リスト本体 */
+  .prop-list{
+    padding: 6px 8px 12px;
+    overflow:auto;
+    scrollbar-width: thin;             /* Firefox 細く */
+  }
+  /* WebKit スクロールバーをコンパクトに */
+  .prop-list::-webkit-scrollbar{ width:8px; }
+  .prop-list::-webkit-scrollbar-track{ background: transparent; }
+  .prop-list::-webkit-scrollbar-thumb{
+    background: rgba(255,255,255,.35);
+    border-radius: 8px;
+  }
+  .prop-list::-webkit-scrollbar-thumb:hover{
+    background: rgba(255,255,255,.55);
+  }
+
+  /* プロパティ（サイト）行 */
+  .site-nav-link{
+    display:block;
+    color:#fff;
+    border-radius:12px;
+    padding:10px 12px;
+    border:1px solid rgba(255,255,255,.12);
+    background: rgba(0,0,0,.08);
+  }
+  .site-nav-link + .site-nav-link{ margin-top:8px; }
+  .site-nav-link:hover{ background: rgba(0,0,0,.15); }
+  .site-nav-link.active{
+    background: rgba(255,255,255,.16);
+    border-color: rgba(255,255,255,.26);
+  }
+
+  /* 丸いアルファベットは削除 ⇒ その分パディングを調整 */
+  .prop-row{ display:flex; gap:10px; align-items:flex-start; }
+
+  .prop-texts{ min-width:0; flex:1; }
   .prop-name{
-    font-weight: 600;
-    line-height: 1.1;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;            /* ★ 2行で折り返し */
-    line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
+    font-weight: 700;
+    line-height: 1.25;
+    word-break: break-word;
+    white-space: normal;           /* ← 折返し許可 */
   }
   .prop-domain{
-    font-size: .75rem; opacity:.9;
-    color: #f3f4f6;
+    font-size: 12px;
+    opacity:.9;
+    margin-top: 2px;
+    word-break: break-all;
   }
 
-  .plat-badges{ display:flex; gap:6px; align-items:center; }
-  .plat-badge{
-    border:1px solid rgba(255,255,255,.5);
-    border-radius: 9999px;
+  .prop-badges{
+    display:flex; flex-wrap:wrap; gap:6px;
+    margin-top:8px;
+  }
+  .badge{
+    font-size:11px; font-weight:700;
+    display:inline-flex; align-items:center; gap:6px;
+    border-radius: 999px;
     padding: 2px 8px;
-    font-size: .72rem; font-weight: 700;
-    line-height:1;
-    background: rgba(255,255,255,.15);
-    white-space: nowrap;
+    line-height:1.5;
+    border:1px solid transparent;
+    background:#fff; color:#374151;
   }
-  .plat-badge.zero{ opacity:.55; background: rgba(255,255,255,.08); }
-  .plat-badge.ld{ border-color: var(--plat-ld); }
-  .plat-badge.note{ border-color: var(--plat-note); }
-  .plat-badge.ame{ border-color: var(--plat-ame); }
+  .badge .num{
+    padding:1px 6px;
+    border-radius:999px;
+    background: rgba(0,0,0,.08);
+    font-variant-numeric: tabular-nums;
+  }
+  /* 色分け */
+  .badge-livedoor{
+    background: var(--badge-livedoor-bg);
+    color: var(--badge-livedoor-fg);
+    border-color: #cfe2ff;
+  }
+  .badge-note{
+    background: var(--badge-note-bg);
+    color: var(--badge-note-fg);
+    border-color: #d9d9d9;
+  }
+  .badge-ameblo{
+    background: var(--badge-ameblo-bg);
+    color: var(--badge-ameblo-fg);
+    border-color: #cfeecf;
+  }
 
-  /* ===== 右側カード ===== */
+  /* ── 右：内容エリア（白スペースを狭め、背景色を変える） ── */
+  .tcd-main{
+    flex:1 1 auto;
+    background: #f5f9ff;   /* ← 右側のベース色を淡いブルーに変更 */
+    border-radius: 12px;
+    padding: 14px;
+  }
+
   .tcd-card{
     background:#fff;
     border:1px solid rgba(0,0,0,.08);
@@ -139,7 +186,7 @@
     box-shadow: 0 1px 2px rgba(0,0,0,.04);
   }
 
-  /* ▼アコーディオン（プラットフォームセクション） */
+  /* アコーディオン */
   .tcd-acc-trigger{
     background:#fff; width:100%; text-align:left; padding:14px 20px;
     display:flex; align-items:center; justify-content:flex-start; gap:14px;
@@ -157,81 +204,61 @@
   .btn-lg{ padding:.5rem 1rem; font-size:1rem; border-radius:.5rem; }
   .tcd-add-btn{ border:1px solid rgba(0,0,0,.12); background:#fff; }
   .tcd-add-btn:hover{ background:#f9fafb; }
+
   .tcd-metrics{ color:#374151; font-size:.95rem; gap:1.25rem; }
 
-  /* 進捗バー（モーダル内） */
-  #accProgressBar{ transition: width .5s ease; }
-
-  /* トースト */
-  #toast{ pointer-events:none; }
+  /* モーダルの進捗バー */
+  #accProgress .h-2{ height:8px; }
 </style>
 
 {# 例外的に2つ目以降も作成可能なユーザーID（UI側判定用） #}
 {% set ALLOW_MULTI_BLOG_USER_IDS = [1, 2, 5] %}
 
 <div class="tcd-wrap">
-  <div class="flex gap-6">
-    {# ========================= 左：プロパティ検索＋一覧（GSC風） ========================= #}
-    <aside class="prop-sidebar">
-      <div class="prop-side-head">
-        <div class="prop-title">外部SEO</div>
+  <div class="tcd-stage">
+    {# ========================= 左：サイト選択 ========================= #}
+    <aside class="tcd-sidebar">
+      <div class="tcd-side-title">外部SEO</div>
+
+      <div class="prop-search">
+        <input id="siteSearch" type="text" placeholder="サイトを検索" oninput="filterSites(this.value)">
       </div>
 
-      <div class="prop-search-wrap">
-        <input id="propSearch" class="prop-search" type="search" placeholder="プロパティを検索（/ でフォーカス）" />
-      </div>
-
-      <nav id="propList" class="prop-list" role="listbox" aria-label="サイト一覧">
+      <nav id="propList" class="prop-list">
         {% for s in sites %}
-          {# ドメインを生成（簡易） #}
-          {% set _url = s.url|default('')|replace('https://','')|replace('http://','')|replace('www.','') %}
-          {% set _clean = (_url|replace('http://','')|replace('https://','')|replace('www.','')) %}
-          {% set _domain = _clean.split('/')[0] if _clean else '' %}
-          {# プラットフォーム件数（既存データからのフォールバック） #}
-          {% set _livedoor_accounts = [] %}
-          {% if s.livedoor_accounts is defined %}
-            {% set _livedoor_accounts = s.livedoor_accounts %}
-          {% elif s.external_accounts is defined %}
-            {% set _livedoor_accounts = s.external_accounts %}
-          {% elif s.accounts is defined %}
-            {% set _livedoor_accounts = s.accounts %}
-          {% endif %}
-          {% set _ld_cnt = s.ld_count|default(_livedoor_accounts|length)|int %}
-
-          {# 他プラットフォームがある場合は同様にカウント（無ければ0） #}
-          {% set _note_cnt = (s.note_accounts|length) if s.note_accounts is defined else 0 %}
-          {% set _ame_cnt  = (s.ameba_accounts|length) if s.ameba_accounts is defined else 0 %}
+          {# URLを安全に短縮表示（split は使わない） #}
+          {% set _url = (s.url or '') %}
+          {% set url_text = _url|replace('https://','')|replace('http://','')|replace('www.','') %}
+          {# プラットフォーム件数（存在しなければ 0） #}
+          {% set ld  = s.ld_count if s.ld_count is defined else (s.livedoor_accounts|length if s.livedoor_accounts is defined else 0) %}
+          {% set note = s.note_count if s.note_count is defined else 0 %}
+          {% set ame = s.ameblo_count if s.ameblo_count is defined else 0 %}
 
           <a href="javascript:void(0)"
-             class="prop-item site-nav-link {% if loop.first %}active{% endif %}"
+             class="site-nav-link {% if loop.first %}active{% endif %}"
              data-site-id="{{ s.id }}"
-             data-search="{{ (s.name or '') ~ ' ' ~ (s.url or '') ~ ' ' ~ _domain }}">
-            <span class="prop-icon">{{ (_domain[:1] or (s.name[:1] if s.name else '?'))|upper }}</span>
-            <span class="prop-texts">
-              <div class="prop-name">{{ s.name }}</div>
-              {% if _domain %}
-                <div class="prop-domain">{{ _domain }}</div>
-              {% endif %}
-            </span>
-            <span class="plat-badges">
-              <button class="plat-badge ld {% if _ld_cnt == 0 %}zero{% endif %}" title="Livedoor"
-                      data-open-platform="ld" data-site-id="{{ s.id }}">LD {{ _ld_cnt }}</button>
-              {% if _note_cnt is not none %}
-                <button class="plat-badge note {% if _note_cnt == 0 %}zero{% endif %}" title="note"
-                        data-open-platform="note" data-site-id="{{ s.id }}">Note {{ _note_cnt }}</button>
-              {% endif %}
-              {% if _ame_cnt is not none %}
-                <button class="plat-badge ame {% if _ame_cnt == 0 %}zero{% endif %}" title="Ameba"
-                        data-open-platform="ame" data-site-id="{{ s.id }}">Ame {{ _ame_cnt }}</button>
-              {% endif %}
-            </span>
+             data-name="{{ s.name|lower }}"
+             data-url="{{ url_text|lower }}">
+            <div class="prop-row">
+              <div class="prop-texts">
+                <div class="prop-name">{{ s.name }}</div>
+                {% if url_text %}
+                  <div class="prop-domain">{{ url_text }}</div>
+                {% endif %}
+                <div class="prop-badges">
+                  <span class="badge badge-livedoor">ライブドア <span class="num">{{ ld|default(0) }}</span></span>
+                  <span class="badge badge-note">note <span class="num">{{ note|default(0) }}</span></span>
+                  <span class="badge badge-ameblo">アメブロ <span class="num">{{ ame|default(0) }}</span></span>
+                </div>
+              </div>
+            </div>
           </a>
         {% endfor %}
       </nav>
     </aside>
 
     {# ========================= 右：内容 ========================= #}
-    <main class="flex-1">
+    <main class="tcd-main">
       {% for s in sites %}
         {% set _all_accounts = [] %}
         {% if s.livedoor_accounts is defined %}
@@ -243,7 +270,7 @@
         {% endif %}
         {% set tab_cnt = s.ld_count | default(_all_accounts|length) %}
 
-        {# ▼ Livedoorの現在数と追加可否（例外IDは常に可、通常は0件のときのみ可） #}
+        {# Livedoorの現在数と追加可否（例外IDは常に可、通常は0件のときのみ可） #}
         {% set livedoor_count = _all_accounts | length %}
         {% set can_add_livedoor = (current_user.id in ALLOW_MULTI_BLOG_USER_IDS) or (livedoor_count == 0) %}
 
@@ -252,7 +279,7 @@
           <div class="tcd-card p-5 mb-4">
             <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
               <div class="min-w-0">
-                <div class="tcd-title-lg truncate max-w-xl">{{ s.name }}</div>
+                <div class="tcd-title-lg break-words">{{ s.name }}</div>
                 {% if s.url %}
                   <a href="{{ s.url }}" class="tcd-link-lg break-all" target="_blank">{{ s.url }}</a>
                 {% endif %}
@@ -266,7 +293,7 @@
             </div>
           </div>
 
-          {# プラットフォームセクション（当面 Livedoor） #}
+          {# アコーディオン（プラットフォーム単位） #}
           <section class="tcd-card overflow-hidden">
             <button class="tcd-acc-trigger accordion-trigger"
                     data-acc-target="#tab-ld-{{ s.id }}"
@@ -286,7 +313,6 @@
                     <div id="acc-card-{{ acc.id }}" class="tcd-card p-5 flex flex-col gap-4">
                       <div class="flex items-start justify-between gap-3">
                         <div class="min-w-0">
-                          {# アカウント名は非表示 #}
                           {% if acc.public_url %}
                             <a href="{{ acc.public_url }}" target="_blank"
                                class="tcd-link-lg break-all">{{ acc.public_url }}</a>
@@ -345,6 +371,7 @@
                           {% endif %}
                         {% endif %}
                       </div>
+
                     </div>
                   {% endfor %}
                 </div>
@@ -381,7 +408,7 @@
 </div>
 
 {# =========================================================
-   CAPTCHA入力モーダル（進捗は％バーのみ／テキストの進捗文は出さない）
+   CAPTCHA入力モーダル
    ========================================================= #}
 <div id="captchaModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
   <div class="bg-white p-6 rounded-2xl shadow-lg w-[420px] max-w-[92vw] relative">
@@ -393,10 +420,10 @@
       <button id="captchaSubmitBtn" type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg">送信</button>
     </form>
 
-    <!-- 文章の進捗は廃止。％付きバーのみ表示 -->
+    <!-- 文章の進捗は廃止し、％付きバーのみ -->
     <div id="accProgress" class="mt-4">
       <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
-        <div id="accProgressBar" class="h-2 bg-green-500 w-0"></div>
+        <div id="accProgressBar" class="h-2 bg-green-500 w-0 transition-all duration-500"></div>
       </div>
       <div class="mt-1 text-xs text-gray-600 text-right">
         <span id="accProgressPct">0</span>%
@@ -416,9 +443,22 @@
 
 {% block scripts %}
 <script>
-  /* === テンプレからJSへ渡す === */
+  /* === JS 受け渡し === */
   const CURRENT_USER_ID = Number('{{ current_user.id | default(0, true) | int }}');
   const ALLOW_MULTI_BLOG_USER_IDS = [1, 2, 5];
+
+  /* ========== 左のフィルタ（サイトを検索） ========== */
+  function filterSites(q){
+    const query = String(q||'').trim().toLowerCase();
+    const items = document.querySelectorAll('#propList .site-nav-link');
+    items.forEach(el=>{
+      if(!query){ el.classList.remove('hidden'); return; }
+      const name = el.getAttribute('data-name')||'';
+      const url  = el.getAttribute('data-url')||'';
+      const hit = name.includes(query) || url.includes(query);
+      el.classList.toggle('hidden', !hit);
+    });
+  }
 
   /* ========== 1回押したら再押下できないワンクリックロック ========== */
   function lockKey(aid){ return `gen-lock:${aid}`; }
@@ -440,23 +480,20 @@
     return true;
   }
 
-  /* ========== ユーティリティ ========== */
   function escapeHtml(s){ if(s==null) return ''; return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'","&#039;"); }
   function escapeAttr(s){ return escapeHtml(s).replaceAll('"','&quot;'); }
 
-  /* ========== 左：サイト切り替え / 検索 / キーボード ========== */
+  /* ========== 左ナビ：サイト切替（選択保持） ========== */
   const SELECT_KEY = 'extseo.selectedSite';
-
   function selectSite(siteId, store=true){
-    // パネル切替
     document.querySelectorAll('.site-panel').forEach(p => p.classList.add('hidden'));
     const target = document.getElementById('site-panel-' + siteId);
     if (target) target.classList.remove('hidden');
-    // アクティブ表示
+
     document.querySelectorAll('.site-nav-link').forEach(a => a.classList.remove('active'));
     const nav = document.querySelector(`.site-nav-link[data-site-id="${siteId}"]`);
     if (nav) nav.classList.add('active');
-    // 保存
+
     if (store) sessionStorage.setItem(SELECT_KEY, siteId);
   }
   function initialSiteId(){
@@ -468,30 +505,6 @@
     if(saved) return saved;
     const first = document.querySelector('.site-nav-link')?.getAttribute('data-site-id');
     return first || '';
-  }
-
-  // 検索フィルタ
-  function applyPropFilter(q){
-    const term = (q||'').toLowerCase().trim();
-    const items = document.querySelectorAll('#propList .prop-item');
-    items.forEach(it=>{
-      const hay = (it.getAttribute('data-search')||'').toLowerCase();
-      const show = !term || hay.includes(term);
-      it.style.display = show ? '' : 'none';
-    });
-  }
-
-  // バッジ（LD等）クリックで該当タブを開く
-  function openPlatformTab(siteId, plat){
-    selectSite(siteId, true);
-    if(plat==='ld'){
-      const trigger = document.querySelector(`.tcd-acc-trigger[data-acc-target="#tab-ld-${siteId}"]`);
-      const panel = document.getElementById(`tab-ld-${siteId}`);
-      if(trigger && panel && panel.classList.contains('hidden')){
-        trigger.click();
-      }
-    }
-    // 将来：note/ame 等のタブ実装時にここで分岐
   }
 
   document.addEventListener('DOMContentLoaded', () => {
@@ -511,34 +524,7 @@
       });
     });
 
-    // プラットフォームバッジのクリック
-    document.addEventListener('click', (e)=>{
-      const b = e.target.closest('[data-open-platform]');
-      if(!b) return;
-      const siteId = b.getAttribute('data-site-id');
-      const plat = b.getAttribute('data-open-platform');
-      if(siteId && plat) openPlatformTab(siteId, plat);
-      e.stopPropagation();
-    });
-
-    // 検索
-    const inp = document.getElementById('propSearch');
-    if(inp){
-      inp.addEventListener('input', e => applyPropFilter(e.target.value));
-      // "/" でフォーカス
-      document.addEventListener('keydown', (ev)=>{
-        if(ev.key === '/' && !['INPUT','TEXTAREA'].includes(document.activeElement.tagName)){
-          ev.preventDefault();
-          inp.focus(); inp.select();
-        }
-      });
-      // Esc で解除
-      inp.addEventListener('keydown', (ev)=>{
-        if(ev.key==='Escape'){ inp.value=''; applyPropFilter(''); inp.blur(); }
-      });
-    }
-
-    // 初期選択（?site_id / #site- / sessionStorage / 先頭）
+    // 初期選択
     const initId = initialSiteId();
     if (initId) selectSite(initId, false);
   });
@@ -583,7 +569,7 @@
 
   /* ========== アコーディオン ========== */
   document.addEventListener('click', (e) => {
-    const btn = e.target.closest('.tcd-acc-trigger');
+    const btn = e.target.closest('.accordion-trigger');
     if (!btn) return;
     const targetSel = btn.getAttribute('data-acc-target');
     const panel = document.querySelector(targetSel);
@@ -603,7 +589,7 @@
     if (container) {
       container.querySelectorAll('.accordion-panel').forEach(p => p.classList.add('hidden'));
       container.querySelectorAll('.tcd-caret, .accordion-caret').forEach(c => c.classList.remove('rotate-180'));
-      container.querySelectorAll('.tcd-acc-trigger').forEach(b => b.setAttribute('aria-expanded','false'));
+      container.querySelectorAll('.accordion-trigger').forEach(b => b.setAttribute('aria-expanded','false'));
     }
     panel.classList.remove('hidden');
     if (caret) caret.classList.add('rotate-180');
@@ -614,7 +600,7 @@
   async function newAccountStart(button) {
     const siteId = button.getAttribute('data-site-id');
     if (!siteId) return;
-    sessionStorage.setItem(SELECT_KEY, siteId); // ← 遷移/更新でもこのサイトに戻す
+    sessionStorage.setItem(SELECT_KEY, siteId);
 
     button.disabled = true;
     const oldText = button.innerText;
@@ -644,7 +630,6 @@
       renderNewAccountCard(data.site_id, data.account);
       try { incrementLdCount(siteId, +1); } catch(_) {}
 
-      // 作成直後、例外ユーザー以外は「＋ブログ追加」を無効化
       if (!ALLOW_MULTI_BLOG_USER_IDS.includes(CURRENT_USER_ID)) {
         const addBtn = document.getElementById(`addBtn-${siteId}`);
         if (addBtn) {
@@ -668,15 +653,6 @@
     if (!m) return;
     const n = Math.max(parseInt(m[1] || "0", 10) + delta, 0);
     tabBtn.innerHTML = `Livedoor <span class="ml-1 text-xs text-gray-500">(${n})</span>`;
-
-    // 左のバッジも更新
-    const badge = document.querySelector(`.plat-badge.ld[data-site-id="${siteId}"]`);
-    if(badge){
-      const cur = Number((badge.textContent.match(/\d+/)||[0])[0])||0;
-      const next = Math.max(cur + delta, 0);
-      badge.textContent = `LD ${next}`;
-      badge.classList.toggle('zero', next===0);
-    }
   }
 
   function renderNewAccountCard(siteId, account) {
@@ -747,7 +723,6 @@
     const accountId = button.getAttribute("data-account-id");
     const platform  = button.getAttribute("data-platform") || "livedoor";
 
-    // 選択保持
     if (siteId) sessionStorage.setItem(SELECT_KEY, siteId);
 
     button.disabled = true;
@@ -776,7 +751,7 @@
     .then(r => r.json())
     .then(data => {
       if (data && data.captcha_url) {
-        setAccProgress(15); // 取得開始の目安
+        setAccProgress(15);
         document.getElementById("captchaImage").src = data.captcha_url + "?t=" + Date.now();
         document.getElementById("captchaModal").classList.remove("hidden");
         document.getElementById("captchaForm").reset();
@@ -796,7 +771,6 @@
   function closeCaptcha() {
     document.getElementById("captchaModal").classList.add("hidden");
     if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
-    // 送信ボタン初期化（次回モーダル用）
     const btn = document.getElementById("captchaSubmitBtn");
     if (btn) {
       btn.disabled = false;
@@ -805,9 +779,7 @@
       btn.classList.add("bg-blue-600");
       btn.innerText = "送信";
     }
-    // ％リセット
     setAccProgress(0, true);
-    // 二重送信ロック解除
     captchaSubmitLocked = false;
   }
 
@@ -818,8 +790,6 @@
     const platform  = sessionStorage.getItem("currentPlatform") || "livedoor";
 
     const btn = document.getElementById("captchaSubmitBtn");
-
-    // 二重送信ガード（押したら同モーダルでは二度と押せない）
     if (captchaSubmitLocked) return;
     captchaSubmitLocked = true;
     setAccProgress(35);
@@ -841,8 +811,6 @@
     fetch("/submit_captcha", { method: "POST", body: payload })
       .then(r => r.json())
       .then(data => {
-
-        // 成否に関わらずまずはモーダルを閉じる
         closeCaptcha();
 
         if (data.status === "captcha_failed") {
@@ -855,9 +823,8 @@
         if (data.status === "captcha_success" && data.api_key_received) {
           const sid = data.site_id || siteId;
           const aid = data.account_id || accountId;
-
           setAccProgress(100, true);
-          switchToPostCTA(sid, aid); // 自動でボタンを記事生成に切替
+          switchToPostCTA(sid, aid);
           if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
           showToast("アカウント作成が完了！『記事生成＆投稿』をクリックして生成しよう");
           return;
@@ -882,7 +849,6 @@
         console.error(err);
         showToast("CAPTCHA送信中にエラーが発生しました", "error");
         restoreCaptchaButton(siteId, accountId, "❌ 再挑戦");
-        // 失敗時もボタンは再度押せないまま（モーダルを閉じて再開してもらう）
       });
   }
 
@@ -931,7 +897,7 @@
 
           if (data.step !== lastStatus) {
             lastStatus = data.step;
-            updateCaptchaStatusUI(data); // ← バー更新
+            updateCaptchaStatusUI(data);
           }
 
           if (data.step === "API取得完了" && (data.site_id || siteId) && (data.account_id || accountId)) {
@@ -987,7 +953,6 @@
           const hasCards = grid && grid.children.length > 0;
           if (!hasCards) {
             panel.innerHTML = '<div class="px-5 py-4 text-sm text-gray-600">まだLivedoorブログはありません。</div>';
-            // ▼ 追加：ゼロ件になったら「＋ブログ追加」を再有効化（例外IDはそもそも無効化していない）
             const addBtn = document.getElementById(`addBtn-${siteId}`);
             if (addBtn && !ALLOW_MULTI_BLOG_USER_IDS.includes(CURRENT_USER_ID)) {
               addBtn.disabled = false;
