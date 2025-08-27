@@ -16,6 +16,10 @@
     --pane-border:rgba(0,0,0,.08);
   }
 
+  /* ✅ スクロールバーの有無でページ幅が揺れないよう固定 */
+  html{ scrollbar-gutter: stable both-edges; }
+  body{ overflow-y: scroll; }
+
   /* 画面の背景 */
   html, body, main, #main, #content, .content, .content-area,
   .app-main, .app-content, .page-wrapper, .page-content, .container {
@@ -38,12 +42,16 @@
     .tcd-wrap{ padding: 18px; }
   }
 
-  /* 2カラムレイアウト（左を広め、右を詰める） */
-  .tcd-layout{ display:flex; gap:18px; }
-  .tcd-sidebar{ width: 440px; min-width: 360px; max-width: 520px; }
+  /* 2カラムレイアウト（左を広く、右をやや狭く） */
+  .tcd-layout{ display:flex; gap:18px; align-items: stretch; }
+  .tcd-sidebar{ width: 640px; min-width: 620px; max-width: 680px; }  /* ←左を広めに */
+  .right-outer{ flex: 1 1 auto; min-width: 0; }
+  @media (max-width: 1280px){
+    .tcd-sidebar{ width: 560px; min-width: 520px; max-width: 600px; }
+  }
   @media (max-width: 1024px){
-    .tcd-sidebar{ width: 100%; max-width:none; }
     .tcd-layout{ flex-direction: column; }
+    .tcd-sidebar{ width: 100%; min-width: 0; max-width:none; }
   }
 
   /* 左ペイン */
@@ -79,6 +87,7 @@
     overflow: auto;
     padding: 0 10px 14px;
     max-height: calc(100vh - 280px);
+    -webkit-mask-image:none; mask-image:none; /* 端の白筋対策 */
   }
   /* 細いスクロールバー */
   .sites-scroll::-webkit-scrollbar{ width: 6px; }
@@ -90,33 +99,42 @@
     background: rgba(255,255,255,.16);
     border: 1px solid rgba(255,255,255,.15);
     border-radius: 14px;
-    padding: 14px 14px 10px;
+    padding: 12px 14px 10px;
     margin-bottom: 12px;
-    transition: transform .08s ease, background .12s ease, border-color .12s ease;
+    transition: background .12s ease, border-color .12s ease, transform .08s ease;
     cursor: pointer;
   }
   .prop-card:hover{ transform: translateY(-1px); background: rgba(255,255,255,.22); border-color: rgba(255,255,255,.28); }
   .prop-card.active{ outline: 2px solid #fff; background: rgba(255,255,255,.26); }
 
-  .prop-name{
-    font-weight: 700;
-    line-height: 1.25;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;       /* 2行で折り返し */
-    line-clamp: 2;               /* 標準プロパティ（互換用） */
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    word-break: break-word;
+  /* ★ サイト名＋バッジを“横一列”で配置 */
+  .prop-head{
+    display: grid;
+    grid-template-columns: 1fr auto; /* 左:サイト名(伸縮), 右:バッジ一式 */
+    align-items: center;
+    column-gap: 10px;
+    min-height: 28px;
   }
+  .prop-title{
+    font-weight: 800;
+    line-height: 1.25;
+    white-space: nowrap;        /* 1行で */
+    overflow: hidden;
+    text-overflow: ellipsis;    /* はみ出したら… */
+  }
+
   .prop-domain{
-    margin-top: 4px;
+    margin-top: 6px;
     font-size: .92rem;
     opacity: .9;
     word-break: break-all;
   }
 
-  /* バッジ行（大きく、色分け） */
-  .pf-row{ display:flex; gap:8px; margin-top: 10px; flex-wrap: wrap; }
+  /* バッジ行（横一列・折り返さない） */
+  .pf-row-inline{
+    display:flex; gap:8px; align-items:center;
+    white-space: nowrap; flex-wrap: nowrap; overflow: hidden;
+  }
   .pf-badge{
     display:inline-flex; align-items:center; gap:8px;
     padding: 6px 10px;
@@ -125,7 +143,6 @@
     font-size: .95rem;
     color:#fff;
     box-shadow: 0 1px 0 rgba(0,0,0,.15), inset 0 -2px 0 rgba(0,0,0,.12);
-    white-space: nowrap;
   }
   .pf-count{
     background: rgba(255,255,255,.2);
@@ -145,6 +162,7 @@
     background: var(--pane-bg);
     border-radius: 12px;
     padding: 14px;
+    min-height: 520px; /* 開閉しても“見た目の枠”が安定するよう最低高を確保 */
   }
   .tcd-card{
     background: var(--pane-card);
@@ -167,6 +185,9 @@
   .tcd-add-btn{ border:1px solid rgba(0,0,0,.12); background:#fff; }
   .tcd-add-btn:hover{ background:#f9fafb; }
   .tcd-metrics{ color:#374151; font-size:.95rem; gap:1.25rem; }
+
+  /* 右カードの高さ変化でコンテンツ可視領域を保つ（開閉時のチラつき抑制） */
+  .site-panel{ content-visibility:auto; contain-intrinsic-size:800px 600px; }
 </style>
 
 {% set ALLOW_MULTI_BLOG_USER_IDS = [1, 2, 5] %}
@@ -189,15 +210,20 @@
              data-site-name="{{ s.name | e }}"
              data-site-url="{{ s.url | e }}"
              data-search="{{ (s.name ~ ' ' ~ _raw) | e }}">
-            <div class="prop-name">{{ s.name }}</div>
+
+            <!-- ★ サイト名と無料ブログ数を横一列に -->
+            <div class="prop-head">
+              <div class="prop-title" title="{{ s.name }}">{{ s.name }}</div>
+              <div class="pf-row-inline" aria-label="無料ブログカウント">
+                <span class="pf-badge pf-ld">ライブドア <span class="pf-count">{{ s.ld_count|default(0) }}</span></span>
+                <span class="pf-badge pf-note">note <span class="pf-count">{{ s.note_count|default(0) }}</span></span>
+                <span class="pf-badge pf-ame">アメブロ <span class="pf-count">{{ s.ameba_count|default(0) }}</span></span>
+              </div>
+            </div>
+
             {% if s.url %}
               <div class="prop-domain">{{ _raw }}</div>
             {% endif %}
-            <div class="pf-row">
-              <span class="pf-badge pf-ld">ライブドア <span class="pf-count">{{ s.ld_count|default(0) }}</span></span>
-              <span class="pf-badge pf-note">note <span class="pf-count">{{ s.note_count|default(0) }}</span></span>
-              <span class="pf-badge pf-ame">アメブロ <span class="pf-count">{{ s.ameba_count|default(0) }}</span></span>
-            </div>
           </a>
         {% endfor %}
       </div>
