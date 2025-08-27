@@ -2,32 +2,32 @@
 {% block title %}外部SEO | サイト一覧{% endblock %}
 
 {% block content %}
-
 <style>
   :root{
-    /* === ベースカラーを #ff89ff に統一 === */
-    --tcd-base:#ff89ff;
-    --tcd-dark:#e56fe8;    
-    --tcd-darker:#c955cf;  
-    --tcd-light:#ffe9ff;   
-    --tcd-lighter:#fff4ff; 
+    /* === ベースカラーを #ff89ff に統一（濃淡は固定のまま近似トーンを指定） === */
+    --tcd-base:#ff89ff;   /* 指定色 */
+    /* 濃淡はベースからの近似（青みを排除しピンク〜マゼンタ系で統一） */
+    --tcd-dark:#e56fe8;    /* 旧: #b98ccf 相当の暗め */
+    --tcd-darker:#c955cf;  /* 旧: #9b73b8 相当のさらに暗め */
+    --tcd-light:#ffe9ff;   /* 旧: #f7effb の明度合わせ */
+    --tcd-lighter:#fff4ff; /* 旧: #fbf7ff のさらに薄い面 */
 
-    /* カード系トーン */
-    --card1:#6e3f69;
+    /* カードは落ち着いたトーン（減彩のまま、マゼンタ系に置換） */
+    --card1:#6e3f69;     /* desaturated magenta/purple */
     --card2:#8a5583;
     --card-edge:rgba(255,255,255,.18);
     --card-glow:rgba(0,0,0,.06);
 
-    /* 右ペイン */
+    /* 右ペイン（うっすらピンク） */
     --pane-bg:#f8ecfb;
     --pane-border:rgba(0,0,0,.06);
 
-    /* リンク色 */
+    /* リンク色（青系を排除） */
     --link:#ffe9ff;
     --link-hover:#ffffff;
   }
 
-  /* ===== ベース ===== */
+  /* ===== ベース：左右の白余白・白筋を完全排除 ===== */
   html{ scrollbar-gutter: stable; }
   body{
     overflow-y: scroll;
@@ -48,6 +48,7 @@
   }
 
   .tcd-wrap{
+    /* 外枠の帯を濃いマゼンタ系に */
     background: var(--tcd-darker);
     border-radius: 14px;
     padding: 28px;
@@ -73,6 +74,7 @@
 
   /* ===== 左ペイン ===== */
   .tcd-sidebar{
+    /* 青味グラデを #ff89ff 系の濃淡へ変更 */
     background: linear-gradient(180deg, var(--tcd-darker) 0%, var(--tcd-dark) 100%);
     color:#fff;
     border-radius: 12px;
@@ -81,7 +83,9 @@
     -webkit-mask:none !important; mask:none !important;
   }
 
-  /* === “白いマーク”の完全除去 === */
+  /* ■■■ “白いマーク（擬似要素）” を徹底的に無効化 ■■■
+     テーマ/ライブラリ側で .prop-card/.site-nav-link/.prop-head/.prop-title などに
+     ::before/::after で装飾を差すケースを想定して広く潰す */
   .tcd-sidebar::before,
   .tcd-sidebar::after,
   #siteList::before,
@@ -95,22 +99,6 @@
     box-shadow: none !important;
     -webkit-mask: none !important;
     mask: none !important;
-  }
-
-  /* badge/chip系も潰す */
-  #siteList .prop-card [class*="badge"],
-  #siteList .prop-card [class*="chip"],
-  #siteList .prop-card [class*="pill"],
-  #siteList .prop-card .bg-white,
-  #siteList .prop-card [style*="background:white"],
-  #siteList .prop-card [style*="background:#fff"],
-  #siteList .prop-card [style*="background-color:white"],
-  #siteList .prop-card [style*="background-color:#fff"] {
-    background: transparent !important;
-    background-image: none !important;
-    box-shadow: none !important;
-    border: none !important;
-    color: #fff !important;
   }
 
   .tcd-side-title{
@@ -136,7 +124,7 @@
   .sites-scroll::-webkit-scrollbar-thumb{ background: rgba(255,255,255,.35); border-radius: 999px; }
   .sites-scroll::-webkit-scrollbar-track{ background: transparent; }
 
-  /* サイトカード */
+  /* 左：サイトカード */
   .prop-card{
     background: rgba(255,255,255,.12);
     border: 1px solid rgba(255,255,255,.14);
@@ -145,7 +133,7 @@
     margin: 10px 4px 12px;
     transition: background .12s ease, border-color .12s ease, transform .08s ease, box-shadow .12s ease;
     cursor: pointer;
-    background-image: none !important;
+    background-image: none !important; /* 念押し */
     overflow: hidden;
   }
   .prop-card:hover{ transform: translateY(-1px); background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.24); }
@@ -175,7 +163,8 @@
     filter: saturate(.85);
   }
   .pf-count{ background: rgba(255,255,255,.2); border-radius:999px; padding:1px 8px; font-weight:800; line-height:1.2; }
-  .pf-ld{ background: linear-gradient(135deg,#874e9d,#6f3e84); }
+  /* バッジの色味は意味区別のため据え置き可（要件は“ページのベースカラー統一”のため） */
+  .pf-ld{ background: linear-gradient(135deg,#874e9d,#6f3e84); } /* 青→マゼンタ寄り */
   .pf-note{ background: linear-gradient(135deg,#3a3441,#5a5362); }
   .pf-ame{ background: linear-gradient(135deg,#19824a,#2ca765); color:#052413; }
   .pf-ame .pf-count{ background: rgba(0,0,0,.12); color:#0a3114; }
@@ -192,6 +181,7 @@
   }
   .right-outer .tcd-card{ margin-left: 8px; margin-right: 8px; }
 
+  /* ===== カード ===== */
   .tcd-card{
     background: linear-gradient(135deg,var(--card1),var(--card2));
     border: 1px solid var(--card-edge);
@@ -201,21 +191,25 @@
     filter: saturate(.85) brightness(.98);
   }
 
+  /* 見出しカード（サイト名） */
   .tcd-header{ padding: 18px 22px; }
   .tcd-title-lg{ font-weight:800; font-size:1.125rem; }
   .tcd-link-lg{ color: var(--link); text-decoration:underline; font-size:1rem; }
   .tcd-link-lg:hover{ color: var(--link-hover); }
 
+  /* タブ見出し（Livedoor） */
   .tcd-acc-trigger{
     width:100%; text-align:left; padding:14px 20px;
     display:flex; align-items:center; gap:14px; cursor: pointer;
     border-top-left-radius:16px; border-top-right-radius:16px;
+    /* ここもマゼンタ系に変更 */
     background: linear-gradient(135deg, #7a4a75, #9a6194);
     border-bottom: 1px solid var(--card-edge);
     color:#fff; filter: saturate(.85);
   }
   .tcd-caret{ font-size:2.1rem; line-height:1; color:#f3e7f2; transition:transform .2s ease; }
 
+  /* メトリクス */
   .tcd-metrics{
     color:#fef2ff; font-size:.95rem; gap:1.25rem;
     display:flex; align-items:center; white-space:nowrap;
@@ -245,7 +239,6 @@
   }
   #siteList { transform: translateZ(0); }
 </style>
-
 
 {% set ALLOW_MULTI_BLOG_USER_IDS = [1, 2, 5] %}
 
