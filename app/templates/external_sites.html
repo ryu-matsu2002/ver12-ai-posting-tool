@@ -10,32 +10,10 @@
     --tcd-light:#ffd4ff;
     --tcd-lighter:#ffecff;
 
-    /* 右ペイン */
+    /* 右ペインの見やすさ強化 */
     --pane-bg:#fff6fb;
     --pane-card:#ffffff;
     --pane-border:rgba(0,0,0,.08);
-
-    /* 右のカード帯（色つきゾーン） */
-    --card-zone-bg:#ffe9f5;
-    --card-zone-border:#f7c5e6;
-
-    /* 無料ブログ（アコーディオン枠）の強調色 */
-    --acc-frame:#f3a3d5;
-    --acc-frame-soft:#fde7f3;
-  }
-
-  /* ✅ 幅シフト防止＆左端の白余白を完全除去 */
-  html{ scrollbar-gutter: stable both-edges; }
-  html, body{ margin:0 !important; }
-  body{ overflow-y: scroll; } /* 縦スクロール常時確保で幅固定 */
-
-  /* このページの左右余白を0に（テーマ側の余白を打ち消す） */
-  .page-content, .app-content, .page-wrapper, .app-main,
-  .content, .content-area, .container{
-    padding-left: 0 !important;
-    padding-right: 0 !important;
-    margin-left: 0 !important;
-    margin-right: 0 !important;
   }
 
   /* 画面の背景 */
@@ -45,7 +23,8 @@
     background-image: none !important;
   }
 
-  /* ページ幅広め */
+  /* このページは横幅を広く */
+  .page-content, .container, .app-content { max-width: 100% !important; }
   .tcd-wrap{
     background: var(--tcd-darker);
     border-radius: 14px;
@@ -54,21 +33,17 @@
     width: 100%;
     max-width: 1500px;
   }
+
   @media (max-width: 1024px){
     .tcd-wrap{ padding: 18px; }
   }
 
-  /* 2カラム（左幅を広く固定・右と揃える） */
-  .tcd-layout{ display:flex; gap:18px; align-items: stretch; }
-  .tcd-sidebar{ width: 560px; min-width: 560px; max-width: 560px; }
-  .right-outer{ flex: 1 1 auto; min-width: 0; }
-
-  @media (max-width: 1280px){
-    .tcd-sidebar{ width: 520px; min-width: 520px; max-width: 520px; }
-  }
+  /* 2カラムレイアウト（左を広め、右を詰める） */
+  .tcd-layout{ display:flex; gap:18px; }
+  .tcd-sidebar{ width: 440px; min-width: 360px; max-width: 520px; }
   @media (max-width: 1024px){
+    .tcd-sidebar{ width: 100%; max-width:none; }
     .tcd-layout{ flex-direction: column; }
-    .tcd-sidebar{ width: 100%; min-width: 0; max-width: none; }
   }
 
   /* 左ペイン */
@@ -85,7 +60,9 @@
     font-size: 1.9rem;
     line-height: 1.2;
   }
-  .side-search{ padding: 0 14px 12px; }
+  .side-search{
+    padding: 0 14px 12px;
+  }
   .side-search input{
     width: 100%;
     border-radius: 12px;
@@ -97,79 +74,63 @@
   }
   .side-search input::placeholder{ color: rgba(255,255,255,.85); }
 
-  /* サイトリスト（白い棒対策） */
+  /* サイトリスト（スクロール領域をコンパクトに） */
   .sites-scroll{
-    position: relative;
     overflow: auto;
-    padding: 0 12px 14px;
+    padding: 0 10px 14px;
     max-height: calc(100vh - 280px);
-    background: transparent;
-    mask-image: none;
-    -webkit-mask-image: none; /* Edge/Chromeの塗り欠け対策 */
   }
+  /* 細いスクロールバー */
   .sites-scroll::-webkit-scrollbar{ width: 6px; }
   .sites-scroll::-webkit-scrollbar-thumb{ background: rgba(255,255,255,.45); border-radius: 999px; }
   .sites-scroll::-webkit-scrollbar-track{ background: transparent; }
 
-  /* サイトカード（列揃え＆はみ出し抑止） */
+  /* サイトカード */
   .prop-card{
     background: rgba(255,255,255,.16);
     border: 1px solid rgba(255,255,255,.15);
     border-radius: 14px;
-    padding: 12px 14px;
+    padding: 14px 14px 10px;
     margin-bottom: 12px;
-    transition: background .12s ease, border-color .12s ease, box-shadow .12s ease;
+    transition: transform .08s ease, background .12s ease, border-color .12s ease;
     cursor: pointer;
-    display: grid;
-    grid-template-rows: auto auto; /* 1:ヘッダ, 2:ドメイン */
-    row-gap: 6px;
-    overflow: hidden;
-    background-clip: padding-box;
   }
-  .prop-card:hover{ background: rgba(255,255,255,.22); border-color: rgba(255,255,255,.28); }
-  .prop-card:focus{ outline: none; }
-  .prop-card.active{ box-shadow: inset 0 0 0 2px #ffffff; }
+  .prop-card:hover{ transform: translateY(-1px); background: rgba(255,255,255,.22); border-color: rgba(255,255,255,.28); }
+  .prop-card.active{ outline: 2px solid #fff; background: rgba(255,255,255,.26); }
 
-  /* サイト名とバッジ（サイト名は固定幅、バッジは折り返して全表示） */
-  .prop-head{
-    display:grid;
-    grid-template-columns: 320px 1fr;        /* ✅ サイト名固定幅 */
-    align-items: center;
-    column-gap: 10px;
-    min-height: 28px;
-  }
-  .prop-head > * { min-width: 0; }           /* 子の正しい縮小を許可 */
   .prop-name{
-    font-weight: 800;
-    line-height: 1.35;
-    white-space: normal;                     /* ✅ すべて表示（省略しない） */
+    font-weight: 700;
+    line-height: 1.25;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;       /* 2行で折り返し */
+    line-clamp: 2;               /* 標準プロパティ（互換用） */
+    -webkit-box-orient: vertical;
+    overflow: hidden;
     word-break: break-word;
   }
   .prop-domain{
+    margin-top: 4px;
     font-size: .92rem;
     opacity: .9;
     word-break: break-all;
   }
 
-  /* バッジ：折り返し可（切れないように） */
-  .pf-row-inline{
-    display:flex; align-items:center; gap:6px 6px;
-    flex-wrap: wrap;               /* ✅ 折り返し可 */
-    white-space: normal;           /* ✅ 切れない */
-  }
+  /* バッジ行（大きく、色分け） */
+  .pf-row{ display:flex; gap:8px; margin-top: 10px; flex-wrap: wrap; }
   .pf-badge{
-    display:inline-flex; align-items:center; gap:6px;
-    padding: 4px 8px;
+    display:inline-flex; align-items:center; gap:8px;
+    padding: 6px 10px;
     border-radius: 999px;
     font-weight: 700;
-    font-size: .85rem;
+    font-size: .95rem;
     color:#fff;
     box-shadow: 0 1px 0 rgba(0,0,0,.15), inset 0 -2px 0 rgba(0,0,0,.12);
+    white-space: nowrap;
   }
   .pf-count{
-    background: rgba(255,255,255,.22);
+    background: rgba(255,255,255,.2);
     border-radius: 999px;
-    padding: 0 6px;
+    padding: 1px 8px;
     font-weight: 800;
     line-height: 1.2;
   }
@@ -178,76 +139,41 @@
   .pf-ame{ background: linear-gradient(135deg,#16a34a,#22c55e); color:#062b0f; }
   .pf-ame .pf-count{ background: rgba(0,0,0,.12); color:#0a3114; }
 
-  /* 右側ペイン */
+  /* 右側ペイン（色分け） */
   .right-outer{
+    flex: 1 1 auto;
     background: var(--pane-bg);
     border-radius: 12px;
     padding: 14px;
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
   }
-
-  /* カード帯（色付きゾーン）→ 白背景と分離して視認性UP */
-  .card-zone{
-    background: var(--card-zone-bg);
-    border: 2px solid var(--card-zone-border);
-    border-radius: 12px;
-    padding: 12px;
-  }
-
-  /* 共通カード */
   .tcd-card{
     background: var(--pane-card);
     border:1px solid var(--pane-border);
     border-radius: 12px;
     box-shadow: 0 1px 2px rgba(0,0,0,.04);
   }
-
-  /* 無料ブログ（Livedoorなど）の枠を色付きでわかりやすく */
-  .tcd-card:has(.tcd-acc-trigger){
-    border-color: var(--acc-frame);
-    box-shadow: 0 0 0 2px var(--acc-frame-soft) inset;
-    background: linear-gradient(0deg, #fff 0%, #fff 100%); /* 中身は白 */
-  }
   .tcd-acc-trigger{
-    width:100%; text-align:left; padding:14px 20px;
+    background:#fff; width:100%; text-align:left; padding:14px 20px;
     display:flex; align-items:center; justify-content:flex-start; gap:14px;
-    background:#fff;
-    border-top:1px solid var(--acc-frame);
-    border-bottom:1px solid var(--acc-frame);
-    border-left:4px solid var(--tcd-dark);  /* 左にアクセント */
+    border-top:1px solid rgba(0,0,0,.06);
+    border-bottom:1px solid rgba(0,0,0,.06);
     cursor: pointer;
-    border-radius: 10px; /* 内側の角を少し丸める */
-    margin: 8px;         /* 周囲に余白（枠が見やすく） */
   }
   .tcd-caret{ font-size:2.1rem; line-height:1; color:#4b5563; transition:transform .2s ease; }
   .tcd-title-lg{ font-weight:700; font-size:1.125rem; }
-  .tcd-link-lg{ color:#1d4ed8; text-decoration:underline; font-size:1rem; white-space:nowrap; }
+  .tcd-link-lg{ color:#1d4ed8; text-decoration:underline; font-size:1rem; }
   .tcd-link-lg:hover{ color:#1e40af; }
   .btn-lg{ padding:.5rem 1rem; font-size:1rem; border-radius:.5rem; }
   .tcd-add-btn{ border:1px solid rgba(0,0,0,.12); background:#fff; }
   .tcd-add-btn:hover{ background:#f9fafb; }
-
-  /* メトリクスは1行で（改行しない） */
-  .tcd-metrics{
-    color:#374151; font-size:.95rem; gap:1.25rem;
-    display:flex; align-items:center; flex-wrap:nowrap; white-space:nowrap;
-  }
-  .tcd-metrics > div{ white-space:nowrap; }
-
-  /* 遅延レンダ（体感高速） */
-  .site-panel{ content-visibility:auto; contain-intrinsic-size: 800px 600px; }
-
-  /* 開閉しても左右の枠が動かないよう最小高さ確保 */
-  #sitePanes{ min-height: 520px; }
+  .tcd-metrics{ color:#374151; font-size:.95rem; gap:1.25rem; }
 </style>
 
 {% set ALLOW_MULTI_BLOG_USER_IDS = [1, 2, 5] %}
 
 <div class="tcd-wrap">
   <div class="tcd-layout">
-    <!-- ================= 左：サイト一覧 ================= -->
+    {# ================= 左：サイト一覧（検索＋カード） ================= #}
     <aside class="tcd-sidebar">
       <div class="tcd-side-title">外部SEO</div>
       <div class="side-search">
@@ -263,176 +189,168 @@
              data-site-name="{{ s.name | e }}"
              data-site-url="{{ s.url | e }}"
              data-search="{{ (s.name ~ ' ' ~ _raw) | e }}">
-            <div class="prop-head">
-              <!-- ✅ サイト名固定幅（長い場合は改行して全表示） -->
-              <div class="prop-name" title="{{ s.name }}">{{ s.name }}</div>
-              <!-- ✅ 無料ブログのバッジ：サイト名の横。折り返し可で全表示 -->
-              <div class="pf-row-inline" aria-label="無料ブログカウント">
-                <span class="pf-badge pf-ld">ライブドア <span class="pf-count">{{ s.ld_count|default(0) }}</span></span>
-                <span class="pf-badge pf-note">note <span class="pf-count">{{ s.note_count|default(0) }}</span></span>
-                <span class="pf-badge pf-ame">アメブロ <span class="pf-count">{{ s.ameba_count|default(0) }}</span></span>
-              </div>
-            </div>
-
+            <div class="prop-name">{{ s.name }}</div>
             {% if s.url %}
               <div class="prop-domain">{{ _raw }}</div>
             {% endif %}
+            <div class="pf-row">
+              <span class="pf-badge pf-ld">ライブドア <span class="pf-count">{{ s.ld_count|default(0) }}</span></span>
+              <span class="pf-badge pf-note">note <span class="pf-count">{{ s.note_count|default(0) }}</span></span>
+              <span class="pf-badge pf-ame">アメブロ <span class="pf-count">{{ s.ameba_count|default(0) }}</span></span>
+            </div>
           </a>
         {% endfor %}
       </div>
     </aside>
 
-    <!-- ================= 右：選択中サイト ================= -->
+    {# ================= 右：選択中サイトの内容 ================= #}
     <main id="sitePanes" class="right-outer">
-      <div class="card-zone">
-        {% for s in sites %}
-          {% set _all_accounts = [] %}
-          {% if s.livedoor_accounts is defined %}
-            {% set _all_accounts = s.livedoor_accounts %}
-          {% elif s.external_accounts is defined %}
-            {% set _all_accounts = s.external_accounts %}
-          {% elif s.accounts is defined %}
-            {% set _all_accounts = s.accounts %}
-          {% endif %}
-          {% set tab_cnt = s.ld_count | default(_all_accounts|length) %}
-          {% set livedoor_count = _all_accounts | length %}
-          {% set can_add_livedoor = (current_user.id in ALLOW_MULTI_BLOG_USER_IDS) or (livedoor_count == 0) %}
+      {# 初期選択サイトだけ即時レンダリング。その他は下の <template> に退避して遅延展開 #}
+      {% for s in sites %}
+        {% set _all_accounts = [] %}
+        {% if s.livedoor_accounts is defined %}
+          {% set _all_accounts = s.livedoor_accounts %}
+        {% elif s.external_accounts is defined %}
+          {% set _all_accounts = s.external_accounts %}
+        {% elif s.accounts is defined %}
+          {% set _all_accounts = s.accounts %}
+        {% endif %}
+        {% set tab_cnt = s.ld_count | default(_all_accounts|length) %}
+        {% set livedoor_count = _all_accounts | length %}
+        {% set can_add_livedoor = (current_user.id in ALLOW_MULTI_BLOG_USER_IDS) or (livedoor_count == 0) %}
 
-          {% if loop.first %}
-          <section id="site-panel-{{ s.id }}" class="site-panel">
-            <div class="tcd-card p-5 mb-4">
-              <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-                <div class="min-w-0">
-                  <div class="tcd-title-lg truncate max-w-xl">{{ s.name }}</div>
-                  {% if s.url %}
-                    <a href="{{ s.url }}" class="tcd-link-lg break-all" target="_blank">{{ s.url }}</a>
-                  {% endif %}
-                </div>
-                <div class="flex items-center gap-2 md:self-start">
-                  <a href="{{ url_for('main.external_accounts') }}?site_id={{ s.id }}"
-                     class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm border">
-                    📒 無料ブログ一覧
-                  </a>
-                </div>
+        {% if loop.first %}
+        <section id="site-panel-{{ s.id }}" class="site-panel">
+          <div class="tcd-card p-5 mb-4">
+            <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+              <div class="min-w-0">
+                <div class="tcd-title-lg truncate max-w-xl">{{ s.name }}</div>
+                {% if s.url %}
+                  <a href="{{ s.url }}" class="tcd-link-lg break-all" target="_blank">{{ s.url }}</a>
+                {% endif %}
+              </div>
+              <div class="flex items-center gap-2 md:self-start">
+                <a href="{{ url_for('main.external_accounts') }}?site_id={{ s.id }}"
+                   class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm border">
+                  📒 無料ブログ一覧
+                </a>
               </div>
             </div>
+          </div>
 
-            <!-- 無料ブログ（色付き枠） -->
-            <section class="tcd-card overflow-hidden">
-              <button class="tcd-acc-trigger accordion-trigger"
-                      data-acc-target="#tab-ld-{{ s.id }}"
-                      aria-controls="tab-ld-{{ s.id }}"
-                      aria-expanded="true">
-                <span class="tcd-caret accordion-caret rotate-180">▾</span>
-                <span class="font-semibold">
-                  Livedoor
-                  <span class="ml-1 text-xs text-gray-500">({{ tab_cnt }})</span>
-                </span>
-              </button>
+          <section class="tcd-card overflow-hidden">
+            <button class="tcd-acc-trigger accordion-trigger"
+                    data-acc-target="#tab-ld-{{ s.id }}"
+                    aria-controls="tab-ld-{{ s.id }}"
+                    aria-expanded="true">
+              <span class="tcd-caret accordion-caret rotate-180">▾</span>
+              <span class="font-semibold">
+                Livedoor
+                <span class="ml-1 text-xs text-gray-500">({{ tab_cnt }})</span>
+              </span>
+            </button>
 
-              <div id="tab-ld-{{ s.id }}" class="accordion-panel">
-                {% if _all_accounts and _all_accounts|length > 0 %}
-                  <div class="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                    {% for acc in _all_accounts %}
-                      <div id="acc-card-{{ acc.id }}" class="tcd-card p-5 flex flex-col gap-4">
-                        <div class="flex items-center justify-between gap-3">
-                          <div class="min-w-0">
-                            {% if acc.public_url %}
-                              <a href="{{ acc.public_url }}" target="_blank"
-                                 class="tcd-link-lg break-all">{{ acc.public_url }}</a>
-                            {% endif %}
-                          </div>
-                          <div class="flex items-center gap-2 whitespace-nowrap">
-                            <button class="text-gray-400 hover:text-gray-700 text-lg leading-none" title="詳細/ログ（準備中）">⋯</button>
-                            <button
-                              type="button"
-                              class="text-xs px-2 py-1 border rounded hover:bg-red-50 text-red-600"
-                              data-acct-id="{{ acc.id }}"
-                              data-site-id="{{ s.id }}"
-                              onclick="deleteExternalAccount(this.dataset.acctId, this.dataset.siteId)"
-                              title="この無料ブログと記事を削除">
-                              削除
-                            </button>
-                          </div>
-                        </div>
-
-                        <!-- 1行で表示（改行しない） -->
-                        <div class="tcd-metrics">
-                          <div>投稿完了: <span class="font-semibold">{{ acc.stat_posted|default(0) }}</span></div>
-                          <div>記事生成済み: <span class="font-semibold">{{ acc.stat_generated|default(0) }}</span></div>
-                          <div>総記事数: <span class="font-semibold">{{ acc.stat_total|default(0) }}</span></div>
-                          <div><a class="underline" href="{{ url_for('main.external_accounts') }}?site_id={{ s.id }}">記事一覧</a></div>
-                        </div>
-
-                        <div id="actionArea-acc-{{ acc.id }}">
-                          {% if not acc.api_key %}
-                            <button
-                              type="button"
-                              class="w-full btn-lg bg-green-600 hover:bg-green-700 text-white"
-                              data-site-id="{{ s.id }}"
-                              data-account-id="{{ acc.id }}"
-                              data-platform="livedoor"
-                              onclick="handleCaptchaClick(this)">
-                              クリックで新規ブログ作成開始
-                            </button>
-                          {% else %}
-                            {% set _generated_once =
-                                 (acc.generation_locked) or
-                                 (acc.stat_total|default(0) > 0) or
-                                 (acc.stat_generated|default(0) > 0) or
-                                 (acc.stat_posted|default(0) > 0) %}
-                            {% if _generated_once %}
-                              <button class="w-full btn-lg bg-gray-300 text-gray-600 cursor-not-allowed" disabled>
-                                記事生成は実行済み（再実行不可）
-                              </button>
-                            {% else %}
-                              <a
-                                href="/generate?site_id={{ s.id }}&account_id={{ acc.id }}"
-                                class="w-full inline-flex items-center justify-center btn-lg bg-indigo-600 hover:bg-indigo-700 text-white"
-                                data-account-id="{{ acc.id }}"
-                                onclick="return lockAndGo(this)">
-                                📝 クリックで記事生成＆投稿
-                              </a>
-                            {% endif %}
+            <div id="tab-ld-{{ s.id }}" class="accordion-panel">
+              {% if _all_accounts and _all_accounts|length > 0 %}
+                <div class="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {% for acc in _all_accounts %}
+                    <div id="acc-card-{{ acc.id }}" class="tcd-card p-5 flex flex-col gap-4">
+                      <div class="flex items-start justify-between gap-3">
+                        <div class="min-w-0">
+                          {% if acc.public_url %}
+                            <a href="{{ acc.public_url }}" target="_blank"
+                               class="tcd-link-lg break-all">{{ acc.public_url }}</a>
                           {% endif %}
                         </div>
-
-                      </div>
-                    {% endfor %}
-                  </div>
-                {% else %}
-                  <div class="px-5 py-4 text-sm text-gray-600">
-                    まだLivedoorブログはありません。
-                  </div>
-                {% endif %}
-
-                <div class="px-5 py-4 border-t">
-                  {% if can_add_livedoor %}
-                    <button id="addBtn-{{ s.id }}" type="button"
-                            class="tcd-add-btn inline-flex items-center px-4 py-2 rounded-lg text-sm"
+                        <div class="flex items-center gap-2">
+                          <button class="text-gray-400 hover:text-gray-700 text-lg leading-none" title="詳細/ログ（準備中）">⋯</button>
+                          <button
+                            type="button"
+                            class="text-xs px-2 py-1 border rounded hover:bg-red-50 text-red-600"
+                            data-acct-id="{{ acc.id }}"
                             data-site-id="{{ s.id }}"
-                            onclick="newAccountStart(this)">
-                      ＋ ブログ追加
-                    </button>
-                  {% else %}
-                    <button id="addBtn-{{ s.id }}" type="button"
-                            class="tcd-add-btn inline-flex items-center px-4 py-2 rounded-lg text-sm
-                                   bg-gray-200 text-gray-500 cursor-not-allowed opacity-60"
-                            data-site-id="{{ s.id }}" disabled
-                            title="このサイトではLivedoorブログは1つまで（許可ユーザーは除く）">
-                      ＋ ブログ追加
-                    </button>
-                  {% endif %}
+                            onclick="deleteExternalAccount(this.dataset.acctId, this.dataset.siteId)"
+                            title="この無料ブログと記事を削除">
+                            削除
+                          </button>
+                        </div>
+                      </div>
+
+                      <div class="tcd-metrics flex items-center">
+                        <div>投稿完了: <span class="font-semibold">{{ acc.stat_posted|default(0) }}</span></div>
+                        <div>記事生成済み: <span class="font-semibold">{{ acc.stat_generated|default(0) }}</span></div>
+                        <div>総記事数: <span class="font-semibold">{{ acc.stat_total|default(0) }}</span></div>
+                        <div><a class="underline" href="{{ url_for('main.external_accounts') }}?site_id={{ s.id }}">記事一覧</a></div>
+                      </div>
+
+                      <div id="actionArea-acc-{{ acc.id }}">
+                        {% if not acc.api_key %}
+                          <button
+                            type="button"
+                            class="w-full btn-lg bg-green-600 hover:bg-green-700 text-white"
+                            data-site-id="{{ s.id }}"
+                            data-account-id="{{ acc.id }}"
+                            data-platform="livedoor"
+                            onclick="handleCaptchaClick(this)">
+                            クリックで新規ブログ作成開始
+                          </button>
+                        {% else %}
+                          {% set _generated_once =
+                               (acc.generation_locked) or
+                               (acc.stat_total|default(0) > 0) or
+                               (acc.stat_generated|default(0) > 0) or
+                               (acc.stat_posted|default(0) > 0) %}
+                          {% if _generated_once %}
+                            <button class="w-full btn-lg bg-gray-300 text-gray-600 cursor-not-allowed" disabled>
+                              記事生成は実行済み（再実行不可）
+                            </button>
+                          {% else %}
+                            <a
+                              href="/generate?site_id={{ s.id }}&account_id={{ acc.id }}"
+                              class="w-full inline-flex items-center justify-center btn-lg bg-indigo-600 hover:bg-indigo-700 text-white"
+                              data-account-id="{{ acc.id }}"
+                              onclick="return lockAndGo(this)">
+                              📝 クリックで記事生成＆投稿
+                            </a>
+                          {% endif %}
+                        {% endif %}
+                      </div>
+
+                    </div>
+                  {% endfor %}
                 </div>
+              {% else %}
+                <div class="px-5 py-4 text-sm text-gray-600">
+                  まだLivedoorブログはありません。
+                </div>
+              {% endif %}
+
+              <div class="px-5 py-4 border-t">
+                {% if can_add_livedoor %}
+                  <button id="addBtn-{{ s.id }}" type="button"
+                          class="tcd-add-btn inline-flex items-center px-4 py-2 rounded-lg text-sm"
+                          data-site-id="{{ s.id }}"
+                          onclick="newAccountStart(this)">
+                    ＋ ブログ追加
+                  </button>
+                {% else %}
+                  <button id="addBtn-{{ s.id }}" type="button"
+                          class="tcd-add-btn inline-flex items-center px-4 py-2 rounded-lg text-sm
+                                 bg-gray-200 text-gray-500 cursor-not-allowed opacity-60"
+                          data-site-id="{{ s.id }}" disabled
+                          title="このサイトではLivedoorブログは1つまで（許可ユーザーは除く）">
+                    ＋ ブログ追加
+                  </button>
+                {% endif %}
               </div>
-            </section>
+            </div>
           </section>
-          {% endif %}
-        {% endfor %}
-      </div>
+        </section>
+        {% endif %}
+      {% endfor %}
     </main>
 
-    <!-- ====== 非アクティブサイトは template に退避（遅延生成で高速化） ====== -->
+    {# ====== 非アクティブサイトは template に退避（遅延生成で高速化） ====== #}
     {% for s in sites %}
       {% if not loop.first %}
         {% set _all_accounts = [] %}
@@ -465,7 +383,6 @@
               </div>
             </div>
 
-            <!-- 無料ブログ（色付き枠） -->
             <section class="tcd-card overflow-hidden">
               <button class="tcd-acc-trigger accordion-trigger"
                       data-acc-target="#tab-ld-{{ s.id }}"
@@ -483,14 +400,14 @@
                   <div class="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                     {% for acc in _all_accounts %}
                       <div id="acc-card-{{ acc.id }}" class="tcd-card p-5 flex flex-col gap-4">
-                        <div class="flex items-center justify-between gap-3">
+                        <div class="flex items-start justify-between gap-3">
                           <div class="min-w-0">
                             {% if acc.public_url %}
                               <a href="{{ acc.public_url }}" target="_blank"
                                  class="tcd-link-lg break-all">{{ acc.public_url }}</a>
                             {% endif %}
                           </div>
-                          <div class="flex items-center gap-2 whitespace-nowrap">
+                          <div class="flex items-center gap-2">
                             <button class="text-gray-400 hover:text-gray-700 text-lg leading-none" title="詳細/ログ（準備中）">⋯</button>
                             <button
                               type="button"
@@ -504,7 +421,7 @@
                           </div>
                         </div>
 
-                        <div class="tcd-metrics">
+                        <div class="tcd-metrics flex items-center">
                           <div>投稿完了: <span class="font-semibold">{{ acc.stat_posted|default(0) }}</span></div>
                           <div>記事生成済み: <span class="font-semibold">{{ acc.stat_generated|default(0) }}</span></div>
                           <div>総記事数: <span class="font-semibold">{{ acc.stat_total|default(0) }}</span></div>
@@ -577,12 +494,10 @@
         </template>
       {% endif %}
     {% endfor %}
-      </div> <!-- /.card-zone -->
-    </main>
   </div>
 </div>
 
-<!-- ============= CAPTCHAモーダル＆トースト（既存） ============= -->
+{# ============== CAPTCHAモーダル＆トースト（既存） ============== #}
 <div id="captchaModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
   <div class="bg-white p-6 rounded-2xl shadow-lg w-[420px] max-w-[92vw] relative">
     <button onclick="closeCaptcha()" class="absolute top-2 right-2 text-gray-500 hover:text-gray-800 text-xl leading-none">×</button>
@@ -643,23 +558,24 @@
   function escapeHtml(s){ if(s==null) return ''; return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'","&#039;"); }
   function escapeAttr(s){ return escapeHtml(s).replaceAll('"','&quot;'); }
 
-  /* ========== 左：サイト切替（遅延生成対応・幅固定） ========== */
+  /* ========== 左：サイト切替（遅延生成対応） ========== */
   function selectSite(siteId, store=true){
+    // 既存パネルを非表示
     document.querySelectorAll('.site-panel').forEach(p => p.classList.add('hidden'));
 
-    // template から展開
+    // まだ生成していなければ template から展開
     let panel = document.getElementById('site-panel-' + siteId);
     if (!panel) {
       const tpl = document.getElementById('tpl-site-' + siteId);
       if (tpl) {
         const frag = tpl.content.cloneNode(true);
-        document.getElementById('sitePanes').querySelector('.card-zone').appendChild(frag);
+        document.getElementById('sitePanes').appendChild(frag);
         panel = document.getElementById('site-panel-' + siteId);
       }
     }
     if (panel) panel.classList.remove('hidden');
 
-    // 左カードのアクティブ表示（装飾のみ・サイズ不変）
+    // ナビのアクティブ表示
     document.querySelectorAll('.site-nav-link').forEach(a => a.classList.remove('active'));
     const nav = document.querySelector(`.site-nav-link[data-site-id="${siteId}"]`);
     if (nav) nav.classList.add('active');
@@ -678,7 +594,7 @@
     return first || '';
   }
 
-  /* ========== 検索（即時フィルタ & 軽量化） ========== */
+  /* ========== 検索（即時フィルタ & 爆速） ========== */
   const siteSearch = document.getElementById('siteSearch');
   function filterSites(q){
     const needle = (q||'').toLowerCase().replace(/\s+/g,'');
@@ -690,7 +606,7 @@
       if (show && !firstVisible) firstVisible = el;
     });
 
-    // 現在選択中が非表示なら先頭可視カードへ切替
+    // 現在選択中が非表示になった場合は、最初に見えているものに切替
     const current = sessionStorage.getItem(SELECT_KEY);
     const currentNav = current ? document.querySelector(`.site-nav-link[data-site-id="${current}"]`) : null;
     if (currentNav && currentNav.style.display === 'none' && firstVisible) {
@@ -758,11 +674,12 @@
     return 10;
   }
 
-  /* ========== アコーディオン（幅固定・高さのみ変化） ========== */
+  /* ========== アコーディオン ========== */
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('.accordion-trigger');
     if (!btn) return;
-    const panel = document.querySelector(btn.getAttribute('data-acc-target'));
+    const targetSel = btn.getAttribute('data-acc-target');
+    const panel = document.querySelector(targetSel);
     if (!panel) return;
 
     const container = btn.closest('.tcd-card') || btn.parentElement;
@@ -848,6 +765,7 @@
   function renderNewAccountCard(siteId, account) {
     let panel = document.querySelector(`#tab-ld-${siteId}`);
     if (!panel) {
+      // まだパネルを展開していない場合はテンプレを差し込み
       selectSite(siteId, true);
       panel = document.querySelector(`#tab-ld-${siteId}`);
     }
@@ -875,16 +793,16 @@
     const url = acc.public_url || '';
 
     card.innerHTML = `
-      <div class="flex items-center justify-between gap-3">
+      <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           ${url ? `<a href="${escapeAttr(url)}" target="_blank" class="tcd-link-lg break-all">${escapeHtml(url)}</a>` : ``}
         </div>
-        <div class="flex items-center gap-2 whitespace-nowrap">
+        <div class="flex items-center gap-2">
           <button class="text-gray-400 hover:text-gray-700 text-lg leading-none" title="詳細/ログ（準備中）">⋯</button>
         </div>
       </div>
 
-      <div class="tcd-metrics">
+      <div class="tcd-metrics flex items-center">
         <div>投稿完了: <span class="font-semibold">${acc.stat_posted || 0}</span></div>
         <div>記事生成済み: <span class="font-semibold">${Math.max((acc.stat_total||0) - (acc.stat_posted||0), 0)}</span></div>
         <div>総記事数: <span class="font-semibold">${acc.stat_total || 0}</span></div>
