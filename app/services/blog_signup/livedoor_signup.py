@@ -390,36 +390,131 @@ def _japanese_base_word(site) -> str:
         return topic.strip()
     return "日々"
 
+def _path_tokens(url: str) -> list[str]:
+    try:
+        from urllib.parse import urlparse
+        p = urlparse(url or "")
+        path = (p.path or "").strip("/").lower()
+    except Exception:
+        path = ""
+    raw = []
+    for seg in path.split("/"):
+        if not seg:
+            continue
+        # - と _ でさらに分割
+        raw.extend([w for w in _re.split(r"[-_]", seg) if w])
+    # 数字だけや短すぎるものは除外
+    out = []
+    for w in raw:
+        if w.isdigit():
+            continue
+        if len(w) < 2:
+            continue
+        out.append(w)
+    return out
+
+def _site_keywords(site, max_tokens: int = 3) -> list[str]:
+    """サイト名とURLからキーワード候補を必ず返す（重複・ストップワード除去）"""
+    name = (getattr(site, "name", "") or "").strip()
+    url  = (getattr(site, "url", "")  or "").strip()
+
+    toks_name = _name_tokens(name)              # 日本語も英語も混ざる
+    toks_dom  = _domain_tokens(url)             # 英語寄り
+    toks_path = _path_tokens(url)               # 英語寄り
+
+    # ストップワード除去
+    filtered = []
+    seen = set()
+    for t in toks_name + toks_dom + toks_path:
+        t_norm = _norm(t)
+        if not t_norm:
+            continue
+        if _has_cjk(t):   # 日本語
+            if any(sw in t for sw in STOPWORDS_JP):
+                continue
+        else:             # 英語
+            if t_norm in STOPWORDS_EN:
+                continue
+        if t_norm in seen:
+            continue
+        seen.add(t_norm)
+        filtered.append(t)
+
+    # 1語も取れない場合はドメインのルート語だけでも拾う（URLが空なら最後に "blog"）
+    if not filtered:
+        base = (_domain_tokens(url)[:1] or ["blog"])
+        return base[:max_tokens]
+
+    return filtered[:max_tokens]
+
+
 def _craft_blog_title(site) -> str:
+    """
+    サイト名/URLから抽出した語を必ず含むタイトルを作る。
+    日本語トークンがあれば日本語寄りのテンプレ、なければ英語寄りだが「ブログ」を付ける。
+    """
     site_name = (getattr(site, "name", "") or "").strip()
     site_url  = (getattr(site, "url", "")  or "").strip()
     salt = f"{getattr(site, 'id', '')}-{site_name}-{site_url}"
-    base_word = _japanese_base_word(site)
-    cands = _templates_jp(base_word)
-    banned_equal = {_norm(site_name)}
-    banned_equal.update(_norm(w) for w in _domain_tokens(site_url))
 
-    def acceptable(title: str) -> bool:
-        if not title or not title.strip():
-            return False
-        if _norm(title) in banned_equal:
-            return False
-        if _too_similar_to_site(title, site):
-            return False
-        if not _has_cjk(title):
-            return False
-        if "ブログ" not in title:
-            return False
-        return True
+    kws = _site_keywords(site, max_tokens=3)
+    # 日本語があるかどうかでテンプレを出し分け
+    has_jp = any(_has_cjk(k) for k in kws)
 
-    idx = _deterministic_index(salt, len(cands))
-    for i in range(len(cands)):
-        title = cands[(idx + i) % len(cands)]
-        if acceptable(title):
-            return title[:48]
+    # 代表語を2つまで使う
+    k1 = kws[0] if len(kws) >= 1 else ""
+    k2 = kws[1] if len(kws) >= 2 else ""
 
-    fallback = [f"{base_word}ブログ", f"{base_word}のブログ", "日々ブログ", "小さなブログ記録"]
-    return fallback[_deterministic_index(salt, len(fallback))][:48]
+    if has_jp:
+        templates = []
+        if k1 and k2:
+            templates.extend([
+                f"{k1}・{k2}ブログ",
+                f"{k1}と{k2}のブログ",
+                f"{k1}{k2}ブログ",
+                f"{k1}＆{k2}の記録ブログ",
+            ])
+        if k1:
+            templates.extend([
+                f"{k1}ブログ",
+                f"{k1}のブログ",
+                f"{k1}の記録ブログ",
+                f"{k1}のメモ帳",
+                f"{k1}ノート",
+            ])
+    else:
+        # 英語のみでも「ブログ」表記で日本語UIに合わせる
+        join12 = f"{k1} {k2}".strip()
+        templates = []
+        if k1 and k2:
+            templates.extend([
+                f"{join12} ブログ",
+                f"{k1} & {k2} ブログ",
+                f"{k1}-{k2} ブログ",
+            ])
+        if k1:
+            templates.extend([
+                f"{k1} ブログ",
+                f"{k1} Notes ブログ",
+                f"{k1} Journal ブログ",
+            ])
+
+    # 予防: 空にならないよう最後の保険（URL由来に限定）
+    if not templates:
+        base = (_domain_tokens(site_url)[:1] or ["blog"])[0]
+        templates = [f"{base} ブログ"]
+
+    # 候補から決定（長さ調整）
+    idx = _deterministic_index(salt, len(templates))
+    for i in range(len(templates)):
+        title = templates[(idx + i) % len(templates)]
+        title = title.strip()[:48]
+        if title:
+            return title
+
+    # ここに来ることはほぼないが一応
+    return (templates[0].strip() if templates else "blog")[:48]
+
 
 # ----------------- 画面操作ユーティリティ -----------------
 async def _maybe_close_overlays(page):
@@ -743,7 +838,10 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         try:
             desired_title = _craft_blog_title(site)
         except Exception:
-            desired_title = "日々ブログ"
+            # 例外時でも最低限ドメイン由来の語を使う
+            site_url = (getattr(site, "url", "") or "").strip()
+            base = (_domain_tokens(site_url)[:1] or ["blog"])[0]
+            desired_title = f"{base} ブログ"
 
         logger.info("[LD-Recover] タイトル設定＆送信開始")
         ok_submit = await _set_title_and_submit(page, desired_title)

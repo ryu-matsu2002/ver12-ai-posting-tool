@@ -161,7 +161,8 @@ def _ensure_http_url(u: str) -> str:
 
 def _base_and_topic(site: Site) -> Tuple[str, str]:
     base = site.url.rstrip("/")
-    return base, f"{base}/topic"
+    # topic の末尾に必ずスラッシュを付ける
+    return base, f"{base}/topic/"
 
 
 # ===============================
