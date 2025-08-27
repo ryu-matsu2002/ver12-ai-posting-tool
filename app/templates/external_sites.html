@@ -4,30 +4,33 @@
 {% block content %}
 <style>
   :root{
-    /* 要望：ベースカラーのみ #ff89ff に変更（他は現状維持） */
-    --tcd-base:#ff89ff;
-    --tcd-dark:#b98ccf;
-    --tcd-darker:#9b73b8;
-    --tcd-light:#f7effb;
-    --tcd-lighter:#fbf7ff;
+    /* === ベースカラーを #ff89ff に統一（濃淡は固定のまま近似トーンを指定） === */
+    --tcd-base:#ff89ff;   /* 指定色 */
+    /* 濃淡はベースからの近似（青みを排除しピンク〜マゼンタ系で統一） */
+    --tcd-dark:#e56fe8;    /* 旧: #b98ccf 相当の暗め */
+    --tcd-darker:#c955cf;  /* 旧: #9b73b8 相当のさらに暗め */
+    --tcd-light:#ffe9ff;   /* 旧: #f7effb の明度合わせ */
+    --tcd-lighter:#fff4ff; /* 旧: #fbf7ff のさらに薄い面 */
 
-    /* 落ち着いた“カード”トーン（減彩） */
-    --card1:#58436e;     /* desaturated purple */
-    --card2:#6b5384;
+    /* カードは落ち着いたトーン（減彩のまま、マゼンタ系に置換） */
+    --card1:#6e3f69;     /* desaturated magenta/purple */
+    --card2:#8a5583;
     --card-edge:rgba(255,255,255,.18);
     --card-glow:rgba(0,0,0,.06);
 
-    /* 右ペイン */
-    --pane-bg:#f4eef8;
+    /* 右ペイン（うっすらピンク） */
+    --pane-bg:#f8ecfb;
     --pane-border:rgba(0,0,0,.06);
-    --link:#e6edff;
+
+    /* リンク色（青系を排除） */
+    --link:#ffe9ff;
     --link-hover:#ffffff;
   }
 
   /* ===== ベース：左右の白余白・白筋を完全排除 ===== */
   html{ scrollbar-gutter: stable; }
   body{
-    overflow-y: scroll;  /* 常にスクロールバーを確保して横幅の揺れを防ぐ */
+    overflow-y: scroll;
     margin:0;
     background: var(--tcd-lighter);
   }
@@ -45,6 +48,7 @@
   }
 
   .tcd-wrap{
+    /* 外枠の帯を濃いマゼンタ系に */
     background: var(--tcd-darker);
     border-radius: 14px;
     padding: 28px;
@@ -56,7 +60,7 @@
     .tcd-wrap{ padding: 18px; }
   }
 
-  /* ===== 2カラム：左幅固定（開閉しても左右幅が変わらない） ===== */
+  /* ===== 2カラム ===== */
   .tcd-layout{ display:flex; gap:18px; align-items: stretch; }
   .tcd-sidebar{ flex: 0 0 640px; min-width: 640px; max-width: 640px; }
   .right-outer{ flex: 1 1 0; min-width: 0; }
@@ -68,22 +72,34 @@
     .tcd-sidebar{ flex: 0 0 auto; min-width: 0; max-width:none; }
   }
 
-  /* ===== 左ペイン（白い表示の根絶） ===== */
+  /* ===== 左ペイン ===== */
   .tcd-sidebar{
+    /* 青味グラデを #ff89ff 系の濃淡へ変更 */
     background: linear-gradient(180deg, var(--tcd-darker) 0%, var(--tcd-dark) 100%);
     color:#fff;
     border-radius: 12px;
     display:flex; flex-direction: column;
-    overflow:hidden;                     /* 内部の装飾をカット */
+    overflow:hidden;
     -webkit-mask:none !important; mask:none !important;
   }
-  /* 疑わしい擬似要素やフェードを完全に無効化 */
-  .tcd-sidebar::before,.tcd-sidebar::after,
-  #siteList::before,#siteList::after,
-  .sites-scroll::before,.sites-scroll::after,
-  .prop-card::before,.prop-card::after,
-  #siteList .site-nav-link::before,
-  #siteList .site-nav-link::after{ content:none !important; display:none !important; }
+
+  /* ■■■ “白いマーク（擬似要素）” を徹底的に無効化 ■■■
+     テーマ/ライブラリ側で .prop-card/.site-nav-link/.prop-head/.prop-title などに
+     ::before/::after で装飾を差すケースを想定して広く潰す */
+  .tcd-sidebar::before,
+  .tcd-sidebar::after,
+  #siteList::before,
+  #siteList::after,
+  #siteList *::before,
+  #siteList *::after{
+    content: none !important;
+    display: none !important;
+    background: none !important;
+    background-image: none !important;
+    box-shadow: none !important;
+    -webkit-mask: none !important;
+    mask: none !important;
+  }
 
   .tcd-side-title{
     padding: 14px 18px 8px;
@@ -104,7 +120,6 @@
     -webkit-mask:none !important; mask:none !important;
     background: transparent !important;
   }
-  /* 細いスクロールバー（白に見えないよう薄紫） */
   .sites-scroll::-webkit-scrollbar{ width: 6px; }
   .sites-scroll::-webkit-scrollbar-thumb{ background: rgba(255,255,255,.35); border-radius: 999px; }
   .sites-scroll::-webkit-scrollbar-track{ background: transparent; }
@@ -118,6 +133,8 @@
     margin: 10px 4px 12px;
     transition: background .12s ease, border-color .12s ease, transform .08s ease, box-shadow .12s ease;
     cursor: pointer;
+    background-image: none !important; /* 念押し */
+    overflow: hidden;
   }
   .prop-card:hover{ transform: translateY(-1px); background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.24); }
   .prop-card.active{
@@ -129,8 +146,12 @@
   .prop-head{
     display: grid; grid-template-columns: 1fr auto; align-items: center;
     column-gap: 10px; min-height: 28px;
+    background: none !important;
   }
-  .prop-title{ font-weight: 800; line-height: 1.35; white-space: normal; word-break: break-word; }
+  .prop-title{
+    font-weight: 800; line-height: 1.35; white-space: normal; word-break: break-word;
+    background: none !important;
+  }
   .prop-domain{ margin-top: 6px; font-size: .92rem; opacity: .9; word-break: break-all; }
 
   .pf-row-inline{ display:flex; gap:8px; align-items:center; white-space:nowrap; flex-wrap:nowrap; }
@@ -139,35 +160,35 @@
     padding: 6px 10px; border-radius: 999px;
     font-weight: 700; font-size: .92rem; color:#fff;
     box-shadow: inset 0 -2px 0 rgba(0,0,0,.1);
-    filter: saturate(.85);   /* バッジも彩度を抑える */
+    filter: saturate(.85);
   }
   .pf-count{ background: rgba(255,255,255,.2); border-radius:999px; padding:1px 8px; font-weight:800; line-height:1.2; }
-  .pf-ld{ background: linear-gradient(135deg,#3558b7,#274aa7); }
-  .pf-note{ background: linear-gradient(135deg,#2b2f36,#475264); }
+  /* バッジの色味は意味区別のため据え置き可（要件は“ページのベースカラー統一”のため） */
+  .pf-ld{ background: linear-gradient(135deg,#874e9d,#6f3e84); } /* 青→マゼンタ寄り */
+  .pf-note{ background: linear-gradient(135deg,#3a3441,#5a5362); }
   .pf-ame{ background: linear-gradient(135deg,#19824a,#2ca765); color:#052413; }
   .pf-ame .pf-count{ background: rgba(0,0,0,.12); color:#0a3114; }
 
-  /* ===== 右ペイン（余白を拡大・横幅安定） ===== */
+  /* ===== 右ペイン ===== */
   .right-outer{
     flex: 1 1 0;
     background: var(--pane-bg);
     border-radius: 12px;
-    padding: 26px 28px;           /* ←左右の余白をしっかり確保 */
+    padding: 26px 28px;
     min-height: 520px;
-    overflow-y: auto;             /* 内側スクロール */
-    scrollbar-gutter: stable;     /* 開閉時に横幅が揺れない */
+    overflow-y: auto;
+    scrollbar-gutter: stable;
   }
-  /* 各カードにも軽く左右マージンを付与（密着防止） */
   .right-outer .tcd-card{ margin-left: 8px; margin-right: 8px; }
 
-  /* ===== 落ち着いたカード（減彩） ===== */
+  /* ===== カード ===== */
   .tcd-card{
     background: linear-gradient(135deg,var(--card1),var(--card2));
     border: 1px solid var(--card-edge);
     border-radius: 16px;
     box-shadow: 0 0 0 1px rgba(0,0,0,.12) inset, 0 10px 24px var(--card-glow);
     color:#fff;
-    filter: saturate(.85) brightness(.98);   /* 主張を抑える */
+    filter: saturate(.85) brightness(.98);
   }
 
   /* 見出しカード（サイト名） */
@@ -181,15 +202,16 @@
     width:100%; text-align:left; padding:14px 20px;
     display:flex; align-items:center; gap:14px; cursor: pointer;
     border-top-left-radius:16px; border-top-right-radius:16px;
-    background: linear-gradient(135deg, #5b4573, #745a8f);
+    /* ここもマゼンタ系に変更 */
+    background: linear-gradient(135deg, #7a4a75, #9a6194);
     border-bottom: 1px solid var(--card-edge);
     color:#fff; filter: saturate(.85);
   }
-  .tcd-caret{ font-size:2.1rem; line-height:1; color:#ebe7f5; transition:transform .2s ease; }
+  .tcd-caret{ font-size:2.1rem; line-height:1; color:#f3e7f2; transition:transform .2s ease; }
 
-  /* メトリクス：1行固定（横スクロールなし） */
+  /* メトリクス */
   .tcd-metrics{
-    color:#f1f3ff; font-size:.95rem; gap:1.25rem;
+    color:#fef2ff; font-size:.95rem; gap:1.25rem;
     display:flex; align-items:center; white-space:nowrap;
     overflow:hidden;
   }
@@ -205,7 +227,7 @@
   .accordion-panel{ background: transparent; }
   .site-panel{ content-visibility:auto; contain-intrinsic-size: 800px 600px; }
 
-  /* ====== “白いピース” を確実に無効化（最下部に配置して勝たせる） ====== */
+  /* 念押し：カードの擬似装飾も無効化 */
   #siteList .prop-card::before,
   #siteList .prop-card::after{
     content: none !important;
@@ -215,14 +237,6 @@
     -webkit-mask: none !important;
     mask: none !important;
   }
-  /* 念のため、カード自体にも余計な背景画像/マスクを禁止 */
-  #siteList .prop-card{
-    background-image: none !important;
-    -webkit-mask: none !important;
-    mask: none !important;
-    overflow: hidden; /* 断片がはみ出さないよう保険 */
-  }
-  /* Chrome の合成滲み対策（必要に応じて） */
   #siteList { transform: translateZ(0); }
 </style>
 
@@ -311,7 +325,6 @@
 
             <div id="tab-ld-{{ s.id }}" class="accordion-panel">
               {% if _all_accounts and _all_accounts|length > 0 %}
-                <!-- “一気に表示” 1カラムで広く -->
                 <div class="p-4 grid grid-cols-1 gap-4">
                   {% for acc in _all_accounts %}
                     <div id="acc-card-{{ acc.id }}" class="tcd-card p-5 flex flex-col gap-4">
@@ -729,34 +742,34 @@
 
   /* ========== アコーディオン ========= */
   document.addEventListener('click', (e) => {
-  const btn = e.target.closest('.accordion-trigger');
-  if (!btn) return;
+    const btn = e.target.closest('.accordion-trigger');
+    if (!btn) return;
 
-  const targetSel = btn.getAttribute('data-acc-target');
-  const panel = document.querySelector(targetSel);
-  if (!panel) return;
+    const targetSel = btn.getAttribute('data-acc-target');
+    const panel = document.querySelector(targetSel);
+    if (!panel) return;
 
-  const container = btn.closest('.tcd-card') || btn.parentElement;
-  const caret = btn.querySelector('.tcd-caret, .accordion-caret');
-  const isOpen = !panel.classList.contains('hidden');
+    const container = btn.closest('.tcd-card') || btn.parentElement;
+    const caret = btn.querySelector('.tcd-caret, .accordion-caret');
+    const isOpen = !panel.classList.contains('hidden');
 
-  if (isOpen) {
-    panel.classList.add('hidden');
-    if (caret) caret.classList.remove('rotate-180');
-    btn.setAttribute('aria-expanded', 'false');
-    return;
-  }
+    if (isOpen) {
+      panel.classList.add('hidden');
+      if (caret) caret.classList.remove('rotate-180');
+      btn.setAttribute('aria-expanded', 'false');
+      return;
+    }
 
-  if (container) {
-    container.querySelectorAll('.accordion-panel').forEach(p => p.classList.add('hidden'));
-    container.querySelectorAll('.tcd-caret, .accordion-caret').forEach(c => c.classList.remove('rotate-180'));
-    container.querySelectorAll('.accordion-trigger').forEach(b => b.setAttribute('aria-expanded','false'));
-  }
+    if (container) {
+      container.querySelectorAll('.accordion-panel').forEach(p => p.classList.add('hidden'));
+      container.querySelectorAll('.tcd-caret, .accordion-caret').forEach(c => c.classList.remove('rotate-180'));
+      container.querySelectorAll('.accordion-trigger').forEach(b => b.setAttribute('aria-expanded','false'));
+    }
 
-  panel.classList.remove('hidden');
-  if (caret) caret.classList.add('rotate-180');  // ←ここを修正
-  btn.setAttribute('aria-expanded', 'true');
-});
+    panel.classList.remove('hidden');
+    if (caret) caret.classList.add('rotate-180');
+    btn.setAttribute('aria-expanded', 'true');
+  });
 
   /* ========== ＋ブログ追加（API連携） ========== */
   async function newAccountStart(button) {
