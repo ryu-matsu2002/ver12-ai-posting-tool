@@ -4,28 +4,32 @@
 {% block content %}
 <style>
   :root{
-    --tcd-base:#ff89ff;
-    --tcd-dark:#c65ac6;
-    --tcd-darker:#a446a4;
-    --tcd-light:#ffd4ff;
-    --tcd-lighter:#ffecff;
+    --tcd-base:#f3e7f8;
+    --tcd-dark:#b98ccf;
+    --tcd-darker:#9b73b8;
+    --tcd-light:#f7effb;
+    --tcd-lighter:#fbf7ff;
 
-    /* ゲームカード風 */
-    --game-grad1:#3a1a57;
-    --game-grad2:#6c2a8a;
-    --game-edge:rgba(255,255,255,.22);
-    --game-glow:rgba(255,137,255,.28);
+    /* 落ち着いた“カード”トーン（減彩） */
+    --card1:#58436e;     /* desaturated purple */
+    --card2:#6b5384;
+    --card-edge:rgba(255,255,255,.18);
+    --card-glow:rgba(0,0,0,.06);
 
     /* 右ペイン */
-    --pane-bg:#f7e6fb;      /* 右側の薄い紫背景（白撤廃） */
-    --pane-border:rgba(255,255,255,.16);
-    --link:#b6e0ff;
-    --link-hover:#e5f3ff;
+    --pane-bg:#f4eef8;
+    --pane-border:rgba(0,0,0,.06);
+    --link:#e6edff;
+    --link-hover:#ffffff;
   }
 
-  /* ベース調整：左右の白余白・白筋を完全に消す */
+  /* ===== ベース：左右の白余白・白筋を完全排除 ===== */
   html{ scrollbar-gutter: stable; }
-  body{ overflow-y: scroll; margin:0; background: var(--tcd-lighter); }
+  body{
+    overflow-y: scroll;  /* 常にスクロールバーを確保して横幅の揺れを防ぐ */
+    margin:0;
+    background: var(--tcd-lighter);
+  }
   *, *::before, *::after{ box-sizing: border-box; }
 
   html, body, main, #main, #content, .content, .content-area,
@@ -51,9 +55,9 @@
     .tcd-wrap{ padding: 18px; }
   }
 
-  /* 2カラム：左幅を“固定”して開閉時も左右幅が変わらない */
+  /* ===== 2カラム：左幅固定（開閉しても左右幅が変わらない） ===== */
   .tcd-layout{ display:flex; gap:18px; align-items: stretch; }
-  .tcd-sidebar{ flex: 0 0 640px; min-width: 640px; max-width: 640px; } /* ←固定 */
+  .tcd-sidebar{ flex: 0 0 640px; min-width: 640px; max-width: 640px; }
   .right-outer{ flex: 1 1 0; min-width: 0; }
   @media (max-width: 1280px){
     .tcd-sidebar{ flex-basis:560px; min-width:560px; max-width:560px; }
@@ -63,14 +67,20 @@
     .tcd-sidebar{ flex: 0 0 auto; min-width: 0; max-width:none; }
   }
 
-  /* 左ペイン（白筋対策にoverflow hidden） */
+  /* ===== 左ペイン（白い表示の根絶） ===== */
   .tcd-sidebar{
     background: linear-gradient(180deg, var(--tcd-darker) 0%, var(--tcd-dark) 100%);
     color:#fff;
     border-radius: 12px;
     display:flex; flex-direction: column;
-    overflow:hidden;   /* ←内部の影やスクロール装飾を切って白い形状を消す */
+    overflow:hidden;                     /* 内部の装飾をカット */
+    -webkit-mask:none !important; mask:none !important;
   }
+  /* 疑わしい擬似要素やフェードを完全に無効化 */
+  .tcd-sidebar::before,.tcd-sidebar::after,
+  #siteList::before,#siteList::after,
+  .sites-scroll::before,.sites-scroll::after,
+  .prop-card::before,.prop-card::after{ content:none !important; display:none !important; }
   .tcd-side-title{
     padding: 14px 18px 8px;
     font-weight: 800; letter-spacing: .02em;
@@ -78,129 +88,116 @@
   }
   .side-search{ padding: 0 14px 12px; }
   .side-search input{
-    width: 100%;
-    border-radius: 12px;
-    border: none; outline: none;
-    padding: 12px 14px;
-    background: rgba(255,255,255,.18);
-    color:#fff;
+    width: 100%; border-radius: 12px; border: none; outline: none;
+    padding: 12px 14px; background: rgba(255,255,255,.16); color:#fff;
   }
-  .side-search input::placeholder{ color: rgba(255,255,255,.85); }
+  .side-search input::placeholder{ color: rgba(255,255,255,.82); }
 
-  /* サイトリスト */
   .sites-scroll{
     overflow: auto;
     padding: 0 10px 14px;
     max-height: calc(100vh - 280px);
-    -webkit-mask-image:none; mask-image:none;
+    -webkit-mask:none !important; mask:none !important;
+    background: transparent !important;
   }
+  /* 細いスクロールバー（白に見えないよう薄紫） */
   .sites-scroll::-webkit-scrollbar{ width: 6px; }
-  .sites-scroll::-webkit-scrollbar-thumb{ background: rgba(255,255,255,.45); border-radius: 999px; }
+  .sites-scroll::-webkit-scrollbar-thumb{ background: rgba(255,255,255,.35); border-radius: 999px; }
   .sites-scroll::-webkit-scrollbar-track{ background: transparent; }
 
-  /* サイトカード（左） */
+  /* 左：サイトカード */
   .prop-card{
-    position: relative;
-    background: rgba(255,255,255,.16);
-    border: 1px solid rgba(255,255,255,.15);
+    background: rgba(255,255,255,.12);
+    border: 1px solid rgba(255,255,255,.14);
     border-radius: 14px;
     padding: 12px 14px 10px;
     margin: 10px 4px 12px;
     transition: background .12s ease, border-color .12s ease, transform .08s ease, box-shadow .12s ease;
     cursor: pointer;
   }
-  .prop-card:hover{ transform: translateY(-1px); background: rgba(255,255,255,.22); border-color: rgba(255,255,255,.28); }
-  /* 選択強調 */
+  .prop-card:hover{ transform: translateY(-1px); background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.24); }
   .prop-card.active{
-    background: rgba(255,255,255,.30);
-    border-color: rgba(255,255,255,.75);
-    box-shadow: 0 0 0 2px rgba(255,255,255,.9) inset, 0 0 0 2px rgba(0,0,0,.06);
+    background: rgba(255,255,255,.22);
+    border-color: rgba(255,255,255,.6);
+    box-shadow: 0 0 0 2px rgba(255,255,255,.75) inset;
   }
 
-  /* サイト名＋バッジを横一列。サイト名は必ず表示（必要なら折返し） */
   .prop-head{
-    display: grid;
-    grid-template-columns: 1fr auto;
-    align-items: center;
-    column-gap: 10px;
-    min-height: 28px;
+    display: grid; grid-template-columns: 1fr auto; align-items: center;
+    column-gap: 10px; min-height: 28px;
   }
-  .prop-title{
-    font-weight: 800;
-    line-height: 1.35;
-    white-space: normal;
-    word-break: break-word;
-  }
-  .prop-domain{
-    margin-top: 6px;
-    font-size: .92rem;
-    opacity: .9;
-    word-break: break-all;
-  }
+  .prop-title{ font-weight: 800; line-height: 1.35; white-space: normal; word-break: break-word; }
+  .prop-domain{ margin-top: 6px; font-size: .92rem; opacity: .9; word-break: break-all; }
 
   .pf-row-inline{ display:flex; gap:8px; align-items:center; white-space:nowrap; flex-wrap:nowrap; }
   .pf-badge{
     display:inline-flex; align-items:center; gap:8px;
     padding: 6px 10px; border-radius: 999px;
-    font-weight: 700; font-size: .95rem; color:#fff;
-    box-shadow: 0 1px 0 rgba(0,0,0,.15), inset 0 -2px 0 rgba(0,0,0,.12);
+    font-weight: 700; font-size: .92rem; color:#fff;
+    box-shadow: inset 0 -2px 0 rgba(0,0,0,.1);
+    filter: saturate(.85);   /* バッジも彩度を抑える */
   }
   .pf-count{ background: rgba(255,255,255,.2); border-radius:999px; padding:1px 8px; font-weight:800; line-height:1.2; }
-  .pf-ld{ background: linear-gradient(135deg,#2563eb,#1d4ed8); }
-  .pf-note{ background: linear-gradient(135deg,#111827,#374151); }
-  .pf-ame{ background: linear-gradient(135deg,#16a34a,#22c55e); color:#062b0f; }
+  .pf-ld{ background: linear-gradient(135deg,#3558b7,#274aa7); }
+  .pf-note{ background: linear-gradient(135deg,#2b2f36,#475264); }
+  .pf-ame{ background: linear-gradient(135deg,#19824a,#2ca765); color:#052413; }
   .pf-ame .pf-count{ background: rgba(0,0,0,.12); color:#0a3114; }
 
-  /* 右ペイン */
+  /* ===== 右ペイン（余白を拡大・横幅安定） ===== */
   .right-outer{
     flex: 1 1 0;
     background: var(--pane-bg);
     border-radius: 12px;
-    padding: 14px;
+    padding: 26px 28px;           /* ←左右の余白をしっかり確保 */
     min-height: 520px;
+    overflow-y: auto;             /* 内側スクロール */
+    scrollbar-gutter: stable;     /* 開閉時に横幅が揺れない */
   }
+  /* 各カードにも軽く左右マージンを付与（密着防止） */
+  .right-outer .tcd-card{ margin-left: 8px; margin-right: 8px; }
 
-  /* ===== Game card style（白背景撤廃） ===== */
+  /* ===== 落ち着いたカード（減彩） ===== */
   .tcd-card{
-    background: linear-gradient(135deg,var(--game-grad1),var(--game-grad2));
-    border: 1px solid var(--game-edge);
+    background: linear-gradient(135deg,var(--card1),var(--card2));
+    border: 1px solid var(--card-edge);
     border-radius: 16px;
-    box-shadow:
-      0 0 0 1px rgba(0,0,0,.15) inset,
-      0 10px 24px var(--game-glow);
+    box-shadow: 0 0 0 1px rgba(0,0,0,.12) inset, 0 10px 24px var(--card-glow);
     color:#fff;
+    filter: saturate(.85) brightness(.98);   /* 主張を抑える */
   }
 
-  /* 見出しカード（サイト名のところ） */
-  .tcd-header{ padding: 18px 20px; }
-
+  /* 見出しカード（サイト名） */
+  .tcd-header{ padding: 18px 22px; }
   .tcd-title-lg{ font-weight:800; font-size:1.125rem; }
   .tcd-link-lg{ color: var(--link); text-decoration:underline; font-size:1rem; }
   .tcd-link-lg:hover{ color: var(--link-hover); }
 
-  /* Livedoorタブ見出しもゲームカード化 */
+  /* タブ見出し（Livedoor） */
   .tcd-acc-trigger{
     width:100%; text-align:left; padding:14px 20px;
-    display:flex; align-items:center; gap:14px;
-    cursor: pointer; border-top-left-radius:16px; border-top-right-radius:16px;
-    background: linear-gradient(135deg, #4a246d, #7d329f);
-    border-bottom: 1px solid var(--game-edge);
+    display:flex; align-items:center; gap:14px; cursor: pointer;
+    border-top-left-radius:16px; border-top-right-radius:16px;
+    background: linear-gradient(135deg, #5b4573, #745a8f);
+    border-bottom: 1px solid var(--card-edge);
+    color:#fff; filter: saturate(.85);
+  }
+  .tcd-caret{ font-size:2.1rem; line-height:1; color:#ebe7f5; transition:transform .2s ease; }
+
+  /* メトリクス：1行固定（横スクロールなし） */
+  .tcd-metrics{
+    color:#f1f3ff; font-size:.95rem; gap:1.25rem;
+    display:flex; align-items:center; white-space:nowrap;
+    overflow:hidden;
+  }
+
+  .btn-lg{ padding:.55rem 1rem; font-size:1rem; border-radius:.75rem; }
+  .tcd-add-btn{
+    border:1px solid rgba(255,255,255,.26);
+    background:rgba(255,255,255,.08);
     color:#fff;
   }
-  .tcd-caret{ font-size:2.1rem; line-height:1; color:#ebdefa; transition:transform .2s ease; }
-
-  /* アカウントのメトリクス：1列で全部表示（横スクロールなし） */
-  .tcd-metrics{
-    color:#eef2ff; font-size:.95rem; gap:1.25rem;
-    display:flex; align-items:center; flex-wrap:nowrap; white-space:nowrap;
-    overflow: hidden;
-  }
-
-  .btn-lg{ padding:.5rem 1rem; font-size:1rem; border-radius:.75rem; }
-  .tcd-add-btn{ border:1px solid rgba(255,255,255,.28); background:rgba(255,255,255,.08); color:#fff; }
   .tcd-add-btn:hover{ background:rgba(255,255,255,.14); }
 
-  /* アコーディオンの中身 */
   .accordion-panel{ background: transparent; }
   .site-panel{ content-visibility:auto; contain-intrinsic-size: 800px 600px; }
 </style>
@@ -258,7 +255,7 @@
 
         {% if loop.first %}
         <section id="site-panel-{{ s.id }}" class="site-panel">
-          <!-- 見出しもゲームカード化 -->
+          <!-- 見出し -->
           <div class="tcd-card tcd-header mb-4">
             <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
               <div class="min-w-0">
@@ -290,7 +287,7 @@
 
             <div id="tab-ld-{{ s.id }}" class="accordion-panel">
               {% if _all_accounts and _all_accounts|length > 0 %}
-                <!-- 1カラム固定＝カードは横幅たっぷりで“全部表示” -->
+                <!-- “一気に表示” 1カラムで広く -->
                 <div class="p-4 grid grid-cols-1 gap-4">
                   {% for acc in _all_accounts %}
                     <div id="acc-card-{{ acc.id }}" class="tcd-card p-5 flex flex-col gap-4">
@@ -315,7 +312,6 @@
                         </div>
                       </div>
 
-                      <!-- 1行で全部表示（横スクロールなし） -->
                       <div class="tcd-metrics">
                         <div>投稿完了: <span class="font-semibold">{{ acc.stat_posted|default(0) }}</span></div>
                         <div>記事生成済み: <span class="font-semibold">{{ acc.stat_generated|default(0) }}</span></div>
@@ -365,7 +361,7 @@
                 </div>
               {% endif %}
 
-              <div class="px-5 py-4 border-t border-[var(--game-edge)]">
+              <div class="px-5 py-4 border-t border-[var(--card-edge)]">
                 {% if can_add_livedoor %}
                   <button id="addBtn-{{ s.id }}" type="button"
                           class="tcd-add-btn inline-flex items-center px-4 py-2 rounded-lg text-sm"
@@ -510,7 +506,7 @@
                   </div>
                 {% endif %}
 
-                <div class="px-5 py-4 border-t border-[var(--game-edge)]">
+                <div class="px-5 py-4 border-t border-[var(--card-edge)]">
                   {% if can_add_livedoor %}
                     <button id="addBtn-{{ s.id }}" type="button"
                             class="tcd-add-btn inline-flex items-center px-4 py-2 rounded-lg text-sm"
@@ -613,7 +609,6 @@
     }
     if (panel) panel.classList.remove('hidden');
 
-    // ナビ強調
     document.querySelectorAll('.site-nav-link').forEach(a => a.classList.remove('active'));
     const nav = document.querySelector(`.site-nav-link[data-site-id="${siteId}"]`);
     if (nav) nav.classList.add('active');
@@ -710,32 +705,34 @@
 
   /* ========== アコーディオン ========= */
   document.addEventListener('click', (e) => {
-    const btn = e.target.closest('.accordion-trigger');
-    if (!btn) return;
-    const targetSel = btn.getAttribute('data-acc-target');
-    const panel = document.querySelector(targetSel);
-    if (!panel) return;
+  const btn = e.target.closest('.accordion-trigger');
+  if (!btn) return;
 
-    const container = btn.closest('.tcd-card') || btn.parentElement;
-    const caret = btn.querySelector('.tcd-caret, .accordion-caret');
-    const isOpen = !panel.classList.contains('hidden');
+  const targetSel = btn.getAttribute('data-acc-target');
+  const panel = document.querySelector(targetSel);
+  if (!panel) return;
 
-    if (isOpen) {
-      panel.classList.add('hidden');
-      if (caret) caret.classList.remove('rotate-180');
-      btn.setAttribute('aria-expanded', 'false');
-      return;
-    }
+  const container = btn.closest('.tcd-card') || btn.parentElement;
+  const caret = btn.querySelector('.tcd-caret, .accordion-caret');
+  const isOpen = !panel.classList.contains('hidden');
 
-    if (container) {
-      container.querySelectorAll('.accordion-panel').forEach(p => p.classList.add('hidden'));
-      container.querySelectorAll('.tcd-caret, .accordion-caret').forEach(c => c.classList.remove('rotate-180'));
-      container.querySelectorAll('.accordion-trigger').forEach(b => b.setAttribute('aria-expanded','false'));
-    }
-    panel.classList.remove('hidden');
-    if (caret) caret.classList.add('rotate-180');
-    btn.setAttribute('aria-expanded', 'true');
-  });
+  if (isOpen) {
+    panel.classList.add('hidden');
+    if (caret) caret.classList.remove('rotate-180');
+    btn.setAttribute('aria-expanded', 'false');
+    return;
+  }
+
+  if (container) {
+    container.querySelectorAll('.accordion-panel').forEach(p => p.classList.add('hidden'));
+    container.querySelectorAll('.tcd-caret, .accordion-caret').forEach(c => c.classList.remove('rotate-180'));
+    container.querySelectorAll('.accordion-trigger').forEach(b => b.setAttribute('aria-expanded','false'));
+  }
+
+  panel.classList.remove('hidden');
+  if (caret) caret.classList.add('rotate-180');  // ←ここを修正
+  btn.setAttribute('aria-expanded', 'true');
+});
 
   /* ========== ＋ブログ追加（API連携） ========== */
   async function newAccountStart(button) {
