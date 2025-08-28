@@ -12,7 +12,7 @@ from app.enums import BlogType
 logger = logging.getLogger(__name__)
 
 # ビルド識別（デプロイ反映チェック用）
-BUILD_TAG = "2025-08-28 fallback_terms_blogid"
+BUILD_TAG = "2025-08-28 fallback_terms_blogid+resubmit"
 logger.info(f"[LD-Recover] loaded build {BUILD_TAG}")
 
 async def _save_shot(page, prefix: str) -> tuple[str, str]:
@@ -394,13 +394,14 @@ async def _maybe_close_overlays(page):
     except Exception:
         pass
 
-async def _maybe_accept_terms(page):
-    """利用規約の同意チェックがあればON（無ければ無視）"""
+async def _maybe_accept_terms(page) -> bool:
+    """利用規約の同意チェックがあればON。チェック状態が変わったら True を返す。"""
     sels = [
         'input[type="checkbox"][name*="agree"]',
         'input#agree', 'input#agreement', 'input#termsAgree',
         'input#accept-terms', 'input[name="agreement"]', 'input[name="accept"]'
     ]
+    changed = False
     for sel in sels:
         try:
             loc = page.locator(sel).first
@@ -408,18 +409,21 @@ async def _maybe_accept_terms(page):
                 try:
                     await loc.check()
                 except Exception:
+                    # check() で失敗した際の直接操作フォールバック
                     try:
                         handle = await loc.element_handle()
                         if handle:
                             await page.evaluate(
-                                "(el)=>{el.checked=true;el.dispatchEvent(new Event('change',{bubbles:true}))}", handle
+                                "(el)=>{if(!el.checked){el.checked=true;} el.dispatchEvent(new Event('change',{bubbles:true}))}", handle
                             )
                     except Exception:
                         pass
                 logger.info("[LD-Recover] ✅ 規約同意チェック: %s", sel)
+                changed = True
                 break
         except Exception:
             pass
+    return changed
 
 async def _has_blog_id_input(page) -> bool:
     for sel in [
@@ -674,14 +678,13 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
 
         logger.info("[LD-Recover] 『ブログを作成』ボタンをクリック: %s", btn_sel)
 
-        # ナビゲーション待ち（発火しないケースもあるので両待機）
+        # ナビゲーション/読み込み待ち（expect_navigation は no-op になりやすいので外す）
         try:
-            async with page.expect_navigation(timeout=12000):
-                pass
+            await page.wait_for_load_state("load", timeout=10000)
         except Exception:
             pass
         try:
-            await page.wait_for_load_state("networkidle", timeout=15000)
+            await page.wait_for_load_state("networkidle", timeout=10000)
         except Exception:
             pass
 
@@ -693,8 +696,6 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
             logger.info("[LD-Recover] dump: /tmp/ld_button_click_exception_%s.png", ts)
         except Exception:
             pass
-        return False
-
     return True
 
 # ─────────────────────────────────────────────
@@ -764,8 +765,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                     logger.info("[LD-Recover] 中間導線をクリック: %s", sel)
                     await _wait_enabled_and_click(page, loc, timeout=7000, label_for_log=f"interstitial {sel}")
                     try:
-                        async with page.expect_navigation(timeout=8000):
-                            pass
+                        await page.wait_for_load_state("load", timeout=8000)
                     except Exception:
                         pass
                     try:
@@ -827,37 +827,55 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
             await _save_shot(page, "ld_create_after_submit_failed")
             await _log_inline_errors(page)
 
-            # (A) 規約同意があればON
-            await _maybe_accept_terms(page)
+            # (A) 規約同意があればON（変更があれば True）
+            terms_changed = await _maybe_accept_terms(page)
 
-            # (B) blog_id 入力欄があれば候補を順に付与 → 再送
-            has_id_box = await _has_blog_id_input(page)
-            if has_id_box:
-                base = _slugify_ascii(getattr(site, "name", None) or getattr(site, "url", None) or "blog")
-                candidates = [base] + [f"{base}-{i}" for i in range(1, 8)]
-                for cand in candidates:
+            # 規約同意を付けた場合は、blog_id 欄の有無に関係なく一度は再送試行
+            if terms_changed and not success:
+                if await _set_title_and_submit(page, desired_title):
                     try:
-                        if await _try_set_desired_blog_id(page, cand):
-                            logger.info(f"[LD-Recover] blog_id 必須/衝突の可能性 → 候補で再送信: {cand}")
-                            if not await _set_title_and_submit(page, desired_title):
-                                continue
-                            try:
-                                await page.wait_for_url(_re.compile(r"/welcome($|[/?#])"), timeout=12000)
-                                success = True
-                                logger.info(f"[LD-Recover] /welcome へ遷移（blog_id={cand}）")
-                                break
-                            except Exception:
-                                fr2, sel2 = await _find_in_any_frame(
-                                    page,
-                                    ['a:has-text("最初のブログを書く")', 'a.button:has-text("はじめての投稿")'],
-                                    timeout_ms=5000
-                                )
-                                if fr2:
-                                    success = True
-                                    logger.info(f"[LD-Recover] welcome 導線検出（blog_id={cand}）")
-                                    break
+                        await page.wait_for_url(_re.compile(r"/welcome($|[/?#])"), timeout=12000)
+                        success = True
+                        logger.info("[LD-Recover] /welcome へ遷移（terms accepted）")
                     except Exception:
-                        continue
+                        fr2, _ = await _find_in_any_frame(
+                            page,
+                            ['a:has-text("最初のブログを書く")', 'a.button:has-text("はじめての投稿")'],
+                            timeout_ms=5000
+                        )
+                        if fr2:
+                            success = True
+                            logger.info("[LD-Recover] welcome 導線検出（terms accepted）")
+
+            # (B) まだダメなら blog_id 入力欄があれば候補で再送
+            if not success:
+                has_id_box = await _has_blog_id_input(page)
+                if has_id_box:
+                    base = _slugify_ascii(getattr(site, "name", None) or getattr(site, "url", None) or "blog")
+                    candidates = [base] + [f"{base}-{i}" for i in range(1, 8)]
+                    for cand in candidates:
+                        try:
+                            if await _try_set_desired_blog_id(page, cand):
+                                logger.info(f"[LD-Recover] blog_id 必須/衝突の可能性 → 候補で再送信: {cand}")
+                                if not await _set_title_and_submit(page, desired_title):
+                                    continue
+                                try:
+                                    await page.wait_for_url(_re.compile(r"/welcome($|[/?#])"), timeout=12000)
+                                    success = True
+                                    logger.info(f"[LD-Recover] /welcome へ遷移（blog_id={cand}）")
+                                    break
+                                except Exception:
+                                    fr2, _ = await _find_in_any_frame(
+                                        page,
+                                        ['a:has-text("最初のブログを書く")', 'a.button:has-text("はじめての投稿")'],
+                                        timeout_ms=5000
+                                    )
+                                    if fr2:
+                                        success = True
+                                        logger.info(f"[LD-Recover] welcome 導線検出（blog_id={cand}）")
+                                        break
+                        except Exception:
+                            continue
 
         if not success:
             # ここまで来たら失敗としてダンプ
