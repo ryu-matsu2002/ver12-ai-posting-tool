@@ -3,7 +3,7 @@ from datetime import datetime
 from pathlib import Path
 import logging
 import re as _re
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse
 
 from app import db
 from app.models import ExternalBlogAccount
@@ -11,9 +11,26 @@ from app.enums import BlogType
 
 logger = logging.getLogger(__name__)
 
+# 可能ならサインアップ時の CAPTCHA 手動入力ツールを流用（存在しなければフォールバックへ）
+try:
+    from app.services.blog_signup.livedoor_signup import (
+        prepare_captcha as ld_prepare_captcha,
+        submit_captcha as ld_submit_captcha,
+    )
+except Exception:
+    ld_prepare_captcha = None
+    ld_submit_captcha = None
+
+# 可能なら pwctl（セッションIDや一時保存ディレクトリの流儀を合わせるため）
+try:
+    from app.services.pw_controller import pwctl  # noqa
+except Exception:
+    pwctl = None
+
 # ビルド識別（デプロイ反映チェック用）
-BUILD_TAG = "2025-08-28 fallback_terms_blogid+resubmit+welcome_url_extract"
+BUILD_TAG = "2025-08-28 create-page-captcha+human-tool+fs-fallback+welcome_url_extract"
 logger.info(f"[LD-Recover] loaded build {BUILD_TAG}")
+
 
 async def _save_shot(page, prefix: str) -> tuple[str, str]:
     """
@@ -55,14 +72,17 @@ def _deterministic_index(salt: str, n: int) -> int:
         acc = (acc * 131 + ord(ch)) & 0xFFFFFFFF
     return acc % n
 
+
 def _has_cjk(s: str) -> bool:
     return bool(_re.search(r"[\u3040-\u30FF\u3400-\u9FFF]", s or ""))
+
 
 def _norm(s: str) -> str:
     """比較用：空白/記号を落として小文字化"""
     s = (s or "").lower()
     s = _re.sub(r"[\s\-_／|｜/・]+", "", s)
     return s
+
 
 def _domain_tokens(url: str) -> list[str]:
     """ドメインを単語に分割（tld等は除外）"""
@@ -78,17 +98,19 @@ def _domain_tokens(url: str) -> list[str]:
         words.extend([w for w in p.replace("_", "-").split("-") if w])
     return words
 
+
 # ─────────────────────────────────────────────
 # サイト名トークン化・ジャンル推定・日本語タイトル生成
 # ─────────────────────────────────────────────
 STOPWORDS_JP = {
-    "株式会社","有限会社","合同会社","公式","オフィシャル","ブログ","サイト","ホームページ",
-    "ショップ","ストア","サービス","工房","教室","情報","案内","チャンネル","通信","マガジン"
+    "株式会社", "有限会社", "合同会社", "公式", "オフィシャル", "ブログ", "サイト", "ホームページ",
+    "ショップ", "ストア", "サービス", "工房", "教室", "情報", "案内", "チャンネル", "通信", "マガジン"
 }
 STOPWORDS_EN = {
-    "inc","ltd","llc","official","blog","site","homepage","shop","store",
-    "service","studio","channel","magazine","info","news"
+    "inc", "ltd", "llc", "official", "blog", "site", "homepage", "shop", "store",
+    "service", "studio", "channel", "magazine", "info", "news"
 }
+
 
 def _name_tokens(name: str) -> list[str]:
     """サイト名を雑にトークン化（日本語/英語混在対応・記号で分割）"""
@@ -106,13 +128,14 @@ def _name_tokens(name: str) -> list[str]:
             toks.append(p)
     return toks
 
+
 def _keyword_seed_from_site(site) -> tuple[str | None, bool]:
     """
     サイト名/URLから「1語」を安定に選ぶ。
     戻り値: (seed, is_jp)  /  抽出できなければ (None, False)
     """
     name = (getattr(site, "name", "") or "").strip()
-    url  = (getattr(site, "url", "") or "").strip()
+    url = (getattr(site, "url", "") or "").strip()
     salt = f"{getattr(site, 'id', '')}-{name}-{url}"
 
     name_toks = _name_tokens(name)
@@ -139,6 +162,7 @@ def _keyword_seed_from_site(site) -> tuple[str | None, bool]:
         return seed, _has_cjk(seed)
     return None, False
 
+
 def _guess_genre(site) -> tuple[str, bool]:
     """
     サイトからジャンル語(日本語/英語)と日本語フラグを推定。
@@ -158,27 +182,27 @@ def _guess_genre(site) -> tuple[str, bool]:
 
     # 2) ヒューリスティック
     name = (getattr(site, "name", "") or "")
-    url  = (getattr(site, "url", "")  or "")
-    txt  = (name + " " + url).lower()
+    url = (getattr(site, "url", "") or "")
+    txt = (name + " " + url).lower()
     toks = set(_domain_tokens(url))
 
     JP = [
-        ("ピラティス", ("pilates","ピラティス","yoga","体幹","姿勢","fitness","stretch")),
-        ("留学",       ("studyabroad","abroad","留学","ielts","toefl","海外","study")),
-        ("旅行",       ("travel","trip","観光","hotel","onsen","温泉","tour")),
-        ("美容",       ("beauty","esthetic","skin","hair","美容","コスメ","メイク")),
-        ("ビジネス",   ("business","marketing","sales","seo","経営","起業","副業")),
+        ("ピラティス", ("pilates", "ピラティス", "yoga", "体幹", "姿勢", "fitness", "stretch")),
+        ("留学", ("studyabroad", "abroad", "留学", "ielts", "toefl", "海外", "study")),
+        ("旅行", ("travel", "trip", "観光", "hotel", "onsen", "温泉", "tour")),
+        ("美容", ("beauty", "esthetic", "skin", "hair", "美容", "コスメ", "メイク")),
+        ("ビジネス", ("business", "marketing", "sales", "seo", "経営", "起業", "副業")),
     ]
     for label, keys in JP:
         if any(k in txt for k in keys) or any(k in toks for k in keys):
             return label, True
 
     EN = [
-        ("Pilates", ("pilates","yoga","fitness","posture","stretch")),
-        ("Study Abroad", ("studyabroad","abroad","study","ielts","toefl")),
-        ("Travel", ("travel","trip","hotel","onsen","tour")),
-        ("Beauty", ("beauty","esthetic","skin","hair","cosme","makeup")),
-        ("Business", ("business","marketing","sales","seo","startup")),
+        ("Pilates", ("pilates", "yoga", "fitness", "posture", "stretch")),
+        ("Study Abroad", ("studyabroad", "abroad", "study", "ielts", "toefl")),
+        ("Travel", ("travel", "trip", "hotel", "onsen", "tour")),
+        ("Beauty", ("beauty", "esthetic", "skin", "hair", "cosme", "makeup")),
+        ("Business", ("business", "marketing", "sales", "seo", "startup")),
     ]
     for label, keys in EN:
         if any(k in txt for k in keys) or any(k in toks for k in keys):
@@ -186,6 +210,7 @@ def _guess_genre(site) -> tuple[str, bool]:
 
     # どれにも該当しなければ汎用
     return ("日々", _has_cjk(name) or _has_cjk(url))
+
 
 def _too_similar_to_site(title: str, site) -> bool:
     """
@@ -196,7 +221,7 @@ def _too_similar_to_site(title: str, site) -> bool:
     """
     t = _norm(title)
     site_name = (getattr(site, "name", "") or "")
-    site_url  = (getattr(site, "url", "")  or "")
+    site_url = (getattr(site, "url", "") or "")
     n = _norm(site_name)
 
     if not t:
@@ -219,6 +244,7 @@ def _too_similar_to_site(title: str, site) -> bool:
 
     return False
 
+
 def _templates_jp(topic: str) -> list[str]:
     base = (topic or "").strip() or "日々"
     return [
@@ -236,9 +262,11 @@ def _templates_jp(topic: str) -> list[str]:
         f"{base}ログ",
     ]
 
+
 def _templates_en(topic: str) -> list[str]:
     base = topic.strip() or "Notes"
     return [f"{base} Blog"]  # ダミー（呼ばれない想定）
+
 
 def _japanese_base_word(site) -> str:
     """
@@ -251,6 +279,7 @@ def _japanese_base_word(site) -> str:
         return topic.strip()
     return "日々"
 
+
 def _craft_blog_title(site) -> str:
     """
     仕様：
@@ -260,7 +289,7 @@ def _craft_blog_title(site) -> str:
       - 同一サイトでは決定論的に安定
     """
     site_name = (getattr(site, "name", "") or "").strip()
-    site_url  = (getattr(site, "url", "")  or "").strip()
+    site_url = (getattr(site, "url", "") or "").strip()
     salt = f"{getattr(site, 'id', '')}-{site_name}-{site_url}"
 
     # 1) 日本語のベース語（ジャンルラベル優先）
@@ -302,6 +331,7 @@ def _craft_blog_title(site) -> str:
     fallback = [f"{base_word}ブログ", f"{base_word}のブログ", "日々ブログ", "小さなブログ記録"]
     return fallback[_deterministic_index(salt, len(fallback))][:48]
 
+
 # ─────────────────────────────────────────────
 # blog_id スラッグ生成・入力欄設定ヘルパ
 # ─────────────────────────────────────────────
@@ -325,6 +355,7 @@ def _slugify_ascii(s: str) -> str:
     if len(s) < 3:
         s = (s + "-blog")[:20]
     return s
+
 
 async def _try_set_desired_blog_id(page, desired: str) -> bool:
     """
@@ -352,6 +383,7 @@ async def _try_set_desired_blog_id(page, desired: str) -> bool:
         return True
     except Exception:
         return False
+
 
 # ─────────────────────────────────────────────
 # 追加：フレーム横断・同意チェック・エラーテキスト採取
@@ -394,6 +426,7 @@ async def _maybe_close_overlays(page):
     except Exception:
         pass
 
+
 async def _maybe_accept_terms(page) -> bool:
     """利用規約の同意チェックがあればON。チェック状態が変わったら True を返す。"""
     sels = [
@@ -427,6 +460,7 @@ async def _maybe_accept_terms(page) -> bool:
             pass
     return changed
 
+
 async def _has_blog_id_input(page) -> bool:
     for sel in [
         '#blogId', 'input[name="blog_id"]', 'input[name="livedoor_blog_id"]',
@@ -438,6 +472,7 @@ async def _has_blog_id_input(page) -> bool:
         except Exception:
             pass
     return False
+
 
 async def _log_inline_errors(page):
     """画面上の代表的なエラーメッセージを収集してログ出力"""
@@ -460,6 +495,7 @@ async def _log_inline_errors(page):
     if texts:
         logger.warning("[LD-Recover] inline errors: %s", " | ".join(texts[:5]))
 
+
 async def _find_in_any_frame(page, selectors, timeout_ms=15000):
     """全フレーム走査。最初に見つかったframeとselectorを返す。"""
     logger.info("[LD-Recover] frame-scan start selectors=%s timeout=%sms", selectors[:2], timeout_ms)
@@ -479,6 +515,7 @@ async def _find_in_any_frame(page, selectors, timeout_ms=15000):
         await asyncio.sleep(0.25)
     logger.warning("[LD-Recover] frame-scan timeout selectors=%s", selectors[:3])
     return None, None
+
 
 async def _wait_enabled_and_click(page, locator, *, timeout=8000, label_for_log=""):
     try:
@@ -536,6 +573,9 @@ async def _wait_enabled_and_click(page, locator, *, timeout=8000, label_for_log=
             return False
 
 
+# ─────────────────────────────────────────────
+# ブログ作成ページ：タイトル入力＆送信
+# ─────────────────────────────────────────────
 async def _set_title_and_submit(page, desired_title: str) -> bool:
     """
     タイトル欄と『ブログを作成する』を見つけて送信。
@@ -715,6 +755,149 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
 
     return True
 
+
+# ─────────────────────────────────────────────
+# 作成ページ CAPTCHA 検出・処理（人力ツール優先／FSフォールバック）
+# ─────────────────────────────────────────────
+async def _detect_create_captcha(page) -> tuple[bool, str | None]:
+    """作成ページの CAPTCHA を検出し、画像を /tmp に保存してパスを返す。"""
+    try:
+        img_sel = '#captcha-img, img.captcha'
+        box_sel = 'input[name="captcha"], #captcha'
+        has_img = await page.locator(img_sel).first.count() > 0
+        has_box = await page.locator(box_sel).first.count() > 0
+        if not (has_img and has_box):
+            return False, None
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = f"/tmp/ld_create_captcha_{ts}.png"
+        try:
+            await page.locator(img_sel).first.screenshot(path=path)
+        except Exception:
+            await page.screenshot(path=path, full_page=True)
+        logger.info("[LD-Recover] create CAPTCHA captured: %s", path)
+        return True, path
+    except Exception:
+        return False, None
+
+
+async def _fill_captcha_and_submit(page, text: str) -> bool:
+    """CAPTCHA 文字列を入力して送信をトリガーする。"""
+    try:
+        box_sel = 'input[name="captcha"], #captcha'
+        await page.locator(box_sel).first.fill("")
+        await page.locator(box_sel).first.fill(text)
+
+        # 送信ボタン（代表選抜）
+        btn = page.locator('input[type="submit"][value="ブログを作成する"]').first
+        if await btn.count() == 0:
+            btn = page.locator(
+                'button[type="submit"], input[type="submit"][value*="作成"], input[type="submit"][value*="登録"]'
+            ).first
+
+        await _save_shot(page, "ld_create_before_submit_with_captcha")
+        try:
+            async with page.expect_navigation(wait_until="load", timeout=15000):
+                await btn.click()
+        except Exception:
+            await _wait_enabled_and_click(page, btn, timeout=8000, label_for_log="create-after-captcha")
+            try:
+                await page.wait_for_load_state("networkidle", timeout=8000)
+            except Exception:
+                pass
+        return True
+    except Exception:
+        logger.warning("[LD-Recover] CAPTCHA 入力→送信に失敗", exc_info=True)
+        return False
+
+
+async def _wait_success_after_submit(page) -> tuple[bool, str | None]:
+    """/welcome 遷移 or 成功導線検出を待って成功可否と URL 由来 blog_id を返す。"""
+    try:
+        await page.wait_for_url(_re.compile(r"/welcome($|[/?#])"), timeout=12000)
+        return True, _extract_blog_id_from_url(page.url)
+    except Exception:
+        pass
+
+    # 文言 or 導線
+    try:
+        await page.wait_for_selector('text=ブログの作成が完了しました', timeout=6000)
+        return True, _extract_blog_id_from_url(page.url)
+    except Exception:
+        pass
+    try:
+        await page.wait_for_selector('text=ブログの作成が完了しました！', timeout=3000)
+        return True, _extract_blog_id_from_url(page.url)
+    except Exception:
+        pass
+
+    fr, _ = await _find_in_any_frame(
+        page,
+        ['a:has-text("最初のブログを書く")', 'a.button:has-text("はじめての投稿")', ':has-text("ブログが作成されました")'],
+        timeout_ms=6000
+    )
+    if fr:
+        return True, _extract_blog_id_from_url(page.url)
+
+    return False, None
+
+
+async def _human_tool_captcha_flow(page, image_path: str) -> bool:
+    """
+    サインアップ時の手動入力ツールを優先利用。
+    - ld_prepare_captcha / ld_submit_captcha が使える場合はそれを使う
+    - 使えない場合は FS 監視フォールバック
+    """
+    # 1) まずは既存ツール（関数が見つかれば使う）
+    if ld_prepare_captcha and ld_submit_captcha:
+        try:
+            logger.info("[LD-Recover] using signup captcha tool on create-page")
+            # 多くの実装は page だけで動く想定（余分な引数は渡さない）
+            await ld_prepare_captcha(page)  # 画像保存・人間の入力待ちのトリガ
+            await ld_submit_captcha(page)   # 人間が入力した値で submit
+            return True
+        except Exception:
+            logger.warning("[LD-Recover] signup captcha tool failed; fallback to FS watcher", exc_info=True)
+
+    # 2) フォールバック：/tmp を監視して人間が置く回答ファイルを待つ
+    try:
+        ans_dir = Path("/tmp/captcha_answers")
+        ans_dir.mkdir(parents=True, exist_ok=True)
+        base = Path(image_path).stem  # ld_create_captcha_yyyymmdd_hhmmss
+        ans_file = ans_dir / f"{base}.txt"
+
+        # ヒントファイル（UI/オペレータ向け）
+        hint_file = ans_dir / f"{base}.readme"
+        hint = (
+            f"[LD-Recover] 手動CAPTCHA回答の受け付け\n"
+            f"- 画像: {image_path}\n"
+            f"- 回答ファイルにテキストで解答を保存してください: {ans_file}\n"
+        )
+        try:
+            hint_file.write_text(hint, encoding="utf-8")
+        except Exception:
+            pass
+
+        logger.info("[LD-Recover] waiting human answer file: %s (up to 180s)", ans_file)
+        for _ in range(180):  # 最大180秒
+            if ans_file.exists():
+                try:
+                    text = ans_file.read_text(encoding="utf-8").strip()
+                except Exception:
+                    text = ""
+                if text:
+                    logger.info("[LD-Recover] got manual captcha answer: %s (len=%d)", text, len(text))
+                    await _fill_captcha_and_submit(page, text)
+                    return True
+                else:
+                    logger.warning("[LD-Recover] answer file empty, keep waiting: %s", ans_file)
+            await asyncio.sleep(1.0)
+        logger.warning("[LD-Recover] timeout waiting for human captcha answer")
+        return False
+    except Exception:
+        logger.warning("[LD-Recover] FS watcher fallback failed", exc_info=True)
+        return False
+
+
 # ─────────────────────────────────────────────
 # メイン：ブログ作成→AtomPub APIキー取得
 # ─────────────────────────────────────────────
@@ -725,12 +908,14 @@ def _extract_blog_id_from_url(url: str) -> str | None:
     except Exception:
         return None
 
+
 async def recover_atompub_key(page, nickname: str, email: str, password: str, site,
                               desired_blog_id: str | None = None) -> dict:
     """
     - Livedoorブログの作成 → AtomPub APIキーを発行・取得
-    - 原則は「ブログタイトル入力 → 作成ボタン」だけを操作し、blog_id には触れない
-    - 送信後に create に留まった場合は、規約同意チェックと blog_id 指定の再送を必ず試す
+    - CAPTCHA が無ければ通常送信で進む
+    - CAPTCHA が出た場合は、サインアップ時同様の「ツールで手動入力」フローに切替（なければFSフォールバック）
+    - 送信後に create に留まった場合は、規約同意チェックと blog_id 指定の再送も試す
     - DBには保存しない（呼び出し元で保存）
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -747,9 +932,6 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
             pass
         return error_html, error_png
 
-    # ─────────────────────────────────────────
-    # ここから本処理
-    # ─────────────────────────────────────────
     try:
         # 1) ブログ作成ページへ
         logger.info("[LD-Recover] ブログ作成ページに遷移")
@@ -758,10 +940,9 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
             await page.wait_for_load_state("networkidle", timeout=15000)
         except Exception:
             pass
-        # ★ 作成ページ到達時のスクショ
         await _save_shot(page, "ld_create_landing")
 
-        # === 到達確認のダンプと中間導線の踏破（既存 + best-effort） ===
+        # 中間導線の踏破（同意・開始ボタンなど）
         try:
             logger.info("[LD-Recover] create到達: url=%s title=%s", page.url, (await page.title()))
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -827,69 +1008,46 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                 "png_path": err_png,
             }
 
-        # 3) 成功判定：/welcome への遷移 or 成功導線/文言の出現
-        success = False
-        blog_id_from_url = None
-        try:
-            await page.wait_for_url(_re.compile(r"/welcome($|[/?#])"), timeout=15000)
-            success = True
-            logger.info("[LD-Recover] /welcome への遷移を確認")
-            blog_id_from_url = _extract_blog_id_from_url(page.url)
-        except Exception:
-            # 文言の出現でも成功扱い（『ブログの作成が完了しました！』など）
-            try:
-                await page.wait_for_selector('text=ブログの作成が完了しました', timeout=6000)
-                success = True
-                logger.info("[LD-Recover] 成功メッセージを検出")
-                blog_id_from_url = _extract_blog_id_from_url(page.url)
-            except Exception:
-                try:
-                    await page.wait_for_selector('text=ブログの作成が完了しました！', timeout=3000)
-                    success = True
-                    logger.info("[LD-Recover] 成功メッセージ（！付き）を検出")
-                    blog_id_from_url = _extract_blog_id_from_url(page.url)
-                except Exception:
-                    hints = [
-                        'a:has-text("最初のブログを書く")',
-                        'a.button:has-text("はじめての投稿")',
-                        ':has-text("ようこそ")',
-                        ':has-text("ブログが作成されました")',
-                    ]
-                    fr, sel = await _find_in_any_frame(page, hints, timeout_ms=6000)
-                    if fr:
-                        logger.info("[LD-Recover] welcome 導線の出現を確認（frame内）")
-                        success = True
-                        blog_id_from_url = _extract_blog_id_from_url(page.url)
+        # 3) 一発成功判定
+        success, blog_id_from_url = await _wait_success_after_submit(page)
 
-        # 送信後も create に留まる場合のフォールバック（文言に依存しない）
+        # 4) まだ create に留まる → まず CAPTCHA を最優先で処理
         if not success:
-            # 現状保存＆エラーテキスト採取
             await _save_shot(page, "ld_create_after_submit_failed")
             await _log_inline_errors(page)
 
-            # (A) 規約同意があればON（変更があれば True）
+            # CAPTCHA 検出
+            is_cap, cap_path = await _detect_create_captcha(page)
+            if is_cap:
+                # 画像更新ボタンがあれば一度更新（読みやすくするため・任意）
+                try:
+                    await page.locator('a:has-text("画像を更新"), button:has-text("画像を更新")').first.click(timeout=1000)
+                    await asyncio.sleep(0.8)
+                    is_cap, cap_path = await _detect_create_captcha(page)
+                except Exception:
+                    pass
+
+                # サインアップツール or FS 監視で人力回答を取得→入力・送信
+                ok_cap = await _human_tool_captcha_flow(page, cap_path or "")
+                if ok_cap:
+                    success, blog_id_from_url = await _wait_success_after_submit(page)
+                    if success:
+                        logger.info("[LD-Recover] /welcome へ遷移（captcha solved）")
+                else:
+                    logger.warning("[LD-Recover] CAPTCHA 処理に失敗（人力回答未取得 or 入力不可）")
+
+        # 5) それでもダメなら：規約同意→再送、blog_id 候補→再送
+        if not success:
             terms_changed = await _maybe_accept_terms(page)
 
-            # 規約同意を付けた場合は、blog_id 欄の有無に関係なく一度は再送試行
+            # 規約同意を付けた場合は、一度は再送
             if terms_changed and not success:
                 if await _set_title_and_submit(page, desired_title):
-                    try:
-                        await page.wait_for_url(_re.compile(r"/welcome($|[/?#])"), timeout=12000)
-                        success = True
+                    success, blog_id_from_url = await _wait_success_after_submit(page)
+                    if success:
                         logger.info("[LD-Recover] /welcome へ遷移（terms accepted）")
-                        blog_id_from_url = _extract_blog_id_from_url(page.url)
-                    except Exception:
-                        fr2, _ = await _find_in_any_frame(
-                            page,
-                            ['a:has-text("最初のブログを書く")', 'a.button:has-text("はじめての投稿")'],
-                            timeout_ms=5000
-                        )
-                        if fr2:
-                            success = True
-                            logger.info("[LD-Recover] welcome 導線検出（terms accepted）")
-                            blog_id_from_url = _extract_blog_id_from_url(page.url)
 
-            # (B) まだダメなら blog_id 入力欄があれば候補で再送
+            # blog_id 入力欄があれば候補で再送
             if not success:
                 has_id_box = await _has_blog_id_input(page)
                 if has_id_box:
@@ -901,23 +1059,10 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                                 logger.info(f"[LD-Recover] blog_id 必須/衝突の可能性 → 候補で再送信: {cand}")
                                 if not await _set_title_and_submit(page, desired_title):
                                     continue
-                                try:
-                                    await page.wait_for_url(_re.compile(r"/welcome($|[/?#])"), timeout=12000)
-                                    success = True
+                                success, blog_id_from_url = await _wait_success_after_submit(page)
+                                if success:
                                     logger.info(f"[LD-Recover] /welcome へ遷移（blog_id={cand}）")
-                                    blog_id_from_url = _extract_blog_id_from_url(page.url)
                                     break
-                                except Exception:
-                                    fr2, _ = await _find_in_any_frame(
-                                        page,
-                                        ['a:has-text("最初のブログを書く")', 'a.button:has-text("はじめての投稿")'],
-                                        timeout_ms=5000
-                                    )
-                                    if fr2:
-                                        success = True
-                                        logger.info(f"[LD-Recover] welcome 導線検出（blog_id={cand}）")
-                                        blog_id_from_url = _extract_blog_id_from_url(page.url)
-                                        break
                         except Exception:
                             continue
 
@@ -933,7 +1078,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                 "png_path": err_png
             }
 
-        # 4) （任意）welcome にある導線があれば押す（押す必要は無いがUI変化のため best-effort）
+        # 6) （任意）welcome にある導線があれば押す
         try:
             fr, sel = await _find_in_any_frame(page, [
                 'a:has-text("最初のブログを書く")',
@@ -948,7 +1093,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         except Exception:
             pass
 
-        # 5) blog_id 決定：まずは URL から、無ければ /member で探す
+        # 7) blog_id 決定：まずは URL から、無ければ /member で探す
         blog_id = blog_id_from_url
         if blog_id:
             logger.info(f"[LD-Recover] ブログID（URL由来）: {blog_id}")
@@ -967,9 +1112,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                 'a[href*="/config/"]'
             ]
 
-            link_el = None
             href = None
-
             for sel in blog_settings_selectors:
                 try:
                     loc = page.locator(sel).first
@@ -980,7 +1123,6 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                             pass
                         href = await loc.get_attribute("href")
                         if href:
-                            link_el = loc
                             break
                 except Exception:
                     continue
@@ -1015,7 +1157,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                     "png_path": err_png
                 }
 
-        # 6) 設定ページ → AtomPub 発行ページへ（blog_id を直接使って遷移）
+        # 8) 設定ページ → AtomPub 発行ページへ（blog_id を直接使って遷移）
         config_url = f"https://livedoor.blogcms.jp/blog/{blog_id}/config/"
         await page.goto(config_url, wait_until="load")
         try:
@@ -1073,7 +1215,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                 "png_path": err_png
             }
 
-        # 7) スクショ
+        # 9) スクショ
         success_png = f"/tmp/ld_atompub_page_{timestamp}.png"
         try:
             await page.screenshot(path=success_png, full_page=True)
@@ -1084,7 +1226,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                 pass
         logger.info(f"[LD-Recover] AtomPubページのスクリーンショット保存: {success_png}")
 
-        # 8) APIキー発行
+        # 10) APIキー発行
         await page.wait_for_selector('input#apiKeyIssue', timeout=12000)
         await _wait_enabled_and_click(page, page.locator('input#apiKeyIssue').first, timeout=6000, label_for_log="api-issue")
         logger.info("[LD-Recover] 『発行する』をクリック")
@@ -1093,9 +1235,8 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         await _wait_enabled_and_click(page, page.locator('button:has-text("実行")').first, timeout=6000, label_for_log="api-issue-confirm")
         logger.info("[LD-Recover] モーダルの『実行』をクリック")
 
-        # 9) 取得（valueはJSで後から入るため、非空になるまで待つ & 1回だけ再発行リトライ）
+        # 11) 取得（valueはJSで後から入るため、非空になるまで待つ & 1回だけ再発行リトライ）
         async def _read_endpoint_and_key():
-            # endpoint の候補セレクタを冗長化
             endpoint_selectors = [
                 'input.input-xxlarge[readonly]',
                 'input[readonly][name*="endpoint"]',
@@ -1147,7 +1288,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         logger.info(f"[LD-Recover] ✅ AtomPub endpoint: {endpoint}")
         logger.info(f"[LD-Recover] ✅ AtomPub key: {api_key[:8]}...")
 
-        # 10) 返却（DB保存は呼び出し元が担当）
+        # 12) 返却（DB保存は呼び出し元が担当）
         return {
             "success": True,
             "blog_id": blog_id,
