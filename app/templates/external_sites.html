@@ -329,6 +329,58 @@
     flex: unset !important;
   }
 }
+/* ---- #siteList領域の装飾を完全クリア（実体ノードに付与された背景/マスク/ボーダー画像も含む） ---- */
+.tcd-sidebar .sites-scroll #siteList,
+.tcd-sidebar .sites-scroll #siteList *{
+  /* 背景系 */
+  background: none !important;
+  background-image: none !important;
+  /* ボーダー画像・グラデ枠など */
+  border-image: none !important;
+  /* マスク系（Safari/Chromium） */
+  -webkit-mask: none !important;
+  -webkit-mask-image: none !important;
+  mask: none !important;
+  mask-image: none !important;
+  /* 擬似装飾の保険（実体ノードの ::before/::after を強制オフ） */
+}
+.tcd-sidebar .sites-scroll #siteList *::before,
+.tcd-sidebar .sites-scroll #siteList *::after{
+  content: none !important;
+  display: none !important;
+}
+
+/* ---- クリアで消えた“必要な見た目”をピンポイントで復活 ---- */
+/* サイト行カード */
+#siteList .prop-card{
+  background: rgba(0,0,0,.12) !important;
+  border: 1px solid rgba(255,255,255,.35) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,.25) !important;
+}
+#siteList .prop-card:hover{
+  background: rgba(255,255,255,.18) !important;
+  box-shadow: 0 3px 10px rgba(0,0,0,.28) !important;
+}
+#siteList .prop-card.active{
+  border-color: #fff !important;
+  box-shadow: inset 0 0 0 2px #fff, 0 6px 14px rgba(0,0,0,.3) !important;
+}
+
+/* バッジのグラデ＆カウントのピル背景 */
+.pf-ld{  background-image: linear-gradient(135deg,#874e9d,#6f3e84) !important; }
+.pf-note{background-image: linear-gradient(135deg,#3a3441,#5a5362) !important; }
+.pf-ame{ background-image: linear-gradient(135deg,#19824a,#2ca765) !important; color:#052413; }
+.pf-count{
+  background-color: rgba(0,0,0,.45) !important;
+  color:#fff !important;
+  border-radius: 999px !important;
+  padding: 1px 8px !important;
+  font-weight: 800 !important;
+  line-height: 1.2 !important;
+}
+.pf-ame .pf-count{ background-color: rgba(0,0,0,.55) !important; }
+
 
 </style>
 

@@ -4256,7 +4256,7 @@ from app.services.blog_signup.livedoor_signup import (
     poll_latest_link_gw,                     # メール認証リンク取得
 )
 from app.services.mail_utils.mail_gw import create_inbox
-from app.services.blog_signup.livedoor_signup import recover_atompub_key
+from app.services.blog_signup.livedoor_atompub_recover import recover_atompub_key
 from app.services.pw_controller import pwctl  # セッションの明示クローズ用
 
 
