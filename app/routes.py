@@ -4258,6 +4258,13 @@ from app.services.blog_signup.livedoor_signup import (
 from app.services.mail_utils.mail_gw import create_inbox
 from app.services.blog_signup.livedoor_atompub_recover import recover_atompub_key
 from app.services.pw_controller import pwctl  # セッションの明示クローズ用
+# 既存 import 群の近くに追記
+from flask import current_app  # submit_captcha で使っているため
+from app.services.pw_session_store import (
+    save as pw_save,
+    get_cred as pw_get,
+    clear as pw_clear,
+)
 
 
 # ====== /prepare_captcha ======
@@ -4314,6 +4321,16 @@ def prepare_captcha():
         logger.exception("[prepare_captcha] CAPTCHA生成で例外が発生")
         return jsonify({"captcha_url": None, "error": "CAPTCHAの準備に失敗しました",
                         "site_id": site_id, "account_id": account_id})
+    
+    # ★ 追加：資格情報を sid 単位で保存（フォームや Flask セッションに依存しない）
+    pw_save(session_id,
+            email=email,
+            password=password,
+            livedoor_id=livedoor_id,
+            token=token,
+            site_id=site_id,
+            account_id=account_id,
+            desired_blog_id=desired_blog_id)
 
     # 画像URL化
     img_name = Path(img_abs_path).name
@@ -4358,7 +4375,7 @@ def submit_captcha():
     from app import db
     from flask import jsonify, session, request
     import logging, contextlib, asyncio
-    
+    import time
 
     logger = logging.getLogger(__name__)
 
@@ -4375,6 +4392,36 @@ def submit_captcha():
     account_id = request.form.get("account_id", type=int) or session.get("captcha_account_id")
     site_id    = session.get("captcha_site_id")
     session_id = session.get("captcha_session_id")
+
+    # ★ 追加：サーバー側ストアから資格情報を復元（フォーム/Flaskセッションが空でもOK）
+    cred = pw_get(session_id) if session_id else None
+
+    email = (
+        request.form.get("email")
+        or session.get("captcha_email")
+        or (cred and cred.get("email"))
+    )
+    password = (
+        request.form.get("password")
+        or session.get("captcha_password")
+        or (cred and cred.get("password"))
+    )
+    livedoor_id = (
+        request.form.get("livedoor_id")
+        or session.get("captcha_nickname")
+        or (cred and cred.get("livedoor_id"))
+    )
+
+    # URLサブドメイン=ユーザーID（希望値）。無ければ livedoor_id を使う
+    desired_blog_id = (
+        request.form.get("desired_blog_id")
+        or request.form.get("blog_id")
+        or request.form.get("sub")
+        or session.get("captcha_desired_blog_id")
+        or (cred and cred.get("desired_blog_id"))
+        or livedoor_id
+    )
+
 
     if not all([site_id, session_id, account_id]):
         return jsonify({"status": "error", "message": "セッション情報が不足しています"}), 400
@@ -4419,10 +4466,19 @@ def submit_captcha():
     # --- ここから 既存の「メール認証→AtomPubキー回収」を継続 ---
     try:
         # メール確認リンク取得（最大 5 回 / 30 秒）
-        activation_url = None
+        token = session.get("captcha_token") or (cred and cred.get("token"))
+        if not token:
+            with contextlib.suppress(Exception):
+                pwctl.close_session(session_id)
+            return jsonify({
+                "status": "recreate_required",
+                "message": "確認メールのトークンが見つかりませんでした（セッション復元に失敗）",
+                "site_id": site_id,
+            }), 200
+        activation_url = None  # ← これを追加
         for _ in range(5):
             with contextlib.suppress(Exception):
-                activation_url = asyncio.run(poll_latest_link_gw(session.get("captcha_token")))
+                activation_url = asyncio.run(poll_latest_link_gw(token))
             if activation_url:
                 break
             time.sleep(6)
@@ -4447,18 +4503,19 @@ def submit_captcha():
         pwctl.run(page.goto(activation_url, wait_until="load"))
 
         # ★ ここを asyncio.run(...) ではなく pwctl.run(...) にするのがポイント
-        # ユーザーIDの取得（フォーム名の揺れ対策＋フォールバック）
+        # ★ 置換：recover で使う livedoor の user_id は、基本 livedoor_id を使う
         user_id = (
             request.form.get("livedoor_id")
             or request.form.get("user_id")
             or request.form.get("userid")
             or request.form.get("username")
             or request.form.get("account_id")
-            or desired_blog_id  # 最後の手段：URLサブドメインと同一にする
+            or livedoor_id
         )
         if not user_id:
-            current_app.logger.error("[submit_captcha] livedoor user_id is missing")
+            current_app.logger.error("[submit_captcha] livedoor user_id is missing (sid=%s)", session_id)
             return jsonify({"ok": False, "error": "missing_user_id"}), 400
+
         
         # --- ここでフォーム値を集める（名称の揺れを吸収） ---
         nickname = (
@@ -4466,42 +4523,47 @@ def submit_captcha():
             or request.form.get("display_name")
             or request.form.get("name")
         )
+
+        # ここからは “既存値を優先し、未設定のときだけフォームから補完”
         email = (
-            request.form.get("email")
+            email
+            or request.form.get("email")
             or request.form.get("livedoor_email")
             or request.form.get("mail")
         )
+
         password = (
-            request.form.get("password")
+            password
+            or request.form.get("password")
             or request.form.get("livedoor_password")
             or request.form.get("pass")
         )
-        # URLサブドメイン=ユーザーIDの希望値。無ければ user_id を使う
-        desired_blog_id = (
-            request.form.get("desired_blog_id")
-            or request.form.get("blog_id")
-            or request.form.get("sub")
-            or request.form.get("livedoor_id")
-            or request.form.get("user_id")
-            or user_id
-        )
+
+        # desired_blog_id は関数前半で cred/セッション/フォームから一度確定済み。
+        # 後段で再計算・上書きしない（そのまま desired_blog_id を使う）。
+
 
         # 最低限のバリデーション（必要に応じて 400 を返す）
         if not email or not password:
-            current_app.logger.error("[submit_captcha] email/password missing")
+            current_app.logger.error(
+                "[submit_captcha] email/password missing (sid=%s, has_email=%s, has_pw=%s)",
+                session_id, bool(email), bool(password)
+            )
             return jsonify({"ok": False, "error": "missing_email_or_password"}), 400
+
         if not nickname:
             nickname = email.split("@")[0]  # フォールバック
 
         result = pwctl.run(recover_atompub_key(
             page,
-            livedoor_id=user_id,          # ← ここで確実に渡す
-            nickname=nickname,
+            livedoor_id=user_id,
+            nickname=nickname or (email.split("@")[0] if email else None),
             email=email,
             password=password,
             site=site,
             desired_blog_id=desired_blog_id,
         ))
+
 
         if not result or not result.get("success"):
             with contextlib.suppress(Exception):
@@ -4571,7 +4633,8 @@ def submit_captcha():
     finally:
         with contextlib.suppress(Exception):
             pwctl.close_session(session_id)
-        # captcha_* を掃除（captcha_status は残す）
+        with contextlib.suppress(Exception):   # ★ 追加
+            pw_clear(session_id)
         for key in list(session.keys()):
             if key.startswith("captcha_") and key != "captcha_status":
                 session.pop(key)
