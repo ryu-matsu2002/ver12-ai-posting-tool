@@ -4448,12 +4448,13 @@ def submit_captcha():
 
         # ★ ここを asyncio.run(...) ではなく pwctl.run(...) にするのがポイント
         result = pwctl.run(recover_atompub_key(
-            page=page,
-            nickname=session.get("captcha_nickname"),
-            email=session.get("captcha_email"),
-            password=session.get("captcha_password"),
+            page,
+            livedoor_id=user_id,          # ← アカウント作成フォームのユーザーID
+            nickname=nickname,
+            email=email,
+            password=password,
             site=site,
-            desired_blog_id=session.get("captcha_desired_blog_id"),
+            desired_blog_id=desired_blog_id,  # ← ここも同じIDを使っているなら整合が取れる
         ))
 
         if not result or not result.get("success"):

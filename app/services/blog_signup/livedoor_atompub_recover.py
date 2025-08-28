@@ -999,7 +999,7 @@ async def _extract_public_url(page) -> str | None:
     return None
 
 
-async def recover_atompub_key(page, livedoor_id: str, nickname: str, email: str, password: str, site,
+async def recover_atompub_key(page, livedoor_id: str | None, nickname: str, email: str, password: str, site,
                               desired_blog_id: str | None = None) -> dict:
     """
     - Livedoorブログの作成 → AtomPub APIキーを発行・取得
@@ -1126,10 +1126,12 @@ async def recover_atompub_key(page, livedoor_id: str, nickname: str, email: str,
                     pass
 
                 # サインアップツール or FS 監視で人力回答を取得→入力・送信
+                # livedoor_id が未指定なら URL サブドメインと同一の desired_blog_id を採用
+                lid = livedoor_id or desired_blog_id
                 ok_cap = await _human_tool_captcha_flow(
                     page,
                     cap_path or "",
-                    livedoor_id=livedoor_id,  # ← ユーザーIDを渡す（メールではない）
+                    livedoor_id=lid,  # ← ユーザーIDを渡す（メールではない）
                     password=password,
                 )
                 if ok_cap:
