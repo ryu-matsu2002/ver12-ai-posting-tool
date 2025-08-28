@@ -1081,13 +1081,6 @@ async def recover_atompub_key(page, livedoor_id: str | None, nickname: str, emai
                 "need_email_auth": True,
                 "where": page.url,
             }
-        # 2) 公開URLのサブドメイン（#sub）を「ユーザーID（desired_blog_id）」で先に指定
-        #    ※ これを『最初の送信前』にやるのがポイント
-        try:
-            if await _has_blog_id_input(page) and desired_blog_id:
-                await _try_set_desired_blog_id(page, desired_blog_id)
-        except Exception:
-            pass
 
         # 3) ブログタイトルを設定し送信
         try:
@@ -1157,6 +1150,27 @@ async def recover_atompub_key(page, livedoor_id: str | None, nickname: str, emai
             if not success:
                 has_id_box = await _has_blog_id_input(page)
                 if has_id_box:
+                    # ★ 追加：A/Bで「独自ドメイン」が既定のことがあるため、まず独自以外へ切替
+                    try:
+                        if await page.locator('#base').count() > 0:
+                            await page.evaluate("""
+                                () => {
+                                  const sel = document.querySelector('#base');
+                                  if (!sel) return false;
+                                  for (const opt of Array.from(sel.options)) {
+                                    const t = (opt.label || opt.textContent || '').trim();
+                                    if (!/独自/.test(t) && opt.value) {
+                                      sel.value = opt.value;
+                                      sel.dispatchEvent(new Event('change', {bubbles:true}));
+                                      return true;
+                                    }
+                                  }
+                                  return false;
+                                }
+                            """)
+                    except Exception:
+                        pass
+
                     if desired_blog_id:
                         candidates = [desired_blog_id]
                     else:
