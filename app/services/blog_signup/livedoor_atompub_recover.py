@@ -359,11 +359,12 @@ def _slugify_ascii(s: str) -> str:
 
 async def _try_set_desired_blog_id(page, desired: str) -> bool:
     """
-    ブログ作成画面で希望 blog_id を入力する。
+    ブログ作成画面で希望 blog_id / サブドメインを入力する。
     画面ごとの違いに備えて複数セレクタを順に試す。
     成功/入力欄が見つからない場合は True、明確な失敗で False を返す。
     """
-    selectors = [
+    # まず従来セレクタ（ID型）
+    id_selectors = [
         '#blogId',
         'input[name="blog_id"]',
         'input[name="livedoor_blog_id"]',
@@ -372,17 +373,62 @@ async def _try_set_desired_blog_id(page, desired: str) -> bool:
         'input[placeholder*="ブログURL"]',
     ]
     try:
-        for sel in selectors:
+        for sel in id_selectors:
             try:
                 if await page.locator(sel).count() > 0:
                     await page.fill(sel, desired)
                     return True
             except Exception:
                 continue
-        # 入力欄が見つからなくても致命ではない（サイト側が自動採番の可能性）
-        return True
     except Exception:
-        return False
+        pass
+
+    # サブドメイン型（今回ヒットしているやつ）
+    try:
+        sub_loc = None
+        if await page.locator('#sub').count() > 0:
+            sub_loc = page.locator('#sub').first
+        elif await page.locator('input[name="sub"]').count() > 0:
+            sub_loc = page.locator('input[name="sub"]').first
+
+        if sub_loc:
+            # base があれば最初の有効optionを選ぶ（既定でOKならそのまま）
+            try:
+                if await page.locator('#base').count() > 0:
+                    base = page.locator('#base').first
+                    # 選択済みでも change を発火させ domaincheck を走らせる
+                    await base.evaluate("(el)=>el.dispatchEvent(new Event('change', {bubbles:true}))")
+            except Exception:
+                pass
+
+            # 入力とイベント発火（htmxのdomaincheck用）
+            try:
+                await sub_loc.fill("")
+            except Exception:
+                try:
+                    await sub_loc.click()
+                    await sub_loc.press("Control+A")
+                    await sub_loc.press("Delete")
+                except Exception:
+                    pass
+            await sub_loc.fill(desired)
+            try:
+                await sub_loc.evaluate("(el)=>el.dispatchEvent(new Event('keyup', {bubbles:true}))")
+            except Exception:
+                pass
+
+            # domaincheck の結果を短時間待つ（OK/NGはこの後のリトライ側で判定）
+            try:
+                await page.wait_for_timeout(700)
+            except Exception:
+                pass
+            return True
+    except Exception:
+        pass
+
+    # どれも見つからない → 致命ではない
+    return True
+
 
 
 # ─────────────────────────────────────────────
@@ -464,7 +510,8 @@ async def _maybe_accept_terms(page) -> bool:
 async def _has_blog_id_input(page) -> bool:
     for sel in [
         '#blogId', 'input[name="blog_id"]', 'input[name="livedoor_blog_id"]',
-        'input[name="blogId"]', 'input#livedoor_blog_id', 'input[placeholder*="ブログURL"]'
+        'input[name="blogId"]', 'input#livedoor_blog_id', 'input[placeholder*="ブログURL"]',  # ← ここにカンマ
+        '#sub', 'input[name="sub"]'   # ← これが生きる
     ]:
         try:
             if await page.locator(sel).count() > 0:
@@ -472,6 +519,7 @@ async def _has_blog_id_input(page) -> bool:
         except Exception:
             pass
     return False
+
 
 
 async def _log_inline_errors(page):
@@ -760,10 +808,9 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
 # 作成ページ CAPTCHA 検出・処理（人力ツール優先／FSフォールバック）
 # ─────────────────────────────────────────────
 async def _detect_create_captcha(page) -> tuple[bool, str | None]:
-    """作成ページの CAPTCHA を検出し、画像を /tmp に保存してパスを返す。"""
     try:
-        img_sel = '#captcha-img, img.captcha'
-        box_sel = 'input[name="captcha"], #captcha'
+        img_sel = '#captcha_image, #captcha-img, img.captcha'  # 実体＋互換
+        box_sel = 'input[name="captcha_code"], input[name="captcha"], #captcha'
         has_img = await page.locator(img_sel).first.count() > 0
         has_box = await page.locator(box_sel).first.count() > 0
         if not (has_img and has_box):
@@ -780,12 +827,13 @@ async def _detect_create_captcha(page) -> tuple[bool, str | None]:
         return False, None
 
 
+
 async def _fill_captcha_and_submit(page, text: str) -> bool:
-    """CAPTCHA 文字列を入力して送信をトリガーする。"""
     try:
-        box_sel = 'input[name="captcha"], #captcha'
-        await page.locator(box_sel).first.fill("")
-        await page.locator(box_sel).first.fill(text)
+        box_sel = 'input[name="captcha_code"], input[name="captcha"], #captcha'
+        loc = page.locator(box_sel).first
+        await loc.fill("")
+        await loc.fill(text)
 
         # 送信ボタン（代表選抜）
         btn = page.locator('input[type="submit"][value="ブログを作成する"]').first
@@ -808,6 +856,7 @@ async def _fill_captcha_and_submit(page, text: str) -> bool:
     except Exception:
         logger.warning("[LD-Recover] CAPTCHA 入力→送信に失敗", exc_info=True)
         return False
+
 
 
 async def _wait_success_after_submit(page) -> tuple[bool, str | None]:
@@ -1020,8 +1069,9 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
             is_cap, cap_path = await _detect_create_captcha(page)
             if is_cap:
                 # 画像更新ボタンがあれば一度更新（読みやすくするため・任意）
+                # CAPTCHA 検出後の「画像更新」
                 try:
-                    await page.locator('a:has-text("画像を更新"), button:has-text("画像を更新")').first.click(timeout=1000)
+                    await page.locator('#captchaImageA, a:has-text("画像を更新"), button:has-text("画像を更新")').first.click(timeout=1000)
                     await asyncio.sleep(0.8)
                     is_cap, cap_path = await _detect_create_captcha(page)
                 except Exception:
