@@ -12,7 +12,7 @@ from app.enums import BlogType
 logger = logging.getLogger(__name__)
 
 # ビルド識別（デプロイ反映チェック用）
-BUILD_TAG = "2025-08-28 fallback_terms_blogid+resubmit+navfix"
+BUILD_TAG = "2025-08-28 fallback_terms_blogid+resubmit+welcome_url_extract"
 logger.info(f"[LD-Recover] loaded build {BUILD_TAG}")
 
 async def _save_shot(page, prefix: str) -> tuple[str, str]:
@@ -542,7 +542,7 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
     1) まずメインフレームで厳密に待つ
     2) ダメなら全フレーム走査
     3) クリック前にスクロール＆フォーカス
-    4) クリックは expect_navigation を試し、失敗時は多段フォールバック
+    4) クリックは expect_navigation を優先し、失敗時は多段フォールバック
     5) どこで失敗してもログ＋スクショ
     """
     await _maybe_close_overlays(page)
@@ -667,7 +667,7 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
         except Exception:
             pass
 
-        # まずは expect_navigation で遷移イベントを掴みにいく
+        # まずは expect_navigation で遷移イベントを掴む
         try:
             async with page.expect_navigation(wait_until="load", timeout=30000):
                 try:
@@ -681,7 +681,7 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
                 await btn.click()
             logger.info("[LD-Recover] 『ブログを作成』ボタンをクリック: %s (expect_navigation)", btn_sel)
         except Exception:
-            # フォールバッククリック（遷移イベントを掴めない実装向け）
+            # フォールバッククリック
             logger.info("[LD-Recover] expect_navigation を掴めず。フォールバッククリックに切替")
             clicked = await _wait_enabled_and_click(page, btn, timeout=8000, label_for_log=f"create-button {btn_sel}")
             if not clicked:
@@ -718,6 +718,13 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
 # ─────────────────────────────────────────────
 # メイン：ブログ作成→AtomPub APIキー取得
 # ─────────────────────────────────────────────
+def _extract_blog_id_from_url(url: str) -> str | None:
+    try:
+        m = _re.search(r"/blog/([^/]+)/", url)
+        return m.group(1) if m else None
+    except Exception:
+        return None
+
 async def recover_atompub_key(page, nickname: str, email: str, password: str, site,
                               desired_blog_id: str | None = None) -> dict:
     """
@@ -822,22 +829,25 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
 
         # 3) 成功判定：/welcome への遷移 or 成功導線/文言の出現
         success = False
+        blog_id_from_url = None
         try:
             await page.wait_for_url(_re.compile(r"/welcome($|[/?#])"), timeout=15000)
             success = True
             logger.info("[LD-Recover] /welcome への遷移を確認")
+            blog_id_from_url = _extract_blog_id_from_url(page.url)
         except Exception:
-            # 文言の出現でも成功扱い（例：『ブログの作成が完了しました！』）
+            # 文言の出現でも成功扱い（『ブログの作成が完了しました！』など）
             try:
-                # 感嘆符の有無・余白差異に強くするため2パターン見る
                 await page.wait_for_selector('text=ブログの作成が完了しました', timeout=6000)
                 success = True
                 logger.info("[LD-Recover] 成功メッセージを検出")
+                blog_id_from_url = _extract_blog_id_from_url(page.url)
             except Exception:
                 try:
                     await page.wait_for_selector('text=ブログの作成が完了しました！', timeout=3000)
                     success = True
                     logger.info("[LD-Recover] 成功メッセージ（！付き）を検出")
+                    blog_id_from_url = _extract_blog_id_from_url(page.url)
                 except Exception:
                     hints = [
                         'a:has-text("最初のブログを書く")',
@@ -849,6 +859,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                     if fr:
                         logger.info("[LD-Recover] welcome 導線の出現を確認（frame内）")
                         success = True
+                        blog_id_from_url = _extract_blog_id_from_url(page.url)
 
         # 送信後も create に留まる場合のフォールバック（文言に依存しない）
         if not success:
@@ -866,6 +877,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                         await page.wait_for_url(_re.compile(r"/welcome($|[/?#])"), timeout=12000)
                         success = True
                         logger.info("[LD-Recover] /welcome へ遷移（terms accepted）")
+                        blog_id_from_url = _extract_blog_id_from_url(page.url)
                     except Exception:
                         fr2, _ = await _find_in_any_frame(
                             page,
@@ -875,6 +887,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                         if fr2:
                             success = True
                             logger.info("[LD-Recover] welcome 導線検出（terms accepted）")
+                            blog_id_from_url = _extract_blog_id_from_url(page.url)
 
             # (B) まだダメなら blog_id 入力欄があれば候補で再送
             if not success:
@@ -892,6 +905,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                                     await page.wait_for_url(_re.compile(r"/welcome($|[/?#])"), timeout=12000)
                                     success = True
                                     logger.info(f"[LD-Recover] /welcome へ遷移（blog_id={cand}）")
+                                    blog_id_from_url = _extract_blog_id_from_url(page.url)
                                     break
                                 except Exception:
                                     fr2, _ = await _find_in_any_frame(
@@ -902,6 +916,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                                     if fr2:
                                         success = True
                                         logger.info(f"[LD-Recover] welcome 導線検出（blog_id={cand}）")
+                                        blog_id_from_url = _extract_blog_id_from_url(page.url)
                                         break
                         except Exception:
                             continue
@@ -918,7 +933,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                 "png_path": err_png
             }
 
-        # 4) （任意）welcome にある導線があれば押す
+        # 4) （任意）welcome にある導線があれば押す（押す必要は無いがUI変化のため best-effort）
         try:
             fr, sel = await _find_in_any_frame(page, [
                 'a:has-text("最初のブログを書く")',
@@ -933,71 +948,75 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         except Exception:
             pass
 
-        # 5) /member に遷移して blog_id を抽出
-        await page.goto("https://livedoor.blogcms.jp/member/", wait_until="load")
-        try:
-            await page.wait_for_load_state("networkidle", timeout=10000)
-        except Exception:
-            pass
-
-        blog_settings_selectors = [
-            'a[title="ブログ設定"]',
-            'a:has-text("ブログ設定")',
-            'a[href^="/blog/"][href$="/config/"]',
-            'a[href*="/config/"]'
-        ]
-
-        link_el = None
-        href = None
-
-        for sel in blog_settings_selectors:
+        # 5) blog_id 決定：まずは URL から、無ければ /member で探す
+        blog_id = blog_id_from_url
+        if blog_id:
+            logger.info(f"[LD-Recover] ブログID（URL由来）: {blog_id}")
+        else:
+            # /member に遷移して抽出（従来ルート）
+            await page.goto("https://livedoor.blogcms.jp/member/", wait_until="load")
             try:
-                loc = page.locator(sel).first
-                if await loc.count() > 0:
+                await page.wait_for_load_state("networkidle", timeout=10000)
+            except Exception:
+                pass
+
+            blog_settings_selectors = [
+                'a[title="ブログ設定"]',
+                'a:has-text("ブログ設定")',
+                'a[href^="/blog/"][href$="/config/"]',
+                'a[href*="/config/"]'
+            ]
+
+            link_el = None
+            href = None
+
+            for sel in blog_settings_selectors:
+                try:
+                    loc = page.locator(sel).first
+                    if await loc.count() > 0:
+                        try:
+                            await loc.wait_for(state="visible", timeout=8000)
+                        except Exception:
+                            pass
+                        href = await loc.get_attribute("href")
+                        if href:
+                            link_el = loc
+                            break
+                except Exception:
+                    continue
+
+            if not href:
+                fr, sel = await _find_in_any_frame(page, blog_settings_selectors, timeout_ms=12000)
+                if fr:
+                    loc = fr.locator(sel).first
                     try:
-                        await loc.wait_for(state="visible", timeout=8000)
+                        await loc.wait_for(state="visible", timeout=6000)
                     except Exception:
                         pass
                     href = await loc.get_attribute("href")
-                    if href:
-                        link_el = loc
-                        break
-            except Exception:
-                continue
 
-        if not href:
-            fr, sel = await _find_in_any_frame(page, blog_settings_selectors, timeout_ms=12000)
-            if fr:
-                loc = fr.locator(sel).first
+            if href:
                 try:
-                    await loc.wait_for(state="visible", timeout=6000)
+                    parts = href.split("/")
+                    blog_id = parts[2] if len(parts) > 2 else None
                 except Exception:
-                    pass
-                href = await loc.get_attribute("href")
-                if href:
-                    link_el = loc
+                    blog_id = None
 
-        if not href:
-            err_html, err_png = await _dump_error("ld_atompub_member_fail")
-            return {
-                "success": False,
-                "error": "member page missing blog link",
-                "html_path": err_html,
-                "png_path": err_png
-            }
+            if not blog_id:
+                cur_url = page.url
+                blog_id = cur_url.split("/blog/")[1].split("/")[0] if "/blog/" in cur_url else None
 
-        config_url = urljoin("https://livedoor.blogcms.jp/", href)
-        try:
-            parts = href.split("/")
-            blog_id = parts[2] if len(parts) > 2 else None
-        except Exception:
-            blog_id = None
-        if not blog_id:
-            cur_url = page.url
-            blog_id = cur_url.split("/blog/")[1].split("/")[0] if "/blog/" in cur_url else "unknown"
-        logger.info(f"[LD-Recover] ブログIDを取得: {blog_id}")
+            if not blog_id:
+                err_html, err_png = await _dump_error("ld_atompub_member_fail")
+                return {
+                    "success": False,
+                    "error": "member page missing blog link",
+                    "html_path": err_html,
+                    "png_path": err_png
+                }
 
-        # 6) 設定ページ → AtomPub 発行ページへ
+        # 6) 設定ページ → AtomPub 発行ページへ（blog_id を直接使って遷移）
+        config_url = f"https://livedoor.blogcms.jp/blog/{blog_id}/config/"
         await page.goto(config_url, wait_until="load")
         try:
             await page.wait_for_load_state("networkidle", timeout=10000)
@@ -1009,6 +1028,8 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
             'a[title*="API Key"]',
             'a:has-text("API Key")',
             'a:has-text("API Keyの発行")',
+            'a[href*="/api"]',
+            'a:has-text("AtomPub")',
         ]
         api_link = None
         for sel in api_nav_selectors:

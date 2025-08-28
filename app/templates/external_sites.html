@@ -4,30 +4,24 @@
 {% block content %}
 <style>
   :root{
-    /* === ベースカラーを #ff89ff に統一（濃淡は固定のまま近似トーンを指定） === */
-    --tcd-base:#ff89ff;   /* 指定色 */
-    /* 濃淡はベースからの近似（青みを排除しピンク〜マゼンタ系で統一） */
-    --tcd-dark:#e56fe8;    /* 旧: #b98ccf 相当の暗め */
-    --tcd-darker:#c955cf;  /* 旧: #9b73b8 相当のさらに暗め */
-    --tcd-light:#ffe9ff;   /* 旧: #f7effb の明度合わせ */
-    --tcd-lighter:#fff4ff; /* 旧: #fbf7ff のさらに薄い面 */
+    --tcd-base:#ff89ff;
+    --tcd-dark:#e56fe8;
+    --tcd-darker:#c955cf;
+    --tcd-light:#ffe9ff;
+    --tcd-lighter:#fff4ff;
 
-    /* カードは落ち着いたトーン（減彩のまま、マゼンタ系に置換） */
-    --card1:#6e3f69;     /* desaturated magenta/purple */
+    --card1:#6e3f69;
     --card2:#8a5583;
     --card-edge:rgba(255,255,255,.18);
     --card-glow:rgba(0,0,0,.06);
 
-    /* 右ペイン（うっすらピンク） */
     --pane-bg:#f8ecfb;
     --pane-border:rgba(0,0,0,.06);
 
-    /* リンク色（青系を排除） */
     --link:#ffe9ff;
     --link-hover:#ffffff;
   }
 
-  /* ===== ベース：左右の白余白・白筋を完全排除 ===== */
   html{ scrollbar-gutter: stable; }
   body{
     overflow-y: scroll;
@@ -48,37 +42,53 @@
     margin-right: 0 !important;
   }
 
-  /* === 【白い装飾 徹底無効化】html/body/各上位ラッパーの疑似要素＆背景を遮断 === */
-  html::before, html::after,
-  body::before, body::after,
+  /* ===== テーマ側（上位ラッパー）の装飾を徹底無効化 ===== */
+  body.bg-primary,
+  .min-h-screen.bg-primary,
+  .bg-primary,
+  .bg-primaryDark{
+    background-image: none !important;
+    -webkit-mask: none !important;
+    mask: none !important;
+  }
   .bg-primary::before, .bg-primary::after,
+  .bg-primaryDark::before, .bg-primaryDark::after,
   .min-h-screen::before, .min-h-screen::after,
-  .page-wrapper::before, .page-wrapper::after{
+  .bg-primary *::before, .bg-primary *::after,
+  .bg-primaryDark *::before, .bg-primaryDark *::after{
     content: none !important;
     display: none !important;
     background: none !important;
     background-image: none !important;
+    box-shadow: none !important;
     -webkit-mask: none !important;
     mask: none !important;
-    mix-blend-mode: normal !important;
-    box-shadow: none !important;
     pointer-events: none !important;
   }
-  html, body, .bg-primary, .min-h-screen, .page-wrapper{
+
+  /* ===== ページ内（tcd-wrap配下）の“白いピース”完全遮断 ===== */
+  .tcd-wrap *::before,
+  .tcd-wrap *::after{
+    content: none !important;
+    display: none !important;
+    background: none !important;
     background-image: none !important;
+    box-shadow: none !important;
     -webkit-mask: none !important;
     mask: none !important;
+    pointer-events: none !important;
   }
+  /* リストの marker を消す（装飾がmarker経由の場合の保険） */
+  .tcd-wrap li::marker{ content: "" !important; }
 
   .tcd-wrap{
-    /* 外枠の帯を濃いマゼンタ系に */
     background: var(--tcd-darker);
     border-radius: 14px;
     padding: 28px;
     margin: 0 auto;
     width: 100%;
     max-width: 1500px;
-    contain: paint; /* 再描画の分離で軽量化 */
+    contain: paint;
   }
   @media (max-width: 1024px){
     .tcd-wrap{ padding: 18px; }
@@ -99,31 +109,11 @@
 
   /* ===== 左ペイン ===== */
   .tcd-sidebar{
-    /* 青味グラデを #ff89ff 系の濃淡へ変更 */
     background: linear-gradient(180deg, var(--tcd-darker) 0%, var(--tcd-dark) 100%);
     color:#fff;
     border-radius: 12px;
     display:flex; flex-direction: column;
     overflow:hidden;
-    -webkit-mask:none !important; mask:none !important;
-  }
-
-  /* ■■■ サイドバー配下の擬似装飾も広く無効化 ■■■ */
-  .tcd-sidebar::before,
-  .tcd-sidebar::after,
-  #siteList::before,
-  #siteList::after,
-  #siteList *::before,
-  #siteList *::after{
-    content: none !important;
-    display: none !important;
-    background: none !important;
-    background-image: none !important;
-    box-shadow: none !important;
-    -webkit-mask: none !important;
-    mask: none !important;
-    mix-blend-mode: normal !important;
-    pointer-events: none !important;
   }
 
   .tcd-side-title{
@@ -142,16 +132,15 @@
     overflow: auto;
     padding: 0 14px 18px;
     max-height: calc(100vh - 280px);
-    -webkit-mask:none !important; mask:none !important;
     background: transparent !important;
   }
   .sites-scroll::-webkit-scrollbar{ width: 6px; }
   .sites-scroll::-webkit-scrollbar-thumb{ background: rgba(255,255,255,.35); border-radius: 999px; }
   .sites-scroll::-webkit-scrollbar-track{ background: transparent; }
 
-  /* ===== 左：サイト一覧ラッパー ===== */
+  /* ===== 左：サイト一覧（カード化） ===== */
   #siteList{
-    border: none;                         /* 旧表形式の枠は撤廃 */
+    border: none;
     border-radius: 0;
     background: transparent;
     padding: 0;
@@ -159,21 +148,19 @@
     list-style: none;
   }
 
-  /* 左：サイトカード（= 1サイトをカード化） */
   .prop-card{
     position: relative;
     background: rgba(255,255,255,.08);
     border: 1px solid rgba(0,0,0,.25);
     border-radius: 12px;
     padding: 12px 14px 10px;
-    margin: 8px 0;                        /* カード間の余白で境界を明確化 */
+    margin: 8px 0;
     transition: background .12s ease, border-color .12s ease, box-shadow .12s ease, transform .08s ease;
     cursor: pointer;
     overflow: hidden;
     box-shadow: 0 1px 2px rgba(0,0,0,.16);
     outline: none;
   }
-  /* 旧：行境界線/ゼブラは不要なので無効化 */
   #siteList .prop-card + .prop-card{ border-top: none; }
   #siteList .prop-card:nth-child(even){ background: rgba(255,255,255,.08); }
 
@@ -181,39 +168,26 @@
     background: rgba(255,255,255,.14);
     box-shadow: 0 2px 6px rgba(0,0,0,.22);
   }
-  /* 選択カード（今どのサイトかを強調） */
   .prop-card.active{
     background: rgba(255,255,255,.18);
     box-shadow: 0 0 0 2px #ffffff inset, 0 4px 10px rgba(0,0,0,.25);
     border-color: #fff;
   }
-  .prop-card.active::after{
-    content:"";
-    position:absolute; inset:0;
-    outline: 2px solid rgba(255,255,255,.9);
-    outline-offset:-2px;
-    pointer-events:none;
-    border-radius: 12px;
-  }
-  /* フォーカス/マーカーの残像を完全無効化（白いピース対策） */
-  .prop-card:focus{ outline: none !important; box-shadow: 0 0 0 2px transparent inset !important; }
+  .prop-card:focus{ outline: none !important; }
   .prop-card::marker{ content: none; }
-  .prop-card *{ outline: none !important; }
 
   .prop-head{
     display: grid; grid-template-columns: 1fr auto; align-items: center;
     column-gap: 10px; min-height: 28px;
-    background: none !important;
   }
-  /* ★ サイト名は1行・省略 (…) 表示に固定 */
+  /* 1行固定＆省略表示 */
   .prop-title{
     font-weight: 800;
     line-height: 1.35;
-    white-space: nowrap;            /* ここで1行固定 */
-    overflow: hidden;               /* はみ出しカット */
-    text-overflow: ellipsis;        /* 末尾… */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     word-break: normal;
-    background: none !important;
   }
   .prop-domain{ margin-top: 6px; font-size: .92rem; opacity: .9; word-break: break-all; }
 
@@ -225,15 +199,17 @@
     box-shadow: inset 0 -2px 0 rgba(0,0,0,.1);
     filter: saturate(.85);
   }
+  /* ★ バッジのグラデ背景を強制復活 */
+  .pf-ld{  background-image: linear-gradient(135deg,#874e9d,#6f3e84) !important; }
+  .pf-note{background-image: linear-gradient(135deg,#3a3441,#5a5362) !important; }
+  .pf-ame{ background-image: linear-gradient(135deg,#19824a,#2ca765) !important; color:#052413; }
+  /* ★ カウント数字の背景も強制復活 */
   .pf-count{
-    background: rgba(0,0,0,.45);
-    color:#fff;
+    background-color: rgba(0,0,0,.45) !important;
+    color:#fff !important;
     border-radius:999px; padding:1px 8px; font-weight:800; line-height:1.2;
   }
-  .pf-ld{ background: linear-gradient(135deg,#874e9d,#6f3e84); }
-  .pf-note{ background: linear-gradient(135deg,#3a3441,#5a5362); }
-  .pf-ame{ background: linear-gradient(135deg,#19824a,#2ca765); color:#052413; }
-  .pf-ame .pf-count{ background: rgba(0,0,0,.55); color:#fff; }
+  .pf-ame .pf-count{ background-color: rgba(0,0,0,.55) !important; }
 
   /* ===== 右ペイン ===== */
   .right-outer{
@@ -257,13 +233,11 @@
     color:#fff;
   }
 
-  /* 見出しカード（サイト名） */
   .tcd-header{ padding: 18px 22px; }
   .tcd-title-lg{ font-weight:800; font-size:1.125rem; }
   .tcd-link-lg{ color: var(--link); text-decoration:underline; font-size:1rem; }
   .tcd-link-lg:hover{ color: var(--link-hover); }
 
-  /* タブ見出し（Livedoor） */
   .tcd-acc-trigger{
     width:100%; text-align:left; padding:14px 20px;
     display:flex; align-items:center; gap:14px; cursor: pointer;
@@ -291,77 +265,16 @@
   .accordion-panel{ background: transparent; }
   .site-panel{ content-visibility:auto; contain-intrinsic-size: 800px 600px; }
 
-  /* 念押し：カードの擬似装飾も無効化 */
+  /* 念押し：左リストのカードへ外部装飾が混入しないように */
   #siteList .prop-card::before,
   #siteList .prop-card::after{
     content: none !important;
-    display: none !important;
-    background: none !important;
-    box-shadow: none !important;
-    -webkit-mask: none !important;
-    mask: none !important;
   }
-  #siteList { transform: translateZ(0); }
 
-  /* 低モーション環境ではアニメ短縮 */
   @media (prefers-reduced-motion: reduce){
     .prop-card{ transition: none; }
     .tcd-caret{ transition: none; }
   }
-
-  /* ====== 追加：テーマの白い装飾を徹底的に無効化 ====== */
-/* 上位ラッパー（bg-primary / bg-primaryDark / min-h-screen）が差し込む
-   背景画像・擬似要素・マスク・影を全面オフにする */
-body.bg-primary,
-.min-h-screen.bg-primary,
-.bg-primary,
-.bg-primaryDark{
-  background-image: none !important;
-  -webkit-mask: none !important;
-  mask: none !important;
-}
-
-/* 擬似要素を完全無効化（白いピースの正体はほぼここ） */
-.bg-primary::before,
-.bg-primary::after,
-.bg-primary *::before,
-.bg-primary *::after,
-.bg-primaryDark::before,
-.bg-primaryDark::after,
-.bg-primaryDark *::before,
-.bg-primaryDark *::after,
-.min-h-screen::before,
-.min-h-screen::after{
-  content: none !important;
-  display: none !important;
-  background: none !important;
-  background-image: none !important;
-  box-shadow: none !important;
-  -webkit-mask: none !important;
-  mask: none !important;
-  pointer-events: none !important;
-}
-
-/* まれに白い“帯”が border / shadow で注入されるテーマがあるので無効化。
-   影と白系ボーダーをこのページ内では消す */
-.min-h-screen [class*="shadow-"],
-.min-h-screen [style*="box-shadow"]{
-  box-shadow: none !important;
-}
-.min-h-screen [class*="border-white"],
-.min-h-screen [style*="border-color: rgb(255, 255, 255)"],
-.min-h-screen [style*="border-color: #fff"]{
-  border-color: transparent !important;
-}
-
-/* 我々の紫サイドバー配下は“外部からの背景注入”を全遮断 */
-.tcd-sidebar,
-.tcd-sidebar *{
-  background-image: none !important;
-  -webkit-mask: none !important;
-  mask: none !important;
-}
-
 </style>
 
 {% set ALLOW_MULTI_BLOG_USER_IDS = [1, 2, 5] %}
@@ -726,12 +639,10 @@ body.bg-primary,
 
 {% block scripts %}
 <script>
-  /* ========== ユーザーID ========== */
   const CURRENT_USER_ID = Number('{{ current_user.id | default(0, true) | int }}');
   const ALLOW_MULTI_BLOG_USER_IDS = [1, 2, 5];
   const SELECT_KEY = 'extseo.selectedSite';
 
-  /* ========== 1クリック・ロック ========== */
   function lockKey(aid){ return `gen-lock:${aid}`; }
   function disableLink(el){
     el.classList.add('opacity-50','pointer-events-none','cursor-not-allowed');
@@ -751,7 +662,6 @@ body.bg-primary,
     return true;
   }
 
-  /* ========== ユーティリティ ========== */
   function escapeHtml(s){
     if(s==null) return '';
     return String(s)
@@ -763,7 +673,6 @@ body.bg-primary,
   }
   function escapeAttr(s){ return escapeHtml(s).replace(/"/g,'&quot;'); }
 
-  /* ========== 左：サイト切替（遅延生成対応） ========== */
   function selectSite(siteId, store=true){
     document.querySelectorAll('.site-panel').forEach(p => p.classList.add('hidden'));
 
@@ -796,7 +705,6 @@ body.bg-primary,
     return first || '';
   }
 
-  /* ========== 検索 ========== */
   const siteSearch = document.getElementById('siteSearch');
   function filterSites(q){
     const needle = (q||'').toLowerCase().replace(/\s+/g,'');
@@ -821,7 +729,6 @@ body.bg-primary,
     _filterTimer = setTimeout(()=>filterSites(v), 100);
   });
 
-  /* ========== 起動時 ========= */
   document.addEventListener('DOMContentLoaded', () => {
     const u = new URLSearchParams(location.search).get('unlock');
     if(u){ localStorage.removeItem(lockKey(u)); }
@@ -838,7 +745,6 @@ body.bg-primary,
     if (initId) selectSite(initId, false);
   });
 
-  /* ========== トースト ========= */
   function showToast(message, type='success', ms=4200){
     const el = document.getElementById('toast');
     const box = document.getElementById('toastInner');
@@ -852,7 +758,6 @@ body.bg-primary,
     el.__t = setTimeout(()=>{ el.classList.add('opacity-0'); setTimeout(()=>el.classList.add('hidden'), 300); }, ms);
   }
 
-  /* ========== 進捗バー ========= */
   function setAccProgress(pct, instant=false){
     const bar = document.getElementById('accProgressBar');
     const num = document.getElementById('accProgressPct');
@@ -872,7 +777,6 @@ body.bg-primary,
     return 10;
   }
 
-  /* ========== アコーディオン ========= */
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('.accordion-trigger');
     if (!btn) return;
@@ -903,7 +807,6 @@ body.bg-primary,
     btn.setAttribute('aria-expanded', 'true');
   });
 
-  /* ========== ＋ブログ追加（API連携） ========== */
   async function newAccountStart(button) {
     const siteId = button.getAttribute('data-site-id');
     if (!siteId) return;
@@ -1024,7 +927,6 @@ body.bg-primary,
     grid.prepend(card);
   }
 
-  /* ========== CAPTCHA処理 ========== */
   let progressInterval = null;
   let lastStatus = null;
   let captchaSubmitLocked = false;
@@ -1240,7 +1142,6 @@ body.bg-primary,
     try{ const p = percentForStep(data && data.step); setAccProgress(p); }catch(_){}
   }
 
-  /* ========== 削除処理 ========== */
   async function deleteExternalAccount(acctId, siteId) {
     if (!acctId) return;
     if (!confirm("この無料ブログを削除します。予約と（このブログだけが使っている）生成記事も削除します。よろしいですか？")) {
