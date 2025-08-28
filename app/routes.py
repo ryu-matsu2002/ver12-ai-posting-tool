@@ -4447,14 +4447,27 @@ def submit_captcha():
         pwctl.run(page.goto(activation_url, wait_until="load"))
 
         # ★ ここを asyncio.run(...) ではなく pwctl.run(...) にするのがポイント
+        # ユーザーIDの取得（フォーム名の揺れ対策＋フォールバック）
+        user_id = (
+            request.form.get("livedoor_id")
+            or request.form.get("user_id")
+            or request.form.get("userid")
+            or request.form.get("username")
+            or request.form.get("account_id")
+            or desired_blog_id  # 最後の手段：URLサブドメインと同一にする
+        )
+        if not user_id:
+            current_app.logger.error("[submit_captcha] livedoor user_id is missing")
+            return jsonify({"ok": False, "error": "missing_user_id"}), 400
+
         result = pwctl.run(recover_atompub_key(
             page,
-            livedoor_id=user_id,          # ← アカウント作成フォームのユーザーID
+            livedoor_id=user_id,          # ← ここで確実に渡す
             nickname=nickname,
             email=email,
             password=password,
             site=site,
-            desired_blog_id=desired_blog_id,  # ← ここも同じIDを使っているなら整合が取れる
+            desired_blog_id=desired_blog_id,
         ))
 
         if not result or not result.get("success"):

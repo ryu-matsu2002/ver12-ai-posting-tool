@@ -1009,6 +1009,7 @@ async def recover_atompub_key(page, livedoor_id: str | None, nickname: str, emai
     - DBには保存しない（呼び出し元で保存）
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    logger.info("[LD-Recover] args: livedoor_id=%s desired_blog_id=%s email=%s", livedoor_id, desired_blog_id, email)
 
     # 失敗時保存用ヘルパ
     async def _dump_error(prefix: str):
