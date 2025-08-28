@@ -12,7 +12,7 @@ from app.enums import BlogType
 logger = logging.getLogger(__name__)
 
 # ビルド識別（デプロイ反映チェック用）
-BUILD_TAG = "2025-08-25T11:07 selector_patch"
+BUILD_TAG = "2025-08-28 fallback_terms_blogid"
 logger.info(f"[LD-Recover] loaded build {BUILD_TAG}")
 
 async def _save_shot(page, prefix: str) -> tuple[str, str]:
@@ -338,6 +338,7 @@ async def _try_set_desired_blog_id(page, desired: str) -> bool:
         'input[name="livedoor_blog_id"]',
         'input[name="blogId"]',
         'input#livedoor_blog_id',
+        'input[placeholder*="ブログURL"]',
     ]
     try:
         for sel in selectors:
@@ -353,9 +354,8 @@ async def _try_set_desired_blog_id(page, desired: str) -> bool:
         return False
 
 # ─────────────────────────────────────────────
-# 追加：フレーム横断ユーティリティ（※フォールバック専用で使う）
+# 追加：フレーム横断・同意チェック・エラーテキスト採取
 # ─────────────────────────────────────────────
-# 追加：オーバーレイ/クッキーバナーを閉じる（あっても無視安全）
 async def _maybe_close_overlays(page):
     selectors = [
         'button#iubenda-cs-accept-btn',
@@ -393,6 +393,66 @@ async def _maybe_close_overlays(page):
         """)
     except Exception:
         pass
+
+async def _maybe_accept_terms(page):
+    """利用規約の同意チェックがあればON（無ければ無視）"""
+    sels = [
+        'input[type="checkbox"][name*="agree"]',
+        'input#agree', 'input#agreement', 'input#termsAgree',
+        'input#accept-terms', 'input[name="agreement"]', 'input[name="accept"]'
+    ]
+    for sel in sels:
+        try:
+            loc = page.locator(sel).first
+            if await loc.count() > 0:
+                try:
+                    await loc.check()
+                except Exception:
+                    try:
+                        handle = await loc.element_handle()
+                        if handle:
+                            await page.evaluate(
+                                "(el)=>{el.checked=true;el.dispatchEvent(new Event('change',{bubbles:true}))}", handle
+                            )
+                    except Exception:
+                        pass
+                logger.info("[LD-Recover] ✅ 規約同意チェック: %s", sel)
+                break
+        except Exception:
+            pass
+
+async def _has_blog_id_input(page) -> bool:
+    for sel in [
+        '#blogId', 'input[name="blog_id"]', 'input[name="livedoor_blog_id"]',
+        'input[name="blogId"]', 'input#livedoor_blog_id', 'input[placeholder*="ブログURL"]'
+    ]:
+        try:
+            if await page.locator(sel).count() > 0:
+                return True
+        except Exception:
+            pass
+    return False
+
+async def _log_inline_errors(page):
+    """画面上の代表的なエラーメッセージを収集してログ出力"""
+    sels = [
+        '.error', '.error-message', '.errors li', 'p.error', 'span.error',
+        '.alert-danger', '.alert.alert-danger', 'div.errorMessage', 'li.error',
+        'div.formError', 'div#notice .error', 'div.notice.error'
+    ]
+    texts = []
+    for sel in sels:
+        try:
+            loc = page.locator(sel)
+            cnt = await loc.count()
+            for i in range(min(cnt, 10)):
+                t = (await loc.nth(i).inner_text()).strip()
+                if t:
+                    texts.append(t.replace("\n", " "))
+        except Exception:
+            pass
+    if texts:
+        logger.warning("[LD-Recover] inline errors: %s", " | ".join(texts[:5]))
 
 async def _find_in_any_frame(page, selectors, timeout_ms=15000):
     """全フレーム走査。最初に見つかったframeとselectorを返す。"""
@@ -595,6 +655,12 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
                 return False
             btn = fr_btn.locator(btn_sel).first
 
+        # ★クリック直前の証跡
+        try:
+            await _save_shot(page, "ld_create_before_submit")
+        except Exception:
+            pass
+
         # クリックの堅牢化
         clicked = await _wait_enabled_and_click(page, btn, timeout=8000, label_for_log=f"create-button {btn_sel}")
         if not clicked:
@@ -639,8 +705,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
     """
     - Livedoorブログの作成 → AtomPub APIキーを発行・取得
     - 原則は「ブログタイトル入力 → 作成ボタン」だけを操作し、blog_id には触れない
-    - ただし、送信後にページ内エラー（重複/必須など）を検知した場合に限り、
-      最小限のフォールバックとして blog_id を入力して再送信を試みる
+    - 送信後に create に留まった場合は、規約同意チェックと blog_id 指定の再送を必ず試す
     - DBには保存しない（呼び出し元で保存）
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -668,13 +733,12 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
             await page.wait_for_load_state("networkidle", timeout=15000)
         except Exception:
             pass
-        # ★ 追加：作成ページ到達時のスクショ（共通ヘルパで保存）
+        # ★ 作成ページ到達時のスクショ
         await _save_shot(page, "ld_create_landing")
 
-        # === 追加：到達確認のダンプと中間導線の踏破 ===
+        # === 到達確認のダンプと中間導線の踏破（既存 + best-effort） ===
         try:
             logger.info("[LD-Recover] create到達: url=%s title=%s", page.url, (await page.title()))
-            # いま何が表示されているか毎回ダンプ（原因特定のため最初の1枚だけ）
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             await page.screenshot(path=f"/tmp/ld_create_landing_{ts}.png", full_page=True)
             Path(f"/tmp/ld_create_landing_{ts}.html").write_text(await page.content(), encoding="utf-8")
@@ -682,7 +746,6 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         except Exception:
             pass
 
-        # 中間画面の代表パターンを踏む（あれば押す / 無ければスキップ）
         interstitial_sels = [
             'button:has-text("同意して進む")',
             'button:has-text("同意")',
@@ -709,11 +772,11 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                         await page.wait_for_load_state("networkidle", timeout=10000)
                     except Exception:
                         pass
-                    break  # 1つ踏めれば十分
+                    break
             except Exception:
                 continue
 
-        # ★ ここを追加：メール認証未完了の早期検知
+        # メール認証未完了の早期検知
         if "need_email_auth" in page.url:
             logger.warning("[LD-Recover] email auth required before blog creation: %s", page.url)
             return {
@@ -723,7 +786,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                 "where": page.url,
             }
 
-        # 2) ブログタイトルを設定し送信（まずメイン→フォールバック）
+        # 2) ブログタイトルを設定し送信
         try:
             desired_title = _craft_blog_title(site)
         except Exception:
@@ -747,7 +810,6 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
             success = True
             logger.info("[LD-Recover] /welcome への遷移を確認")
         except Exception:
-            # フォールバック：welcome系要素の出現
             hints = [
                 'a:has-text("最初のブログを書く")',
                 'a.button:has-text("はじめての投稿")',
@@ -759,60 +821,49 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                 logger.info("[LD-Recover] welcome 導線の出現を確認（frame内）")
                 success = True
 
+        # 送信後も create に留まる場合のフォールバック（文言に依存しない）
         if not success:
-            # 同一ページに留まっている＝何らかのバリデーションで弾かれた可能性
-            html_lower = (await page.content()).lower()
-            dup_or_required = any(k in html_lower for k in [
-                "使用できません", "既に使われています", "重複", "invalid", "already",
-                "必須", "入力してください"
-            ])
+            # 現状保存＆エラーテキスト採取
+            await _save_shot(page, "ld_create_after_submit_failed")
+            await _log_inline_errors(page)
 
-            if dup_or_required:
-                # 最小限のフォールバック：この時だけ blog_id を入れて再試行（最大5通り）
+            # (A) 規約同意があればON
+            await _maybe_accept_terms(page)
+
+            # (B) blog_id 入力欄があれば候補を順に付与 → 再送
+            has_id_box = await _has_blog_id_input(page)
+            if has_id_box:
                 base = _slugify_ascii(getattr(site, "name", None) or getattr(site, "url", None) or "blog")
-                candidates = [base] + [f"{base}-{i}" for i in range(1, 6)]
-
-                # blog_id 入力欄があるかを軽く確認（自動採番UIだと存在しない場合もある）
-                has_id_box = False
-                for sel in ['#blogId', 'input[name="blog_id"]', 'input[name="livedoor_blog_id"]', 'input[name="blogId"]', 'input#livedoor_blog_id']:
+                candidates = [base] + [f"{base}-{i}" for i in range(1, 8)]
+                for cand in candidates:
                     try:
-                        if await page.locator(sel).count() > 0:
-                            has_id_box = True
-                            break
-                    except Exception:
-                        pass
-
-                if has_id_box:
-                    for cand in candidates:
-                        try:
-                            if await _try_set_desired_blog_id(page, cand):
-                                logger.info(f"[LD-Recover] blog_id 衝突/必須 → 候補で再送信: {cand}")
-                                if not await _set_title_and_submit(page, desired_title):
-                                    continue
-                                try:
-                                    await page.wait_for_url(_re.compile(r"/welcome($|[/?#])"), timeout=9000)
+                        if await _try_set_desired_blog_id(page, cand):
+                            logger.info(f"[LD-Recover] blog_id 必須/衝突の可能性 → 候補で再送信: {cand}")
+                            if not await _set_title_and_submit(page, desired_title):
+                                continue
+                            try:
+                                await page.wait_for_url(_re.compile(r"/welcome($|[/?#])"), timeout=12000)
+                                success = True
+                                logger.info(f"[LD-Recover] /welcome へ遷移（blog_id={cand}）")
+                                break
+                            except Exception:
+                                fr2, sel2 = await _find_in_any_frame(
+                                    page,
+                                    ['a:has-text("最初のブログを書く")', 'a.button:has-text("はじめての投稿")'],
+                                    timeout_ms=5000
+                                )
+                                if fr2:
                                     success = True
-                                    logger.info(f"[LD-Recover] /welcome へ遷移（blog_id={cand}）")
+                                    logger.info(f"[LD-Recover] welcome 導線検出（blog_id={cand}）")
                                     break
-                                except Exception:
-                                    hints = [
-                                        'a:has-text("最初のブログを書く")',
-                                        'a.button:has-text("はじめての投稿")',
-                                    ]
-                                    fr2, sel2 = await _find_in_any_frame(page, hints, timeout_ms=4000)
-                                    if fr2:
-                                        success = True
-                                        logger.info(f"[LD-Recover] welcome 導線検出（blog_id={cand}）")
-                                        break
-                        except Exception:
-                            continue
+                    except Exception:
+                        continue
 
         if not success:
             # ここまで来たら失敗としてダンプ
-            # ★ 追加：失敗状態の画面をまず撮っておく（原因特定に有効）
-            await _save_shot(page, "ld_create_after_submit_failed")
+            await _save_shot(page, "ld_create_still_failed")
             err_html, err_png = await _dump_error("ld_atompub_create_fail")
-            logger.error("[LD-Recover] ブログ作成に失敗（タイトルのみ or 自動採番不可）")
+            logger.error("[LD-Recover] ブログ作成に失敗（createに留まる）")
             return {
                 "success": False,
                 "error": "blog create failed",
@@ -820,7 +871,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                 "png_path": err_png
             }
 
-        # 4) （任意）welcome にある導線があれば押す。無くても次の /member に進めるので best-effort
+        # 4) （任意）welcome にある導線があれば押す
         try:
             fr, sel = await _find_in_any_frame(page, [
                 'a:has-text("最初のブログを書く")',
@@ -835,14 +886,13 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         except Exception:
             pass
 
-        # 5) /member に遷移して blog_id を抽出（リンク検出を堅牢化）
+        # 5) /member に遷移して blog_id を抽出
         await page.goto("https://livedoor.blogcms.jp/member/", wait_until="load")
         try:
             await page.wait_for_load_state("networkidle", timeout=10000)
         except Exception:
             pass
 
-        # 「ブログ設定」リンクのセレクタ候補
         blog_settings_selectors = [
             'a[title="ブログ設定"]',
             'a:has-text("ブログ設定")',
@@ -853,12 +903,10 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         link_el = None
         href = None
 
-        # メインフレーム優先
         for sel in blog_settings_selectors:
             try:
                 loc = page.locator(sel).first
                 if await loc.count() > 0:
-                    # visible まで待ってから href を取る
                     try:
                         await loc.wait_for(state="visible", timeout=8000)
                     except Exception:
@@ -870,7 +918,6 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
             except Exception:
                 continue
 
-        # 無ければ全フレーム走査
         if not href:
             fr, sel = await _find_in_any_frame(page, blog_settings_selectors, timeout_ms=12000)
             if fr:
@@ -892,17 +939,13 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                 "png_path": err_png
             }
 
-        # href 正規化（相対→絶対）
         config_url = urljoin("https://livedoor.blogcms.jp/", href)
-        # /blog/{id}/config/ から blog_id を抽出
         try:
             parts = href.split("/")
-            # 例: /blog/king123/config/ → ["", "blog", "king123", "config", ""]
             blog_id = parts[2] if len(parts) > 2 else None
         except Exception:
             blog_id = None
         if not blog_id:
-            # 念のためDOMから推測
             cur_url = page.url
             blog_id = cur_url.split("/blog/")[1].split("/")[0] if "/blog/" in cur_url else "unknown"
         logger.info(f"[LD-Recover] ブログIDを取得: {blog_id}")
@@ -914,7 +957,6 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         except Exception:
             pass
 
-        # 「API Keyの発行・確認」リンクに複数セレクタで対応
         api_nav_selectors = [
             'a.configIdxApi[title="API Keyの発行・確認"]',
             'a[title*="API Key"]',
@@ -983,7 +1025,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         await _wait_enabled_and_click(page, page.locator('button:has-text("実行")').first, timeout=6000, label_for_log="api-issue-confirm")
         logger.info("[LD-Recover] モーダルの『実行』をクリック")
 
-        # 9) 取得（valueはJSで後から入るため、非空になるまで現在値を待つ & 1回だけ再発行リトライ）
+        # 9) 取得（valueはJSで後から入るため、非空になるまで待つ & 1回だけ再発行リトライ）
         async def _read_endpoint_and_key():
             # endpoint の候補セレクタを冗長化
             endpoint_selectors = [
