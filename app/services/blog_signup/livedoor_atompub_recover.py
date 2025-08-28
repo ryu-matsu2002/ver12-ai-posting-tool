@@ -419,7 +419,7 @@ async def _try_set_desired_blog_id(page, desired: str) -> bool:
 
             # domaincheck の結果を短時間待つ（OK/NGはこの後のリトライ側で判定）
             try:
-                await page.wait_for_timeout(700)
+                await page.wait_for_timeout(1200)  # htmx domaincheck 余裕を持たせる
             except Exception:
                 pass
             return True
@@ -890,7 +890,15 @@ async def _wait_success_after_submit(page) -> tuple[bool, str | None]:
     return False, None
 
 
-async def _human_tool_captcha_flow(page, image_path: str) -> bool:
+import inspect
+
+async def _human_tool_captcha_flow(
+    page,
+    image_path: str,
+    *,
+    livedoor_id: str | None = None,
+    password: str | None = None,
+) -> bool:
     """
     サインアップ時の手動入力ツールを優先利用。
     - ld_prepare_captcha / ld_submit_captcha が使える場合はそれを使う
@@ -900,9 +908,21 @@ async def _human_tool_captcha_flow(page, image_path: str) -> bool:
     if ld_prepare_captcha and ld_submit_captcha:
         try:
             logger.info("[LD-Recover] using signup captcha tool on create-page")
-            # 多くの実装は page だけで動く想定（余分な引数は渡さない）
-            await ld_prepare_captcha(page)  # 画像保存・人間の入力待ちのトリガ
-            await ld_submit_captcha(page)   # 人間が入力した値で submit
+            # 既存実装の引数差異を吸収
+            def _callable_with(args_map, fn):
+                sig = inspect.signature(fn)
+                kwargs = {}
+                for name in sig.parameters.keys():
+                    if name in args_map and args_map[name] is not None:
+                        kwargs[name] = args_map[name]
+                return kwargs
+            args_map = {
+                "page": page,
+                "livedoor_id": livedoor_id,
+                "password": password,
+            }
+            await ld_prepare_captcha(**_callable_with(args_map, ld_prepare_captcha))
+            await ld_submit_captcha(**_callable_with(args_map, ld_submit_captcha))
             return True
         except Exception:
             logger.warning("[LD-Recover] signup captcha tool failed; fallback to FS watcher", exc_info=True)
@@ -970,13 +990,16 @@ async def _extract_public_url(page) -> str | None:
             loc = page.locator(sel).first
             if await loc.count() > 0 and await loc.is_visible():
                 href = await loc.get_attribute("href")
-                if href: return href
+                if href:
+                    # 相対URLで返るケースに備えて絶対化
+                    abs_href = await page.evaluate("href => new URL(href, location.href).href", href)
+                    return abs_href
         except Exception:
             pass
     return None
 
 
-async def recover_atompub_key(page, nickname: str, email: str, password: str, site,
+async def recover_atompub_key(page, livedoor_id: str, nickname: str, email: str, password: str, site,
                               desired_blog_id: str | None = None) -> dict:
     """
     - Livedoorブログの作成 → AtomPub APIキーを発行・取得
@@ -1103,7 +1126,12 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                     pass
 
                 # サインアップツール or FS 監視で人力回答を取得→入力・送信
-                ok_cap = await _human_tool_captcha_flow(page, cap_path or "")
+                ok_cap = await _human_tool_captcha_flow(
+                    page,
+                    cap_path or "",
+                    livedoor_id=livedoor_id,  # ← ユーザーIDを渡す（メールではない）
+                    password=password,
+                )
                 if ok_cap:
                     success, blog_id_from_url = await _wait_success_after_submit(page)
                     if success:
