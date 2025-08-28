@@ -634,8 +634,16 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
 # ─────────────────────────────────────────────
 # メイン：ブログ作成→AtomPub APIキー取得
 # ─────────────────────────────────────────────
-async def recover_atompub_key(page, nickname: str, email: str, password: str, site,
-                              desired_blog_id: str | None = None) -> dict:
+async def recover_atompub_key(
+    page,
+    nickname: str,
+    email: str,
+    password: str,
+    site,
+    desired_blog_id: str | None = None,
+    livedoor_id: str | None = None,   # ← 追加（未使用でOK）
+    **_ignored,                       # ← 予期しないキーワードも握り潰す
+) -> dict:
     """
     - Livedoorブログの作成 → AtomPub APIキーを発行・取得
     - 原則は「ブログタイトル入力 → 作成ボタン」だけを操作し、blog_id には触れない
