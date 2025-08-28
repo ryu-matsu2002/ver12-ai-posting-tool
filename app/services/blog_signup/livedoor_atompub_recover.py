@@ -15,6 +15,29 @@ logger = logging.getLogger(__name__)
 BUILD_TAG = "2025-08-25T11:07 selector_patch"
 logger.info(f"[LD-Recover] loaded build {BUILD_TAG}")
 
+async def _save_shot(page, prefix: str) -> tuple[str, str]:
+    """
+    現在ページを /tmp/{prefix}_{ts}.{png,html} で保存してパスを返す。
+    失敗時は full_page=False にフォールバック。
+    """
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    png = f"/tmp/{prefix}_{ts}.png"
+    html = f"/tmp/{prefix}_{ts}.html"
+    try:
+        await page.screenshot(path=png, full_page=True)
+    except Exception:
+        try:
+            await page.screenshot(path=png)
+        except Exception:
+            pass
+    try:
+        Path(html).write_text(await page.content(), encoding="utf-8")
+    except Exception:
+        pass
+    logger.info("[LD-Recover] dump saved: %s , %s", png, html)
+    return png, html
+
+
 # ─────────────────────────────────────────────
 # 安定インデックス・文字種判定・正規化などのユーティリティ
 # ─────────────────────────────────────────────
@@ -645,6 +668,8 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
             await page.wait_for_load_state("networkidle", timeout=15000)
         except Exception:
             pass
+        # ★ 追加：作成ページ到達時のスクショ（共通ヘルパで保存）
+        await _save_shot(page, "ld_create_landing")
 
         # === 追加：到達確認のダンプと中間導線の踏破 ===
         try:
@@ -784,6 +809,8 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
 
         if not success:
             # ここまで来たら失敗としてダンプ
+            # ★ 追加：失敗状態の画面をまず撮っておく（原因特定に有効）
+            await _save_shot(page, "ld_create_after_submit_failed")
             err_html, err_png = await _dump_error("ld_atompub_create_fail")
             logger.error("[LD-Recover] ブログ作成に失敗（タイトルのみ or 自動採番不可）")
             return {
