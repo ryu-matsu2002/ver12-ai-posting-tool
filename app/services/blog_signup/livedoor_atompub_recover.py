@@ -12,7 +12,7 @@ from app.enums import BlogType
 logger = logging.getLogger(__name__)
 
 # ビルド識別（デプロイ反映チェック用）
-BUILD_TAG = "2025-08-28 fallback_terms_blogid+resubmit"
+BUILD_TAG = "2025-08-28 fallback_terms_blogid+resubmit+navfix"
 logger.info(f"[LD-Recover] loaded build {BUILD_TAG}")
 
 async def _save_shot(page, prefix: str) -> tuple[str, str]:
@@ -408,6 +408,7 @@ async def _maybe_accept_terms(page) -> bool:
             if await loc.count() > 0:
                 try:
                     await loc.check()
+                    changed = True
                 except Exception:
                     # check() で失敗した際の直接操作フォールバック
                     try:
@@ -416,11 +417,12 @@ async def _maybe_accept_terms(page) -> bool:
                             await page.evaluate(
                                 "(el)=>{if(!el.checked){el.checked=true;} el.dispatchEvent(new Event('change',{bubbles:true}))}", handle
                             )
+                            changed = True
                     except Exception:
                         pass
-                logger.info("[LD-Recover] ✅ 規約同意チェック: %s", sel)
-                changed = True
-                break
+                if changed:
+                    logger.info("[LD-Recover] ✅ 規約同意チェック: %s", sel)
+                    break
         except Exception:
             pass
     return changed
@@ -540,7 +542,7 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
     1) まずメインフレームで厳密に待つ
     2) ダメなら全フレーム走査
     3) クリック前にスクロール＆フォーカス
-    4) クリックは多段（normal→force→evaluate）
+    4) クリックは expect_navigation を試し、失敗時は多段フォールバック
     5) どこで失敗してもログ＋スクショ
     """
     await _maybe_close_overlays(page)
@@ -665,20 +667,33 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
         except Exception:
             pass
 
-        # クリックの堅牢化
-        clicked = await _wait_enabled_and_click(page, btn, timeout=8000, label_for_log=f"create-button {btn_sel}")
-        if not clicked:
-            try:
-                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                await page.screenshot(path=f"/tmp/ld_button_click_error_{ts}.png", full_page=True)
-                logger.info("[LD-Recover] dump: /tmp/ld_button_click_error_%s.png", ts)
-            except Exception:
-                pass
-            return False
+        # まずは expect_navigation で遷移イベントを掴みにいく
+        try:
+            async with page.expect_navigation(wait_until="load", timeout=30000):
+                try:
+                    await btn.scroll_into_view_if_needed(timeout=1500)
+                except Exception:
+                    pass
+                try:
+                    await btn.focus()
+                except Exception:
+                    pass
+                await btn.click()
+            logger.info("[LD-Recover] 『ブログを作成』ボタンをクリック: %s (expect_navigation)", btn_sel)
+        except Exception:
+            # フォールバッククリック（遷移イベントを掴めない実装向け）
+            logger.info("[LD-Recover] expect_navigation を掴めず。フォールバッククリックに切替")
+            clicked = await _wait_enabled_and_click(page, btn, timeout=8000, label_for_log=f"create-button {btn_sel}")
+            if not clicked:
+                try:
+                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    await page.screenshot(path=f"/tmp/ld_button_click_error_{ts}.png", full_page=True)
+                    logger.info("[LD-Recover] dump: /tmp/ld_button_click_error_%s.png", ts)
+                except Exception:
+                    pass
+                return False
 
-        logger.info("[LD-Recover] 『ブログを作成』ボタンをクリック: %s", btn_sel)
-
-        # ナビゲーション/読み込み待ち（expect_navigation は no-op になりやすいので外す）
+        # 追加でロード待ち（遷移しないUIでも描画更新を待つ）
         try:
             await page.wait_for_load_state("load", timeout=10000)
         except Exception:
@@ -696,6 +711,8 @@ async def _set_title_and_submit(page, desired_title: str) -> bool:
             logger.info("[LD-Recover] dump: /tmp/ld_button_click_exception_%s.png", ts)
         except Exception:
             pass
+        return False
+
     return True
 
 # ─────────────────────────────────────────────
@@ -803,23 +820,35 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                 "png_path": err_png,
             }
 
-        # 3) 成功判定：/welcome への遷移 or 成功導線の出現
+        # 3) 成功判定：/welcome への遷移 or 成功導線/文言の出現
         success = False
         try:
             await page.wait_for_url(_re.compile(r"/welcome($|[/?#])"), timeout=15000)
             success = True
             logger.info("[LD-Recover] /welcome への遷移を確認")
         except Exception:
-            hints = [
-                'a:has-text("最初のブログを書く")',
-                'a.button:has-text("はじめての投稿")',
-                ':has-text("ようこそ")',
-                ':has-text("ブログが作成されました")',
-            ]
-            fr, sel = await _find_in_any_frame(page, hints, timeout_ms=6000)
-            if fr:
-                logger.info("[LD-Recover] welcome 導線の出現を確認（frame内）")
+            # 文言の出現でも成功扱い（例：『ブログの作成が完了しました！』）
+            try:
+                # 感嘆符の有無・余白差異に強くするため2パターン見る
+                await page.wait_for_selector('text=ブログの作成が完了しました', timeout=6000)
                 success = True
+                logger.info("[LD-Recover] 成功メッセージを検出")
+            except Exception:
+                try:
+                    await page.wait_for_selector('text=ブログの作成が完了しました！', timeout=3000)
+                    success = True
+                    logger.info("[LD-Recover] 成功メッセージ（！付き）を検出")
+                except Exception:
+                    hints = [
+                        'a:has-text("最初のブログを書く")',
+                        'a.button:has-text("はじめての投稿")',
+                        ':has-text("ようこそ")',
+                        ':has-text("ブログが作成されました")',
+                    ]
+                    fr, sel = await _find_in_any_frame(page, hints, timeout_ms=6000)
+                    if fr:
+                        logger.info("[LD-Recover] welcome 導線の出現を確認（frame内）")
+                        success = True
 
         # 送信後も create に留まる場合のフォールバック（文言に依存しない）
         if not success:

@@ -308,6 +308,60 @@
     .prop-card{ transition: none; }
     .tcd-caret{ transition: none; }
   }
+
+  /* ====== 追加：テーマの白い装飾を徹底的に無効化 ====== */
+/* 上位ラッパー（bg-primary / bg-primaryDark / min-h-screen）が差し込む
+   背景画像・擬似要素・マスク・影を全面オフにする */
+body.bg-primary,
+.min-h-screen.bg-primary,
+.bg-primary,
+.bg-primaryDark{
+  background-image: none !important;
+  -webkit-mask: none !important;
+  mask: none !important;
+}
+
+/* 擬似要素を完全無効化（白いピースの正体はほぼここ） */
+.bg-primary::before,
+.bg-primary::after,
+.bg-primary *::before,
+.bg-primary *::after,
+.bg-primaryDark::before,
+.bg-primaryDark::after,
+.bg-primaryDark *::before,
+.bg-primaryDark *::after,
+.min-h-screen::before,
+.min-h-screen::after{
+  content: none !important;
+  display: none !important;
+  background: none !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  -webkit-mask: none !important;
+  mask: none !important;
+  pointer-events: none !important;
+}
+
+/* まれに白い“帯”が border / shadow で注入されるテーマがあるので無効化。
+   影と白系ボーダーをこのページ内では消す */
+.min-h-screen [class*="shadow-"],
+.min-h-screen [style*="box-shadow"]{
+  box-shadow: none !important;
+}
+.min-h-screen [class*="border-white"],
+.min-h-screen [style*="border-color: rgb(255, 255, 255)"],
+.min-h-screen [style*="border-color: #fff"]{
+  border-color: transparent !important;
+}
+
+/* 我々の紫サイドバー配下は“外部からの背景注入”を全遮断 */
+.tcd-sidebar,
+.tcd-sidebar *{
+  background-image: none !important;
+  -webkit-mask: none !important;
+  mask: none !important;
+}
+
 </style>
 
 {% set ALLOW_MULTI_BLOG_USER_IDS = [1, 2, 5] %}
