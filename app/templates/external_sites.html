@@ -33,6 +33,7 @@
     overflow-y: scroll;
     margin:0;
     background: var(--tcd-lighter);
+    -webkit-tap-highlight-color: transparent;
   }
   *, *::before, *::after{ box-sizing: border-box; }
 
@@ -46,6 +47,30 @@
     margin-left: 0 !important;
     margin-right: 0 !important;
   }
+
+  /* === ここで body/.bg-primary レベルの装飾を完全無効化（白いマーク対策の決定版） === */
+  body::before, body::after,
+  .bg-primary::before, .bg-primary::after{
+    content: none !important;
+    display: none !important;
+    background: none !important;
+    background-image: none !important;
+    -webkit-mask: none !important;
+    mask: none !important;
+    mix-blend-mode: normal !important;
+    box-shadow: none !important;
+    pointer-events: none !important;
+  }
+  body, .bg-primary, .tcd-sidebar, #siteList, #siteList *{
+    background-image: none !important;
+    -webkit-mask: none !important;
+    mask: none !important;
+    text-shadow: none !important;
+    -webkit-background-clip: border-box !important;
+    background-clip: border-box !important;
+  }
+  #siteList, #siteList *{ list-style: none !important; }
+  #siteList ::marker{ content: '' !important; }
 
   .tcd-wrap{
     /* 外枠の帯を濃いマゼンタ系に */
@@ -83,9 +108,7 @@
     -webkit-mask:none !important; mask:none !important;
   }
 
-  /* ■■■ “白いマーク（擬似要素）” を徹底的に無効化 ■■■
-     テーマ/ライブラリ側で .prop-card/.site-nav-link/.prop-head/.prop-title などに
-     ::before/::after で装飾を差すケースを想定して広く潰す */
+  /* ■■■ “白いマーク（擬似要素）” を徹底的に無効化（サイドバー配下） ■■■ */
   .tcd-sidebar::before,
   .tcd-sidebar::after,
   #siteList::before,
@@ -99,6 +122,8 @@
     box-shadow: none !important;
     -webkit-mask: none !important;
     mask: none !important;
+    mix-blend-mode: normal !important;
+    pointer-events: none !important;
   }
 
   .tcd-side-title{
@@ -124,23 +149,43 @@
   .sites-scroll::-webkit-scrollbar-thumb{ background: rgba(255,255,255,.35); border-radius: 999px; }
   .sites-scroll::-webkit-scrollbar-track{ background: transparent; }
 
-  /* 左：サイトカード */
+  /* ===== 左：サイト一覧を“表風”にする外枠 ===== */
+  #siteList{
+    border: 1px solid rgba(255,255,255,.38);
+    border-radius: 12px;
+    background: rgba(255,255,255,.06);
+    padding: 6px;
+  }
+
+  /* 左：サイトカード（= 行） */
   .prop-card{
-    background: rgba(255,255,255,.12);
-    border: 1px solid rgba(255,255,255,.14);
-    border-radius: 14px;
+    position: relative;
+    background: transparent;            /* 行背景はゼブラ/ホバーで付与 */
+    border: none;                       /* 行の区切り線は隣接セレクタで付与 */
+    border-radius: 0;
     padding: 12px 14px 10px;
-    margin: 10px 4px 12px;
+    margin: 0;                          /* 行間の余白をなくす */
     transition: background .12s ease, border-color .12s ease, transform .08s ease, box-shadow .12s ease;
     cursor: pointer;
-    background-image: none !important; /* 念押し */
     overflow: hidden;
   }
-  .prop-card:hover{ transform: translateY(-1px); background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.24); }
+  /* 行の明確な区切り線（上ボーダー） */
+  #siteList .prop-card + .prop-card{
+    border-top: 1px solid rgba(255,255,255,.35);
+  }
+  /* ゼブラ（ごく薄く） */
+  #siteList .prop-card:nth-child(even){
+    background: rgba(255,255,255,.05);
+  }
+  /* ホバー行 */
+  .prop-card:hover{
+    background: rgba(255,255,255,.12);
+  }
+  /* 選択行（今どのサイトかを強調） */
   .prop-card.active{
-    background: rgba(255,255,255,.22);
-    border-color: rgba(255,255,255,.6);
-    box-shadow: 0 0 0 2px rgba(255,255,255,.75) inset;
+    background: rgba(255,255,255,.18);
+    box-shadow: inset 0 0 0 2px rgba(255,255,255,.85);
+    border-left: 3px solid #fff;
   }
 
   .prop-head{
@@ -628,8 +673,16 @@
   }
 
   /* ========== ユーティリティ ========== */
-  function escapeHtml(s){ if(s==null) return ''; return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'","&#039;"); }
-  function escapeAttr(s){ return escapeHtml(s).replaceAll('"','&quot;'); }
+  function escapeHtml(s){
+    if(s==null) return '';
+    return String(s)
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;')
+      .replace(/'/g,'&#039;');
+  }
+  function escapeAttr(s){ return escapeHtml(s).replace(/"/g,'&quot;'); }
 
   /* ========== 左：サイト切替（遅延生成対応） ========== */
   function selectSite(siteId, store=true){
@@ -853,7 +906,8 @@
     }
 
     const acc = account || {};
-    const card = document.createElement('div');
+    theCard = document.createElement('div');
+    const card = theCard; /* to avoid accidental shadowing */
     card.id = `acc-card-${acc.id}`;
     card.className = 'tcd-card p-5 flex flex-col gap-4';
 
