@@ -275,6 +275,61 @@
     .prop-card{ transition: none; }
     .tcd-caret{ transition: none; }
   }
+  /* 1) “白い欠片”の最終駆除：左リスト領域直下の全子孫の擬似要素/背景を遮断 */
+.tcd-sidebar .sites-scroll *,
+.tcd-sidebar .sites-scroll *::before,
+.tcd-sidebar .sites-scroll *::after{
+  background-image: none !important;
+  -webkit-mask: none !important;
+  mask: none !important;
+  box-shadow: none !important;
+}
+.tcd-sidebar .sites-scroll *::before,
+.tcd-sidebar .sites-scroll *::after{
+  content: none !important;
+  display: none !important;
+  pointer-events: none !important;
+}
+
+/* 2) “カードらしさ”を出す：外枠に内側余白、カードの境界をクッキリ */
+#siteList{ padding: 10px 12px !important; }
+#siteList .prop-card{
+  margin: 10px 4px !important;
+  border: 1px solid rgba(255,255,255,.35) !important;
+  background: rgba(0,0,0,.12) !important;
+  background-clip: padding-box !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,.25) !important;
+}
+#siteList .prop-card:hover{
+  background: rgba(255,255,255,.18) !important;
+  box-shadow: 0 3px 10px rgba(0,0,0,.28) !important;
+}
+#siteList .prop-card.active{
+  border-color: #fff !important;
+  box-shadow: inset 0 0 0 2px #fff, 0 6px 14px rgba(0,0,0,.3) !important;
+}
+
+/* 2') 検索ボックスの白い筋もつぶす */
+.side-search input{
+  background-image: none !important;
+}
+
+/* 3) 7:3 の固定化：Gridで強制（タブレット以上） */
+@media (min-width: 1025px){
+  .tcd-layout{
+    display: grid !important;
+    grid-template-columns: minmax(0, 7fr) minmax(0, 3fr) !important;
+    gap: 18px !important;
+    align-items: stretch !important;
+  }
+  .tcd-sidebar, .right-outer{
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    flex: unset !important;
+  }
+}
+
 </style>
 
 {% set ALLOW_MULTI_BLOG_USER_IDS = [1, 2, 5] %}
