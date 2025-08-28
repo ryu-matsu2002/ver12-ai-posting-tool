@@ -78,8 +78,15 @@
     mask: none !important;
     pointer-events: none !important;
   }
-  /* リストの marker を消す（装飾がmarker経由の場合の保険） */
   .tcd-wrap li::marker{ content: "" !important; }
+
+  /* ===== フォントの太さを全体的に細めへ調整 ===== */
+  .tcd-wrap{ font-weight: 400; }
+  .tcd-wrap .font-semibold{ font-weight: 500 !important; }
+  .tcd-wrap .font-bold{ font-weight: 600 !important; }
+  .tcd-title-lg,
+  .tcd-side-title,
+  .prop-title{ font-weight: 600 !important; } /* 見出しは読みやすい中太へ */
 
   .tcd-wrap{
     background: var(--tcd-darker);
@@ -118,7 +125,7 @@
 
   .tcd-side-title{
     padding: 14px 18px 8px;
-    font-weight: 800; letter-spacing: .02em;
+    letter-spacing: .02em;
     font-size: 1.9rem; line-height: 1.2;
   }
   .side-search{ padding: 0 14px 12px; }
@@ -151,10 +158,10 @@
   .prop-card{
     position: relative;
     background: rgba(255,255,255,.08);
-    border: 1px solid rgba(0,0,0,.25);
+    border: 1px solid rgba(255,255,255,.34); /* くっきり境界線 */
     border-radius: 12px;
     padding: 12px 14px 10px;
-    margin: 8px 0;
+    margin: 10px 0;
     transition: background .12s ease, border-color .12s ease, box-shadow .12s ease, transform .08s ease;
     cursor: pointer;
     overflow: hidden;
@@ -169,10 +176,15 @@
     box-shadow: 0 2px 6px rgba(0,0,0,.22);
   }
   .prop-card.active{
-    background: rgba(255,255,255,.18);
+    background: rgba(255,255,255,.2);
+    border-color:#fff;
     box-shadow: 0 0 0 2px #ffffff inset, 0 4px 10px rgba(0,0,0,.25);
-    border-color: #fff;
   }
+  /* 選択中を一目で：左にアクセントバー */
+  .prop-card.active::after{
+    content:""; position:absolute; inset:0 auto 0 0; width:6px; background:#ffffff;
+  }
+
   .prop-card:focus{ outline: none !important; }
   .prop-card::marker{ content: none; }
 
@@ -180,9 +192,7 @@
     display: grid; grid-template-columns: 1fr auto; align-items: center;
     column-gap: 10px; min-height: 28px;
   }
-  /* 1行固定＆省略表示 */
   .prop-title{
-    font-weight: 800;
     line-height: 1.35;
     white-space: nowrap;
     overflow: hidden;
@@ -195,19 +205,18 @@
   .pf-badge{
     display:inline-flex; align-items:center; gap:8px;
     padding: 6px 10px; border-radius: 999px;
-    font-weight: 700; font-size: .92rem; color:#fff;
+    font-size: .92rem; color:#fff;
     box-shadow: inset 0 -2px 0 rgba(0,0,0,.1);
     filter: saturate(.85);
+    font-weight: 500;
   }
-  /* ★ バッジのグラデ背景を強制復活 */
   .pf-ld{  background-image: linear-gradient(135deg,#874e9d,#6f3e84) !important; }
   .pf-note{background-image: linear-gradient(135deg,#3a3441,#5a5362) !important; }
   .pf-ame{ background-image: linear-gradient(135deg,#19824a,#2ca765) !important; color:#052413; }
-  /* ★ カウント数字の背景も強制復活 */
   .pf-count{
     background-color: rgba(0,0,0,.45) !important;
     color:#fff !important;
-    border-radius:999px; padding:1px 8px; font-weight:800; line-height:1.2;
+    border-radius:999px; padding:1px 8px; line-height:1.2; font-weight:600;
   }
   .pf-ame .pf-count{ background-color: rgba(0,0,0,.55) !important; }
 
@@ -234,7 +243,7 @@
   }
 
   .tcd-header{ padding: 18px 22px; }
-  .tcd-title-lg{ font-weight:800; font-size:1.125rem; }
+  .tcd-title-lg{ font-size:1.125rem; }
   .tcd-link-lg{ color: var(--link); text-decoration:underline; font-size:1rem; }
   .tcd-link-lg:hover{ color: var(--link-hover); }
 
@@ -248,10 +257,16 @@
   }
   .tcd-caret{ font-size:2.1rem; line-height:1; color:#f3e7f2; transition:transform .2s ease; }
 
+  /* ===== メトリクス（折り返し強化） ===== */
   .tcd-metrics{
-    color:#fef2ff; font-size:1rem; gap:1.25rem;
-    display:flex; align-items:center; white-space:nowrap;
-    overflow:hidden;
+    color:#fef2ff; font-size:1rem;
+    display:flex; align-items:flex-start; gap:1rem;
+    white-space: normal;        /* ← 文を折り返し可に */
+    flex-wrap: wrap;            /* ← 横幅が狭い時は折り返す */
+    word-break: break-word;     /* ← 途中で改行OK */
+  }
+  .tcd-metrics > div{
+    min-width: 180px;           /* 2列に並びやすい幅 */
   }
 
   .btn-lg{ padding:.55rem 1rem; font-size:1rem; border-radius:.75rem; }
@@ -265,8 +280,7 @@
   .accordion-panel{ background: transparent; }
   .site-panel{ content-visibility:auto; contain-intrinsic-size: 800px 600px; }
 
-  /* ===================== ここから“白いピース”オーバーレイ定義 ===================== */
-  /* 既存の「疑似要素全無効化」よりも後・かつ高い特異性で上書きする */
+  /* ===== アクセント・オーバーレイ（視認性向上） ===== */
   .tcd-wrap .prop-card{ position: relative; overflow: hidden; }
   .tcd-wrap .prop-card::before{
     content: "" !important;
@@ -275,39 +289,17 @@
     inset: 0 !important;
     pointer-events: none !important;
     background:
-      radial-gradient(120% 80% at -10% -10%, rgba(255,255,255,.18), transparent 60%),
-      linear-gradient(160deg, rgba(255,255,255,.08), rgba(255,255,255,.03));
+      radial-gradient(120% 80% at -10% -10%, rgba(255,255,255,.12), transparent 60%),
+      linear-gradient(160deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
     mix-blend-mode: screen;
-    opacity: .9;
+    opacity: .85;
   }
   .tcd-wrap .prop-card:hover::before{ opacity: 1; }
-  .tcd-wrap .prop-card.active::before{
-    opacity: 1;
-    box-shadow: inset 0 0 0 2px #fff4;
-  }
-
-  /* サイト間の境界線をより分かりやすく */
-  #siteList .prop-card{
-    border: 1px solid rgba(255,255,255,.38);
-    margin: 10px 0;
-  }
-  #siteList .prop-card + .prop-card{
-    box-shadow: 0 -1px 0 0 rgba(0,0,0,.18) inset;
-  }
-  #siteList .prop-card.active{
-    background: rgba(255,255,255,.22);
-    box-shadow:
-      0 2px 10px rgba(0,0,0,.28),
-      0 0 0 2px #ffffff inset;
-    transform: translateZ(0);
-  }
-  /* ===================== ここまでオーバーレイ定義 ===================== */
 
   @media (prefers-reduced-motion: reduce){
     .prop-card{ transition: none; }
     .tcd-caret{ transition: none; }
   }
-
 </style>
 
 {% set ALLOW_MULTI_BLOG_USER_IDS = [1, 2, 5] %}
@@ -387,7 +379,7 @@
                     aria-controls="tab-ld-{{ s.id }}"
                     aria-expanded="true">
               <span class="tcd-caret accordion-caret rotate-180">▾</span>
-              <span class="font-semibold">
+              <span>
                 Livedoor
                 <span class="ml-1 text-xs opacity-80">({{ tab_cnt }})</span>
               </span>
@@ -419,6 +411,7 @@
                         </div>
                       </div>
 
+                      <!-- ★ メトリクスは必ず折り返し、途切れ無し -->
                       <div class="tcd-metrics">
                         <div>投稿完了: <span class="font-semibold">{{ acc.stat_posted|default(0) }}</span></div>
                         <div>記事生成済み: <span class="font-semibold">{{ acc.stat_generated|default(0) }}</span></div>
@@ -532,7 +525,7 @@
                       aria-controls="tab-ld-{{ s.id }}"
                       aria-expanded="true">
                 <span class="tcd-caret accordion-caret rotate-180">▾</span>
-                <span class="font-semibold">
+                <span>
                   Livedoor
                   <span class="ml-1 text-xs opacity-80">({{ tab_cnt }})</span>
                 </span>
@@ -564,6 +557,7 @@
                           </div>
                         </div>
 
+                        <!-- ★ メトリクスは必ず折り返し、途切れ無し -->
                         <div class="tcd-metrics">
                           <div>投稿完了: <span class="font-semibold">{{ acc.stat_posted|default(0) }}</span></div>
                           <div>記事生成済み: <span class="font-semibold">{{ acc.stat_generated|default(0) }}</span></div>
@@ -812,7 +806,6 @@
   }
 
   function percentForStep(step, data){
-    // 数値が来ていれば最優先
     if (data && typeof data.progress === 'number') return clampPct(data.progress);
     if (data && typeof data.percent  === 'number') return clampPct(data.percent);
     if (data && typeof data.pct      === 'number') return clampPct(data.pct);
@@ -821,17 +814,14 @@
 
     if (/(ready|captcha[_\s-]*ready|image|取得|fetch)/.test(s))               return 15;
     if (/(show|表示|download|captcha[_\s-]*download)/.test(s))                return 20;
-    if (/(submit|送信|入力|entered|post|posting)/.test(s))                    return 40; // 35%で止まらない
+    if (/(submit|送信|入力|entered|post|posting)/.test(s))                    return 40;
     if (/(mail|email|送付|発行|sent)/.test(s))                                return 50;
     if (/(open|opened|閲覧)/.test(s))                                         return 55;
     if (/(verify|認証|確認|成功|success)/.test(s))                            return 70;
     if (/(register|作成|登録|done|created|完成)/.test(s))                     return 85;
     if (/(api[\s_-]*key|apikey|token|key|api|api取得完了|received)/.test(s))   return 100;
-
-    // 未知のステップは少しだけ前進
     return maxSeenPct + 5;
   }
-  /* ========================================================================= */
 
   function setCaptchaDoneUI(siteId, accountId) {
     const btn = document.querySelector(`button[data-site-id="${siteId}"][data-account-id="${accountId}"]`);
@@ -1021,7 +1011,7 @@
     .then(r => r.json())
     .then(data => {
       if (data && data.captcha_url) {
-        maxSeenPct = 0;               // 新規開始時は進捗リセット
+        maxSeenPct = 0;
         setAccProgress(15);
         document.getElementById("captchaImage").src = data.captcha_url + "?t=" + Date.now();
         document.getElementById("captchaModal").classList.remove("hidden");
@@ -1063,7 +1053,7 @@
     const btn = document.getElementById("captchaSubmitBtn");
     if (captchaSubmitLocked) return;
     captchaSubmitLocked = true;
-    setAccProgress(40); // 以前の35%を超える位置に固定
+    setAccProgress(40);
     btn.innerText = "⏳ 送信中…";
     btn.disabled = true;
     btn.setAttribute("aria-busy", "true");
@@ -1128,7 +1118,7 @@
 
   function startProgressPolling() {
     lastStatus = null;
-    maxSeenPct = 0; // 新規ポーリング開始時にリセット
+    maxSeenPct = 0;
     if (progressInterval) clearInterval(progressInterval);
 
     progressInterval = setInterval(() => {
@@ -1140,17 +1130,14 @@
         .then(data => {
           if (!data) return;
 
-          // step/percent から現在%を計算
           const pct = percentForStep(data.step, data);
           setAccProgress(pct);
 
-          // step（テキスト）が変わった時のみUI追加更新
           if (data.step && data.step !== lastStatus) {
             lastStatus = data.step;
             updateCaptchaStatusUI(data);
           }
 
-          // 完了判定（APIキー取得）
           const done = (
             (typeof data.progress === 'number' && data.progress >= 100) ||
             /api[\s_-]*key|apikey|api取得完了|received/i.test(String(data.step||''))
@@ -1169,7 +1156,7 @@
           }
         })
         .catch(err => { console.error("進捗取得エラー:", err); });
-    }, 2000); // ← 2秒間隔
+    }, 2000);
   }
 
   document.addEventListener('click', (e) => {
