@@ -28,7 +28,7 @@ except Exception:
     pwctl = None
 
 # ビルド識別（デプロイ反映チェック用）
-BUILD_TAG = "2025-08-28 create-page-captcha+human-tool+fs-fallback+welcome_url_extract+public_url+prefer_userid_sub"
+BUILD_TAG = "2025-08-29 livedoor-create-minimal(title+submit-only)"
 logger.info(f"[LD-Recover] loaded build {BUILD_TAG}")
 
 
@@ -282,54 +282,64 @@ def _japanese_base_word(site) -> str:
 
 def _craft_blog_title(site) -> str:
     """
-    仕様：
-      - 生成結果は必ず“日本語”
-      - 元サイト名やドメインに“似すぎない”
-      - かならず“ブログっぽい”語尾（～ブログ 等）を含める
+    仕様（ご指定反映）：
+      - 生成結果は日本語ベース
+      - サイト名/URLから抽出したキーワードやジャンル語を使って“ブログ風”に
+      - 「日々のブログ」にはしない（明示的に禁止）
+      - 元サイト名/ドメインに似すぎない
       - 同一サイトでは決定論的に安定
     """
     site_name = (getattr(site, "name", "") or "").strip()
     site_url = (getattr(site, "url", "") or "").strip()
     salt = f"{getattr(site, 'id', '')}-{site_name}-{site_url}"
 
-    # 1) 日本語のベース語（ジャンルラベル優先）
-    base_word = _japanese_base_word(site)
+    # まずはサイトから1語シードを取る（日本語があれば優先）
+    seed, seed_is_jp = _keyword_seed_from_site(site)
+    if not seed:
+        # ジャンル推定語（JPなら優先）
+        topic, is_jp = _guess_genre(site)
+        seed = topic if _has_cjk(topic) else "暮らし"  # デフォルトは「暮らし」
+        seed_is_jp = True
 
-    # 2) 候補群（日本語テンプレのみ）
-    cands = _templates_jp(base_word)
+    # ブログ風テンプレ（“ブログ”を含むパターン中心＋バリエーション）
+    base = seed.strip()
+    # 「日々のブログ」は禁止語として明示除外
+    banned_exact = {"日々のブログ", "ひびのブログ"}
+    candidates = [
+        f"{base}ブログ",
+        f"{base}のブログ",
+        f"{base}ブログ記録",
+        f"{base}の記録ブログ",
+        f"{base}のメモブログ",
+        f"{base}のノート",
+        f"{base}ログ",
+        f"{base}手帖",
+    ]
 
-    # 3) “似すぎ”禁止セット（強め）
-    banned_equal = {_norm(site_name)}
-    banned_equal.update(_norm(w) for w in _domain_tokens(site_url))
-
+    # 許容判定
     def acceptable(title: str) -> bool:
-        # 空/None
         if not title or not title.strip():
             return False
-        # 完全一致の禁止
-        if _norm(title) in banned_equal:
+        if title in banned_exact:
             return False
-        # 類似（包含/ドメイン語幹）の禁止
         if _too_similar_to_site(title, site):
             return False
-        # 日本語強制
+        # 日本語らしさ：少なくとも1文字はCJK
         if not _has_cjk(title):
-            return False
-        # “ブログっぽさ”担保
-        if "ブログ" not in title:
             return False
         return True
 
-    # 4) salt で開始位置を決め、順送りで最初に通ったもの
-    idx = _deterministic_index(salt, len(cands))
-    for i in range(len(cands)):
-        title = cands[(idx + i) % len(cands)]
-        if acceptable(title):
-            return title[:48]
+    # saltで開始位置を決め、順回しで最初に通ったものを採用
+    start = _deterministic_index(salt, len(candidates))
+    for i in range(len(candidates)):
+        t = candidates[(start + i) % len(candidates)]
+        if acceptable(t):
+            return t[:48]
 
-    # 5) 最終フォールバック
-    fallback = [f"{base_word}ブログ", f"{base_word}のブログ", "日々ブログ", "小さなブログ記録"]
-    return fallback[_deterministic_index(salt, len(fallback))][:48]
+    # 最終フォールバック（禁止の「日々のブログ」は含めない）
+    fallbacks = [f"{base}ブログ", f"{base}ログ", f"{base}手帖", "こつこつブログ"]
+    return fallbacks[_deterministic_index(salt, len(fallbacks))][:48]
+
 
 
 # ─────────────────────────────────────────────
@@ -626,182 +636,82 @@ async def _wait_enabled_and_click(page, locator, *, timeout=8000, label_for_log=
 # ─────────────────────────────────────────────
 async def _set_title_and_submit(page, desired_title: str) -> bool:
     """
-    タイトル欄と『ブログを作成する』を見つけて送信。
-    1) まずメインフレームで厳密に待つ
-    2) ダメなら全フレーム走査
-    3) クリック前にスクロール＆フォーカス
-    4) クリックは expect_navigation を優先し、失敗時は多段フォールバック
-    5) どこで失敗してもログ＋スクショ
+    ブログタイトル入力 → 『ブログを作成する』クリック だけ。
+    それ以外のUI操作は行わない。
     """
-    await _maybe_close_overlays(page)
-
-    title_primary = ['#blogTitle', 'input[name="title"]']
-    title_fallback = [
-        '#blogTitle', 'input#blogTitle', 'input[name="title"]',
-        'input#title', 'input[name="blogTitle"]', 'input[name="blog_title"]',
-        'input[placeholder*="ブログ"]', 'input[placeholder*="タイトル"]',
-    ]
-    create_btn_sels = [
+    title_selectors = ['#blogTitle', 'input[name="title"]']
+    button_selectors = [
         'input[type="submit"][value="ブログを作成する"]',
-        'input[type="submit"][value*="ブログを作成"]',
-        'input[type="submit"][value*="ブログ作成"]',
-        'input[type="submit"][value*="作成"]',
-        'input[type="submit"][value*="登録"]',
-        '#commit-button',
         'button[type="submit"]',
-        'button:has-text("ブログを作成")',
-        'button:has-text("ブログを開設")',
-        'button:has-text("ブログを始める")',
-        'button:has-text("作成")',
-        'button:has-text("登録")',
-        'a.button:has-text("ブログを作成")',
-        'a:has-text("ブログを作成")',
-        'a:has-text("ブログを開設")',
-        'a:has-text("ブログを始める")',
+        'input[type="submit"]',
     ]
 
-    # --- 1) メインフレームで厳密に待つ ---
-    try:
-        logger.info("[LD-Recover] タイトル設定＆送信開始（main-frame first）")
-        found = False
-        for sel in title_primary:
-            try:
-                await page.wait_for_selector(sel, state="visible", timeout=20000)
-                el = page.locator(sel).first
-                # クリア
-                try:
-                    await el.fill("")
-                except Exception:
-                    try:
-                        await el.click()
-                        await el.press("Control+A")
-                        await el.press("Delete")
-                    except Exception:
-                        pass
-                await el.fill(desired_title)
-                logger.info("[LD-Recover] ブログタイトルを設定: %s (%s)", desired_title, sel)
-                found = True
+    # タイトル入力
+    title_loc = None
+    for sel in title_selectors:
+        try:
+            await page.wait_for_selector(sel, state="visible", timeout=20000)
+            cand = page.locator(sel).first
+            if await cand.count() > 0:
+                title_loc = cand
                 break
-            except Exception:
-                continue
+        except Exception:
+            continue
+    if not title_loc:
+        logger.warning("[LD-Recover] タイトル入力欄が見つかりません")
+        return False
 
-        if not found:
-            # --- 2) 全フレーム走査 ---
-            fr, sel = await _find_in_any_frame(page, title_fallback, timeout_ms=20000)
-            if not fr:
-                logger.warning("[LD-Recover] タイトル入力欄が見つからない（DOM/iframe変更の可能性）")
-                try:
-                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    await page.screenshot(path=f"/tmp/ld_title_not_found_{ts}.png", full_page=True)
-                    logger.info("[LD-Recover] dump: /tmp/ld_title_not_found_%s.png", ts)
-                except Exception:
-                    pass
-                return False
-
-            el = fr.locator(sel).first
+    try:
+        try:
+            await title_loc.fill("")
+        except Exception:
             try:
-                await el.fill("")
+                await title_loc.click()
+                await title_loc.press("Control+A")
+                await title_loc.press("Delete")
             except Exception:
-                try:
-                    await el.click()
-                    await el.press("Control+A")
-                    await el.press("Delete")
-                except Exception:
-                    pass
-            await el.fill(desired_title)
-            logger.info("[LD-Recover] ブログタイトルを設定(frame): %s (%s)", desired_title, sel)
-
+                pass
+        await title_loc.fill(desired_title)
+        logger.info("[LD-Recover] ブログタイトルを設定: %s", desired_title)
     except Exception:
         logger.warning("[LD-Recover] タイトル入力に失敗", exc_info=True)
-        try:
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            await page.screenshot(path=f"/tmp/ld_title_fill_error_{ts}.png", full_page=True)
-            logger.info("[LD-Recover] dump: /tmp/ld_title_fill_error_%s.png", ts)
-        except Exception:
-            pass
         return False
 
-    # --- 3) 作成ボタンを探してクリック ---
+    # 作成ボタン
+    btn = None
+    for sel in button_selectors:
+        try:
+            cand = page.locator(sel).first
+            if await cand.count() > 0:
+                btn = cand
+                break
+        except Exception:
+            continue
+    if not btn:
+        logger.warning("[LD-Recover] 『ブログを作成する』ボタンが見つかりません")
+        return False
+
+    # クリック（遷移が発生しないUIでも1回だけ押す）
     try:
-        # まずメインフレーム
-        btn = None
-        btn_sel = None
-        for sel in create_btn_sels:
-            loc = page.locator(sel).first
-            try:
-                if await loc.count() > 0:
-                    btn = loc
-                    btn_sel = sel
-                    break
-            except Exception:
-                continue
-        if btn is None:
-            # 全フレーム
-            fr_btn, btn_sel = await _find_in_any_frame(page, create_btn_sels, timeout_ms=10000)
-            if not fr_btn:
-                logger.warning("[LD-Recover] 作成ボタンが見つからない（UI変更の可能性）")
-                try:
-                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    await page.screenshot(path=f"/tmp/ld_button_not_found_{ts}.png", full_page=True)
-                    logger.info("[LD-Recover] dump: /tmp/ld_button_not_found_%s.png", ts)
-                except Exception:
-                    pass
-                return False
-            btn = fr_btn.locator(btn_sel).first
-
-        # ★クリック直前の証跡
-        try:
-            await _save_shot(page, "ld_create_before_submit")
-        except Exception:
-            pass
-
-        # まずは expect_navigation で遷移イベントを掴む
-        try:
-            async with page.expect_navigation(wait_until="load", timeout=30000):
-                try:
-                    await btn.scroll_into_view_if_needed(timeout=1500)
-                except Exception:
-                    pass
-                try:
-                    await btn.focus()
-                except Exception:
-                    pass
-                await btn.click()
-            logger.info("[LD-Recover] 『ブログを作成』ボタンをクリック: %s (expect_navigation)", btn_sel)
-        except Exception:
-            # フォールバッククリック
-            logger.info("[LD-Recover] expect_navigation を掴めず。フォールバッククリックに切替")
-            clicked = await _wait_enabled_and_click(page, btn, timeout=8000, label_for_log=f"create-button {btn_sel}")
-            if not clicked:
-                try:
-                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    await page.screenshot(path=f"/tmp/ld_button_click_error_{ts}.png", full_page=True)
-                    logger.info("[LD-Recover] dump: /tmp/ld_button_click_error_%s.png", ts)
-                except Exception:
-                    pass
-                return False
-
-        # 追加でロード待ち（遷移しないUIでも描画更新を待つ）
-        try:
-            await page.wait_for_load_state("load", timeout=10000)
-        except Exception:
-            pass
-        try:
-            await page.wait_for_load_state("networkidle", timeout=10000)
-        except Exception:
-            pass
-
+        async with page.expect_navigation(wait_until="load", timeout=15000):
+            await btn.click()
+        logger.info("[LD-Recover] 『ブログを作成する』をクリック")
     except Exception:
-        logger.warning("[LD-Recover] 作成ボタンクリック処理で例外", exc_info=True)
+        # 遷移イベントが取れなくても、1回だけフォールバッククリック
         try:
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            await page.screenshot(path=f"/tmp/ld_button_click_exception_{ts}.png", full_page=True)
-            logger.info("[LD-Recover] dump: /tmp/ld_button_click_exception_%s.png", ts)
+            await btn.click(timeout=5000)
+            logger.info("[LD-Recover] 『ブログを作成する』をクリック（fallback）")
         except Exception:
-            pass
-        return False
+            logger.warning("[LD-Recover] 作成ボタンクリックに失敗", exc_info=True)
+            return False
 
+    # 追加の安定待ち（軽く）
+    try:
+        await page.wait_for_load_state("networkidle", timeout=8000)
+    except Exception:
+        pass
     return True
+
 
 
 # ─────────────────────────────────────────────
@@ -1001,17 +911,9 @@ async def _extract_public_url(page) -> str | None:
 
 async def recover_atompub_key(page, livedoor_id: str | None, nickname: str, email: str, password: str, site,
                               desired_blog_id: str | None = None) -> dict:
-    """
-    - Livedoorブログの作成 → AtomPub APIキーを発行・取得
-    - CAPTCHA が無ければ通常送信で進む
-    - CAPTCHA が出た場合は、サインアップ時同様の「ツールで手動入力」フローに切替（なければFSフォールバック）
-    - 送信後に create に留まった場合は、規約同意チェックと blog_id 指定の再送も試す
-    - DBには保存しない（呼び出し元で保存）
-    """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     logger.info("[LD-Recover] args: livedoor_id=%s desired_blog_id=%s email=%s", livedoor_id, desired_blog_id, email)
 
-    # 失敗時保存用ヘルパ
     async def _dump_error(prefix: str):
         html = await page.content()
         error_html = f"/tmp/{prefix}_{timestamp}.html"
@@ -1032,209 +934,43 @@ async def recover_atompub_key(page, livedoor_id: str | None, nickname: str, emai
         except Exception:
             pass
         await _save_shot(page, "ld_create_landing")
+        logger.info("[LD-Recover] create到達: url=%s title=%s", page.url, (await page.title()))
 
-        # 中間導線の踏破（同意・開始ボタンなど）
-        try:
-            logger.info("[LD-Recover] create到達: url=%s title=%s", page.url, (await page.title()))
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            await page.screenshot(path=f"/tmp/ld_create_landing_{ts}.png", full_page=True)
-            Path(f"/tmp/ld_create_landing_{ts}.html").write_text(await page.content(), encoding="utf-8")
-            logger.info("[LD-Recover] dump: /tmp/ld_create_landing_%s.png /tmp/ld_create_landing_%s.html", ts, ts)
-        except Exception:
-            pass
-
-        interstitial_sels = [
-            'button:has-text("同意して進む")',
-            'button:has-text("同意")',
-            'button:has-text("許可")',
-            'a:has-text("無料でブログを始める")',
-            'a:has-text("ブログの作成を開始")',
-            'a:has-text("新しくブログを作成")',
-            'a:has-text("ブログを始める")',
-            'button:has-text("ブログの作成")',
-            'a.button:has-text("ブログを作成")',
-        ]
-        for sel in interstitial_sels:
-            try:
-                loc = page.locator(sel).first
-                if await loc.count() > 0 and await loc.is_visible():
-                    logger.info("[LD-Recover] 中間導線をクリック: %s", sel)
-                    await _wait_enabled_and_click(page, loc, timeout=7000, label_for_log=f"interstitial {sel}")
-                    try:
-                        await page.wait_for_load_state("load", timeout=8000)
-                    except Exception:
-                        pass
-                    try:
-                        await page.wait_for_load_state("networkidle", timeout=10000)
-                    except Exception:
-                        pass
-                    break
-            except Exception:
-                continue
-
-        # メール認証未完了の早期検知
-        if "need_email_auth" in page.url:
-            logger.warning("[LD-Recover] email auth required before blog creation: %s", page.url)
-            return {
-                "success": False,
-                "error": "email_auth_required",
-                "need_email_auth": True,
-                "where": page.url,
-            }
-
-        # 3) ブログタイトルを設定し送信
+        # 2) タイトル生成 → 送信（それ以外は何もしない）
         try:
             desired_title = _craft_blog_title(site)
         except Exception:
-            desired_title = "日々ブログ"
+            desired_title = "こつこつブログ"  # 「日々のブログ」は使わない安全フォールバック
 
-        logger.info("[LD-Recover] タイトル設定＆送信開始")
         ok_submit = await _set_title_and_submit(page, desired_title)
         if not ok_submit:
             err_html, err_png = await _dump_error("ld_create_ui_notfound")
-            return {
-                "success": False,
-                "error": "ブログ作成UIが見つからない/クリック不可（DOM/iframe変更の可能性）",
-                "html_path": err_html,
-                "png_path": err_png,
-            }
+            return {"success": False, "error": "タイトル/送信UIが見つからない", "html_path": err_html, "png_path": err_png}
 
-        # 4) 一発成功判定
+        # 3) 成功判定
         success, blog_id_from_url = await _wait_success_after_submit(page)
-
-        # 5) まだ create に留まる → まず CAPTCHA を最優先で処理
         if not success:
-            await _save_shot(page, "ld_create_after_submit_failed")
+            await _save_shot(page, "ld_create_after_submit_failed_minimal")
             await _log_inline_errors(page)
-
-            # CAPTCHA 検出
-            is_cap, cap_path = await _detect_create_captcha(page)
-            if is_cap:
-                # 画像更新ボタンがあれば一度更新（読みやすくするため・任意）
-                # CAPTCHA 検出後の「画像更新」
-                try:
-                    await page.locator('#captchaImageA, a:has-text("画像を更新"), button:has-text("画像を更新")').first.click(timeout=1000)
-                    await asyncio.sleep(0.8)
-                    is_cap, cap_path = await _detect_create_captcha(page)
-                except Exception:
-                    pass
-
-                # サインアップツール or FS 監視で人力回答を取得→入力・送信
-                # livedoor_id が未指定なら URL サブドメインと同一の desired_blog_id を採用
-                lid = livedoor_id or desired_blog_id
-                ok_cap = await _human_tool_captcha_flow(
-                    page,
-                    cap_path or "",
-                    livedoor_id=lid,  # ← ユーザーIDを渡す（メールではない）
-                    password=password,
-                )
-                if ok_cap:
-                    success, blog_id_from_url = await _wait_success_after_submit(page)
-                    if success:
-                        logger.info("[LD-Recover] /welcome へ遷移（captcha solved）")
-                else:
-                    logger.warning("[LD-Recover] CAPTCHA 処理に失敗（人力回答未取得 or 入力不可）")
-
-        # 6) それでもダメなら：規約同意→再送、blog_id 候補→再送
-        if not success:
-            terms_changed = await _maybe_accept_terms(page)
-
-            # 規約同意を付けた場合は、一度は再送
-            if terms_changed and not success:
-                if await _set_title_and_submit(page, desired_title):
-                    success, blog_id_from_url = await _wait_success_after_submit(page)
-                    if success:
-                        logger.info("[LD-Recover] /welcome へ遷移（terms accepted）")
-
-            # blog_id 入力欄があれば候補で再送（ユーザーIDが空の場合のみ自動候補へ）
-            if not success:
-                has_id_box = await _has_blog_id_input(page)
-                if has_id_box:
-                    # ★ 追加：A/Bで「独自ドメイン」が既定のことがあるため、まず独自以外へ切替
-                    try:
-                        if await page.locator('#base').count() > 0:
-                            await page.evaluate("""
-                                () => {
-                                  const sel = document.querySelector('#base');
-                                  if (!sel) return false;
-                                  for (const opt of Array.from(sel.options)) {
-                                    const t = (opt.label || opt.textContent || '').trim();
-                                    if (!/独自/.test(t) && opt.value) {
-                                      sel.value = opt.value;
-                                      sel.dispatchEvent(new Event('change', {bubbles:true}));
-                                      return true;
-                                    }
-                                  }
-                                  return false;
-                                }
-                            """)
-                    except Exception:
-                        pass
-
-                    if desired_blog_id:
-                        candidates = [desired_blog_id]
-                    else:
-                        base = _slugify_ascii(getattr(site, "name", None) or getattr(site, "url", None) or "blog")
-                        candidates = [base] + [f"{base}-{i}" for i in range(1, 8)]
-                    for cand in candidates:
-                        try:
-                            if await _try_set_desired_blog_id(page, cand):
-                                logger.info(f"[LD-Recover] blog_id 必須/衝突の可能性 → 候補で再送信: {cand}")
-                                if not await _set_title_and_submit(page, desired_title):
-                                    continue
-                                success, blog_id_from_url = await _wait_success_after_submit(page)
-                                if success:
-                                    logger.info(f"[LD-Recover] /welcome へ遷移（blog_id={cand}）")
-                                    break
-                        except Exception:
-                            continue
-
-        if not success:
-            # ここまで来たら失敗としてダンプ
-            await _save_shot(page, "ld_create_still_failed")
-            err_html, err_png = await _dump_error("ld_atompub_create_fail")
+            err_html, err_png = await _dump_error("ld_atompub_create_fail_minimal")
             logger.error("[LD-Recover] ブログ作成に失敗（createに留まる）")
-            return {
-                "success": False,
-                "error": "blog create failed",
-                "html_path": err_html,
-                "png_path": err_png
-            }
+            return {"success": False, "error": "blog create failed", "html_path": err_html, "png_path": err_png}
 
-        # 7) （任意）welcome にある導線があれば押す
-        try:
-            fr, sel = await _find_in_any_frame(page, [
-                'a:has-text("最初のブログを書く")',
-                'a.button:has-text("はじめての投稿")',
-            ], timeout_ms=2500)
-            if fr and sel:
-                try:
-                    await _wait_enabled_and_click(fr, fr.locator(sel).first, timeout=3000, label_for_log="welcome-next")
-                    logger.info("[LD-Recover] 『最初のブログを書く』をクリック（任意）")
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        # 8) blog_id 決定：まずは URL から、無ければ /member で探す
+        # （以下は従来どおり：blog_id抽出→設定→APIキー取得）
         blog_id = blog_id_from_url
-        if blog_id:
-            logger.info(f"[LD-Recover] ブログID（URL由来）: {blog_id}")
-        else:
-            # /member に遷移して抽出（従来ルート）
+        if not blog_id:
             await page.goto("https://livedoor.blogcms.jp/member/", wait_until="load")
             try:
                 await page.wait_for_load_state("networkidle", timeout=10000)
             except Exception:
                 pass
-
+            # blog_idをメニューから推定
             blog_settings_selectors = [
                 'a[title="ブログ設定"]',
                 'a:has-text("ブログ設定")',
                 'a[href^="/blog/"][href$="/config/"]',
                 'a[href*="/config/"]'
             ]
-
             href = None
             for sel in blog_settings_selectors:
                 try:
@@ -1244,43 +980,23 @@ async def recover_atompub_key(page, livedoor_id: str | None, nickname: str, emai
                             await loc.wait_for(state="visible", timeout=8000)
                         except Exception:
                             pass
-                        href = await loc.get_attribute("href")
-                        if href:
-                            break
+                        href = await loc.get_attribute("href"); 
+                        if href: break
                 except Exception:
                     continue
-
-            if not href:
-                fr, sel = await _find_in_any_frame(page, blog_settings_selectors, timeout_ms=12000)
-                if fr:
-                    loc = fr.locator(sel).first
-                    try:
-                        await loc.wait_for(state="visible", timeout=6000)
-                    except Exception:
-                        pass
-                    href = await loc.get_attribute("href")
-
             if href:
                 try:
                     parts = href.split("/")
                     blog_id = parts[2] if len(parts) > 2 else None
                 except Exception:
                     blog_id = None
-
-            if not blog_id:
-                cur_url = page.url
-                blog_id = cur_url.split("/blog/")[1].split("/")[0] if "/blog/" in cur_url else None
-
+            if not blog_id and "/blog/" in page.url:
+                blog_id = page.url.split("/blog/")[1].split("/")[0]
             if not blog_id:
                 err_html, err_png = await _dump_error("ld_atompub_member_fail")
-                return {
-                    "success": False,
-                    "error": "member page missing blog link",
-                    "html_path": err_html,
-                    "png_path": err_png
-                }
+                return {"success": False, "error": "member page missing blog link", "html_path": err_html, "png_path": err_png}
 
-        # 9) 設定ページ → AtomPub 発行ページへ（blog_id を直接使って遷移）
+        # 設定→APIキー
         config_url = f"https://livedoor.blogcms.jp/blog/{blog_id}/config/"
         await page.goto(config_url, wait_until="load")
         try:
@@ -1301,146 +1017,89 @@ async def recover_atompub_key(page, livedoor_id: str | None, nickname: str, emai
             try:
                 loc = page.locator(sel).first
                 if await loc.count() > 0:
-                    api_link = loc
-                    break
+                    api_link = loc; break
             except Exception:
                 continue
-        if api_link is None:
+        if not api_link:
             fr, sel = await _find_in_any_frame(page, api_nav_selectors, timeout_ms=8000)
-            if fr:
-                api_link = fr.locator(sel).first
-
-        if api_link is None:
+            if fr: api_link = fr.locator(sel).first
+        if not api_link:
             err_html, err_png = await _dump_error("ld_atompub_nav_fail")
-            logger.error("[LD-Recover] AtomPub設定ページへのリンクが見つからない")
-            return {
-                "success": False,
-                "error": "api nav link not found",
-                "html_path": err_html,
-                "png_path": err_png
-            }
+            return {"success": False, "error": "api nav link not found", "html_path": err_html, "png_path": err_png}
 
         await _wait_enabled_and_click(page, api_link, timeout=8000, label_for_log="api-nav")
         try:
             await page.wait_for_load_state("load", timeout=10000)
         except Exception:
             pass
-
-        logger.info(f"[LD-Recover] AtomPub設定ページに遷移: {page.url}")
-
         if "member" in page.url:
             err_html, err_png = await _dump_error("ld_atompub_redirect_fail")
-            logger.error(f"[LD-Recover] AtomPubページが開けず /member にリダイレクト: {page.url}")
-            return {
-                "success": False,
-                "error": "redirected to member",
-                "html_path": err_html,
-                "png_path": err_png
-            }
+            return {"success": False, "error": "redirected to member", "html_path": err_html, "png_path": err_png}
 
-        # 10) スクショ
         success_png = f"/tmp/ld_atompub_page_{timestamp}.png"
         try:
             await page.screenshot(path=success_png, full_page=True)
         except Exception:
-            try:
-                await page.screenshot(path=success_png)
-            except Exception:
-                pass
-        logger.info(f"[LD-Recover] AtomPubページのスクリーンショット保存: {success_png}")
+            try: await page.screenshot(path=success_png)
+            except Exception: pass
 
-        # 11) APIキー発行
+        # 発行
         await page.wait_for_selector('input#apiKeyIssue', timeout=12000)
         await _wait_enabled_and_click(page, page.locator('input#apiKeyIssue').first, timeout=6000, label_for_log="api-issue")
-        logger.info("[LD-Recover] 『発行する』をクリック")
-
         await page.wait_for_selector('button:has-text("実行")', timeout=12000)
         await _wait_enabled_and_click(page, page.locator('button:has-text("実行")').first, timeout=6000, label_for_log="api-issue-confirm")
-        logger.info("[LD-Recover] モーダルの『実行』をクリック")
 
-        # 12) 取得（valueはJSで後から入るため、非空になるまで待つ & 1回だけ再発行リトライ）
         async def _read_endpoint_and_key():
-            endpoint_selectors = [
-                'input.input-xxlarge[readonly]',
-                'input[readonly][name*="endpoint"]',
-                'input[readonly][id*="endpoint"]',
-            ]
             endpoint_val = ""
-            for sel in endpoint_selectors:
+            for sel in ['input.input-xxlarge[readonly]','input[readonly][name*="endpoint"]','input[readonly][id*="endpoint"]']:
                 try:
                     await page.wait_for_selector(sel, timeout=8000)
                     endpoint_val = await page.locator(sel).first.input_value()
-                    if endpoint_val:
-                        break
+                    if endpoint_val: break
                 except Exception:
                     continue
-
             await page.wait_for_selector('input#apiKey', timeout=15000)
-            for _ in range(30):  # 30 * 0.5s = 15s
+            for _ in range(30):
                 key_val = (await page.locator('input#apiKey').input_value()).strip()
-                if key_val:
-                    return endpoint_val, key_val
+                if key_val: return endpoint_val, key_val
                 await asyncio.sleep(0.5)
             return endpoint_val, ""
 
         endpoint, api_key = await _read_endpoint_and_key()
-
         if not api_key:
-            logger.warning("[LD-Recover] API Keyが空。ページを再読み込みして再発行をリトライ")
             await page.reload(wait_until="load")
-            try:
-                await page.wait_for_load_state("networkidle", timeout=8000)
-            except Exception:
-                pass
+            try: await page.wait_for_load_state("networkidle", timeout=8000)
+            except Exception: pass
             await page.wait_for_selector('input#apiKeyIssue', timeout=15000)
             await _wait_enabled_and_click(page, page.locator('input#apiKeyIssue').first, timeout=6000, label_for_log="api-issue-retry")
             await page.wait_for_selector('button:has-text("実行")', timeout=15000)
             await _wait_enabled_and_click(page, page.locator('button:has-text("実行")').first, timeout=6000, label_for_log="api-issue-confirm-retry")
             endpoint, api_key = await _read_endpoint_and_key()
-
         if not api_key:
             err_html, err_png = await _dump_error("ld_atompub_no_key")
-            logger.error(f"[LD-Recover] API Keyが取得できませんでした。証跡: {err_html}, {err_png}")
-            return {
-                "success": False,
-                "error": "api key empty",
-                "html_path": err_html,
-                "png_path": err_png
-            }
+            return {"success": False, "error": "api key empty", "html_path": err_html, "png_path": err_png}
 
-        logger.info(f"[LD-Recover] ✅ AtomPub endpoint: {endpoint}")
-        logger.info(f"[LD-Recover] ✅ AtomPub key: {api_key[:8]}...")
-
-        # 13) 公開URL抽出（推測せずリンクから）
         public_url = await _extract_public_url(page)
         if not public_url:
-            # AtomPubページに無い場合は config 直下へ戻って再探索
             try:
                 await page.goto(f"https://livedoor.blogcms.jp/blog/{blog_id}/config/", wait_until="load")
-                try:
-                    await page.wait_for_load_state("networkidle", timeout=6000)
-                except Exception:
-                    pass
+                try: await page.wait_for_load_state("networkidle", timeout=6000)
+                except Exception: pass
                 public_url = await _extract_public_url(page)
             except Exception:
                 pass
 
-        # 14) 返却（DB保存は呼び出し元が担当）
         return {
             "success": True,
             "blog_id": blog_id,
             "api_key": api_key,
             "endpoint": endpoint,
-            "blog_title": desired_title,  # 任意
-            "public_url": public_url      # ← 追加：実際の公開URL
+            "blog_title": desired_title,
+            "public_url": public_url
         }
 
     except Exception as e:
         err_html, err_png = await _dump_error("ld_atompub_fail")
         logger.error("[LD-Recover] AtomPub処理エラー", exc_info=True)
-        return {
-            "success": False,
-            "error": str(e),
-            "html_path": err_html,
-            "png_path": err_png
-        }
+        return {"success": False, "error": str(e), "html_path": err_html, "png_path": err_png}
+
