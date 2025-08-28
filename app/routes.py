@@ -4459,6 +4459,39 @@ def submit_captcha():
         if not user_id:
             current_app.logger.error("[submit_captcha] livedoor user_id is missing")
             return jsonify({"ok": False, "error": "missing_user_id"}), 400
+        
+        # --- ここでフォーム値を集める（名称の揺れを吸収） ---
+        nickname = (
+            request.form.get("nickname")
+            or request.form.get("display_name")
+            or request.form.get("name")
+        )
+        email = (
+            request.form.get("email")
+            or request.form.get("livedoor_email")
+            or request.form.get("mail")
+        )
+        password = (
+            request.form.get("password")
+            or request.form.get("livedoor_password")
+            or request.form.get("pass")
+        )
+        # URLサブドメイン=ユーザーIDの希望値。無ければ user_id を使う
+        desired_blog_id = (
+            request.form.get("desired_blog_id")
+            or request.form.get("blog_id")
+            or request.form.get("sub")
+            or request.form.get("livedoor_id")
+            or request.form.get("user_id")
+            or user_id
+        )
+
+        # 最低限のバリデーション（必要に応じて 400 を返す）
+        if not email or not password:
+            current_app.logger.error("[submit_captcha] email/password missing")
+            return jsonify({"ok": False, "error": "missing_email_or_password"}), 400
+        if not nickname:
+            nickname = email.split("@")[0]  # フォールバック
 
         result = pwctl.run(recover_atompub_key(
             page,
