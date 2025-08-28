@@ -28,7 +28,7 @@ except Exception:
     pwctl = None
 
 # ビルド識別（デプロイ反映チェック用）
-BUILD_TAG = "2025-08-28 create-page-captcha+human-tool+fs-fallback+welcome_url_extract"
+BUILD_TAG = "2025-08-28 create-page-captcha+human-tool+fs-fallback+welcome_url_extract+public_url+prefer_userid_sub"
 logger.info(f"[LD-Recover] loaded build {BUILD_TAG}")
 
 
@@ -957,6 +957,24 @@ def _extract_blog_id_from_url(url: str) -> str | None:
     except Exception:
         return None
 
+async def _extract_public_url(page) -> str | None:
+    # 設定/ウェルカムにある「ブログを見る」リンクを探す
+    sels = [
+        'a:has-text("ブログを見る")',
+        'a[target="_blank"][href*="livedoor.blog"]',
+        'a[href^="https://blog.livedoor.com/"]',
+        'a[href^="https://blog.livedoor.jp/"]',
+    ]
+    for sel in sels:
+        try:
+            loc = page.locator(sel).first
+            if await loc.count() > 0 and await loc.is_visible():
+                href = await loc.get_attribute("href")
+                if href: return href
+        except Exception:
+            pass
+    return None
+
 
 async def recover_atompub_key(page, nickname: str, email: str, password: str, site,
                               desired_blog_id: str | None = None) -> dict:
@@ -1039,8 +1057,15 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                 "need_email_auth": True,
                 "where": page.url,
             }
+        # 2) 公開URLのサブドメイン（#sub）を「ユーザーID（desired_blog_id）」で先に指定
+        #    ※ これを『最初の送信前』にやるのがポイント
+        try:
+            if await _has_blog_id_input(page) and desired_blog_id:
+                await _try_set_desired_blog_id(page, desired_blog_id)
+        except Exception:
+            pass
 
-        # 2) ブログタイトルを設定し送信
+        # 3) ブログタイトルを設定し送信
         try:
             desired_title = _craft_blog_title(site)
         except Exception:
@@ -1057,10 +1082,10 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                 "png_path": err_png,
             }
 
-        # 3) 一発成功判定
+        # 4) 一発成功判定
         success, blog_id_from_url = await _wait_success_after_submit(page)
 
-        # 4) まだ create に留まる → まず CAPTCHA を最優先で処理
+        # 5) まだ create に留まる → まず CAPTCHA を最優先で処理
         if not success:
             await _save_shot(page, "ld_create_after_submit_failed")
             await _log_inline_errors(page)
@@ -1086,7 +1111,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                 else:
                     logger.warning("[LD-Recover] CAPTCHA 処理に失敗（人力回答未取得 or 入力不可）")
 
-        # 5) それでもダメなら：規約同意→再送、blog_id 候補→再送
+        # 6) それでもダメなら：規約同意→再送、blog_id 候補→再送
         if not success:
             terms_changed = await _maybe_accept_terms(page)
 
@@ -1097,12 +1122,15 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                     if success:
                         logger.info("[LD-Recover] /welcome へ遷移（terms accepted）")
 
-            # blog_id 入力欄があれば候補で再送
+            # blog_id 入力欄があれば候補で再送（ユーザーIDが空の場合のみ自動候補へ）
             if not success:
                 has_id_box = await _has_blog_id_input(page)
                 if has_id_box:
-                    base = _slugify_ascii(getattr(site, "name", None) or getattr(site, "url", None) or "blog")
-                    candidates = [base] + [f"{base}-{i}" for i in range(1, 8)]
+                    if desired_blog_id:
+                        candidates = [desired_blog_id]
+                    else:
+                        base = _slugify_ascii(getattr(site, "name", None) or getattr(site, "url", None) or "blog")
+                        candidates = [base] + [f"{base}-{i}" for i in range(1, 8)]
                     for cand in candidates:
                         try:
                             if await _try_set_desired_blog_id(page, cand):
@@ -1128,7 +1156,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                 "png_path": err_png
             }
 
-        # 6) （任意）welcome にある導線があれば押す
+        # 7) （任意）welcome にある導線があれば押す
         try:
             fr, sel = await _find_in_any_frame(page, [
                 'a:has-text("最初のブログを書く")',
@@ -1143,7 +1171,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         except Exception:
             pass
 
-        # 7) blog_id 決定：まずは URL から、無ければ /member で探す
+        # 8) blog_id 決定：まずは URL から、無ければ /member で探す
         blog_id = blog_id_from_url
         if blog_id:
             logger.info(f"[LD-Recover] ブログID（URL由来）: {blog_id}")
@@ -1207,7 +1235,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                     "png_path": err_png
                 }
 
-        # 8) 設定ページ → AtomPub 発行ページへ（blog_id を直接使って遷移）
+        # 9) 設定ページ → AtomPub 発行ページへ（blog_id を直接使って遷移）
         config_url = f"https://livedoor.blogcms.jp/blog/{blog_id}/config/"
         await page.goto(config_url, wait_until="load")
         try:
@@ -1265,7 +1293,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                 "png_path": err_png
             }
 
-        # 9) スクショ
+        # 10) スクショ
         success_png = f"/tmp/ld_atompub_page_{timestamp}.png"
         try:
             await page.screenshot(path=success_png, full_page=True)
@@ -1276,7 +1304,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
                 pass
         logger.info(f"[LD-Recover] AtomPubページのスクリーンショット保存: {success_png}")
 
-        # 10) APIキー発行
+        # 11) APIキー発行
         await page.wait_for_selector('input#apiKeyIssue', timeout=12000)
         await _wait_enabled_and_click(page, page.locator('input#apiKeyIssue').first, timeout=6000, label_for_log="api-issue")
         logger.info("[LD-Recover] 『発行する』をクリック")
@@ -1285,7 +1313,7 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         await _wait_enabled_and_click(page, page.locator('button:has-text("実行")').first, timeout=6000, label_for_log="api-issue-confirm")
         logger.info("[LD-Recover] モーダルの『実行』をクリック")
 
-        # 11) 取得（valueはJSで後から入るため、非空になるまで待つ & 1回だけ再発行リトライ）
+        # 12) 取得（valueはJSで後から入るため、非空になるまで待つ & 1回だけ再発行リトライ）
         async def _read_endpoint_and_key():
             endpoint_selectors = [
                 'input.input-xxlarge[readonly]',
@@ -1338,13 +1366,28 @@ async def recover_atompub_key(page, nickname: str, email: str, password: str, si
         logger.info(f"[LD-Recover] ✅ AtomPub endpoint: {endpoint}")
         logger.info(f"[LD-Recover] ✅ AtomPub key: {api_key[:8]}...")
 
-        # 12) 返却（DB保存は呼び出し元が担当）
+        # 13) 公開URL抽出（推測せずリンクから）
+        public_url = await _extract_public_url(page)
+        if not public_url:
+            # AtomPubページに無い場合は config 直下へ戻って再探索
+            try:
+                await page.goto(f"https://livedoor.blogcms.jp/blog/{blog_id}/config/", wait_until="load")
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=6000)
+                except Exception:
+                    pass
+                public_url = await _extract_public_url(page)
+            except Exception:
+                pass
+
+        # 14) 返却（DB保存は呼び出し元が担当）
         return {
             "success": True,
             "blog_id": blog_id,
             "api_key": api_key,
             "endpoint": endpoint,
-            "blog_title": desired_title  # 任意
+            "blog_title": desired_title,  # 任意
+            "public_url": public_url      # ← 追加：実際の公開URL
         }
 
     except Exception as e:
