@@ -1050,7 +1050,7 @@ def delete_stuck_articles():
     return redirect(url_for("admin.admin_dashboard"))
 
 
-from flask import render_template, request, redirect, url_for, flash, abort
+from flask import render_template, request, redirect, url_for, flash, abort, current_app
 from flask_login import login_required, current_user
 from app.forms import RyunosukeDepositForm
 from app.models import User, RyunosukeDeposit, Site, SiteQuotaLog, db
@@ -1058,7 +1058,7 @@ from collections import defaultdict
 from datetime import datetime
 from sqlalchemy.orm import selectinload, load_only
 from sqlalchemy import func, extract
-
+import time
 
 @admin_bp.route("/admin/accounting", methods=["GET", "POST"])
 @login_required
@@ -1081,21 +1081,30 @@ def accounting():
         flash("龍之介の入金記録を保存しました", "success")
         return redirect(url_for("admin.accounting"))
 
+    # ── 計測開始
+    t0 = time.perf_counter()
+
     # ✅ 入金合計と残高
     paid_total = db.session.query(
         db.func.coalesce(db.func.sum(RyunosukeDeposit.amount), 0)
     ).scalar()
+    current_app.logger.info("[/admin/accounting] paid_total in %.3fs", time.perf_counter()-t0); t0=time.perf_counter()
 
-    # ✅ 全ユーザー＆関連情報を一括取得（N+1回避・不要なsitesのロードを削除）
+    # ✅ 全ユーザー＆関連情報を一括取得
+    #   - site_quota は必須
+    #   - テンプレ側で user.sites を参照していても N+1 にならないように
     users = (
         User.query
         .options(
             load_only(User.id, User.first_name, User.last_name, User.is_admin, User.is_special_access),
-            selectinload(User.site_quota)
+            selectinload(User.site_quota),
+            # もしテンプレで user.sites を触っても N+1 にならないよう最軽量でプリロード
+            selectinload(User.sites).load_only(Site.id)
         )
         .filter(User.is_admin == False)
         .all()
     )
+    current_app.logger.info("[/admin/accounting] load users(+relations) in %.3fs", time.perf_counter()-t0); t0=time.perf_counter()
 
     # ✅ ユーザー分類＆サイト枠合計
     tcc_1000_total = 0
@@ -1119,6 +1128,8 @@ def accounting():
         else:
             tcc_3000_total += quota.total_quota
             student_users.append(user)
+
+    current_app.logger.info("[/admin/accounting] classify users in %.3fs", time.perf_counter()-t0); t0=time.perf_counter()
 
     # ✅ 集計結果（現状の構成は完全維持）
     breakdown = {
@@ -1159,6 +1170,7 @@ def accounting():
         .group_by(func.date_trunc("month", Site.created_at))
         .all()
     )
+    current_app.logger.info("[/admin/accounting] monthly site agg in %.3fs", time.perf_counter()-t0); t0=time.perf_counter()
 
     site_data_by_month = {}
     all_months_set = set()
@@ -1186,10 +1198,11 @@ def accounting():
 
     # ✅ 入金履歴と月一覧（変化なし）
     deposit_logs = RyunosukeDeposit.query.order_by(RyunosukeDeposit.deposit_date.desc()).all()
+    current_app.logger.info("[/admin/accounting] load deposit_logs in %.3fs", time.perf_counter()-t0); t0=time.perf_counter()
     all_months = sorted(all_months_set, reverse=True)
 
     # ✅ テンプレートへ渡す（現状維持）
-    return render_template(
+    resp = render_template(
         "admin/accounting.html",
         form=form,
         paid_total=paid_total,
@@ -1203,6 +1216,8 @@ def accounting():
         member_users=member_users,
         business_users=business_users
     )
+    current_app.logger.info("[/admin/accounting] render_template in %.3fs", time.perf_counter()-t0)
+    return resp
 
 
 @admin_bp.route("/admin/accounting/details", methods=["GET"])
