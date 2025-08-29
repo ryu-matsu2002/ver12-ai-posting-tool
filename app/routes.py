@@ -1095,6 +1095,7 @@ def accounting():
         User.query
         .options(
             load_only(User.id, User.first_name, User.last_name, User.is_admin, User.is_special_access),
+            selectinload(User.site_quota)     # ← これを必ず入れる
         )
         .filter(User.is_admin == False)
         .all()
