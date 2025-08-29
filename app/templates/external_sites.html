@@ -20,10 +20,11 @@
     --link:#ffe9ff;
     --link-hover:#ffffff;
 
-    /* ★ 固定ヘッダーの合計高さ（右ペイン） */
-    --sticky-header: 72px;      /* サイト名カードのおおよその高さ */
-    --sticky-gap: 8px;          /* サイト名カードとLivedoor見出しの間隔 */
-    --sticky-top-for-acc: calc(var(--sticky-header) + var(--sticky-gap));
+    /* 右ペインのレイアウト用（固定ヘッダー分） */
+    --right-height: calc(100vh - 280px);  /* 左と同じ基準高さ */
+    --site-header-h: 96px;                /* サイト名カードのおおよその高さ */
+    --acc-header-h: 52px;                 /* 「Livedoor」の見出しボタン高さ */
+    --right-vpad: 52px;                   /* 右ペイン上下の内側余白合計 */
   }
 
   /* ===== ベース ===== */
@@ -71,7 +72,7 @@
     pointer-events: none !important;
   }
 
-  /* ===== “白い四角（疑似要素）”を完全に消す ===== */
+  /* ===== ページ内の“白い四角”疑似要素を完全に消す ===== */
   .tcd-wrap *::before,
   .tcd-wrap *::after,
   .tcd-wrap::before,
@@ -87,11 +88,10 @@
   }
   .tcd-wrap li::marker{ content: "" !important; }
 
-  /* ===== 文字ウエイト（見やすく細めに） ===== */
+  /* ===== 文字ウエイト（白文字が潰れないよう細め） ===== */
   .tcd-wrap{ font-weight: 400; }
   .tcd-wrap .font-semibold{ font-weight: 500 !important; }
   .tcd-wrap .font-bold{ font-weight: 600 !important; }
-  /* 見出し・サイト名も細め（500）へ */
   .tcd-title-lg,
   .tcd-side-title,
   .prop-title,
@@ -151,17 +151,14 @@
     background: transparent !important;
   }
 
-  /* ===== スクロールバー（“左の細い棒だけ”に見えるように） ===== */
-  /* Firefox */
+  /* ===== スクロールバー（左の棒だけを見せる） ===== */
   *{ scrollbar-width: thin; scrollbar-color: rgba(0,0,0,.28) transparent; }
-  /* WebKit系 */
-  *::-webkit-scrollbar{ width: 10px; height:10px; }
+  *::-webkit-scrollbar{ width: 10px; height: 10px; }
   *::-webkit-scrollbar-track{ background: transparent; }
-  /* 親指は透明にして左側の内側ボーダーだけ出す */
   *::-webkit-scrollbar-thumb{
     background: transparent;
     border-radius: 999px;
-    box-shadow: inset 3px 0 0 rgba(0,0,0,.35); /* ←左側の棒だけ */
+    box-shadow: inset 3px 0 0 rgba(0,0,0,.35);
   }
   *::-webkit-scrollbar-corner{ background: transparent; }
 
@@ -172,6 +169,7 @@
     overflow: hidden;
     background: rgba(255,255,255,.06);
   }
+  /* ← このヘッダーは sites-scroll の中で sticky（固定） */
   .site-table-head{
     position: sticky; top: 0;
     display: grid;
@@ -230,28 +228,23 @@
   }
   .pf-ame .pf-count{ background-color: rgba(0,0,0,.55) !important; }
 
-  /* ===== 右ペイン：専用スクロール領域が全面を占有 ===== */
+  /* ===== 右ペイン：ヘッダー固定＋カード一覧だけスクロール ===== */
   .right-outer{
     background: var(--pane-bg);
     border-radius: 12px;
     border: 1px solid var(--pane-border);
-    display: flex;
-    flex-direction: column;
     position: relative;
-    overflow: hidden;        /* ←白い領域に隠れるのを回避 */
+    overflow: hidden;               /* ← すり抜け防止（白領域に隠れない） */
     min-height: 520px;
   }
-  /* 右側は高さをビュー全体に合わせて占有させる */
+  /* 右ペインのベースはスクロールさせず、高さを固定化 */
   .right-scroll{
-    position: absolute;
-    inset: 0;                /* コンテナを全面に広げる */
-    overflow: auto;          /* ←スクロールはここだけ */
-    padding: 26px 28px 36px; /* 下に余白を少し足して最後のカードが切れないように */
+    height: var(--right-height);
+    overflow: hidden;               /* ← ここはスクロールしない */
+    padding: 26px 28px;
   }
-
   .right-outer .tcd-card{ margin-left: 8px; margin-right: 8px; }
 
-  /* ===== カード ===== */
   .tcd-card{
     background: linear-gradient(135deg,var(--card1),var(--card2));
     border: 1px solid var(--card-edge);
@@ -260,18 +253,13 @@
     color:#fff;
   }
 
-  /* ★ サイト名カードは上部固定（右スクロール内部のsticky） */
-  .tcd-header{
-    padding: 18px 22px;
-    position: sticky;
-    top: 0;
-    z-index: 5;
-  }
+  /* サイト名カードは固定（right-scroll 自体が固定高なので staticでOK） */
+  .tcd-header{ padding: 18px 22px; }
   .tcd-title-lg{ font-size:1.125rem; }
   .tcd-link-lg{ color: var(--link); text-decoration:underline; font-size:1rem; }
   .tcd-link-lg:hover{ color: var(--link-hover); }
 
-  /* ★ Livedoor見出しも固定。サイト名カードの直下で止まる */
+  /* 「Livedoor」見出し（固定、スクロール領域の上に鎮座） */
   .tcd-acc-trigger{
     width:100%; text-align:left; padding:14px 20px;
     display:flex; align-items:center; gap:14px; cursor: pointer;
@@ -279,13 +267,17 @@
     background: linear-gradient(135deg, #7a4a75, #9a6194);
     border-bottom: 1px solid var(--card-edge);
     color:#fff;
-    position: sticky;
-    top: var(--sticky-top-for-acc);
-    z-index: 4;
   }
   .tcd-caret{ font-size:2.1rem; line-height:1; color:#f3e7f2; transition:transform .2s ease; }
 
-  /* ===== メトリクス（折り返し） ===== */
+  /* アカウントカードだけがスクロールする枠 */
+  .accounts-scroll{
+    height: calc(var(--right-height) - var(--site-header-h) - var(--acc-header-h) - var(--right-vpad));
+    overflow: auto;
+    padding: 0 0 8px 0; /* 下に余白 */
+  }
+
+  /* メトリクス */
   .tcd-metrics{
     color:#fef2ff; font-size:1rem;
     display:flex; align-items:flex-start; gap:1rem;
@@ -353,7 +345,7 @@
       </div>
     </aside>
 
-    {# ================= 右：選択中サイト（専用スクロール領域） ================= #}
+    {# ================= 右：選択中サイト（ヘッダー固定＋カード一覧スクロール） ================= #}
     <main id="sitePanes" class="right-outer">
       <div class="right-scroll" id="rightScroll">
         {% for s in sites %}
@@ -371,7 +363,7 @@
 
           {% if loop.first %}
           <section id="site-panel-{{ s.id }}" class="site-panel">
-            <!-- サイト名（固定ヘッダー） -->
+            <!-- サイト名（固定ヘッダー扱い） -->
             <div class="tcd-card tcd-header mb-4">
               <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
                 <div class="min-w-0">
@@ -390,7 +382,7 @@
             </div>
 
             <section class="tcd-card overflow-hidden">
-              <!-- Livedoor 見出し（固定） -->
+              <!-- Livedoor 見出し（固定表示） -->
               <button class="tcd-acc-trigger accordion-trigger"
                       data-acc-target="#tab-ld-{{ s.id }}"
                       aria-controls="tab-ld-{{ s.id }}"
@@ -402,99 +394,103 @@
                 </span>
               </button>
 
-              <div id="tab-ld-{{ s.id }}" class="accordion-panel">
-                {% if _all_accounts and _all_accounts|length > 0 %}
-                  <div class="p-4 grid grid-cols-1 gap-4">
-                    {% for acc in _all_accounts %}
-                      <div id="acc-card-{{ acc.id }}" class="tcd-card p-5 flex flex-col gap-4">
-                        <div class="flex items-start justify-between gap-3">
-                          <div class="min-w-0">
-                            {% if acc.public_url %}
-                              <a href="{{ acc.public_url }}" target="_blank"
-                                 class="tcd-link-lg break-all">{{ acc.public_url }}</a>
-                            {% endif %}
+              <!-- ★ ここだけスクロール領域 -->
+              <div class="accounts-scroll">
+                <div id="tab-ld-{{ s.id }}" class="accordion-panel">
+                  {% if _all_accounts and _all_accounts|length > 0 %}
+                    <div class="p-4 grid grid-cols-1 gap-4">
+                      {% for acc in _all_accounts %}
+                        <div id="acc-card-{{ acc.id }}" class="tcd-card p-5 flex flex-col gap-4">
+                          <div class="flex items-start justify-between gap-3">
+                            <div class="min-w-0">
+                              {% if acc.public_url %}
+                                <a href="{{ acc.public_url }}" target="_blank"
+                                   class="tcd-link-lg break-all">{{ acc.public_url }}</a>
+                              {% endif %}
+                            </div>
+                            <div class="flex items-center gap-2">
+                              <button class="opacity-70 hover:opacity-100 text-lg leading-none" title="詳細/ログ（準備中）">⋯</button>
+                              <button
+                                type="button"
+                                class="text-xs px-2 py-1 rounded tcd-add-btn hover:brightness-110"
+                                data-acct-id="{{ acc.id }}"
+                                data-site-id="{{ s.id }}"
+                                onclick="deleteExternalAccount(this.dataset.acctId, this.dataset.siteId)"
+                                title="この無料ブログと記事を削除">
+                                削除
+                              </button>
+                            </div>
                           </div>
-                          <div class="flex items-center gap-2">
-                            <button class="opacity-70 hover:opacity-100 text-lg leading-none" title="詳細/ログ（準備中）">⋯</button>
-                            <button
-                              type="button"
-                              class="text-xs px-2 py-1 rounded tcd-add-btn hover:brightness-110"
-                              data-acct-id="{{ acc.id }}"
-                              data-site-id="{{ s.id }}"
-                              onclick="deleteExternalAccount(this.dataset.acctId, this.dataset.siteId)"
-                              title="この無料ブログと記事を削除">
-                              削除
-                            </button>
+
+                          <div class="tcd-metrics">
+                            <div>投稿完了: <span class="font-semibold">{{ acc.stat_posted|default(0) }}</span></div>
+                            <div>記事生成済み: <span class="font-semibold">{{ acc.stat_generated|default(0) }}</span></div>
+                            <div>総記事数: <span class="font-semibold">{{ acc.stat_total|default(0) }}</span></div>
+                            <div><a class="underline" href="{{ url_for('main.external_accounts') }}?site_id={{ s.id }}">記事一覧</a></div>
                           </div>
-                        </div>
 
-                        <div class="tcd-metrics">
-                          <div>投稿完了: <span class="font-semibold">{{ acc.stat_posted|default(0) }}</span></div>
-                          <div>記事生成済み: <span class="font-semibold">{{ acc.stat_generated|default(0) }}</span></div>
-                          <div>総記事数: <span class="font-semibold">{{ acc.stat_total|default(0) }}</span></div>
-                          <div><a class="underline" href="{{ url_for('main.external_accounts') }}?site_id={{ s.id }}">記事一覧</a></div>
-                        </div>
-
-                        <div id="actionArea-acc-{{ acc.id }}">
-                          {% if not acc.api_key %}
-                            <button
-                              type="button"
-                              class="w-full btn-lg bg-green-600 hover:bg-green-700 text-white"
-                              data-site-id="{{ s.id }}"
-                              data-account-id="{{ acc.id }}"
-                              data-platform="livedoor"
-                              onclick="handleCaptchaClick(this)">
-                              クリックで新規ブログ作成開始
-                            </button>
-                          {% else %}
-                            {% set _generated_once =
-                                 (acc.generation_locked) or
-                                 (acc.stat_total|default(0) > 0) or
-                                 (acc.stat_generated|default(0) > 0) or
-                                 (acc.stat_posted|default(0) > 0) %}
-                            {% if _generated_once %}
-                              <button class="w-full btn-lg bg-gray-400 text-white/90 cursor-not-allowed" disabled>
-                                記事生成は実行済み（再実行不可）
+                          <div id="actionArea-acc-{{ acc.id }}">
+                            {% if not acc.api_key %}
+                              <button
+                                type="button"
+                                class="w-full btn-lg bg-green-600 hover:bg-green-700 text-white"
+                                data-site-id="{{ s.id }}"
+                                data-account-id="{{ acc.id }}"
+                                data-platform="livedoor"
+                                onclick="handleCaptchaClick(this)">
+                                クリックで新規ブログ作成開始
                               </button>
                             {% else %}
-                              <a
-                                href="/generate?site_id={{ s.id }}&account_id={{ acc.id }}"
-                                class="w-full inline-flex items-center justify-center btn-lg bg-indigo-600 hover:bg-indigo-700 text-white"
-                                data-account-id="{{ acc.id }}"
-                                onclick="return lockAndGo(this)">
-                                📝 クリックで記事生成＆投稿
-                              </a>
+                              {% set _generated_once =
+                                   (acc.generation_locked) or
+                                   (acc.stat_total|default(0) > 0) or
+                                   (acc.stat_generated|default(0) > 0) or
+                                   (acc.stat_posted|default(0) > 0) %}
+                              {% if _generated_once %}
+                                <button class="w-full btn-lg bg-gray-400 text-white/90 cursor-not-allowed" disabled>
+                                  記事生成は実行済み（再実行不可）
+                                </button>
+                              {% else %}
+                                <a
+                                  href="/generate?site_id={{ s.id }}&account_id={{ acc.id }}"
+                                  class="w-full inline-flex items-center justify-center btn-lg bg-indigo-600 hover:bg-indigo-700 text-white"
+                                  data-account-id="{{ acc.id }}"
+                                  onclick="return lockAndGo(this)">
+                                  📝 クリックで記事生成＆投稿
+                                </a>
+                              {% endif %}
                             {% endif %}
-                          {% endif %}
+                          </div>
+
                         </div>
-
-                      </div>
-                    {% endfor %}
-                  </div>
-                {% else %}
-                  <div class="px-5 py-4 text-sm opacity-90">
-                    まだLivedoorブログはありません。
-                  </div>
-                {% endif %}
-
-                <div class="px-5 py-4 border-t border-[var(--card-edge)]">
-                  {% if can_add_livedoor %}
-                    <button id="addBtn-{{ s.id }}" type="button"
-                            class="tcd-add-btn inline-flex items-center px-4 py-2 rounded-lg text-sm"
-                            data-site-id="{{ s.id }}"
-                            onclick="newAccountStart(this)">
-                      ＋ ブログ追加
-                    </button>
+                      {% endfor %}
+                    </div>
                   {% else %}
-                    <button id="addBtn-{{ s.id }}" type="button"
-                            class="tcd-add-btn inline-flex items-center px-4 py-2 rounded-lg text-sm
-                                   opacity-60 cursor-not-allowed"
-                            data-site-id="{{ s.id }}" disabled
-                            title="このサイトではLivedoorブログは1つまで（許可ユーザーは除く）">
-                      ＋ ブログ追加
-                    </button>
+                    <div class="px-5 py-4 text-sm opacity-90">
+                      まだLivedoorブログはありません。
+                    </div>
                   {% endif %}
                 </div>
+              </div>
+
+              <!-- 追加ボタンは固定で下に表示（スクロール外） -->
+              <div class="px-5 py-4 border-t border-[var(--card-edge)]">
+                {% if can_add_livedoor %}
+                  <button id="addBtn-{{ s.id }}" type="button"
+                          class="tcd-add-btn inline-flex items-center px-4 py-2 rounded-lg text-sm"
+                          data-site-id="{{ s.id }}"
+                          onclick="newAccountStart(this)">
+                    ＋ ブログ追加
+                  </button>
+                {% else %}
+                  <button id="addBtn-{{ s.id }}" type="button"
+                          class="tcd-add-btn inline-flex items-center px-4 py-2 rounded-lg text-sm
+                                 opacity-60 cursor-not-allowed"
+                          data-site-id="{{ s.id }}" disabled
+                          title="このサイトではLivedoorブログは1つまで（許可ユーザーは除く）">
+                    ＋ ブログ追加
+                  </button>
+                {% endif %}
               </div>
             </section>
           </section>
@@ -548,99 +544,101 @@
                 </span>
               </button>
 
-              <div id="tab-ld-{{ s.id }}" class="accordion-panel">
-                {% if _all_accounts and _all_accounts|length > 0 %}
-                  <div class="p-4 grid grid-cols-1 gap-4">
-                    {% for acc in _all_accounts %}
-                      <div id="acc-card-{{ acc.id }}" class="tcd-card p-5 flex flex-col gap-4">
-                        <div class="flex items-start justify-between gap-3">
-                          <div class="min-w-0">
-                            {% if acc.public_url %}
-                              <a href="{{ acc.public_url }}" target="_blank"
-                                 class="tcd-link-lg break-all">{{ acc.public_url }}</a>
-                            {% endif %}
+              <div class="accounts-scroll">
+                <div id="tab-ld-{{ s.id }}" class="accordion-panel">
+                  {% if _all_accounts and _all_accounts|length > 0 %}
+                    <div class="p-4 grid grid-cols-1 gap-4">
+                      {% for acc in _all_accounts %}
+                        <div id="acc-card-{{ acc.id }}" class="tcd-card p-5 flex flex-col gap-4">
+                          <div class="flex items-start justify-between gap-3">
+                            <div class="min-w-0">
+                              {% if acc.public_url %}
+                                <a href="{{ acc.public_url }}" target="_blank"
+                                   class="tcd-link-lg break-all">{{ acc.public_url }}</a>
+                              {% endif %}
+                            </div>
+                            <div class="flex items-center gap-2">
+                              <button class="opacity-70 hover:opacity-100 text-lg leading-none" title="詳細/ログ（準備中）">⋯</button>
+                              <button
+                                type="button"
+                                class="text-xs px-2 py-1 rounded tcd-add-btn hover:brightness-110"
+                                data-acct-id="{{ acc.id }}"
+                                data-site-id="{{ s.id }}"
+                                onclick="deleteExternalAccount(this.dataset.acctId, this.dataset.siteId)"
+                                title="この無料ブログと記事を削除">
+                                削除
+                              </button>
+                            </div>
                           </div>
-                          <div class="flex items-center gap-2">
-                            <button class="opacity-70 hover:opacity-100 text-lg leading-none" title="詳細/ログ（準備中）">⋯</button>
-                            <button
-                              type="button"
-                              class="text-xs px-2 py-1 rounded tcd-add-btn hover:brightness-110"
-                              data-acct-id="{{ acc.id }}"
-                              data-site-id="{{ s.id }}"
-                              onclick="deleteExternalAccount(this.dataset.acctId, this.dataset.siteId)"
-                              title="この無料ブログと記事を削除">
-                              削除
-                            </button>
+
+                          <div class="tcd-metrics">
+                            <div>投稿完了: <span class="font-semibold">{{ acc.stat_posted|default(0) }}</span></div>
+                            <div>記事生成済み: <span class="font-semibold">{{ acc.stat_generated|default(0) }}</span></div>
+                            <div>総記事数: <span class="font-semibold">{{ acc.stat_total|default(0) }}</span></div>
+                            <div><a class="underline" href="{{ url_for('main.external_accounts') }}?site_id={{ s.id }}">記事一覧</a></div>
                           </div>
-                        </div>
 
-                        <div class="tcd-metrics">
-                          <div>投稿完了: <span class="font-semibold">{{ acc.stat_posted|default(0) }}</span></div>
-                          <div>記事生成済み: <span class="font-semibold">{{ acc.stat_generated|default(0) }}</span></div>
-                          <div>総記事数: <span class="font-semibold">{{ acc.stat_total|default(0) }}</span></div>
-                          <div><a class="underline" href="{{ url_for('main.external_accounts') }}?site_id={{ s.id }}">記事一覧</a></div>
-                        </div>
-
-                        <div id="actionArea-acc-{{ acc.id }}">
-                          {% if not acc.api_key %}
-                            <button
-                              type="button"
-                              class="w-full btn-lg bg-green-600 hover:bg-green-700 text-white"
-                              data-site-id="{{ s.id }}"
-                              data-account-id="{{ acc.id }}"
-                              data-platform="livedoor"
-                              onclick="handleCaptchaClick(this)">
-                              クリックで新規ブログ作成開始
-                            </button>
-                          {% else %}
-                            {% set _generated_once =
-                                 (acc.generation_locked) or
-                                 (acc.stat_total|default(0) > 0) or
-                                 (acc.stat_generated|default(0) > 0) or
-                                 (acc.stat_posted|default(0) > 0) %}
-                            {% if _generated_once %}
-                              <button class="w-full btn-lg bg-gray-400 text-white/90 cursor-not-allowed" disabled>
-                                記事生成は実行済み（再実行不可）
+                          <div id="actionArea-acc-{{ acc.id }}">
+                            {% if not acc.api_key %}
+                              <button
+                                type="button"
+                                class="w-full btn-lg bg-green-600 hover:bg-green-700 text-white"
+                                data-site-id="{{ s.id }}"
+                                data-account-id="{{ acc.id }}"
+                                data-platform="livedoor"
+                                onclick="handleCaptchaClick(this)">
+                                クリックで新規ブログ作成開始
                               </button>
                             {% else %}
-                              <a
-                                href="/generate?site_id={{ s.id }}&account_id={{ acc.id }}"
-                                class="w-full inline-flex items-center justify-center btn-lg bg-indigo-600 hover:bg-indigo-700 text-white"
-                                data-account-id="{{ acc.id }}"
-                                onclick="return lockAndGo(this)">
-                                📝 クリックで記事生成＆投稿
-                              </a>
+                              {% set _generated_once =
+                                   (acc.generation_locked) or
+                                   (acc.stat_total|default(0) > 0) or
+                                   (acc.stat_generated|default(0) > 0) or
+                                   (acc.stat_posted|default(0) > 0) %}
+                              {% if _generated_once %}
+                                <button class="w-full btn-lg bg-gray-400 text-white/90 cursor-not-allowed" disabled>
+                                  記事生成は実行済み（再実行不可）
+                                </button>
+                              {% else %}
+                                <a
+                                  href="/generate?site_id={{ s.id }}&account_id={{ acc.id }}"
+                                  class="w-full inline-flex items-center justify-center btn-lg bg-indigo-600 hover:bg-indigo-700 text-white"
+                                  data-account-id="{{ acc.id }}"
+                                  onclick="return lockAndGo(this)">
+                                  📝 クリックで記事生成＆投稿
+                                </a>
+                              {% endif %}
                             {% endif %}
-                          {% endif %}
+                          </div>
+
                         </div>
-
-                      </div>
-                    {% endfor %}
-                  </div>
-                {% else %}
-                  <div class="px-5 py-4 text-sm opacity-90">
-                    まだLivedoorブログはありません。
-                  </div>
-                {% endif %}
-
-                <div class="px-5 py-4 border-t border-[var(--card-edge)]">
-                  {% if can_add_livedoor %}
-                    <button id="addBtn-{{ s.id }}" type="button"
-                            class="tcd-add-btn inline-flex items-center px-4 py-2 rounded-lg text-sm"
-                            data-site-id="{{ s.id }}"
-                            onclick="newAccountStart(this)">
-                      ＋ ブログ追加
-                    </button>
+                      {% endfor %}
+                    </div>
                   {% else %}
-                    <button id="addBtn-{{ s.id }}" type="button"
-                            class="tcd-add-btn inline-flex items-center px-4 py-2 rounded-lg text-sm
-                                   opacity-60 cursor-not-allowed"
-                            data-site-id="{{ s.id }}" disabled
-                            title="このサイトではLivedoorブログは1つまで（許可ユーザーは除く）">
-                      ＋ ブログ追加
-                    </button>
+                    <div class="px-5 py-4 text-sm opacity-90">
+                      まだLivedoorブログはありません。
+                    </div>
                   {% endif %}
                 </div>
+              </div>
+
+              <div class="px-5 py-4 border-t border-[var(--card-edge)]">
+                {% if can_add_livedoor %}
+                  <button id="addBtn-{{ s.id }}" type="button"
+                          class="tcd-add-btn inline-flex items-center px-4 py-2 rounded-lg text-sm"
+                          data-site-id="{{ s.id }}"
+                          onclick="newAccountStart(this)">
+                    ＋ ブログ追加
+                  </button>
+                {% else %}
+                  <button id="addBtn-{{ s.id }}" type="button"
+                          class="tcd-add-btn inline-flex items-center px-4 py-2 rounded-lg text-sm
+                                 opacity-60 cursor-not-allowed"
+                          data-site-id="{{ s.id }}" disabled
+                          title="このサイトではLivedoorブログは1つまで（許可ユーザーは除く）">
+                    ＋ ブログ追加
+                  </button>
+                {% endif %}
               </div>
             </section>
           </section>
@@ -737,9 +735,9 @@
 
     if (store) sessionStorage.setItem(SELECT_KEY, siteId);
 
-    // 右スクロール位置を先頭へ
-    const rs = document.getElementById('rightScroll');
-    if (rs) rs.scrollTop = 0;
+    // アカウント枠のスクロールを先頭へ
+    const accBox = panel?.querySelector('.accounts-scroll');
+    if (accBox) accBox.scrollTop = 0;
   }
 
   function initialSiteId(){
@@ -806,7 +804,7 @@
     el.__t = setTimeout(()=>{ el.classList.add('opacity-0'); setTimeout(()=>el.classList.add('hidden'), 300); }, ms);
   }
 
-  /* ===== 以下、既存：CAPTCHA / 進捗まわり ===== */
+  /* ===== ここから既存：CAPTCHA / 進捗 ===== */
   let progressInterval = null;
   let lastStatus = null;
   let captchaSubmitLocked = false;
