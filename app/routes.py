@@ -1063,6 +1063,7 @@ import time
 @admin_bp.route("/admin/accounting", methods=["GET", "POST"])
 @login_required
 def accounting():
+    t0 = time.perf_counter()
     if not current_user.is_admin:
         abort(403)
 
@@ -1088,9 +1089,11 @@ def accounting():
     paid_total = db.session.query(
         db.func.coalesce(db.func.sum(RyunosukeDeposit.amount), 0)
     ).scalar()
+    log.info("[accounting] t_sum_deposit=%.3f", time.perf_counter()-t0)
     current_app.logger.info("[/admin/accounting] paid_total in %.3fs", time.perf_counter()-t0); t0=time.perf_counter()
 
     # ✅ 全ユーザー＆関連情報を一括取得（N+1回避・sitesはロードしない）
+    t1 = time.perf_counter()
     users = (
         User.query
         .options(
@@ -1100,6 +1103,7 @@ def accounting():
         .filter(User.is_admin == False)
         .all()
     )
+    log.info("[accounting] t_users=%.3f", time.perf_counter()-t1)
     current_app.logger.info("[/admin/accounting] load users(+relations) in %.3fs", time.perf_counter()-t0); t0=time.perf_counter()
 
     # ✅ ユーザー分類＆サイト枠合計
@@ -1152,6 +1156,7 @@ def accounting():
     }
 
     # ✅ サイト登録データを月別にSQLで直接集計（join最適化＋NULL除外）
+    t2 = time.perf_counter()
     site_data_raw = (
         db.session.query(
             func.date_trunc("month", Site.created_at).label("month"),
@@ -1166,6 +1171,7 @@ def accounting():
         .group_by(func.date_trunc("month", Site.created_at))
         .all()
     )
+    log.info("[accounting] t_site_agg=%.3f", time.perf_counter()-t2)
     current_app.logger.info("[/admin/accounting] monthly site agg in %.3fs", time.perf_counter()-t0); t0=time.perf_counter()
 
     site_data_by_month = {}
@@ -1193,11 +1199,14 @@ def accounting():
     )
 
     # ✅ 入金履歴と月一覧（変化なし）
+    t3 = time.perf_counter()
     deposit_logs = RyunosukeDeposit.query.order_by(RyunosukeDeposit.deposit_date.desc()).all()
     current_app.logger.info("[/admin/accounting] load deposit_logs in %.3fs", time.perf_counter()-t0); t0=time.perf_counter()
+    log.info("[accounting] t_deposits=%.3f", time.perf_counter()-t3)
     all_months = sorted(all_months_set, reverse=True)
 
     # ✅ テンプレートへ渡す（現状維持）
+    t4 = time.perf_counter()
     resp = render_template(
         "admin/accounting.html",
         form=form,
@@ -1212,6 +1221,8 @@ def accounting():
         member_users=member_users,
         business_users=business_users
     )
+    log.info("[accounting] t_render=%.3f  t_total=%.3f",
+             time.perf_counter()-t4, time.perf_counter()-t0)
     current_app.logger.info("[/admin/accounting] render_template in %.3fs", time.perf_counter()-t0)
     return resp
 
