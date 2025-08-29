@@ -1090,16 +1090,11 @@ def accounting():
     ).scalar()
     current_app.logger.info("[/admin/accounting] paid_total in %.3fs", time.perf_counter()-t0); t0=time.perf_counter()
 
-    # ✅ 全ユーザー＆関連情報を一括取得
-    #   - site_quota は必須
-    #   - テンプレ側で user.sites を参照していても N+1 にならないように
+    # ✅ 全ユーザー＆関連情報を一括取得（N+1回避・sitesはロードしない）
     users = (
         User.query
         .options(
             load_only(User.id, User.first_name, User.last_name, User.is_admin, User.is_special_access),
-            selectinload(User.site_quota),
-            # もしテンプレで user.sites を触っても N+1 にならないよう最軽量でプリロード
-            selectinload(User.sites).load_only(Site.id)
         )
         .filter(User.is_admin == False)
         .all()
