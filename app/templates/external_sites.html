@@ -13,18 +13,23 @@
     --card1:#6e3f69;
     --card2:#8a5583;
     --card-edge:rgba(255,255,255,.18);
-    --card-glow:rgba(0,0,0,.06);
 
     --pane-bg:#f8ecfb;
     --pane-border:rgba(0,0,0,.06);
 
     --link:#ffe9ff;
     --link-hover:#ffffff;
+
+    /* ★ 固定ヘッダーの合計高さ（右ペイン） */
+    --sticky-header: 72px;      /* サイト名カードのおおよその高さ */
+    --sticky-gap: 8px;          /* サイト名カードとLivedoor見出しの間隔 */
+    --sticky-top-for-acc: calc(var(--sticky-header) + var(--sticky-gap));
   }
 
+  /* ===== ベース ===== */
   html{ scrollbar-gutter: stable; }
   body{
-    overflow-y: scroll;
+    overflow-y: auto;
     margin:0;
     background: var(--tcd-lighter);
     -webkit-tap-highlight-color: transparent;
@@ -42,7 +47,7 @@
     margin-right: 0 !important;
   }
 
-  /* ===== テーマ側（上位ラッパー）の装飾を徹底無効化 ===== */
+  /* ===== テーマ側の装飾を徹底無効化 ===== */
   body.bg-primary,
   .min-h-screen.bg-primary,
   .bg-primary,
@@ -66,7 +71,7 @@
     pointer-events: none !important;
   }
 
-  /* ★CHANGE01: “白い四角（疑似要素）”を確実に消す */
+  /* ===== “白い四角（疑似要素）”を完全に消す ===== */
   .tcd-wrap *::before,
   .tcd-wrap *::after,
   .tcd-wrap::before,
@@ -82,13 +87,15 @@
   }
   .tcd-wrap li::marker{ content: "" !important; }
 
-  /* ===== フォントの太さを全体的に細めへ調整 ===== */
+  /* ===== 文字ウエイト（見やすく細めに） ===== */
   .tcd-wrap{ font-weight: 400; }
   .tcd-wrap .font-semibold{ font-weight: 500 !important; }
   .tcd-wrap .font-bold{ font-weight: 600 !important; }
+  /* 見出し・サイト名も細め（500）へ */
   .tcd-title-lg,
   .tcd-side-title,
-  .prop-title{ font-weight: 600 !important; } /* 見出しは中太 */
+  .prop-title,
+  .site-name{ font-weight: 500 !important; }
 
   .tcd-wrap{
     background: var(--tcd-darker);
@@ -143,11 +150,22 @@
     max-height: calc(100vh - 280px);
     background: transparent !important;
   }
-  .sites-scroll::-webkit-scrollbar{ width: 6px; }
-  .sites-scroll::-webkit-scrollbar-thumb{ background: rgba(255,255,255,.35); border-radius: 999px; }
-  .sites-scroll::-webkit-scrollbar-track{ background: transparent; }
 
-  /* ★CHANGE02: 左ペインを“表（テーブル）風”に */
+  /* ===== スクロールバー（“左の細い棒だけ”に見えるように） ===== */
+  /* Firefox */
+  *{ scrollbar-width: thin; scrollbar-color: rgba(0,0,0,.28) transparent; }
+  /* WebKit系 */
+  *::-webkit-scrollbar{ width: 10px; height:10px; }
+  *::-webkit-scrollbar-track{ background: transparent; }
+  /* 親指は透明にして左側の内側ボーダーだけ出す */
+  *::-webkit-scrollbar-thumb{
+    background: transparent;
+    border-radius: 999px;
+    box-shadow: inset 3px 0 0 rgba(0,0,0,.35); /* ←左側の棒だけ */
+  }
+  *::-webkit-scrollbar-corner{ background: transparent; }
+
+  /* ===== 左：サイト一覧（テーブル風） ===== */
   .site-table{
     border: 1px solid rgba(255,255,255,.28);
     border-radius: 10px;
@@ -157,7 +175,7 @@
   .site-table-head{
     position: sticky; top: 0;
     display: grid;
-    grid-template-columns: 1.2fr .42fr .42fr .42fr; /* サイト名 / LD / note / Ame */
+    grid-template-columns: 1.2fr .42fr .42fr .42fr;
     gap: 0;
     padding: 10px 12px;
     background: rgba(0,0,0,.22);
@@ -166,7 +184,6 @@
     letter-spacing: .02em;
     z-index: 1;
   }
-  .site-table-head > div{ opacity:.95; }
   .site-rows{ display:block; }
   .site-row{
     display: grid;
@@ -178,6 +195,7 @@
     border-top: 1px solid rgba(255,255,255,.22);
     transition: background .12s ease, box-shadow .12s ease, border-color .12s ease;
     cursor: pointer;
+    position: relative;
   }
   .site-row:nth-child(odd){ background: rgba(255,255,255,.06); }
   .site-row:hover{ background: rgba(255,255,255,.12); }
@@ -186,20 +204,12 @@
     border-color: #fff;
     box-shadow: 0 0 0 2px rgba(255,255,255,.85) inset;
   }
-  .site-row.active::after{ /* 左アクセントバー */
-    content:""; display:block; position:absolute; inset:auto auto auto 0; width:6px; height:100%;
-    background:#fff;
+  .site-row.active::after{
+    content:""; position:absolute; inset:auto auto auto 0; width:6px; height:100%; background:#fff;
   }
-  .site-row{ position:relative; } /* ↑ ::after のため */
-
   .col-site{ min-width:0; }
-  .site-name{
-    font-weight:600;
-    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-  }
-  .site-domain{
-    font-size:.92rem; opacity:.9; margin-top:4px; word-break:break-all;
-  }
+  .site-name{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .site-domain{ font-size:.92rem; opacity:.9; margin-top:4px; word-break:break-all; }
 
   .pf-badge{
     display:inline-flex; align-items:center; gap:6px;
@@ -220,24 +230,25 @@
   }
   .pf-ame .pf-count{ background-color: rgba(0,0,0,.55) !important; }
 
-  /* ===== 右ペイン（独立スクロール） ===== */
+  /* ===== 右ペイン：専用スクロール領域が全面を占有 ===== */
   .right-outer{
     background: var(--pane-bg);
     border-radius: 12px;
-    padding: 0; /* ★CHANGE03: 見出しをヘッダーとしてstickyにするため0開始 */
     border: 1px solid var(--pane-border);
     display: flex;
     flex-direction: column;
+    position: relative;
+    overflow: hidden;        /* ←白い領域に隠れるのを回避 */
     min-height: 520px;
   }
-  /* ★CHANGE03: 左と同等の独立スクロール領域を作成 */
+  /* 右側は高さをビュー全体に合わせて占有させる */
   .right-scroll{
-    overflow: auto;
-    max-height: calc(100vh - 280px);
-    padding: 26px 28px;
-    scrollbar-gutter: stable;
-    contain: paint;
+    position: absolute;
+    inset: 0;                /* コンテナを全面に広げる */
+    overflow: auto;          /* ←スクロールはここだけ */
+    padding: 26px 28px 36px; /* 下に余白を少し足して最後のカードが切れないように */
   }
+
   .right-outer .tcd-card{ margin-left: 8px; margin-right: 8px; }
 
   /* ===== カード ===== */
@@ -249,11 +260,18 @@
     color:#fff;
   }
 
-  .tcd-header{ padding: 18px 22px; position: sticky; top: 0; z-index: 2; } /* ★CHANGE04: 右側の見出しを固定 */
+  /* ★ サイト名カードは上部固定（右スクロール内部のsticky） */
+  .tcd-header{
+    padding: 18px 22px;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+  }
   .tcd-title-lg{ font-size:1.125rem; }
   .tcd-link-lg{ color: var(--link); text-decoration:underline; font-size:1rem; }
   .tcd-link-lg:hover{ color: var(--link-hover); }
 
+  /* ★ Livedoor見出しも固定。サイト名カードの直下で止まる */
   .tcd-acc-trigger{
     width:100%; text-align:left; padding:14px 20px;
     display:flex; align-items:center; gap:14px; cursor: pointer;
@@ -261,6 +279,9 @@
     background: linear-gradient(135deg, #7a4a75, #9a6194);
     border-bottom: 1px solid var(--card-edge);
     color:#fff;
+    position: sticky;
+    top: var(--sticky-top-for-acc);
+    z-index: 4;
   }
   .tcd-caret{ font-size:2.1rem; line-height:1; color:#f3e7f2; transition:transform .2s ease; }
 
@@ -285,8 +306,6 @@
   .accordion-panel{ background: transparent; }
   .site-panel{ content-visibility:auto; contain-intrinsic-size: 800px 600px; }
 
-  /* 軽いハイライト */
-  .tcd-wrap .site-row::before{ content:""; display:none; }
   @media (prefers-reduced-motion: reduce){
     .tcd-caret{ transition: none; }
   }
@@ -303,7 +322,6 @@
         <input id="siteSearch" type="search" placeholder="サイトを検索" autocomplete="off">
       </div>
 
-      <!-- ★CHANGE02: テーブル風のヘッダー＋行 -->
       <div class="sites-scroll">
         <div class="site-table">
           <div class="site-table-head">
@@ -325,15 +343,9 @@
                   <div class="site-name" title="{{ s.name }}">{{ s.name }}</div>
                   {% if s.url %}<div class="site-domain">{{ _raw }}</div>{% endif %}
                 </div>
-                <div class="col-ld">
-                  <span class="pf-badge pf-ld">LD <span class="pf-count">{{ s.ld_count|default(0) }}</span></span>
-                </div>
-                <div class="col-note">
-                  <span class="pf-badge pf-note">note <span class="pf-count">{{ s.note_count|default(0) }}</span></span>
-                </div>
-                <div class="col-ame">
-                  <span class="pf-badge pf-ame">Ame <span class="pf-count">{{ s.ameba_count|default(0) }}</span></span>
-                </div>
+                <div><span class="pf-badge pf-ld">LD <span class="pf-count">{{ s.ld_count|default(0) }}</span></span></div>
+                <div><span class="pf-badge pf-note">note <span class="pf-count">{{ s.note_count|default(0) }}</span></span></div>
+                <div><span class="pf-badge pf-ame">Ame <span class="pf-count">{{ s.ameba_count|default(0) }}</span></span></div>
               </a>
             {% endfor %}
           </div>
@@ -341,9 +353,9 @@
       </div>
     </aside>
 
-    {# ================= 右：選択中サイト（独立スクロール） ================= #}
+    {# ================= 右：選択中サイト（専用スクロール領域） ================= #}
     <main id="sitePanes" class="right-outer">
-      <div class="right-scroll" id="rightScroll">  {# ★CHANGE03: ここがスクロール領域 #}
+      <div class="right-scroll" id="rightScroll">
         {% for s in sites %}
           {% set _all_accounts = [] %}
           {% if s.livedoor_accounts is defined %}
@@ -359,7 +371,7 @@
 
           {% if loop.first %}
           <section id="site-panel-{{ s.id }}" class="site-panel">
-            <!-- 見出し（sticky） -->
+            <!-- サイト名（固定ヘッダー） -->
             <div class="tcd-card tcd-header mb-4">
               <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
                 <div class="min-w-0">
@@ -378,6 +390,7 @@
             </div>
 
             <section class="tcd-card overflow-hidden">
+              <!-- Livedoor 見出し（固定） -->
               <button class="tcd-acc-trigger accordion-trigger"
                       data-acc-target="#tab-ld-{{ s.id }}"
                       aria-controls="tab-ld-{{ s.id }}"
@@ -415,7 +428,6 @@
                           </div>
                         </div>
 
-                        <!-- メトリクスは必ず折り返し -->
                         <div class="tcd-metrics">
                           <div>投稿完了: <span class="font-semibold">{{ acc.stat_posted|default(0) }}</span></div>
                           <div>記事生成済み: <span class="font-semibold">{{ acc.stat_generated|default(0) }}</span></div>
@@ -704,7 +716,7 @@
   }
   function escapeAttr(s){ return escapeHtml(s).replace(/"/g,'&quot;'); }
 
-  /* ★CHANGE05: 表（行）クリックで選択＆右ペイン切替 */
+  /* 左行クリックで右を切替 */
   function selectSite(siteId, store=true){
     document.querySelectorAll('.site-panel').forEach(p => p.classList.add('hidden'));
 
@@ -725,7 +737,7 @@
 
     if (store) sessionStorage.setItem(SELECT_KEY, siteId);
 
-    // 右スクロール位置は先頭へ
+    // 右スクロール位置を先頭へ
     const rs = document.getElementById('rightScroll');
     if (rs) rs.scrollTop = 0;
   }
@@ -794,7 +806,7 @@
     el.__t = setTimeout(()=>{ el.classList.add('opacity-0'); setTimeout(()=>el.classList.add('hidden'), 300); }, ms);
   }
 
-  /* =========================== 進捗ロジック（既存） =========================== */
+  /* ===== 以下、既存：CAPTCHA / 進捗まわり ===== */
   let progressInterval = null;
   let lastStatus = null;
   let captchaSubmitLocked = false;
