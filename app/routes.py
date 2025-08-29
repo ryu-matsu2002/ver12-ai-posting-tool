@@ -1056,8 +1056,7 @@ from app.forms import RyunosukeDepositForm
 from app.models import User, RyunosukeDeposit, Site, SiteQuotaLog, db
 from collections import defaultdict
 from datetime import datetime
-from sqlalchemy.orm import selectinload, load_only
-from sqlalchemy import func, extract
+from sqlalchemy import func, extract, text
 import time
 
 @admin_bp.route("/admin/accounting", methods=["GET", "POST"])
@@ -1092,44 +1091,31 @@ def accounting():
     logger.info("[accounting] t_sum_deposit=%.3f", time.perf_counter()-t0)
     current_app.logger.info("[/admin/accounting] paid_total in %.3fs", time.perf_counter()-t0); t0=time.perf_counter()
 
-    # ✅ 全ユーザー＆関連情報を一括取得（N+1回避・sitesはロードしない）
+    # ✅ サイト枠合計をSQLひと撃ちで取得（ユーザー配列は未使用なので計算のみ）
     t1 = time.perf_counter()
-    users = (
-        User.query
-        .options(
-            load_only(User.id, User.first_name, User.last_name, User.is_admin, User.is_special_access),
-            selectinload(User.site_quota)     # ← これを必ず入れる
-        )
-        .filter(User.is_admin == False)
-        .all()
-    )
-    logger.info("[accounting] t_users=%.3f", time.perf_counter()-t1)
-    current_app.logger.info("[/admin/accounting] load users(+relations) in %.3fs", time.perf_counter()-t0); t0=time.perf_counter()
+    row = db.session.execute(text("""
+        SELECT
+          COALESCE(SUM(CASE
+              WHEN u.is_admin = FALSE AND sq.plan_type = 'business' AND sq.total_quota > 0
+              THEN sq.total_quota ELSE 0 END), 0) AS business_total,
+          COALESCE(SUM(CASE
+              WHEN u.is_admin = FALSE AND (u.is_special_access = TRUE OR u.id = 16)
+                   AND COALESCE(sq.plan_type, '') <> 'business' AND sq.total_quota > 0
+              THEN sq.total_quota ELSE 0 END), 0) AS tcc_1000_total,
+          COALESCE(SUM(CASE
+              WHEN u.is_admin = FALSE AND (u.is_special_access = FALSE AND u.id <> 16)
+                   AND COALESCE(sq.plan_type, '') <> 'business' AND sq.total_quota > 0
+              THEN sq.total_quota ELSE 0 END), 0) AS tcc_3000_total
+        FROM "user" u
+        JOIN user_site_quota sq ON sq.user_id = u.id
+    """)).fetchone()
+    business_total  = int(row.business_total)
+    tcc_1000_total  = int(row.tcc_1000_total)
+    tcc_3000_total  = int(row.tcc_3000_total)
+    # 画面ではユーザー配列を使っていないため空で渡す（互換維持）
+    student_users, member_users, business_users = [], [], []
+    current_app.logger.info("[/admin/accounting] load quota sums in %.3fs", time.perf_counter()-t1)
 
-    # ✅ ユーザー分類＆サイト枠合計
-    tcc_1000_total = 0
-    tcc_3000_total = 0
-    business_total = 0
-
-    student_users = []
-    member_users = []
-    business_users = []
-
-    for user in users:
-        quota = user.site_quota
-        if not quota or quota.total_quota == 0:
-            continue
-        if quota.plan_type == "business":
-            business_total += quota.total_quota
-            business_users.append(user)
-        elif user.is_special_access or user.id == 16:
-            tcc_1000_total += quota.total_quota
-            member_users.append(user)
-        else:
-            tcc_3000_total += quota.total_quota
-            student_users.append(user)
-
-    current_app.logger.info("[/admin/accounting] classify users in %.3fs", time.perf_counter()-t0); t0=time.perf_counter()
 
     # ✅ 集計結果（現状の構成は完全維持）
     breakdown = {
