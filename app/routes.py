@@ -1053,9 +1053,11 @@ def delete_stuck_articles():
 from flask import render_template, request, redirect, url_for, flash, abort
 from flask_login import login_required, current_user
 from app.forms import RyunosukeDepositForm
-from app.models import User, RyunosukeDeposit, Site, db
+from app.models import User, RyunosukeDeposit, Site, SiteQuotaLog, db
 from collections import defaultdict
 from datetime import datetime
+from sqlalchemy.orm import selectinload, load_only
+from sqlalchemy import func, extract
 
 
 @admin_bp.route("/admin/accounting", methods=["GET", "POST"])
@@ -1063,9 +1065,6 @@ from datetime import datetime
 def accounting():
     if not current_user.is_admin:
         abort(403)
-
-    from sqlalchemy.orm import selectinload
-    from sqlalchemy import func
 
     selected_month = request.args.get("month", "all")
 
@@ -1087,11 +1086,16 @@ def accounting():
         db.func.coalesce(db.func.sum(RyunosukeDeposit.amount), 0)
     ).scalar()
 
-    # ✅ 全ユーザー＆関連情報を一括取得（N+1回避）
-    users = User.query.options(
-        selectinload(User.site_quota),
-        selectinload(User.sites)
-    ).filter(User.is_admin == False).all()
+    # ✅ 全ユーザー＆関連情報を一括取得（N+1回避・不要なsitesのロードを削除）
+    users = (
+        User.query
+        .options(
+            load_only(User.id, User.first_name, User.last_name, User.is_admin, User.is_special_access),
+            selectinload(User.site_quota)
+        )
+        .filter(User.is_admin == False)
+        .all()
+    )
 
     # ✅ ユーザー分類＆サイト枠合計
     tcc_1000_total = 0
@@ -1140,14 +1144,21 @@ def accounting():
         },
     }
 
-    # ✅ サイト登録データを月別にSQLで直接集計（超高速）
-    site_data_raw = db.session.query(
-        func.date_trunc("month", Site.created_at).label("month"),
-        func.count(Site.id)
-    ).join(User).filter(
-        User.is_admin == False,
-        User.is_special_access == False  # ← TCC研究生（3,000円）のみ
-    ).group_by(func.date_trunc("month", Site.created_at)).all()
+    # ✅ サイト登録データを月別にSQLで直接集計（join最適化＋NULL除外）
+    site_data_raw = (
+        db.session.query(
+            func.date_trunc("month", Site.created_at).label("month"),
+            func.count(Site.id)
+        )
+        .join(User, Site.user_id == User.id, isouter=False)
+        .filter(
+            Site.created_at.isnot(None),
+            User.is_admin == False,
+            User.is_special_access == False  # ← TCC研究生（3,000円）のみ
+        )
+        .group_by(func.date_trunc("month", Site.created_at))
+        .all()
+    )
 
     site_data_by_month = {}
     all_months_set = set()
@@ -1200,15 +1211,15 @@ def accounting_details():
     if not current_user.is_admin:
         abort(403)
 
-    from flask import request
-    from sqlalchemy import extract, func
-
     selected_month = request.args.get("month", "all")
 
     # ✅ 月一覧を抽出（NULLを除外して高速に）
-    all_months_raw = db.session.query(
-        func.date_trunc("month", SiteQuotaLog.created_at)
-    ).filter(SiteQuotaLog.created_at != None).distinct().all()
+    all_months_raw = (
+        db.session.query(func.date_trunc("month", SiteQuotaLog.created_at))
+        .filter(SiteQuotaLog.created_at.isnot(None))
+        .distinct()
+        .all()
+    )
 
     all_months = sorted(
         {month[0].strftime("%Y-%m") for month in all_months_raw},
@@ -1216,7 +1227,7 @@ def accounting_details():
     )
 
     # ✅ 月フィルタに応じてログ抽出
-    logs_query = SiteQuotaLog.query.filter(SiteQuotaLog.created_at != None)
+    logs_query = SiteQuotaLog.query.filter(SiteQuotaLog.created_at.isnot(None))
 
     if selected_month != "all":
         try:
