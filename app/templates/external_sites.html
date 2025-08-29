@@ -160,18 +160,20 @@
   .site-table{
     border: 1px solid rgba(255,255,255,.28);
     border-radius: 10px;
-    overflow: hidden;
+    /* sticky を効かせるため hidden → visible に修正 */
+    overflow: visible;
     background: rgba(255,255,255,.06);
   }
   .site-table-head{
     position: sticky;
-    top: 0;                 /* ← これでスクロール時も固定 */
-    z-index: 2;
+    top: 0;                 /* ← スクロール時も固定 */
+    z-index: 5;
     display: grid;
     grid-template-columns: 1.2fr .42fr .42fr .42fr;
     gap: 0;
     padding: 10px 12px;
-    background: rgba(0,0,0,.22);
+    /* 透けやズレに見えないように少し濃いめ */
+    background: linear-gradient(0deg, rgba(0,0,0,.35), rgba(0,0,0,.35));
     backdrop-filter: blur(2px);
     font-size: .92rem;
     letter-spacing: .02em;
@@ -228,14 +230,14 @@
     border-radius: 12px;
     border: 1px solid var(--pane-border);
     position: relative;
-    overflow: hidden;       /* 右下の白被りを防止 */
+    overflow: hidden;        /* 右下の白被りを防止 */
     min-height: 520px;
   }
   .right-scroll{
     position: absolute;
-    inset: 0;              /* 右コンテナを全面化 */
+    inset: 0;                /* 右コンテナを全面化 */
     overflow: auto;
-    padding: 26px 28px 26px; /* 最下部でも隠れないよう適度な余白 */
+    padding: 26px 28px 36px; /* 最下部が白に隠れないように余白増し */
   }
 
   .tcd-card{
@@ -257,7 +259,7 @@
     z-index: 5;
   }
 
-  /* Livedoor見出し（固定） */
+  /* Livedoor見出し：sticky をやめてズレを解消（通常フロー） */
   .tcd-acc-trigger{
     width:100%; text-align:left; padding:14px 20px;
     display:flex; align-items:center; gap:14px; cursor: pointer;
@@ -265,17 +267,18 @@
     background: linear-gradient(135deg, #7a4a75, #9a6194);
     border-bottom: 1px solid var(--card-edge);
     color:#fff;
-    position: sticky;
-    top: 86px;             /* サイト名カード直下（カードの高さに合わせて固定） */
-    z-index: 4;
+    /* position: sticky; top: … を削除してズレ防止 */
   }
+  /* 見出し直下のカードが食い込んで見えないよう軽く余白 */
+  .tcd-acc-trigger + .accordion-panel{ padding-top: 10px; }
+
   .tcd-caret{ font-size:2.1rem; line-height:1; color:#f3e7f2; transition:transform .2s ease; }
 
-  /* アカウントカード領域（この中だけスクロール） */
+  /* アカウントカード領域（必要に応じて使うなら） */
   .ld-panel{ padding: 0; }
   .ld-scroll{
     overflow: auto;
-    max-height: 480px;     /* JS で実測上書き（下のスクリプト） */
+    max-height: 480px;   /* 使わない場合は未使用でもOK */
     padding: 16px;
   }
 
@@ -304,6 +307,7 @@
     .tcd-caret{ transition: none; }
   }
 </style>
+
 
 {% set ALLOW_MULTI_BLOG_USER_IDS = [1, 2, 5] %}
 
