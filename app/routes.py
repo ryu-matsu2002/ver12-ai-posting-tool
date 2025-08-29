@@ -1089,7 +1089,7 @@ def accounting():
     paid_total = db.session.query(
         db.func.coalesce(db.func.sum(RyunosukeDeposit.amount), 0)
     ).scalar()
-    log.info("[accounting] t_sum_deposit=%.3f", time.perf_counter()-t0)
+    logger.info("[accounting] t_sum_deposit=%.3f", time.perf_counter()-t0)
     current_app.logger.info("[/admin/accounting] paid_total in %.3fs", time.perf_counter()-t0); t0=time.perf_counter()
 
     # ✅ 全ユーザー＆関連情報を一括取得（N+1回避・sitesはロードしない）
@@ -1103,7 +1103,7 @@ def accounting():
         .filter(User.is_admin == False)
         .all()
     )
-    log.info("[accounting] t_users=%.3f", time.perf_counter()-t1)
+    logger.info("[accounting] t_users=%.3f", time.perf_counter()-t1)
     current_app.logger.info("[/admin/accounting] load users(+relations) in %.3fs", time.perf_counter()-t0); t0=time.perf_counter()
 
     # ✅ ユーザー分類＆サイト枠合計
@@ -1171,7 +1171,7 @@ def accounting():
         .group_by(func.date_trunc("month", Site.created_at))
         .all()
     )
-    log.info("[accounting] t_site_agg=%.3f", time.perf_counter()-t2)
+    logger.info("[accounting] t_site_agg=%.3f", time.perf_counter()-t2)
     current_app.logger.info("[/admin/accounting] monthly site agg in %.3fs", time.perf_counter()-t0); t0=time.perf_counter()
 
     site_data_by_month = {}
@@ -1202,7 +1202,7 @@ def accounting():
     t3 = time.perf_counter()
     deposit_logs = RyunosukeDeposit.query.order_by(RyunosukeDeposit.deposit_date.desc()).all()
     current_app.logger.info("[/admin/accounting] load deposit_logs in %.3fs", time.perf_counter()-t0); t0=time.perf_counter()
-    log.info("[accounting] t_deposits=%.3f", time.perf_counter()-t3)
+    logger.info("[accounting] t_deposits=%.3f", time.perf_counter()-t3)
     all_months = sorted(all_months_set, reverse=True)
 
     # ✅ テンプレートへ渡す（現状維持）
@@ -1221,7 +1221,7 @@ def accounting():
         member_users=member_users,
         business_users=business_users
     )
-    log.info("[accounting] t_render=%.3f  t_total=%.3f",
+    logger.info("[accounting] t_render=%.3f  t_total=%.3f",
              time.perf_counter()-t4, time.perf_counter()-t0)
     current_app.logger.info("[/admin/accounting] render_template in %.3fs", time.perf_counter()-t0)
     return resp
@@ -1301,14 +1301,14 @@ def adjust_quota():
     quota.total_quota = max(quota.total_quota + delta, 0)
 
     # ログ記録
-    log = SiteQuotaLog(
+    quota_log = SiteQuotaLog(
         user_id=user.id,
         plan_type=quota.plan_type,
         site_count=delta,
         reason="管理者手動調整",
         created_at=datetime.utcnow()
     )
-    db.session.add(log)
+    db.session.add(quota_log)
     db.session.commit()
 
     # ✅ 集計再構築
