@@ -99,7 +99,14 @@ def prepare_captcha(email_addr: str, livedoor_id: str, password: str) -> Tuple[s
     LiveDoor 会員登録フォームに入力→送信→CAPTCHAが出たら要素スクショを保存。
     返り値: (session_id, captcha_image_path)
     """
-    sid, page = pwctl.run(pwctl.create_session(provider="livedoor"))
+    sid, page = pwctl.run(
+        pwctl.create_session(
+            provider="livedoor",
+            auto_load_latest=False,      # ← 前回の storage_state を使わない
+            storage_state_path=None      # ← 念のため明示的に未指定
+        )
+    )
+
     img_path = pwctl.run(_ld_prepare(page, email_addr, livedoor_id, password, sid))
     # 復旧用に storage_state を保存（ワーカー跨ぎ/復活にも強くする）
     pwctl.run(pwctl.save_storage_state(sid))
