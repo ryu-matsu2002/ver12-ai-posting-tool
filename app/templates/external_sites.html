@@ -1,247 +1,253 @@
 {% extends "base.html" %}
-{% block title %}外部SEO | サイト一覧{% endblock %}
+{% block title %}SEO強化ページ | 外部SEO{% endblock %}
 
 {% block content %}
 <style>
-  /* ─────────────────  カラーパレット（#3A1F5C ベース）  ───────────────── */
+  /* ===================== カラーパレット（#3A1F5C ベース） ===================== */
   :root{
     --seo-bg: #3A1F5C;        /* ベース背景（指定色） */
-    --seo-bg-2: #422468;      /* 少し明るめの面 */
-    --seo-bg-3: #4c2b7a;      /* さらに明るめ（テーブルヘッダー等） */
-    --seo-bg-4: #2f174d;      /* さらに暗めの縁/分割 */
-    --card-edge: rgba(255,255,255,.12);
+    --seo-bg-2: #43256b;      /* 一覧/右ペインの面 */
+    --seo-bg-3: #4d2e7c;      /* テーブルヘッダ */
+    --seo-bg-4: #2d184a;      /* 枠や分割用の暗色 */
+    --edge: rgba(255,255,255,.12);
 
-    --txt: #F4F2FB;           /* 基本文字（高コントラスト白） */
-    --txt-dim: #E6E0F5;       /* 補助文字 */
-    --txt-muted: #C6BDE4;
+    --txt: #ffffff;           /* 文字は白基調 */
+    --txt-dim: #E5DEF8;
 
-    --accent: #9B7CFF;        /* アクセント（リンク/強調） */
-    --accent-2: #5DD5C7;      /* 成功系/ボタン */
-    --accent-3: #FF7AAE;      /* 注意系 */
+    --accent: #B79CFF;        /* リンク等のアクセント */
+    --ok: #22c55e;            /* 緑（ボタン） */
+    --ok-strong: #16a34a;     /* 緑 hover */
+    --warn: #ef4444;
 
-    --chip-bg: rgba(255,255,255,.08);
-    --chip-fg: #fff;
-
-    --row: rgba(255,255,255,.05);    /* テーブル行の基準 */
-    --row-alt: rgba(255,255,255,.08);/* 交互行 */
+    --row: rgba(255,255,255,.06);
+    --row-alt: rgba(255,255,255,.09);
     --row-hover: rgba(255,255,255,.14);
-    --row-active: rgba(255,255,255,.22);
+    --row-active: rgba(255,255,255,.20);
 
-    --badge-dark: rgba(0,0,0,.5);
+    --chip-bg: rgba(255,255,255,.12);
+    --chip-fg: #fff;
   }
 
-  /* ─────────────────  全面背景  ───────────────── */
-  html, body, main, #main, #content, .content, .content-area,
-  .app-main, .app-content, .page-wrapper, .page-content, .container{
+  /* ===================== 全体レイアウト/背景 ===================== */
+  html, body,
+  main, #main, #content, .content, .page-wrapper, .page-content {
     background: var(--seo-bg) !important;
-    background-image: none !important;
+    color: var(--txt);
     max-width: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
-    color: var(--txt);
   }
-  /* テーマの装飾・疑似要素は抑止 */
-  .bg-primary, .bg-primaryDark, .min-h-screen{ background-image:none !important; }
+  /* ページ全体はスクロールさせない（左リストだけスクロール） */
+  html, body { height: 100%; overflow: hidden; }
+
+  /* 既存テーマの装飾無効化（軽量化） */
+  .bg-primary, .bg-primaryDark, .min-h-screen { background-image: none !important; }
   .bg-primary::before, .bg-primary::after,
   .bg-primaryDark::before, .bg-primaryDark::after,
-  .min-h-screen::before, .min-h-screen::after{ content:none !important; }
+  .min-h-screen::before, .min-h-screen::after { content: none !important; }
 
-  /* ─────────────────  レイアウト  ───────────────── */
-  .ext-page { width:100%; padding: 16px 18px; }
+  /* スクロールバー（軽め） */
+  *{ scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.35) transparent; }
+  *::-webkit-scrollbar{ width: 10px; height: 10px; }
+  *::-webkit-scrollbar-thumb{
+    background: transparent; border-radius: 999px;
+    box-shadow: inset 3px 0 0 rgba(255,255,255,.35);
+  }
+  *::-webkit-scrollbar-track{ background: transparent; }
+
+  /* ===================== 見出し ===================== */
+  .page-title {
+    font-size: 1.5rem; font-weight: 700; letter-spacing: .02em;
+    padding: 14px 20px 6px 20px;
+  }
+
+  /* ===================== 連結2カラム（左：サイト / 右：詳細） ===================== */
+  .ext-page{ height: calc(100vh - 0px); display: grid; grid-template-rows: auto 1fr; }
   .seo-layout{
-    display:grid;
-    grid-template-columns: 1fr 420px;  /* 左：一覧 / 右：詳細 */
-    gap: 16px;
+    display: grid;
+    grid-template-columns: minmax(620px,1fr) 440px;
+    gap: 0;                    /* ← “つながる”見た目のため隙間ゼロ */
+    height: 100%;
   }
-  @media (max-width: 1280px){ .seo-layout{ grid-template-columns: 1fr; } }
+  @media (max-width: 1200px){ .seo-layout{ grid-template-columns: 1fr; } }
 
-  /* ─────────────────  左：一覧テーブル（ダーク UI）  ───────────────── */
-  .left-list{
+  /* 左右をつなげる背景 */
+  .left-pane{
     background: var(--seo-bg-2);
-    border: 1px solid var(--card-edge);
-    border-radius: 12px;
-    overflow: hidden;
-    box-shadow: 0 1px 2px rgba(0,0,0,.2);
+    border-right: 1px solid var(--edge);
+    display: grid; grid-template-rows: auto 1fr;
   }
+  .right-pane{
+    background: var(--seo-bg-2);
+    border-left: 1px solid var(--edge);
+    position: relative;
+    display: grid; grid-template-rows: auto 1fr;
+  }
+
+  /* 選択状態で左右にブリッジの強調（視覚的に一体化） */
+  .seo-layout.connected .left-pane{ box-shadow: inset -6px 0 0 #fff1; }
+  .seo-layout.connected .right-pane{ box-shadow: inset 6px 0 0 #fff1; }
+
+  /* ---------------- 左：サイト一覧（上：検索 / 下：スクロール） ---------------- */
   .search-wrap{
-    padding: 10px 12px 0;
-    background: linear-gradient(180deg,var(--seo-bg-3),var(--seo-bg-2));
-    border-bottom: 1px solid var(--card-edge);
+    padding: 12px 14px;
+    background: var(--seo-bg-3);
+    border-bottom: 1px solid var(--edge);
   }
   .search-wrap input{
-    width:100%;
-    background: rgba(255,255,255,.08);
-    color: var(--txt);
-    border: 1px solid var(--card-edge);
-    border-radius: 10px;
-    padding: 10px 12px;
-    outline: none;
+    width: 100%; background: rgba(255,255,255,.10); color: var(--txt);
+    border: 1px solid var(--edge); border-radius: 10px; padding: 10px 12px; outline: none;
   }
-  .search-wrap input::placeholder{ color: var(--txt-muted); }
+  .search-wrap input::placeholder{ color: var(--txt-dim); }
 
-  .tbl{
-    width:100%;
-    border-collapse: separate;
-    border-spacing: 0;
-    font-size: 0.95rem;
+  /* 左リストは単独スクロール */
+  .sites-scroll{
+    overflow: auto;
+    height: 100%;
   }
+
+  table.tbl{ width:100%; border-collapse: separate; border-spacing: 0; }
   .tbl thead th{
-    background: var(--seo-bg-3);
-    color: var(--txt);
-    font-weight: 600;
-    text-align: left;
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--card-edge);
-    position: sticky;
-    top: 0;
-    z-index: 5;
+    background: var(--seo-bg-3); color: var(--txt);
+    text-align: left; font-weight: 700; padding: 10px 12px; font-size: .95rem;
+    position: sticky; top: 0; z-index: 2; border-bottom: 1px solid var(--edge);
   }
-  .tbl tbody tr{
-    background: var(--row);
-    border-bottom: 1px solid var(--card-edge);
-    cursor: pointer;
-    transition: background .15s ease, box-shadow .15s ease;
-  }
+  .tbl tbody tr{ background: var(--row); border-bottom: 1px solid var(--edge); }
   .tbl tbody tr:nth-child(odd){ background: var(--row-alt); }
   .tbl tbody tr:hover{ background: var(--row-hover); }
   .tbl tbody tr.is-active{
     background: var(--row-active);
-    box-shadow: inset -6px 0 0 #fff;
+    box-shadow: inset -6px 0 0 #ffffff;
   }
-  .tbl td{
-    padding: 10px 12px;
-    color: var(--txt);
-    vertical-align: middle;
+  .tbl td{ padding: 10px 12px; vertical-align: middle; color: var(--txt); }
+  .cell-center{ text-align: center; }
+  .cell-num-rose{ color: #FF8EBE; font-weight: 700; text-align:center; }
+  .cell-num-violet{ color: #BCA7FF; font-weight: 700; text-align:center; }
+
+  /* サイト名（白文字/URL非表示） */
+  .site-name-link{
+    color: var(--txt); text-decoration: underline; text-underline-offset: 2px;
   }
-  .tbl .cell-num-rose{ color: #FF8EBE; font-weight: 700; text-align: center; }
-  .tbl .cell-num-violet{ color: #BCA7FF; font-weight: 700; text-align: center; }
+  .site-name-link:hover{ color: var(--accent); }
 
-  /* サイト名セル内のリンク/URL */
-  .site-name-link{ color: var(--accent); text-decoration: underline; }
-  .site-name-link:hover{ color: #C4AEFF; }
-  .site-url{ color: var(--txt-muted); font-size: .86rem; }
-
-  /* バッジ（GSC / LD / note / Ame） */
+  /* バッジ（LD/note/Ame） ※GSCバッジは撤去 */
   .badge{ display:inline-flex; align-items:center; gap:6px; padding: 4px 8px;
           border-radius: 999px; font-size:.8rem; background: var(--chip-bg); color: var(--chip-fg); }
-  .badge .count{ background: var(--badge-dark); color:#fff; border-radius: 999px; padding: 1px 6px; font-weight:700; }
-  .badge-gsc{ background: #0EA5E9; color:#02212E; font-weight:700; padding: 2px 6px; border-radius:6px; }
-  .badge-ld{ background: #A888F8; color:#26153B; }
-  .badge-note{ background: #7A708B; color:#1b1422; }
-  .badge-ame{ background: #2ED3B7; color:#05261F; }
+  .badge .count{ background: rgba(0,0,0,.5); color:#fff; border-radius: 999px; padding: 1px 6px; font-weight:700; }
+  .badge-ld{   background:#A888F8; color:#251339; }
+  .badge-note{ background:#7A708B; color:#1b1422; }
+  .badge-ame{  background:#2ED3B7; color:#05261F; }
 
-  /* ─────────────────  右：詳細ペイン  ───────────────── */
-  .right-pane{
-    background: var(--seo-bg-2);
-    border: 1px solid var(--card-edge);
-    border-radius: 12px;
-    position: relative;
-    overflow: hidden;
-    min-height: 520px;
-    box-shadow: 0 1px 2px rgba(0,0,0,.2);
+  /* GSCボタン列 */
+  .gsc-btn{
+    display:inline-flex; align-items:center; gap:.35rem;
+    padding: .35rem .6rem; border-radius: .5rem;
+    background: rgba(255,255,255,.12); color:#fff; border:1px solid var(--edge);
+    font-size:.85rem; line-height:1;
   }
-  .right-scroll{ position:absolute; inset:0; overflow:auto; padding: 20px 22px 36px; }
+  .gsc-btn:hover{ background: rgba(255,255,255,.18); }
 
-  .card-grad{
-    background: linear-gradient(135deg,#5b2f7f,#7e4aa7);
-    border:1px solid var(--card-edge);
-    border-radius:16px;
+  /* ---------------- 右：アカウント側（固定ヘッダ + 内部スクロール） ---------------- */
+  .right-head{
+    padding: 14px 16px;
+    background: var(--seo-bg-3);
+    border-bottom: 1px solid var(--edge);
+    position: sticky; top: 0; z-index: 3;
+  }
+  .right-head .title{ font-weight: 700; font-size: 1rem; }
+  .right-body{ overflow: auto; padding: 16px; }
+
+  .card{
+    background: linear-gradient(135deg,#5b2f7f,#7b49a3);
+    border: 1px solid var(--edge);
+    border-radius: 14px;
     color:#fff;
-    box-shadow: 0 3px 10px rgba(0,0,0,.18), 0 0 0 1px rgba(255,255,255,.05) inset;
   }
-  .card-head{ position:sticky; top:0; z-index:5; padding:16px 18px; }
-  .card-head a{ color:#fff; text-decoration: underline; }
+  .card + .card{ margin-top: 14px; }
 
-  /* アコーディオン */
   .acc-trigger{
-    width:100%; text-align:left; padding:14px 18px;
-    display:flex; align-items:center; gap:14px; cursor:pointer;
-    background: linear-gradient(135deg,#6b3b94,#8b58b6);
-    color:#fff; border-bottom:1px solid var(--card-edge);
-    border-top-left-radius:16px; border-top-right-radius:16px;
+    width:100%; text-align:left; padding:14px 16px; border-bottom:1px solid var(--edge);
+    background: linear-gradient(135deg,#6b3b94,#8b58b6); color:#fff;
+    display:flex; align-items:center; gap:10px; cursor: pointer;
+    border-top-left-radius: 14px; border-top-right-radius: 14px;
   }
-  .caret{ font-size:2rem; line-height:1; color:#EFE7FF; transition:transform .18s ease; }
-  .ld-scroll{ overflow:auto; max-height:480px; padding: 14px; }
+  .caret{ font-size: 1.8rem; line-height: 1; color:#F6EDFF; transition: transform .12s ease; }
+  .accordion-panel{ display: block; } /* 初期表示ON */
+  .accordion-panel.hidden{ display: none; }
 
-  /* 右側のボタン */
+  .ld-scroll{ overflow: auto; max-height: 480px; padding: 12px; }
+
   .btn{
-    display:inline-flex; align-items:center; justify-content:center;
-    padding: .55rem .9rem; border-radius: .75rem; font-weight:600; gap:.4rem;
-    transition: filter .15s ease, opacity .15s ease, background .15s ease;
+    display:inline-flex; align-items:center; justify-content:center; gap:.4rem;
+    padding: .6rem .9rem; border-radius: .7rem; font-weight: 700;
+    border: 1px solid rgba(255,255,255,.25);
+    transition: filter .12s ease, opacity .12s ease, background .12s ease;
   }
-  .btn-outline{
-    border:1px solid rgba(255,255,255,.3); color:#fff; background: rgba(255,255,255,.08);
-  }
-  .btn-outline:hover{ background: rgba(255,255,255,.14); }
-  .btn-primary{ background: #6659F3; color:#fff; }
-  .btn-primary:hover{ filter: brightness(1.05); }
-  .btn-muted{ background: #8b84b8; color:#fff; opacity:.85; }
+  .btn-green{ background: var(--ok); color:#04170c; border-color: #15803d; }
+  .btn-green:hover{ background: var(--ok-strong); color:#fff; }
+  .btn-outline{ background: rgba(255,255,255,.10); color:#fff; }
+  .btn-outline:hover{ background: rgba(255,255,255,.18); }
 
-  /* CAPTCHAモーダルの文字色調整（白系ページに出すためそのまま） */
-  /* 行のスクロールバー(控えめ) */
-  *{ scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.35) transparent; }
-  *::-webkit-scrollbar{ width:10px; height:10px; }
-  *::-webkit-scrollbar-thumb{
-    background: transparent; border-radius:999px;
-    box-shadow: inset 3px 0 0 rgba(255,255,255,.35);
-  }
-  *::-webkit-scrollbar-track{ background: transparent; }
+  .metric{ color:#fff; font-size:.95rem; display:flex; flex-wrap:wrap; gap:1rem; }
+  .metric b{ font-weight:700; }
+
+  /* 軽量化：アニメーション極小 */
+  .caret, .btn, .tbl tbody tr{ will-change: background; }
 </style>
 
 {% set ALLOW_MULTI_BLOG_USER_IDS = [1, 2, 5] %}
 
 <div class="ext-page">
-  <div class="seo-layout">
+  <div class="page-title">SEO強化ページ</div>
 
-    <!-- ================= 左：サイト一覧 ================= -->
-    <section class="left-list">
+  <div id="seoLayout" class="seo-layout">
+    <!-- --------------- 左：サイト一覧（つながる面） --------------- -->
+    <section class="left-pane">
       <div class="search-wrap">
         <input id="siteSearch" type="search" placeholder="サイトを検索" autocomplete="off">
       </div>
 
-      <div class="overflow-auto">
+      <div class="sites-scroll">
         <table class="tbl" id="siteTable">
           <thead>
           <tr>
-            <th class="w-[44%]">サイト名</th>
-            <th class="text-center">ライブドア</th>
-            <th class="text-center">note</th>
-            <th class="text-center">アメブロ</th>
-            <th class="text-center">クリック数</th>
-            <th class="text-center">表示回数</th>
+            <th>サイト名</th>
+            <th class="cell-center">ライブドア</th>
+            <th class="cell-center">note</th>
+            <th class="cell-center">アメブロ</th>
+            <th class="cell-center">クリック数</th>
+            <th class="cell-center">表示回数</th>
+            <th class="cell-center">GSC</th>
           </tr>
           </thead>
           <tbody id="siteTbody">
           {% for s in sites %}
+            {% set _raw = (s.url or '')|replace('https://','')|replace('http://','')|replace('www.','') %}
             <tr data-site-id="{{ s.id }}">
               <td>
-                <div class="flex items-center gap-2">
-                  {% if s.gsc_connected %}
-                    <span class="badge-gsc">GSC</span>
-                  {% endif %}
-                  <div class="min-w-0">
-                    <div class="truncate">
-                      <a href="{{ s.url }}" target="_blank" class="site-name-link">{{ s.name }}</a>
-                    </div>
-                    {% if s.url %}
-                    <div class="site-url truncate">
-                      {{ s.url|replace('https://','')|replace('http://','')|replace('www.','') }}
-                    </div>
-                    {% endif %}
-                  </div>
-                </div>
+                <a href="{{ s.url }}" target="_blank" class="site-name-link">{{ s.name }}</a>
               </td>
-              <td class="text-center">
+              <td class="cell-center">
                 <span class="badge badge-ld">LD <span class="count">{{ s.ld_count|default(0) }}</span></span>
               </td>
-              <td class="text-center">
+              <td class="cell-center">
                 <span class="badge badge-note">note <span class="count">{{ s.note_count|default(0) }}</span></span>
               </td>
-              <td class="text-center">
+              <td class="cell-center">
                 <span class="badge badge-ame">Ame <span class="count">{{ s.ameba_count|default(0) }}</span></span>
               </td>
               <td class="cell-num-rose">{{ s.clicks or 0 }}</td>
               <td class="cell-num-violet">{{ s.impressions or 0 }}</td>
+              <td class="cell-center">
+                {% set gsc_url = (s.url or '') %}
+                {% if gsc_url %}
+                  {# Search Console のプロパティURL（パフォーマンス画面） #}
+                  {% set rsrc = 'https://search.google.com/search-console/performance/search-analytics?resource_id=' ~ gsc_url %}
+                  <a class="gsc-btn" href="{{ rsrc }}" target="_blank" rel="noopener">GSC ↗</a>
+                {% else %}
+                  <span class="gsc-btn" style="opacity:.5; pointer-events:none;">GSC</span>
+                {% endif %}
+              </td>
             </tr>
           {% endfor %}
           </tbody>
@@ -249,42 +255,29 @@
       </div>
     </section>
 
-    <!-- ================= 右：選択中サイト ================= -->
+    <!-- --------------- 右：アカウントカード（つながる面） --------------- -->
     <aside id="sitePanes" class="right-pane">
-      <div class="right-scroll" id="rightScroll">
+      {% for s in sites %}
+        {% set _all_accounts = [] %}
+        {% if s.livedoor_accounts is defined %}
+          {% set _all_accounts = s.livedoor_accounts %}
+        {% elif s.external_accounts is defined %}
+          {% set _all_accounts = s.external_accounts %}
+        {% elif s.accounts is defined %}
+          {% set _all_accounts = s.accounts %}
+        {% endif %}
+        {% set tab_cnt = s.ld_count | default(_all_accounts|length) %}
+        {% set livedoor_count = _all_accounts | length %}
+        {% set can_add_livedoor = (current_user.id in ALLOW_MULTI_BLOG_USER_IDS) or (livedoor_count == 0) %}
 
-        {% for s in sites %}
-          {% set _all_accounts = [] %}
-          {% if s.livedoor_accounts is defined %}
-            {% set _all_accounts = s.livedoor_accounts %}
-          {% elif s.external_accounts is defined %}
-            {% set _all_accounts = s.external_accounts %}
-          {% elif s.accounts is defined %}
-            {% set _all_accounts = s.accounts %}
-          {% endif %}
-          {% set tab_cnt = s.ld_count | default(_all_accounts|length) %}
-          {% set livedoor_count = _all_accounts | length %}
-          {% set can_add_livedoor = (current_user.id in ALLOW_MULTI_BLOG_USER_IDS) or (livedoor_count == 0) %}
+        {% if loop.first %}
+        <div id="site-panel-{{ s.id }}" class="site-panel">
+          <div class="right-head">
+            <div class="title">{{ s.name }}</div>
+          </div>
 
-          {% if loop.first %}
-          <section id="site-panel-{{ s.id }}" class="site-panel">
-            <!-- サイト名 -->
-            <div class="card-grad card-head mb-4">
-              <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-                <div class="min-w-0">
-                  <div class="text-white text-lg font-semibold break-words">{{ s.name }}</div>
-                  {% if s.url %}
-                    <a href="{{ s.url }}" class="break-all" target="_blank">{{ s.url }}</a>
-                  {% endif %}
-                </div>
-                <div class="flex items-center gap-2 md:self-start">
-                  <a href="{{ url_for('main.external_accounts') }}?site_id={{ s.id }}" class="btn btn-outline text-sm">📒 無料ブログ一覧</a>
-                </div>
-              </div>
-            </div>
-
-            <!-- Livedoor アカウント群 -->
-            <section class="card-grad overflow-hidden">
+          <div class="right-body">
+            <div class="card">
               <button class="acc-trigger accordion-trigger"
                       data-acc-target="#tab-ld-{{ s.id }}"
                       aria-controls="tab-ld-{{ s.id }}"
@@ -294,91 +287,103 @@
               </button>
 
               <div id="tab-ld-{{ s.id }}" class="accordion-panel">
-                <div class="ld-panel">
+                <div class="ld-scroll">
                   {% if _all_accounts and _all_accounts|length > 0 %}
-                    <div class="ld-scroll" id="ld-scroll-{{ s.id }}">
-                      <div class="grid grid-cols-1 gap-4">
-                        {% for acc in _all_accounts %}
-                          <div id="acc-card-{{ acc.id }}" class="card-grad p-5 flex flex-col gap-4">
-                            <div class="flex items-start justify-between gap-3">
-                              <div class="min-w-0">
-                                {% if acc.public_url %}
-                                  <a href="{{ acc.public_url }}" target="_blank" class="underline break-all text-white">{{ acc.public_url }}</a>
-                                {% endif %}
-                              </div>
-                              <div class="flex items-center gap-2">
-                                <button class="opacity-70 hover:opacity-100 text-lg leading-none" title="詳細/ログ（準備中）">⋯</button>
-                                <button type="button"
-                                  class="btn btn-outline text-xs"
-                                  data-acct-id="{{ acc.id }}" data-site-id="{{ s.id }}"
-                                  onclick="deleteExternalAccount(this.dataset.acctId, this.dataset.siteId)"
-                                  title="この無料ブログと記事を削除">削除</button>
-                              </div>
-                            </div>
-
-                            <div class="text-white/95 text-sm flex flex-wrap gap-4">
-                              <div>投稿完了: <span class="font-semibold">{{ acc.stat_posted|default(0) }}</span></div>
-                              <div>記事生成済み: <span class="font-semibold">{{ acc.stat_generated|default(0) }}</span></div>
-                              <div>総記事数: <span class="font-semibold">{{ acc.stat_total|default(0) }}</span></div>
-                              <div><a class="underline" href="{{ url_for('main.external_accounts') }}?site_id={{ s.id }}">記事一覧</a></div>
-                            </div>
-
-                            <div id="actionArea-acc-{{ acc.id }}">
-                              {% if not acc.api_key %}
-                                <button type="button"
-                                  class="btn btn-primary w-full"
-                                  data-site-id="{{ s.id }}" data-account-id="{{ acc.id }}" data-platform="livedoor"
-                                  onclick="handleCaptchaClick(this)">クリックで新規ブログ作成開始</button>
-                              {% else %}
-                                {% set _generated_once =
-                                     (acc.generation_locked) or
-                                     (acc.stat_total|default(0) > 0) or
-                                     (acc.stat_generated|default(0) > 0) or
-                                     (acc.stat_posted|default(0) > 0) %}
-                                {% if _generated_once %}
-                                  <button class="btn btn-muted w-full cursor-not-allowed" disabled>
-                                    記事生成は実行済み（再実行不可）
-                                  </button>
-                                {% else %}
-                                  <a href="/generate?site_id={{ s.id }}&account_id={{ acc.id }}"
-                                     class="btn btn-primary w-full"
-                                     data-account-id="{{ acc.id }}" onclick="return lockAndGo(this)">📝 記事生成＆投稿</a>
-                                {% endif %}
-                              {% endif %}
-                            </div>
+                    <div class="grid grid-cols-1 gap-4">
+                      {% for acc in _all_accounts %}
+                      <div id="acc-card-{{ acc.id }}" class="card p-4">
+                        <div class="flex items-start justify-between gap-3">
+                          <div class="min-w-0">
+                            {% if acc.public_url %}
+                              <a href="{{ acc.public_url }}" target="_blank" class="underline break-all text-white">{{ acc.public_url }}</a>
+                            {% endif %}
                           </div>
-                        {% endfor %}
+                          <div class="flex items-center gap-2">
+                            <button class="opacity-70 hover:opacity-100 text-lg leading-none" title="詳細/ログ（準備中）">⋯</button>
+                            <button
+                              type="button"
+                              class="btn btn-outline text-xs"
+                              data-acct-id="{{ acc.id }}"
+                              data-site-id="{{ s.id }}"
+                              onclick="deleteExternalAccount(this.dataset.acctId, this.dataset.siteId)">
+                              削除
+                            </button>
+                          </div>
+                        </div>
+
+                        <div class="metric mt-2">
+                          <div>投稿完了: <b>{{ acc.stat_posted|default(0) }}</b></div>
+                          <div>記事生成済み: <b>{{ acc.stat_generated|default(0) }}</b></div>
+                          <div>総記事数: <b>{{ acc.stat_total|default(0) }}</b></div>
+                          <div><a class="underline" href="{{ url_for('main.external_accounts') }}?site_id={{ s.id }}">記事一覧</a></div>
+                        </div>
+
+                        <div class="mt-3" id="actionArea-acc-{{ acc.id }}">
+                          {% if not acc.api_key %}
+                            <button
+                              type="button"
+                              class="btn btn-green w-full"
+                              data-site-id="{{ s.id }}"
+                              data-account-id="{{ acc.id }}"
+                              data-platform="livedoor"
+                              onclick="handleCaptchaClick(this)">
+                              クリックで新規ブログ作成開始
+                            </button>
+                          {% else %}
+                            {% set _generated_once =
+                                 (acc.generation_locked) or
+                                 (acc.stat_total|default(0) > 0) or
+                                 (acc.stat_generated|default(0) > 0) or
+                                 (acc.stat_posted|default(0) > 0) %}
+                            {% if _generated_once %}
+                              <button class="btn btn-outline w-full cursor-not-allowed" disabled>
+                                記事生成は実行済み（再実行不可）
+                              </button>
+                            {% else %}
+                              <a
+                                href="/generate?site_id={{ s.id }}&account_id={{ acc.id }}"
+                                class="btn btn-green w-full"
+                                data-account-id="{{ acc.id }}"
+                                onclick="return lockAndGo(this)">
+                                このボタンをクリックして完了してください
+                              </a>
+                            {% endif %}
+                          {% endif %}
+                        </div>
                       </div>
+                      {% endfor %}
                     </div>
                   {% else %}
-                    <div class="ld-scroll" id="ld-scroll-{{ s.id }}">
-                      <div class="px-5 py-4 text-sm opacity-90">まだLivedoorブログはありません。</div>
-                    </div>
+                    <div class="px-5 py-4 text-sm opacity-90">まだLivedoorブログはありません。</div>
                   {% endif %}
                 </div>
 
-                <div class="px-5 py-4 border-t border-[var(--card-edge)]">
+                <div class="px-5 py-4 border-t border-[var(--edge)]">
                   {% if can_add_livedoor %}
                     <button id="addBtn-{{ s.id }}" type="button"
                             class="btn btn-outline text-sm"
-                            data-site-id="{{ s.id }}" onclick="newAccountStart(this)">＋ ブログ追加</button>
+                            data-site-id="{{ s.id }}"
+                            onclick="newAccountStart(this)">
+                      ＋ ブログ追加
+                    </button>
                   {% else %}
                     <button id="addBtn-{{ s.id }}" type="button"
                             class="btn btn-outline text-sm opacity-60 cursor-not-allowed"
                             data-site-id="{{ s.id }}" disabled
-                            title="このサイトではLivedoorブログは1つまで（許可ユーザーは除く）">＋ ブログ追加</button>
+                            title="このサイトではLivedoorブログは1つまで（許可ユーザーは除く）">
+                      ＋ ブログ追加
+                    </button>
                   {% endif %}
                 </div>
               </div>
-            </section>
-          </section>
-          {% endif %}
-        {% endfor %}
-
-      </div>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+      {% endfor %}
     </aside>
 
-    <!-- ====== 非アクティブサイトは template に退避 ====== -->
+    {# ====== 非アクティブサイトは template に退避 ====== #}
     {% for s in sites %}
       {% if not loop.first %}
         {% set _all_accounts = [] %}
@@ -392,108 +397,98 @@
         {% set tab_cnt = s.ld_count | default(_all_accounts|length) %}
         {% set livedoor_count = _all_accounts | length %}
         {% set can_add_livedoor = (current_user.id in ALLOW_MULTI_BLOG_USER_IDS) or (livedoor_count == 0) %}
+
         <template id="tpl-site-{{ s.id }}">
-          <section id="site-panel-{{ s.id }}" class="site-panel">
-            <div class="card-grad card-head mb-4">
-              <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-                <div class="min-w-0">
-                  <div class="text-white text-lg font-semibold break-words">{{ s.name }}</div>
-                  {% if s.url %}<a href="{{ s.url }}" class="break-all" target="_blank">{{ s.url }}</a>{% endif %}
-                </div>
-                <div class="flex items-center gap-2 md:self-start">
-                  <a href="{{ url_for('main.external_accounts') }}?site_id={{ s.id }}" class="btn btn-outline text-sm">📒 無料ブログ一覧</a>
+          <div id="site-panel-{{ s.id }}" class="site-panel">
+            <div class="right-head"><div class="title">{{ s.name }}</div></div>
+
+            <div class="right-body">
+              <div class="card">
+                <button class="acc-trigger accordion-trigger"
+                        data-acc-target="#tab-ld-{{ s.id }}"
+                        aria-controls="tab-ld-{{ s.id }}"
+                        aria-expanded="true">
+                  <span class="caret accordion-caret rotate-180">▾</span>
+                  <span>Livedoor <span class="ml-1 text-xs opacity-80">({{ tab_cnt }})</span></span>
+                </button>
+
+                <div id="tab-ld-{{ s.id }}" class="accordion-panel">
+                  <div class="ld-scroll">
+                    {% if _all_accounts and _all_accounts|length > 0 %}
+                      <div class="grid grid-cols-1 gap-4">
+                        {% for acc in _all_accounts %}
+                        <div id="acc-card-{{ acc.id }}" class="card p-4">
+                          <div class="flex items-start justify-between gap-3">
+                            <div class="min-w-0">
+                              {% if acc.public_url %}
+                                <a href="{{ acc.public_url }}" target="_blank" class="underline break-all text-white">{{ acc.public_url }}</a>
+                              {% endif %}
+                            </div>
+                            <div class="flex items-center gap-2">
+                              <button class="opacity-70 hover:opacity-100 text-lg leading-none" title="詳細/ログ（準備中）">⋯</button>
+                              <button type="button" class="btn btn-outline text-xs"
+                                data-acct-id="{{ acc.id }}" data-site-id="{{ s.id }}"
+                                onclick="deleteExternalAccount(this.dataset.acctId, this.dataset.siteId)">削除</button>
+                            </div>
+                          </div>
+
+                          <div class="metric mt-2">
+                            <div>投稿完了: <b>{{ acc.stat_posted|default(0) }}</b></div>
+                            <div>記事生成済み: <b>{{ acc.stat_generated|default(0) }}</b></div>
+                            <div>総記事数: <b>{{ acc.stat_total|default(0) }}</b></div>
+                            <div><a class="underline" href="{{ url_for('main.external_accounts') }}?site_id={{ s.id }}">記事一覧</a></div>
+                          </div>
+
+                          <div class="mt-3" id="actionArea-acc-{{ acc.id }}">
+                            {% if not acc.api_key %}
+                              <button type="button" class="btn btn-green w-full"
+                                data-site-id="{{ s.id }}" data-account-id="{{ acc.id }}" data-platform="livedoor"
+                                onclick="handleCaptchaClick(this)">クリックで新規ブログ作成開始</button>
+                            {% else %}
+                              {% set _generated_once =
+                                   (acc.generation_locked) or
+                                   (acc.stat_total|default(0) > 0) or
+                                   (acc.stat_generated|default(0) > 0) or
+                                   (acc.stat_posted|default(0) > 0) %}
+                              {% if _generated_once %}
+                                <button class="btn btn-outline w-full cursor-not-allowed" disabled>記事生成は実行済み（再実行不可）</button>
+                              {% else %}
+                                <a href="/generate?site_id={{ s.id }}&account_id={{ acc.id }}"
+                                   class="btn btn-green w-full"
+                                   data-account-id="{{ acc.id }}"
+                                   onclick="return lockAndGo(this)">このボタンをクリックして完了してください</a>
+                              {% endif %}
+                            {% endif %}
+                          </div>
+                        </div>
+                        {% endfor %}
+                      </div>
+                    {% else %}
+                      <div class="px-5 py-4 text-sm opacity-90">まだLivedoorブログはありません。</div>
+                    {% endif %}
+                  </div>
+
+                  <div class="px-5 py-4 border-t border-[var(--edge)]">
+                    {% if can_add_livedoor %}
+                      <button id="addBtn-{{ s.id }}" type="button" class="btn btn-outline text-sm"
+                              data-site-id="{{ s.id }}" onclick="newAccountStart(this)">＋ ブログ追加</button>
+                    {% else %}
+                      <button id="addBtn-{{ s.id }}" type="button"
+                              class="btn btn-outline text-sm opacity-60 cursor-not-allowed"
+                              data-site-id="{{ s.id }}" disabled>＋ ブログ追加</button>
+                    {% endif %}
+                  </div>
                 </div>
               </div>
             </div>
-
-            <section class="card-grad overflow-hidden">
-              <button class="acc-trigger accordion-trigger"
-                      data-acc-target="#tab-ld-{{ s.id }}"
-                      aria-controls="tab-ld-{{ s.id }}"
-                      aria-expanded="true">
-                <span class="caret accordion-caret rotate-180">▾</span>
-                <span>Livedoor <span class="ml-1 text-xs opacity-80">({{ tab_cnt }})</span></span>
-              </button>
-
-              <div id="tab-ld-{{ s.id }}" class="accordion-panel">
-                <div class="ld-panel">
-                  {% if _all_accounts and _all_accounts|length > 0 %}
-                    <div class="ld-scroll" id="ld-scroll-{{ s.id }}">
-                      <div class="grid grid-cols-1 gap-4">
-                        {% for acc in _all_accounts %}
-                          <div id="acc-card-{{ acc.id }}" class="card-grad p-5 flex flex-col gap-4">
-                            <div class="flex items-start justify-between gap-3">
-                              <div class="min-w-0">
-                                {% if acc.public_url %}
-                                  <a href="{{ acc.public_url }}" target="_blank" class="underline break-all text-white">{{ acc.public_url }}</a>
-                                {% endif %}
-                              </div>
-                              <div class="flex items-center gap-2">
-                                <button class="opacity-70 hover:opacity-100 text-lg leading-none" title="詳細/ログ（準備中）">⋯</button>
-                                <button type="button" class="btn btn-outline text-xs"
-                                  data-acct-id="{{ acc.id }}" data-site-id="{{ s.id }}"
-                                  onclick="deleteExternalAccount(this.dataset.acctId, this.dataset.siteId)">削除</button>
-                              </div>
-                            </div>
-
-                            <div class="text-white/95 text-sm flex flex-wrap gap-4">
-                              <div>投稿完了: <span class="font-semibold">{{ acc.stat_posted|default(0) }}</span></div>
-                              <div>記事生成済み: <span class="font-semibold">{{ acc.stat_generated|default(0) }}</span></div>
-                              <div>総記事数: <span class="font-semibold">{{ acc.stat_total|default(0) }}</span></div>
-                              <div><a class="underline" href="{{ url_for('main.external_accounts') }}?site_id={{ s.id }}">記事一覧</a></div>
-                            </div>
-
-                            <div id="actionArea-acc-{{ acc.id }}">
-                              {% if not acc.api_key %}
-                                <button type="button" class="btn btn-primary w-full"
-                                  data-site-id="{{ s.id }}" data-account-id="{{ acc.id }}" data-platform="livedoor"
-                                  onclick="handleCaptchaClick(this)">クリックで新規ブログ作成開始</button>
-                              {% else %}
-                                {% set _generated_once =
-                                     (acc.generation_locked) or
-                                     (acc.stat_total|default(0) > 0) or
-                                     (acc.stat_generated|default(0) > 0) or
-                                     (acc.stat_posted|default(0) > 0) %}
-                                {% if _generated_once %}
-                                  <button class="btn btn-muted w-full cursor-not-allowed" disabled>記事生成は実行済み（再実行不可）</button>
-                                {% else %}
-                                  <a href="/generate?site_id={{ s.id }}&account_id={{ acc.id }}"
-                                     class="btn btn-primary w-full"
-                                     data-account-id="{{ acc.id }}" onclick="return lockAndGo(this)">📝 記事生成＆投稿</a>
-                                {% endif %}
-                              {% endif %}
-                            </div>
-                          </div>
-                        {% endfor %}
-                      </div>
-                    </div>
-                  {% else %}
-                    <div class="ld-scroll" id="ld-scroll-{{ s.id }}">
-                      <div class="px-5 py-4 text-sm opacity-90">まだLivedoorブログはありません。</div>
-                    </div>
-                  {% endif %}
-                </div>
-
-                <div class="px-5 py-4 border-top border-[var(--card-edge)]">
-                  {% if can_add_livedoor %}
-                    <button id="addBtn-{{ s.id }}" type="button" class="btn btn-outline text-sm"
-                            data-site-id="{{ s.id }}" onclick="newAccountStart(this)">＋ ブログ追加</button>
-                  {% else %}
-                    <button id="addBtn-{{ s.id }}" type="button"
-                            class="btn btn-outline text-sm opacity-60 cursor-not-allowed"
-                            data-site-id="{{ s.id }}" disabled>＋ ブログ追加</button>
-                  {% endif %}
-                </div>
-              </div>
-            </section>
-          </section>
+          </div>
         </template>
       {% endif %}
     {% endfor %}
   </div>
 </div>
 
-<!-- ============== CAPTCHAモーダル＆トースト（既存） ============== -->
+<!-- ===================== CAPTCHAモーダル＆トースト（既存） ===================== -->
 <div id="captchaModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
   <div class="bg-white p-6 rounded-2xl shadow-lg w-[420px] max-w-[92vw] relative">
     <button onclick="closeCaptcha()" class="absolute top-2 right-2 text-gray-500 hover:text-gray-800 text-xl leading-none">×</button>
@@ -524,6 +519,7 @@
 
 {% block scripts %}
 <script>
+  /* ========= 軽量ユーティリティ ========= */
   const CURRENT_USER_ID = Number('{{ current_user.id | default(0, true) | int }}');
   const ALLOW_MULTI_BLOG_USER_IDS = [1, 2, 5];
   const SELECT_KEY = 'extseo.selectedSite';
@@ -542,16 +538,14 @@
     localStorage.setItem(key, '1'); disableLink(el); return true;
   }
 
-  /* 左：検索フィルタ */
+  /* ========= 左：検索フィルタ ========= */
   const siteSearch = document.getElementById('siteSearch');
   function filterSites(q){
     const needle = (q||'').toLowerCase().replace(/\s+/g,'');
     let firstVisible = null;
     document.querySelectorAll('#siteTbody tr').forEach(tr=>{
       const name = (tr.querySelector('.site-name-link')?.textContent || '').toLowerCase();
-      const url  = (tr.querySelector('.site-url')?.textContent || '').toLowerCase();
-      const hay = (name + ' ' + url).replace(/\s+/g,'');
-      const show = !needle || hay.includes(needle);
+      const show = !needle || name.replace(/\s+/g,'').includes(needle);
       tr.style.display = show ? '' : 'none';
       if(show && !firstVisible) firstVisible = tr;
     });
@@ -562,24 +556,23 @@
     }
   }
   let _ft=null; siteSearch?.addEventListener('input',e=>{
-    clearTimeout(_ft); _ft=setTimeout(()=>filterSites(e.target.value), 120);
+    clearTimeout(_ft); _ft=setTimeout(()=>filterSites(e.target.value), 100);
   });
 
-  /* 右：スクロール領域の高さ計測 */
+  /* ========= 高さフィット（右：ld-scrollのみ） ========= */
   function fitAccountScrollHeight(scope){
-    const panel = (scope && scope.querySelector) ? scope : document;
-    const rightScroll = document.getElementById('rightScroll');
-    if(!rightScroll) return;
-    panel.querySelectorAll('.ld-scroll').forEach(sc=>{
-      const rsRect = rightScroll.getBoundingClientRect();
-      const rTop   = sc.getBoundingClientRect().top;
-      const available = Math.max(180, Math.floor(rsRect.bottom - rTop - 14));
-      sc.style.maxHeight = available + 'px';
+    const rightBody = document.querySelector('.right-body');
+    if(!rightBody) return;
+    (scope || document).querySelectorAll('.ld-scroll').forEach(sc=>{
+      const rbRect = rightBody.getBoundingClientRect();
+      const top = sc.getBoundingClientRect().top;
+      const h = Math.max(200, Math.floor(rbRect.bottom - top - 12));
+      sc.style.maxHeight = h + 'px';
     });
   }
   window.addEventListener('resize', ()=>fitAccountScrollHeight(document), {passive:true});
 
-  /* 行選択 → 右パネル切替 */
+  /* ========= 行選択 → 右を切替（左右接続の強調もON） ========= */
   function selectSite(siteId, store=true){
     document.querySelectorAll('.site-panel').forEach(p => p.classList.add('hidden'));
     let panel = document.getElementById('site-panel-' + siteId);
@@ -587,7 +580,7 @@
       const tpl = document.getElementById('tpl-site-' + siteId);
       if (tpl) {
         const frag = tpl.content.cloneNode(true);
-        document.getElementById('sitePanes').querySelector('#rightScroll').appendChild(frag);
+        document.getElementById('sitePanes').appendChild(frag);
         panel = document.getElementById('site-panel-' + siteId);
       }
     }
@@ -597,10 +590,13 @@
     const row = document.querySelector(`#siteTbody tr[data-site-id="${siteId}"]`);
     if (row) row.classList.add('is-active');
 
+    // 左右が繋がって見える強調
+    document.getElementById('seoLayout')?.classList.add('connected');
+
     if (store) sessionStorage.setItem(SELECT_KEY, siteId);
 
-    const rs = document.getElementById('rightScroll');
-    if (rs) rs.scrollTop = 0;
+    const rb = document.querySelector('.right-body');
+    if (rb) rb.scrollTop = 0;
 
     fitAccountScrollHeight(panel);
   }
@@ -608,25 +604,55 @@
   function initialSiteId(){
     const q = new URLSearchParams(location.search).get('site_id');
     if(q) return q;
-    const m = String(location.hash||'').match(/site-(\d+)/);
-    if(m) return m[1];
     const saved = sessionStorage.getItem(SELECT_KEY);
     if(saved) return saved;
     const first = document.querySelector('#siteTbody tr')?.getAttribute('data-site-id');
     return first || '';
   }
 
+  /* ========= アコーディオン（開閉） ========= */
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.accordion-trigger');
+    if (!btn) return;
+    const sel = btn.getAttribute('data-acc-target');
+    const panel = document.querySelector(sel);
+    if (!panel) return;
+
+    const caret = btn.querySelector('.accordion-caret,.caret');
+    const isOpen = !panel.classList.contains('hidden');
+    if (isOpen) {
+      panel.classList.add('hidden');
+      caret && caret.classList.remove('rotate-180');
+      btn.setAttribute('aria-expanded', 'false');
+    } else {
+      // 同カード内は単純にトグル（他は閉じない）
+      panel.classList.remove('hidden');
+      caret && caret.classList.add('rotate-180');
+      btn.setAttribute('aria-expanded', 'true');
+      fitAccountScrollHeight(panel.closest('.site-panel'));
+    }
+  });
+
+  /* ========= DOMReady ========= */
   document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('#siteTbody tr').forEach(tr=>{
-      tr.addEventListener('click', ()=> selectSite(tr.getAttribute('data-site-id'), true));
+      tr.addEventListener('click', ()=> selectSite(tr.getAttribute('data-site-id'), true), {passive:true});
     });
+
+    // 生成ボタンのロック復元（高速化：最小限DOM探索）
+    document.querySelectorAll('a[data-account-id]').forEach(a => {
+      const aid = a.getAttribute('data-account-id');
+      if(localStorage.getItem(lockKey(aid)) === '1'){ disableLink(a); }
+    });
+
     const initId = initialSiteId();
     if (initId) selectSite(initId, false);
+
     fitAccountScrollHeight(document);
   });
 
-  /* ===== トースト ===== */
-  function showToast(message, type='success', ms=4200){
+  /* ========= トースト ========= */
+  function showToast(message, type='success', ms=3600){
     const el = document.getElementById('toast');
     const box = document.getElementById('toastInner');
     const msg = document.getElementById('toastMsg');
@@ -636,10 +662,10 @@
     box.classList.add(type === 'error' ? 'bg-red-600' : type === 'info' ? 'bg-blue-600' : 'bg-emerald-600');
     el.classList.remove('hidden','opacity-0'); el.classList.add('opacity-100');
     clearTimeout(el.__t);
-    el.__t = setTimeout(()=>{ el.classList.add('opacity-0'); setTimeout(()=>el.classList.add('hidden'), 300); }, ms);
+    el.__t = setTimeout(()=>{ el.classList.add('opacity-0'); setTimeout(()=>el.classList.add('hidden'), 260); }, ms);
   }
 
-  /* ===== CAPTCHA/進捗/削除：既存ロジック ===== */
+  /* ========= CAPTCHA/進捗/削除：既存ロジック（メッセージ/色のみ一部変更） ========= */
   let progressInterval = null, lastStatus = null, captchaSubmitLocked = false, maxSeenPct = 0;
   function clampPct(x){ return Math.max(0, Math.min(100, Math.round(Number(x)||0))); }
   function setAccProgress(pct, instant=false){
@@ -649,7 +675,7 @@
     const p = clampPct(pct);
     maxSeenPct = Math.max(maxSeenPct, p);
     const target = maxSeenPct;
-    bar.style.transitionDuration = instant ? '0ms' : '500ms';
+    bar.style.transitionDuration = instant ? '0ms' : '400ms';
     bar.style.width = target + '%';
     num.textContent = String(target);
   }
@@ -658,55 +684,49 @@
     if (data && typeof data.percent  === 'number') return clampPct(data.percent);
     if (data && typeof data.pct      === 'number') return clampPct(data.pct);
     const s = String(step||'').toLowerCase();
-    if (/(ready|captcha[_\s-]*ready|image|取得|fetch)/.test(s)) return 15;
-    if (/(show|表示|download|captcha[_\s-]*download)/.test(s)) return 20;
-    if (/(submit|送信|入力|entered|post|posting)/.test(s)) return 40;
-    if (/(mail|email|送付|発行|sent)/.test(s)) return 50;
-    if (/(open|opened|閲覧)/.test(s)) return 55;
-    if (/(verify|認証|確認|成功|success)/.test(s)) return 70;
-    if (/(register|作成|登録|done|created|完成)/.test(s)) return 85;
-    if (/(api[\s_-]*key|apikey|token|key|api|api取得完了|received)/.test(s)) return 100;
+    if (/(ready|captcha|fetch|取得)/.test(s)) return 15;
+    if (/(show|download|表示)/.test(s)) return 20;
+    if (/(submit|送信)/.test(s)) return 40;
+    if (/(verify|認証|成功)/.test(s)) return 70;
+    if (/(register|作成|登録|完成)/.test(s)) return 85;
+    if (/(api[\s_-]*key|apikey|received)/.test(s)) return 100;
     return maxSeenPct + 5;
   }
   function setCaptchaDoneUI(siteId, accountId) {
     const btn = document.querySelector(`button[data-site-id="${siteId}"][data-account-id="${accountId}"]`);
     if (!btn) return;
     btn.innerText = "✅ 実行済み"; btn.disabled = true;
-    btn.classList.remove("bg-gray-500","bg-red-600"); btn.classList.add("bg-green-500");
+    btn.classList.remove("btn-green"); btn.classList.add("btn-outline");
   }
   function updateCaptchaStatusUI(data){ try{ const p = percentForStep(data && data.step, data); setAccProgress(p); }catch(_){} }
   function switchToPostCTA(siteId, accountId) {
-    const actionArea = document.getElementById(`actionArea-acc-${accountId}`);
-    if (!actionArea) return;
-    actionArea.innerHTML = "";
+    const area = document.getElementById(`actionArea-acc-${accountId}`);
+    if (!area) return;
+    area.innerHTML = "";
     const a = document.createElement("a");
     a.href = `/generate?site_id=${siteId}&account_id=${accountId}`;
-    a.className = "btn btn-primary w-full";
-    a.textContent = "📝 記事生成＆投稿";
+    a.className = "btn btn-green w-full";
+    a.textContent = "このボタンをクリックして完了してください";
     a.setAttribute('data-account-id', accountId);
     a.setAttribute('onclick', 'return lockAndGo(this)');
-    actionArea.appendChild(a);
+    area.appendChild(a);
   }
   function restoreCaptchaButton(siteId, accountId, label) {
     const btn = document.querySelector(`button[data-site-id="${siteId}"][data-account-id="${accountId}"]`);
     if (!btn) return;
     btn.disabled = false;
     btn.innerText = label || "新規ブログ作成開始";
-    btn.classList.remove("bg-gray-500");
-    // 右カードはカスタムボタンなので色の切替は省略（classを維持）
   }
   async function newAccountStart(button) {
-    const siteId = button.getAttribute('data-site-id'); if (!siteId) return;
+    const siteId = button.getAttribute('data-site-id');
+    if (!siteId) return;
     sessionStorage.setItem(SELECT_KEY, siteId);
-    button.disabled = true; const oldText = button.innerText; button.innerText = "作成中…";
+    button.disabled = true; const old = button.innerText; button.innerText = "作成中…";
     try {
       const body = new URLSearchParams(); body.append("site_id", siteId);
-      const res = await fetch("/external-seo/new-account", {
-        method:"POST", headers:{"Content-Type":"application/x-www-form-urlencoded"}, body, credentials:"same-origin"
-      });
+      const res = await fetch("/external-seo/new-account", { method:"POST", headers:{"Content-Type":"application/x-www-form-urlencoded"}, body, credentials:"same-origin" });
       const text = await res.text(); let data;
-      try { data = JSON.parse(text); }
-      catch { throw new Error(`APIがJSONを返していません (HTTP ${res.status}).`); }
+      try { data = JSON.parse(text); } catch { throw new Error(`APIがJSONを返していません (HTTP ${res.status}).`); }
       if (!data.ok) throw new Error(data.error || "作成に失敗しました");
       renderNewAccountCard(data.site_id, data.account);
       try { incrementLdCount(siteId, +1); } catch(_) {}
@@ -715,12 +735,13 @@
         if (addBtn) { addBtn.disabled = true; addBtn.classList.add("opacity-60","cursor-not-allowed"); }
       }
     } catch (err) { alert(err.message || "ブログ作成に失敗しました"); }
-    finally { button.disabled = false; button.innerText = oldText; }
+    finally { button.disabled = false; button.innerText = old; }
   }
   function incrementLdCount(siteId, delta) {
     const tabBtn = document.querySelector(`[data-acc-target="#tab-ld-${siteId}"]`);
     if (!tabBtn) return;
-    const m = tabBtn.textContent.match(/\((\d+)\)/); if (!m) return;
+    const m = tabBtn.textContent.match(/\((\d+)\)/);
+    if (!m) return;
     const n = Math.max(parseInt(m[1] || "0", 10) + delta, 0);
     tabBtn.innerHTML = `Livedoor <span class="ml-1 text-xs opacity-80">(${n})</span>`;
   }
@@ -728,32 +749,29 @@
     let panel = document.querySelector(`#tab-ld-${siteId}`);
     if (!panel) { selectSite(siteId, true); panel = document.querySelector(`#tab-ld-${siteId}`); }
     if (!panel) return;
+
     const gridWrap = panel.querySelector('.ld-scroll .grid') || panel.querySelector('.ld-scroll');
     if (!gridWrap) return;
     if (account && document.getElementById(`acc-card-${account.id}`)) return;
+
     const grid = gridWrap.classList.contains('grid') ? gridWrap : (()=>{ const d=document.createElement('div'); d.className='grid grid-cols-1 gap-4'; gridWrap.appendChild(d); return d; })();
+
     const acc = account || {};
     const card = document.createElement('div');
     card.id = `acc-card-${acc.id}`;
-    card.className = 'card-grad p-5 flex flex-col gap-4';
+    card.className = 'card p-4';
     const url = acc.public_url || '';
     card.innerHTML = `
       <div class="flex items-start justify-between gap-3">
-        <div class="min-w-0">
-          ${url ? `<a href="${url}" target="_blank" class="underline break-all text-white">${url}</a>` : ``}
-        </div>
-        <div class="flex items-center gap-2">
-          <button class="opacity-70 hover:opacity-100 text-lg leading-none" title="詳細/ログ（準備中）">⋯</button>
-        </div>
+        <div class="min-w-0">${url ? `<a href="${url}" target="_blank" class="underline break-all text-white">${url}</a>` : ``}</div>
       </div>
-      <div class="text-white/95 text-sm flex flex-wrap gap-4">
-        <div>投稿完了: <span class="font-semibold">${acc.stat_posted || 0}</span></div>
-        <div>記事生成済み: <span class="font-semibold">${Math.max((acc.stat_total||0) - (acc.stat_posted||0), 0)}</span></div>
-        <div>総記事数: <span class="font-semibold">${acc.stat_total || 0}</span></div>
-        <div><a class="underline" href="/external/accounts?site_id=${siteId}">記事一覧</a></div>
+      <div class="metric mt-2">
+        <div>投稿完了: <b>${acc.stat_posted || 0}</b></div>
+        <div>記事生成済み: <b>${Math.max((acc.stat_total||0) - (acc.stat_posted||0), 0)}</b></div>
+        <div>総記事数: <b>${acc.stat_total || 0}</b></div>
       </div>
-      <div id="actionArea-acc-${acc.id}">
-        <button type="button" class="btn btn-primary w-full"
+      <div class="mt-3" id="actionArea-acc-${acc.id}">
+        <button type="button" class="btn btn-green w-full"
           data-site-id="${siteId}" data-account-id="${acc.id}" data-platform="livedoor"
           onclick="handleCaptchaClick(this)">新規ブログ作成開始</button>
       </div>
@@ -846,7 +864,7 @@
           switchToPostCTA(sid, aid);
           if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
           closeCaptcha();
-          showToast("アカウント作成が完了！『記事生成＆投稿』をクリックして生成しよう");
+          showToast("アカウント作成が完了！『このボタンをクリックして完了してください』を押してください");
           return;
         }
         if (data.status === "recreate_required") {
@@ -872,8 +890,7 @@
       });
   }
   function startProgressPolling() {
-    lastStatus = null;
-    maxSeenPct = 0;
+    lastStatus = null; maxSeenPct = 0;
     if (progressInterval) clearInterval(progressInterval);
     progressInterval = setInterval(() => {
       const siteId    = sessionStorage.getItem("currentSiteId");
@@ -885,8 +902,7 @@
           const pct = percentForStep(data.step, data);
           setAccProgress(pct);
           if (data.step && data.step !== lastStatus) {
-            lastStatus = data.step;
-            updateCaptchaStatusUI(data);
+            lastStatus = data.step; updateCaptchaStatusUI(data);
           }
           const done = (
             (typeof data.progress === 'number' && data.progress >= 100) ||
@@ -897,15 +913,15 @@
             const aid = data.account_id || accountId;
             if (sid && aid) switchToPostCTA(sid, aid);
             setAccProgress(100);
-            clearInterval(progressInterval);
-            progressInterval = null;
+            clearInterval(progressInterval); progressInterval = null;
             closeCaptcha();
-            showToast("アカウント作成が完了！『記事生成＆投稿』をクリックして生成しよう");
+            showToast("アカウント作成が完了！『このボタンをクリックして完了してください』を押してください");
           }
         })
         .catch(err => { console.error("進捗取得エラー:", err); });
-    }, 2000);
+    }, 1500); // 少し速め
   }
+
   async function deleteExternalAccount(acctId, siteId) {
     if (!acctId) return;
     if (!confirm("この無料ブログを削除します。予約と（このブログだけが使っている）生成記事も削除します。よろしいですか？")) return;
@@ -932,5 +948,6 @@
       alert(e.message || "削除に失敗しました");
     }
   }
+
 </script>
 {% endblock %}
