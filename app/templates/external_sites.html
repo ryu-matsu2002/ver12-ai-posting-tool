@@ -50,28 +50,26 @@
   .seo-layout{
     display:grid;
     grid-template-columns: minmax(640px, 1fr) 460px;
-    gap: 0;                               /* ← つなげる（境界なし） */
-    height: calc(100vh - 72px);           /* タイトル分を引く */
+    gap: 0;
+    height: calc(100vh - 72px); /* タイトル分を引く */
     border-top: 1px solid var(--edge);
-    background: var(--pane);              /* 両カラム同一背景で一体化 */
   }
   @media (max-width: 1200px){
     .seo-layout{ grid-template-columns: 1fr; height: auto; }
   }
 
   .left-pane{
-    background: transparent;              /* つなげるため transparent */
+    background: var(--pane);
     display:grid;
     grid-template-rows: auto 1fr;
-    /* ★ 境界線は消す */
-    border-right: none;
+    border-right: 1px solid var(--edge);
   }
   .right-pane{
-    background: transparent;              /* つなげるため transparent */
+    background: var(--pane);
     display:grid;
     grid-template-rows: auto 1fr;
-    border-left: none;                    /* ★ 境界線は消す */
-    overflow: hidden;                     /* 右側は固定。内部で必要箇所のみスクロール */
+    border-left: 1px solid var(--edge);
+    overflow: hidden; /* 右側は固定。内部で必要箇所のみスクロール */
   }
 
   /* ===================== 左：サイト欄（のみスクロール） ===================== */
@@ -90,14 +88,7 @@
   .sites-scroll{
     overflow: auto;        /* ← 左列だけスクロール */
     height: 100%;
-    /* スクロールバーの表示を最小にし、出現しても幅がズレない */
-    scrollbar-width: thin;                       /* Firefox */
-    scrollbar-color: rgba(255,255,255,.35) transparent;
-    scrollbar-gutter: stable both-edges;         /* 幅のブレ防止 */
   }
-  .sites-scroll::-webkit-scrollbar{ width:6px; height:6px; }                /* Chrome等 */
-  .sites-scroll::-webkit-scrollbar-track{ background:transparent; }
-  .sites-scroll::-webkit-scrollbar-thumb{ background:rgba(255,255,255,.35); border-radius:999px; }
 
   table.tbl{ width:100%; border-collapse: separate; border-spacing: 0; }
   .tbl thead th{
@@ -182,21 +173,19 @@
   .accordion-panel{ display:block; }      /* 初期開状態 */
   .accordion-panel.hidden{ display:none; }
 
-  .ld-scroll{
-    overflow:auto;
-    max-height: calc(100vh - 72px - 140px);
-    padding: 12px;
-    /* スクロールを細く・列幅のブレなし */
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255,255,255,.35) transparent;
-    scrollbar-gutter: stable both-edges;
+  .ld-scroll{ overflow:auto; max-height: calc(100vh - 72px - 140px); padding: 12px; }
+  .metric{ display:flex; flex-wrap:wrap; gap:1rem; }
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:.4rem;
+    padding:.65rem .95rem; border-radius:.7rem; font-weight:700;
+    border:1px solid rgba(255,255,255,.22);
+    transition: filter .12s ease, background .12s ease, opacity .12s ease;
   }
-  .ld-scroll::-webkit-scrollbar{ width:6px; height:6px; }
-  .ld-scroll::-webkit-scrollbar-track{ background:transparent; }
-  .ld-scroll::-webkit-scrollbar-thumb{ background:rgba(255,255,255,.35); border-radius:999px; }
+  .btn-green{ background: var(--ok); color:#05210f; border-color:#15803d; }
+  .btn-green:hover{ background: var(--ok-strong); color:#fff; }
 
-  /* つながり強調の影は削除（完全に1枚に見せる） */
-  .seo-layout.connected .right-pane{ box-shadow: none; }
+  /* つながりの強調（選択時の白帯と対になる薄いインセット） */
+  .seo-layout.connected .right-pane{ box-shadow: inset 6px 0 0 #ffffff20; }
 </style>
 
 {% set ALLOW_MULTI_BLOG_USER_IDS = [1, 2, 5] %}
@@ -543,7 +532,7 @@
   /* ================== 右：ld-scroll 高さフィット ================== */
   function fitAccountScrollHeight(scope){
     (scope||document).querySelectorAll('.ld-scroll').forEach(sc=>{
-      const h = Math.max(220, window.innerHeight - 72 - 140); /* タイトル＆ヘッダぶん引く */
+      const h = Math.max(220, window.innerHeight - 72 - 160); /* タイトル＆ヘッダぶん引く */
       sc.style.maxHeight = h + 'px';
     });
   }
