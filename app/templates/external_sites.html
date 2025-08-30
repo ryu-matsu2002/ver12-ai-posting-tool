@@ -6,8 +6,8 @@
   /* ===================== ベース色 (#3A1F5C) ===================== */
   :root{
     --seo-bg: #3A1F5C;
-    --pane: #44286D;       /* 面の色 */
-    --pane-2:#4D2F7D;      /* ヘッダや見出し */
+    --pane: #44286D;
+    --pane-2:#4D2F7D;
     --edge: rgba(255,255,255,.14);
 
     --txt:#fff;
@@ -21,9 +21,6 @@
     --ok:#22C55E;
     --ok-strong:#16A34A;
     --muted: rgba(255,255,255,.12);
-
-    /* OSのスクロールバー幅（JSで初期化） */
-    --sbw: 0px;
   }
 
   /* ===================== 背景とレイアウト ===================== */
@@ -49,38 +46,34 @@
     text-shadow: 0 2px 10px rgba(0,0,0,.25);
   }
 
-  /* WordPress設定画面のように左右を完全に揃えて固定高グリッド */
+  /* WordPress設定画面風の左右固定2カラム */
   .seo-layout{
     display:grid;
-    grid-template-columns: minmax(640px, 1fr) 460px;
+    grid-template-columns: minmax(560px, 1fr) 420px; /* ← 右寄りで全体を細身に */
     gap: 0;
-    height: calc(100vh - 72px); /* タイトル分を引く */
-    /* ★ 背景を親に集約：左右のペインは透過にして一体化 */
-    background: var(--pane);
+    height: calc(100vh - 72px);
+    background: var(--pane);            /* 背景を親に統一（左右一体化） */
     border-top: 1px solid var(--edge);
-    /* 子スクロールを許可するための下準備 */
-    min-height: 0;
+    min-height: 0;                      /* 子スクロールを有効化 */
   }
   @media (max-width: 1200px){
     .seo-layout{ grid-template-columns: 1fr; height: auto; }
   }
 
   .left-pane{
-    /* ★ 背景は親に任せて透過。分割線も撤去して一体化 */
     background: transparent;
     display:grid;
     grid-template-rows: auto 1fr;
     border-right: none;
-    /* ★ Grid内で子をスクロールさせるため必須 */
-    min-height: 0;
+    min-height: 0; /* ← これが無いと内部スクロールが効かない */
   }
   .right-pane{
     background: transparent;
     display:grid;
     grid-template-rows: auto 1fr;
     border-left: none;
-    overflow: hidden; /* 右側は固定。内部で必要箇所のみスクロール */
-    min-height: 0;    /* ★ 右側も同様に */
+    overflow: hidden;
+    min-height: 0;
   }
 
   /* ===================== 左：サイト欄（のみスクロール） ===================== */
@@ -99,49 +92,86 @@
   .sites-scroll{
     overflow: auto;        /* ← 左列だけスクロール */
     height: 100%;
-    min-height: 0;         /* ★ Grid子のスクロール有効化 */
-    /* ★ スクロールバー出現時も幅が変わらない（列幅不変） */
-    padding-right: var(--sbw);
-    scrollbar-gutter: stable;  /* サポート環境では併用でより安定 */
-    overscroll-behavior: contain;
+    min-height: 0;
+    /* ★白い溝を消し、細いオーバーレイスクロール */
+    scrollbar-width: thin;                           /* Firefox */
+    scrollbar-color: rgba(255,255,255,.35) transparent;
   }
+  /* WebKit系（Chrome/Edge/Safari） */
+  .sites-scroll::-webkit-scrollbar{ width: 8px; }
+  .sites-scroll::-webkit-scrollbar-track{ background: transparent; }
+  .sites-scroll::-webkit-scrollbar-thumb{
+    background: rgba(255,255,255,.28);
+    border-radius: 8px;
+  }
+  .sites-scroll:hover::-webkit-scrollbar-thumb{ background: rgba(255,255,255,.38); }
 
-  table.tbl{ width:100%; border-collapse: separate; border-spacing: 0; }
+  /* 右側の内部スクロールも同じ細さで統一 */
+  .ld-scroll{
+    overflow:auto; max-height: calc(100vh - 72px - 140px); padding: 12px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,.35) transparent;
+  }
+  .ld-scroll::-webkit-scrollbar{ width: 8px; }
+  .ld-scroll::-webkit-scrollbar-track{ background: transparent; }
+  .ld-scroll::-webkit-scrollbar-thumb{ background: rgba(255,255,255,.28); border-radius:8px; }
+  .ld-scroll:hover::-webkit-scrollbar-thumb{ background: rgba(255,255,255,.38); }
+
+  /* ====== テーブル（細身・1行・固定幅レイアウト） ====== */
+  table.tbl{
+    width:100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: fixed; /* ← 列幅を強制 */
+  }
+  /* 列幅（3枚目の一覧を目安にスリム化） */
+  .tbl col.col-name{ width:auto; }
+  .tbl col.col-ld, .tbl col.col-note, .tbl col.col-ame{ width: 84px; }
+  .tbl col.col-clicks{ width: 86px; }
+  .tbl col.col-impr{ width: 110px; }
+  .tbl col.col-gsc{ width: 80px; }
+
   .tbl thead th{
     position: sticky; top: 0; z-index: 2;
     background: var(--pane-2);
     color: var(--txt); border-bottom: 1px solid var(--edge);
-    text-align:left; font-weight:700; padding:10px 12px; font-size:.95rem;
+    text-align:left; font-weight:700; padding:10px 12px; font-size:.92rem;
+    white-space: nowrap;              /* 折返し禁止 */
   }
-  .tbl td{ padding:10px 12px; color:var(--txt); vertical-align: middle; }
+  .tbl td{
+    padding:10px 12px; color:var(--txt);
+    vertical-align: middle;
+    white-space: nowrap;              /* 折返し禁止 */
+    overflow: hidden; text-overflow: ellipsis;
+  }
 
   .tbl tbody tr{ background: var(--row); border-bottom: 1px solid var(--edge); }
   .tbl tbody tr:nth-child(odd){ background: var(--row-alt); }
   .tbl tbody tr:hover{ background: var(--row-hover); }
   .tbl tbody tr.is-active{
     background: var(--row-active);
-    /* ★ WP管理画面風：右ペインへ“つながる”白帯 */
-    box-shadow: inset -6px 0 0 #fff;
-    border-right: 6px solid #fff; /* つながりをさらに明確に */
+    box-shadow: inset -6px 0 0 #fff;             /* 右へ“つながる”白帯 */
+    border-right: 6px solid #fff;                /* WP風の接続バー */
   }
 
   .cell-center{ text-align:center; }
   .cell-num-rose{ color:#FF8EBE; font-weight:700; text-align:center; }
   .cell-num-violet{ color:#C9B7FF; font-weight:700; text-align:center; }
 
+  .cell-name{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .site-name-link{ color:var(--txt); text-decoration: underline; text-underline-offset:2px; }
   .site-name-link:hover{ color:#C9B7FF; }
 
-  .badge{ display:inline-flex; align-items:center; gap:6px; padding:4px 8px;
-          border-radius:999px; font-size:.8rem; background: var(--muted); color:#fff; }
-  .badge .count{ background: rgba(0,0,0,.5); padding:1px 6px; border-radius:999px; font-weight:700; }
+  .badge{ display:inline-flex; align-items:center; gap:6px; padding:3px 7px;
+          border-radius:999px; font-size:.78rem; background: var(--muted); color:#fff; }
+  .badge .count{ background: rgba(0,0,0,.5); padding:0 6px; border-radius:999px; font-weight:700; }
   .badge-ld{ background:#A888F8; color:#1e1333; }
   .badge-note{ background:#7F7396; color:#160f22; }
   .badge-ame{ background:#2ED3B7; color:#06261E; }
 
   .gsc-btn{
     display:inline-flex; align-items:center; gap:.35rem;
-    padding:.35rem .6rem; border-radius:.5rem; font-size:.85rem;
+    padding:.28rem .6rem; border-radius:.5rem; font-size:.82rem;
     background: var(--muted); color:#fff; border:1px solid var(--edge);
   }
   .gsc-btn:hover{ background: rgba(255,255,255,.18); }
@@ -160,9 +190,7 @@
     display:flex; align-items:center; justify-content:space-between; gap:12px;
     color:#fff;
   }
-  .site-head .title{
-    font-weight: 700; font-size: 1rem; line-height:1.1;
-  }
+  .site-head .title{ font-weight: 700; font-size: 1rem; line-height:1.1; }
   .btn-outline{
     display:inline-flex; align-items:center; justify-content:center;
     gap:.4rem; padding:.5rem .8rem; border-radius:.6rem;
@@ -171,7 +199,6 @@
   }
   .btn-outline:hover{ background: rgba(255,255,255,.18); }
 
-  /* 右の本文は固定。中のld-scrollだけをスクロール */
   .right-body{ overflow: hidden; padding: 14px; }
   .card{
     background: linear-gradient(135deg,#5b2f7f,#7b49a3);
@@ -190,7 +217,6 @@
   .accordion-panel{ display:block; }      /* 初期開状態 */
   .accordion-panel.hidden{ display:none; }
 
-  .ld-scroll{ overflow:auto; max-height: calc(100vh - 72px - 140px); padding: 12px; }
   .metric{ display:flex; flex-wrap:wrap; gap:1rem; }
   .btn{
     display:inline-flex; align-items:center; justify-content:center; gap:.4rem;
@@ -201,7 +227,7 @@
   .btn-green{ background: var(--ok); color:#05210f; border-color:#15803d; }
   .btn-green:hover{ background: var(--ok-strong); color:#fff; }
 
-  /* つながりの強調（選択時の白帯と対になる薄いインセット） */
+  /* WP風の“つながり”を右側でも表現（薄い白のインセット） */
   .seo-layout.connected .right-pane{ box-shadow: inset 6px 0 0 #ffffff20; }
 </style>
 
@@ -219,6 +245,16 @@
 
       <div class="sites-scroll">
         <table class="tbl" id="siteTable">
+          <!-- 列幅を強制する colgroup を追加 -->
+          <colgroup>
+            <col class="col-name">
+            <col class="col-ld">
+            <col class="col-note">
+            <col class="col-ame">
+            <col class="col-clicks">
+            <col class="col-impr">
+            <col class="col-gsc">
+          </colgroup>
           <thead>
           <tr>
             <th>サイト名</th>
@@ -234,7 +270,7 @@
           {% for s in sites %}
             {% set _raw = (s.url or '')|replace('https://','')|replace('http://','')|replace('www.','') %}
             <tr data-site-id="{{ s.id }}">
-              <td>
+              <td class="cell-name">
                 <a href="{{ s.url }}" target="_blank" class="site-name-link">{{ s.name }}</a>
               </td>
               <td class="cell-center">
@@ -510,26 +546,6 @@
 
 {% block scripts %}
 <script>
-  /* ================== スクロールバー幅を測定して --sbw に格納（列幅不変のため常に確保） ================== */
-  (function(){
-    try{
-      const outer = document.createElement('div');
-      outer.style.visibility='hidden';
-      outer.style.position='absolute';
-      outer.style.top='-9999px';
-      outer.style.width='200px';
-      outer.style.height='150px';
-      outer.style.overflow='scroll';
-      const inner = document.createElement('div');
-      inner.style.height='300px';
-      outer.appendChild(inner);
-      document.body.appendChild(outer);
-      const sbw = outer.offsetWidth - outer.clientWidth;
-      document.documentElement.style.setProperty('--sbw', (sbw>0?sbw:0)+'px');
-      document.body.removeChild(outer);
-    }catch(_){}
-  })();
-
   /* ================== 軽量ユーティリティ ================== */
   const CURRENT_USER_ID = Number('{{ current_user.id | default(0, true) | int }}');
   const ALLOW_MULTI_BLOG_USER_IDS = [1,2,5];
@@ -596,7 +612,6 @@
 
     if(store) sessionStorage.setItem(SELECT_KEY, siteId);
 
-    // 右の内容は最上部へ。ページ自体はスクロールしない
     document.querySelectorAll('.ld-scroll').forEach(n=>n.scrollTop=0);
     fitAccountScrollHeight(panel);
   }
@@ -625,7 +640,6 @@
       tr.addEventListener('click', ()=> selectSite(tr.getAttribute('data-site-id'), true), {passive:true});
     });
 
-    // ロック復元（高速化：最小限）
     document.querySelectorAll('a[data-account-id]').forEach(a=>{
       const aid=a.getAttribute('data-account-id');
       if(localStorage.getItem(`gen-lock:${aid}`)==='1'){ disableLink(a); }
@@ -753,7 +767,6 @@
       .then(r=>r.json())
       .then(data=>{
         if(data && data.captcha_url){
-          maxSeenPct=0; setAccProgress(15);
           document.getElementById("captchaImage").src=data.captcha_url+"?t="+Date.now();
           document.getElementById("captchaModal").classList.remove("hidden");
           document.getElementById("captchaForm").reset();
@@ -775,7 +788,6 @@
       btn.classList.remove("bg-gray-500","pointer-events-none","opacity-70");
       btn.classList.add("bg-blue-600"); btn.innerText="送信";
     }
-    setAccProgress(0,true); captchaSubmitLocked=false;
   }
 
   function submitCaptcha(event){
@@ -784,7 +796,6 @@
     const accountId=sessionStorage.getItem("currentAccountId");
     const platform=sessionStorage.getItem("currentPlatform")||"livedoor";
     const btn=document.getElementById("captchaSubmitBtn");
-    if(captchaSubmitLocked) return; captchaSubmitLocked=true;
     setAccProgress(40); btn.innerText="⏳ 送信中…"; btn.disabled=true; btn.setAttribute("aria-busy","true");
     btn.classList.remove("bg-blue-600"); btn.classList.add("bg-gray-500","pointer-events-none","opacity-70");
     const fd=new FormData(document.getElementById("captchaForm"));
@@ -792,22 +803,20 @@
     fetch("/submit_captcha",{method:"POST",body:payload})
       .then(r=>r.json())
       .then(data=>{
-        if(data.status==="captcha_failed"){ showToast("CAPTCHA突破に失敗しました。再度お試しください。","error"); restoreCaptchaButton(siteId, accountId, "❌ 再挑戦"); updateCaptchaStatusUI(data); closeCaptcha(); return; }
+        if(data.status==="captcha_failed"){ showToast("CAPTCHA突破に失敗しました。再度お試しください。","error"); restoreCaptchaButton(siteId, accountId, "❌ 再挑戦"); closeCaptcha(); return; }
         if(data.status==="captcha_success" && data.api_key_received){
           const sid=data.site_id||siteId, aid=data.account_id||accountId;
-          setAccProgress(100,true); switchToPostCTA(sid,aid);
-          if(progressInterval){ clearInterval(progressInterval); progressInterval=null; }
+          switchToPostCTA(sid,aid);
           closeCaptcha(); showToast("アカウント作成が完了！『このボタンをクリックして完了してください』を押してください"); return;
         }
         if(data.status==="recreate_required"){ showToast("ブログ作成に失敗。『↻ ブログを再作成』からやり直してください。","error"); restoreCaptchaButton(siteId, accountId, "↻ ブログを再作成"); closeCaptcha(); return; }
-        if(data.status==="captcha_success"){ setCaptchaDoneUI(siteId, accountId); startProgressPolling(); return; }
+        if(data.status==="captcha_success"){ startProgressPolling(); return; }
         showToast("予期しない応答が返されました","error"); restoreCaptchaButton(siteId, accountId, "⚠ 不明な応答"); closeCaptcha();
       })
       .catch(err=>{ console.error(err); showToast("CAPTCHA送信中にエラーが発生しました","error"); restoreCaptchaButton(siteId, accountId, "❌ 再挑戦"); closeCaptcha(); });
   }
 
   function startProgressPolling(){
-    lastStatus=null; maxSeenPct=0;
     if(progressInterval) clearInterval(progressInterval);
     progressInterval=setInterval(()=>{
       const siteId=sessionStorage.getItem("currentSiteId");
@@ -816,13 +825,11 @@
         .then(r=>r.json())
         .then(data=>{
           if(!data) return;
-          setAccProgress( percentForStep(data.step,data) );
-          if(data.step && data.step!==lastStatus){ lastStatus=data.step; updateCaptchaStatusUI(data); }
           const done = ((typeof data.progress==='number' && data.progress>=100) || /api[\s_-]*key|apikey|api取得完了|received/i.test(String(data.step||'')));
           if(done){
             const sid=data.site_id||siteId, aid=data.account_id||accountId;
             if(sid && aid) switchToPostCTA(sid,aid);
-            setAccProgress(100); clearInterval(progressInterval); progressInterval=null;
+            clearInterval(progressInterval); progressInterval=null;
             closeCaptcha(); showToast("アカウント作成が完了！『このボタンをクリックして完了してください』を押してください");
           }
         })
