@@ -21,6 +21,9 @@
     --ok:#22C55E;
     --ok-strong:#16A34A;
     --muted: rgba(255,255,255,.12);
+
+    /* OSのスクロールバー幅（JSで初期化） */
+    --sbw: 0px;
   }
 
   /* ===================== 背景とレイアウト ===================== */
@@ -55,6 +58,8 @@
     /* ★ 背景を親に集約：左右のペインは透過にして一体化 */
     background: var(--pane);
     border-top: 1px solid var(--edge);
+    /* 子スクロールを許可するための下準備 */
+    min-height: 0;
   }
   @media (max-width: 1200px){
     .seo-layout{ grid-template-columns: 1fr; height: auto; }
@@ -65,15 +70,17 @@
     background: transparent;
     display:grid;
     grid-template-rows: auto 1fr;
-    border-right: none; /* ← 既存の境界線を削除 */
+    border-right: none;
+    /* ★ Grid内で子をスクロールさせるため必須 */
+    min-height: 0;
   }
   .right-pane{
-    /* ★ 背景は親に任せて透過。分割線も撤去して一体化 */
     background: transparent;
     display:grid;
     grid-template-rows: auto 1fr;
-    border-left: none;  /* ← 既存の境界線を削除 */
+    border-left: none;
     overflow: hidden; /* 右側は固定。内部で必要箇所のみスクロール */
+    min-height: 0;    /* ★ 右側も同様に */
   }
 
   /* ===================== 左：サイト欄（のみスクロール） ===================== */
@@ -92,8 +99,10 @@
   .sites-scroll{
     overflow: auto;        /* ← 左列だけスクロール */
     height: 100%;
-    /* ★ スクロールバー出現時も幅が変わらない（行・列幅を不変に） */
-    scrollbar-gutter: stable both-edges;
+    min-height: 0;         /* ★ Grid子のスクロール有効化 */
+    /* ★ スクロールバー出現時も幅が変わらない（列幅不変） */
+    padding-right: var(--sbw);
+    scrollbar-gutter: stable;  /* サポート環境では併用でより安定 */
     overscroll-behavior: contain;
   }
 
@@ -111,8 +120,9 @@
   .tbl tbody tr:hover{ background: var(--row-hover); }
   .tbl tbody tr.is-active{
     background: var(--row-active);
-    /* ★ 右ペインに“つながる”白帯（WP風の選択強調） */
+    /* ★ WP管理画面風：右ペインへ“つながる”白帯 */
     box-shadow: inset -6px 0 0 #fff;
+    border-right: 6px solid #fff; /* つながりをさらに明確に */
   }
 
   .cell-center{ text-align:center; }
@@ -137,7 +147,6 @@
   .gsc-btn:hover{ background: rgba(255,255,255,.18); }
 
   /* ===================== 右：アカウント（WP 設定画面風） ===================== */
-  /* 以前のデザイン風のサイト見出しカード */
   .site-head{
     background: linear-gradient(180deg, var(--pane-2), #5a3694);
     border-bottom: 1px solid var(--edge);
@@ -272,7 +281,6 @@
 
         {% if loop.first %}
         <div id="site-panel-{{ s.id }}" class="site-panel">
-          <!-- ★ 見出しカード -->
           <div class="site-head">
             <div class="site-head-inner">
               <div class="title">{{ s.name }}</div>
@@ -502,6 +510,26 @@
 
 {% block scripts %}
 <script>
+  /* ================== スクロールバー幅を測定して --sbw に格納（列幅不変のため常に確保） ================== */
+  (function(){
+    try{
+      const outer = document.createElement('div');
+      outer.style.visibility='hidden';
+      outer.style.position='absolute';
+      outer.style.top='-9999px';
+      outer.style.width='200px';
+      outer.style.height='150px';
+      outer.style.overflow='scroll';
+      const inner = document.createElement('div');
+      inner.style.height='300px';
+      outer.appendChild(inner);
+      document.body.appendChild(outer);
+      const sbw = outer.offsetWidth - outer.clientWidth;
+      document.documentElement.style.setProperty('--sbw', (sbw>0?sbw:0)+'px');
+      document.body.removeChild(outer);
+    }catch(_){}
+  })();
+
   /* ================== 軽量ユーティリティ ================== */
   const CURRENT_USER_ID = Number('{{ current_user.id | default(0, true) | int }}');
   const ALLOW_MULTI_BLOG_USER_IDS = [1,2,5];
