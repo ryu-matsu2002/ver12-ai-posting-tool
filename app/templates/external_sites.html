@@ -131,8 +131,8 @@
   /* 列幅（ログ表を目安にスリム化） */
   .tbl col.col-name{ width:auto; }
   .tbl col.col-ld, .tbl col.col-note, .tbl col.col-ame{ width: 84px; }
-  .tbl col.col-clicks{ width: 92px; }    /* ← 余白を少し広げて矢印と重ならないように */
-  .tbl col.col-impr{ width: 118px; }     /* ← 余白を少し広げる */
+  .tbl col.col-clicks{ width: 86px; }
+  .tbl col.col-impr{ width: 110px; }
   .tbl col.col-gsc{ width: 80px; }
 
   .tbl thead th{
@@ -146,20 +146,13 @@
   }
   .tbl thead th:first-child{ text-align:left; }  /* サイト名だけ左寄せ */
 
-  /* 見出し内のラッパー（ラベル＋矢印ボタンを横並び） */
-  .th-wrap{
-    display:inline-flex; align-items:center; justify-content:center;
-    gap:8px; line-height:1;
+  /* 並び替えUI（矢印） */
+  th.sortable{ cursor:pointer; padding-right: 22px; position:relative; }
+  th.sortable::after{
+    content: attr(data-arrow);
+    position:absolute; right:6px; top:50%; transform:translateY(-52%);
+    opacity:.9;
   }
-  .sort-btn{
-    appearance:none; -webkit-appearance:none;
-    border:0; background:transparent; color:#fff;
-    font-size: .95rem; line-height:1; padding:0 2px;
-    cursor:pointer; border-radius:4px;
-    min-width: 1.25em;
-  }
-  .sort-btn:hover{ background: rgba(255,255,255,.12); }
-  .sort-btn[aria-pressed="true"]{ background: rgba(255,255,255,.18); }
 
   .tbl td{
     padding:10px 12px; color:var(--txt);
@@ -185,19 +178,12 @@
   .site-name-link{ color:var(--txt); text-decoration: underline; text-underline-offset:2px; }
   .site-name-link:hover{ color:#C9B7FF; }
 
-  /* ===== バッジ（縦位置ズレ解消・中央） ===== */
-  .badge{
-    display:inline-flex; align-items:center; gap:6px;
-    height: 24px; padding:0 8px;          /* 高さ固定 */
-    border-radius:999px; font-size:.78rem; background: var(--muted); color:#fff;
-    line-height: 24px;                     /* テキスト垂直位置を中央に */
-    vertical-align: middle;                /* テーブル内で中央 */
-  }
+  .badge{ display:inline-flex; align-items:center; gap:6px; padding:3px 7px;
+          border-radius:999px; font-size:.78rem; background: var(--muted); color:#fff; }
   .badge .count{
-    display:inline-flex; align-items:center; justify-content:center;
-    height: 18px; min-width: 22px; padding:0 6px; border-radius:999px; font-weight:700;
-    background: rgba(0,0,0,.5); color:#fff;
-    line-height: 18px;
+    background: rgba(0,0,0,.5);
+    padding:0 6px; border-radius:999px; font-weight:700;
+    color:#fff;                              /* 数字を白字 */
   }
   .badge-ld{ background:#A888F8; color:#1e1333; }
   .badge-note{ background:#7F7396; color:#160f22; }
@@ -302,20 +288,9 @@
             <th>ライブドア</th>
             <th>note</th>
             <th>アメブロ</th>
-
-            <!-- ▼ 矢印ボタンを“となりに”出す -->
-            <th class="sortable" data-sort="clicks">
-              <span class="th-wrap">
-                <span>クリック数</span>
-                <button type="button" class="sort-btn" data-col="clicks" aria-label="クリック数の並び替え" aria-pressed="false">↕</button>
-              </span>
-            </th>
-            <th class="sortable" data-sort="impr">
-              <span class="th-wrap">
-                <span>表示回数</span>
-                <button type="button" class="sort-btn" data-col="impr" aria-label="表示回数の並び替え" aria-pressed="false">↕</button>
-              </span>
-            </th>
+            <!-- ▼ 表示回数と同じ矢印（↓）をクリック数にも常時表示 -->
+            <th class="sortable" data-sort="clicks" data-arrow="↓">クリック数</th>
+            <th class="sortable" data-sort="impr"   data-arrow="↓">表示回数</th>
             <th>GSC</th>
           </tr>
           </thead>
@@ -712,29 +687,21 @@
     rows.forEach(r=>tbody.appendChild(r));
   }
   function initSorting(){
-    const buttons = document.querySelectorAll('.sort-btn');
-    buttons.forEach(btn=>{
-      btn.addEventListener('click', (ev)=>{
-        ev.stopPropagation(); /* 見出しクリック伝播を防止（安全） */
-        const th = btn.closest('th.sortable');
-        const key = th?.dataset.sort;
-        const current = th?.dataset.order || '';
+    document.querySelectorAll('th.sortable').forEach(th=>{
+      th.addEventListener('click', ()=>{
+        const key = th.dataset.sort;           // "clicks" or "impr"
+        const current = th.dataset.order;
         const next = current === 'asc' ? 'desc' : 'asc';
-
-        /* すべてのボタンをリセット */
+        // 一旦リセット（既定は「↓」に揃える）
         document.querySelectorAll('th.sortable').forEach(h=>{
           h.dataset.order = '';
-          const b = h.querySelector('.sort-btn');
-          if(b){ b.textContent = '↕'; b.setAttribute('aria-pressed','false'); }
+          h.setAttribute('data-arrow','↓');
         });
-
-        /* 今回の列に適用 */
+        // 今回の列に適用
         th.dataset.order = next;
-        btn.textContent = (next === 'asc' ? '↑' : '↓');
-        btn.setAttribute('aria-pressed','true');
-
+        th.setAttribute('data-arrow', next === 'asc' ? '↑' : '↓');
         sortSites(key, next);
-      }, {passive:false});
+      }, {passive:true});
     });
   }
 
