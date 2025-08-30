@@ -52,6 +52,8 @@
     grid-template-columns: minmax(640px, 1fr) 460px;
     gap: 0;
     height: calc(100vh - 72px); /* タイトル分を引く */
+    /* ★ 背景を親に集約：左右のペインは透過にして一体化 */
+    background: var(--pane);
     border-top: 1px solid var(--edge);
   }
   @media (max-width: 1200px){
@@ -59,16 +61,18 @@
   }
 
   .left-pane{
-    background: var(--pane);
+    /* ★ 背景は親に任せて透過。分割線も撤去して一体化 */
+    background: transparent;
     display:grid;
     grid-template-rows: auto 1fr;
-    border-right: 1px solid var(--edge);
+    border-right: none; /* ← 既存の境界線を削除 */
   }
   .right-pane{
-    background: var(--pane);
+    /* ★ 背景は親に任せて透過。分割線も撤去して一体化 */
+    background: transparent;
     display:grid;
     grid-template-rows: auto 1fr;
-    border-left: 1px solid var(--edge);
+    border-left: none;  /* ← 既存の境界線を削除 */
     overflow: hidden; /* 右側は固定。内部で必要箇所のみスクロール */
   }
 
@@ -88,6 +92,9 @@
   .sites-scroll{
     overflow: auto;        /* ← 左列だけスクロール */
     height: 100%;
+    /* ★ スクロールバー出現時も幅が変わらない（行・列幅を不変に） */
+    scrollbar-gutter: stable both-edges;
+    overscroll-behavior: contain;
   }
 
   table.tbl{ width:100%; border-collapse: separate; border-spacing: 0; }
@@ -104,7 +111,8 @@
   .tbl tbody tr:hover{ background: var(--row-hover); }
   .tbl tbody tr.is-active{
     background: var(--row-active);
-    box-shadow: inset -6px 0 0 #fff; /* 右ペインに“つながる”白帯 */
+    /* ★ 右ペインに“つながる”白帯（WP風の選択強調） */
+    box-shadow: inset -6px 0 0 #fff;
   }
 
   .cell-center{ text-align:center; }
@@ -264,7 +272,7 @@
 
         {% if loop.first %}
         <div id="site-panel-{{ s.id }}" class="site-panel">
-          <!-- ★ 昔の見出しカード風に戻す -->
+          <!-- ★ 見出しカード -->
           <div class="site-head">
             <div class="site-head-inner">
               <div class="title">{{ s.name }}</div>
