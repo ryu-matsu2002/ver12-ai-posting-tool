@@ -147,12 +147,21 @@
   .tbl thead th:first-child{ text-align:left; }  /* サイト名だけ左寄せ */
 
   /* 並び替えUI（矢印） */
-  th.sortable{ cursor:pointer; padding-right: 22px; position:relative; }
+  /* 並び替えUI（矢印） */
+  th.sortable{
+    cursor:pointer;
+    padding-right: 34px;  /* ← 22px → 34px に */
+    position:relative;
+  }
   th.sortable::after{
     content: attr(data-arrow);
-    position:absolute; right:6px; top:50%; transform:translateY(-52%);
+    position:absolute;
+    right:10px;           /* ← 6px → 10px に（任意） */
+    top:50%;
+    transform:translateY(-52%);
     opacity:.9;
   }
+
 
   .tbl td{
     padding:10px 12px; color:var(--txt);
