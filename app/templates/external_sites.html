@@ -288,8 +288,9 @@
             <th>ライブドア</th>
             <th>note</th>
             <th>アメブロ</th>
-            <th class="sortable" data-sort="clicks" data-arrow="↕">クリック数</th>
-            <th class="sortable" data-sort="impr" data-arrow="↕">表示回数</th>
+            <!-- ここを“↑↓”に変更 -->
+            <th class="sortable" data-sort="clicks" data-arrow="↑↓">クリック数</th>
+            <th class="sortable" data-sort="impr"   data-arrow="↑↓">表示回数</th>
             <th>GSC</th>
           </tr>
           </thead>
@@ -691,10 +692,10 @@
         const key = th.dataset.sort;           // "clicks" or "impr"
         const current = th.dataset.order;
         const next = current === 'asc' ? 'desc' : 'asc';
-        // 一旦リセット
+        // 一旦リセット（既定は“↑↓”に）
         document.querySelectorAll('th.sortable').forEach(h=>{
           h.dataset.order = '';
-          h.setAttribute('data-arrow','↕');
+          h.setAttribute('data-arrow','↑↓');
         });
         // 今回の列に適用
         th.dataset.order = next;
