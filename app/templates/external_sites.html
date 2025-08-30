@@ -4,37 +4,62 @@
 {% block content %}
 <style>
   :root{
-    --seo-bg:#3A1F5C; /* 指定色 */
+    --seo-bg:#3A1F5C; /* ページのベース背景色 */
   }
 
-  /* ページ背景（外側だけ紫） */
-  .seo-page-wrap{
-    background: var(--seo-bg);
-    border-radius: 14px;
-    padding: 28px;
-    margin: 0 auto;
-    width: 100%;
-    max-width: 1500px;
+  /* ===== ページ全面で紫背景を適用 ===== */
+  html, body, main, #main, #content, .content, .content-area,
+  .app-main, .app-content, .page-wrapper, .page-content, .container{
+    background: var(--seo-bg) !important;
+    background-image: none !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
-  @media (max-width:1024px){ .seo-page-wrap{ padding:18px; } }
 
-  /* 2カラム：左(一覧) 右(詳細) */
-  .seo-layout{ display:grid; grid-template-columns: 1fr 420px; gap:0; align-items: stretch; }
-  @media (max-width:1280px){ .seo-layout{ grid-template-columns: 1fr; } }
+  /* テーマ側の装飾/疑似要素を無効化（白い四角など） */
+  .min-h-screen.bg-primary, .bg-primary, .bg-primaryDark{ background-image:none !important; }
+  .bg-primary::before, .bg-primary::after,
+  .bg-primaryDark::before, .bg-primaryDark::after,
+  .min-h-screen::before, .min-h-screen::after{ content:none !important; }
+  .tcd-wrap *::before, .tcd-wrap *::after,
+  .tcd-wrap::before, .tcd-wrap::after{ content:none !important; }
 
-  /* 右ペインは“表の右に続く”見た目に */
+  /* ===== レイアウト：ページ全面を使用 ===== */
+  .ext-page {
+    width:100%;
+    padding: 18px 20px;  /* 画面端に張り付きすぎない最小の余白 */
+  }
+  .seo-layout{
+    display:grid;
+    grid-template-columns: 1fr 440px;  /* 左一覧 / 右詳細 */
+    gap: 16px;
+    align-items: stretch;
+    width:100%;
+  }
+  @media (max-width: 1280px){
+    .seo-layout{ grid-template-columns: 1fr; }
+  }
+
+  /* ===== 左：サイト一覧（ログページと同一デザイン） ===== */
+  .left-list{
+    background:#ffffff;
+    overflow:hidden;
+  }
+  /* 検索欄 */
+  .left-list .search-wrap{ padding: 8px 12px 0; }
+
+  /* ===== 右：詳細ペイン（背景は淡いグレー） ===== */
   .right-pane{
     background:#f8f8fb;
-    border-left: 6px solid #ffffff;       /* 左の白いラインで接続 */
-    border-top-right-radius:12px;
-    border-bottom-right-radius:12px;
     overflow:hidden;
-    position: relative;
+    position:relative;
     min-height:520px;
+    border-left: 6px solid #ffffff; /* 左表と“つながる”白ライン */
   }
   .right-scroll{ position:absolute; inset:0; overflow:auto; padding:24px 24px 36px; }
 
-  /* 右カードの配色（既存踏襲） */
+  /* 右カード配色（既存踏襲） */
   .card-grad{
     background: linear-gradient(135deg,#6e3f69,#8a5583);
     border:1px solid rgba(255,255,255,.18);
@@ -48,35 +73,28 @@
   .acc-trigger{
     width:100%; text-align:left; padding:14px 20px;
     display:flex; align-items:center; gap:14px; cursor:pointer;
-    border-top-left-radius:16px; border-top-right-radius:16px;
     background: linear-gradient(135deg, #7a4a75, #9a6194);
     border-bottom:1px solid rgba(255,255,255,.18);
     color:#fff;
+    border-top-left-radius:16px; border-top-right-radius:16px;
   }
   .caret{ font-size:2.1rem; line-height:1; color:#f3e7f2; transition:transform .2s ease; }
   .ld-scroll{ overflow:auto; max-height:480px; padding:16px; }
 
-  /* “白い四角”などテーマの疑似要素を消す（既存と同等） */
-  .seo-page-wrap, .seo-page-wrap *{ box-sizing:border-box; }
-  .seo-page-wrap *::before, .seo-page-wrap *::after{ content:none !important; }
-
-  /* 行選択の視覚強調（テーブル右端の白ラインと同期） */
+  /* 行選択の視覚強調（右ペインの白ラインと同期） */
   tr.is-active td{ box-shadow: inset -6px 0 0 #ffffff; background-color:#eef2ff !important; }
 </style>
 
 {% set ALLOW_MULTI_BLOG_USER_IDS = [1, 2, 5] %}
 
-<div class="seo-page-wrap">
+<div class="ext-page">
   <div class="seo-layout">
 
-    {# ================= 左：サイト一覧（ログページと完全同デザイン） ================= #}
-    <section class="left-list bg-white rounded-tl-lg rounded-bl-lg overflow-hidden">
-      <div class="px-4 pt-4">
-        <h2 class="text-2xl font-semibold text-white/0 select-none">.</h2> {# 余白合わせ用（見た目非表示） #}
-        <div class="mb-3">
-          <input id="siteSearch" type="search" placeholder="サイトを検索"
-                 class="w-full p-2 border rounded" autocomplete="off">
-        </div>
+    {# ================= 左：サイト一覧 ================= #}
+    <section class="left-list">
+      <div class="search-wrap">
+        <input id="siteSearch" type="search" placeholder="サイトを検索"
+               class="w-full p-2 border rounded" autocomplete="off">
       </div>
 
       <div class="overflow-auto">
@@ -130,8 +148,8 @@
       </div>
     </section>
 
-    {# ================= 右：選択中サイトの詳細（機能は現状維持） ================= #}
-    <aside id="sitePanes" class="right-pane rounded-tr-lg rounded-br-lg">
+    {# ================= 右：選択中サイトの詳細 ================= #}
+    <aside id="sitePanes" class="right-pane">
       <div class="right-scroll" id="rightScroll">
         {% for s in sites %}
           {% set _all_accounts = [] %}
@@ -440,7 +458,7 @@
     return true;
   }
 
-  /* 左：検索フィルタ（テーブル行の表示/非表示） */
+  /* 左：検索フィルタ */
   const siteSearch = document.getElementById('siteSearch');
   function filterSites(q){
     const needle = (q||'').toLowerCase().replace(/\s+/g,'');
@@ -527,8 +545,7 @@
     fitAccountScrollHeight(document);
   });
 
-  /* 以降：CAPTCHA/トースト/削除は元コードを踏襲（省略なしで残置） */
-
+  /* ===== トースト ===== */
   function showToast(message, type='success', ms=4200){
     const el = document.getElementById('toast');
     const box = document.getElementById('toastInner');
@@ -542,6 +559,7 @@
     el.__t = setTimeout(()=>{ el.classList.add('opacity-0'); setTimeout(()=>el.classList.add('hidden'), 300); }, ms);
   }
 
+  /* ===== CAPTCHA/進捗/削除：既存踏襲 ===== */
   let progressInterval = null, lastStatus = null, captchaSubmitLocked = false, maxSeenPct = 0;
   function clampPct(x){ return Math.max(0, Math.min(100, Math.round(Number(x)||0))); }
   function setAccProgress(pct, instant=false){
