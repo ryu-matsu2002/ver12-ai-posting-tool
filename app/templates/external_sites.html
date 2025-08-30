@@ -146,21 +146,17 @@
   }
   .tbl thead th:first-child{ text-align:left; }  /* サイト名だけ左寄せ */
 
-  /* 並び替えUI（矢印） */
-  /* 並び替えUI（矢印） */
-  th.sortable{
-    cursor:pointer;
-    padding-right: 34px;  /* ← 22px → 34px に */
-    position:relative;
+  /* クリック数/表示回数の列は矢印分の余白を多めに確保 */
+  th.sortable[data-sort="clicks"],
+  th.sortable[data-sort="impr"]{
+    padding-right: 48px;   /* ← ここを広げる（22px→48px相当） */
   }
+
+  /* 矢印の位置も少し右へ逃がす */
   th.sortable::after{
-    content: attr(data-arrow);
-    position:absolute;
-    right:10px;           /* ← 6px → 10px に（任意） */
-    top:50%;
-    transform:translateY(-52%);
-    opacity:.9;
+    right: 10px;           /* ← 6px→10px くらいに */
   }
+
 
 
   .tbl td{
