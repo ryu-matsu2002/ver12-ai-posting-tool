@@ -49,10 +49,10 @@
   /* WordPress設定画面風の左右固定2カラム */
   .seo-layout{
     display:grid;
-    grid-template-columns: minmax(560px, 1fr) 420px; /* ← 右寄りで全体を細身に */
+    grid-template-columns: minmax(560px, 1fr) 420px; /* 細身 */
     gap: 0;
     height: calc(100vh - 72px);
-    background: var(--pane);            /* 背景を親に統一（左右一体化） */
+    background: var(--pane);            /* 背景を親で統一（左右一体化） */
     border-top: 1px solid var(--edge);
     min-height: 0;                      /* 子スクロールを有効化 */
   }
@@ -93,7 +93,10 @@
     overflow: auto;        /* ← 左列だけスクロール */
     height: 100%;
     min-height: 0;
-    /* ★白い溝を消し、細いオーバーレイスクロール */
+    padding-bottom: 24px;              /* ← 最下行が隠れない余白 */
+    scroll-padding-bottom: 24px;
+
+    /* 細い“棒だけ”のオーバーレイスクロール */
     scrollbar-width: thin;                           /* Firefox */
     scrollbar-color: rgba(255,255,255,.35) transparent;
   }
@@ -124,7 +127,7 @@
     border-spacing: 0;
     table-layout: fixed; /* ← 列幅を強制 */
   }
-  /* 列幅（3枚目の一覧を目安にスリム化） */
+  /* 列幅（ログ表を目安にスリム化） */
   .tbl col.col-name{ width:auto; }
   .tbl col.col-ld, .tbl col.col-note, .tbl col.col-ame{ width: 84px; }
   .tbl col.col-clicks{ width: 86px; }
@@ -135,13 +138,16 @@
     position: sticky; top: 0; z-index: 2;
     background: var(--pane-2);
     color: var(--txt); border-bottom: 1px solid var(--edge);
-    text-align:left; font-weight:700; padding:10px 12px; font-size:.92rem;
-    white-space: nowrap;              /* 折返し禁止 */
+    font-weight:700; padding:10px 12px; font-size:.92rem;
+    white-space: nowrap;
+    text-align: center;                /* ← ヘッダー中央揃え */
   }
+  .tbl thead th:first-child{ text-align:left; }  /* サイト名だけ左寄せ */
+
   .tbl td{
     padding:10px 12px; color:var(--txt);
     vertical-align: middle;
-    white-space: nowrap;              /* 折返し禁止 */
+    white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis;
   }
 
@@ -164,7 +170,11 @@
 
   .badge{ display:inline-flex; align-items:center; gap:6px; padding:3px 7px;
           border-radius:999px; font-size:.78rem; background: var(--muted); color:#fff; }
-  .badge .count{ background: rgba(0,0,0,.5); padding:0 6px; border-radius:999px; font-weight:700; }
+  .badge .count{
+    background: rgba(0,0,0,.5);
+    padding:0 6px; border-radius:999px; font-weight:700;
+    color:#fff;                              /* ← 数字を白字に */
+  }
   .badge-ld{ background:#A888F8; color:#1e1333; }
   .badge-note{ background:#7F7396; color:#160f22; }
   .badge-ame{ background:#2ED3B7; color:#06261E; }
@@ -214,7 +224,7 @@
     border-top-left-radius: 12px; border-top-right-radius: 12px;
   }
   .caret{ font-size:1.8rem; line-height:1; color:#F6EDFF; transition: transform .12s ease; }
-  .accordion-panel{ display:block; }      /* 初期開状態 */
+  .accordion-panel{ display:block; }      /* JSでhidden付与・除去 */
   .accordion-panel.hidden{ display:none; }
 
   .metric{ display:flex; flex-wrap:wrap; gap:1rem; }
@@ -258,12 +268,12 @@
           <thead>
           <tr>
             <th>サイト名</th>
-            <th class="cell-center">ライブドア</th>
-            <th class="cell-center">note</th>
-            <th class="cell-center">アメブロ</th>
-            <th class="cell-center">クリック数</th>
-            <th class="cell-center">表示回数</th>
-            <th class="cell-center">GSC</th>
+            <th>ライブドア</th>
+            <th>note</th>
+            <th>アメブロ</th>
+            <th>クリック数</th>
+            <th>表示回数</th>
+            <th>GSC</th>
           </tr>
           </thead>
           <tbody id="siteTbody">
@@ -329,12 +339,13 @@
               <button class="acc-trigger accordion-trigger"
                       data-acc-target="#tab-ld-{{ s.id }}"
                       aria-controls="tab-ld-{{ s.id }}"
-                      aria-expanded="true">
-                <span class="caret accordion-caret rotate-180">▾</span>
+                      aria-expanded="false">
+                <span class="caret accordion-caret">▾</span>
                 <span>Livedoor <span class="ml-1 text-xs opacity-80">({{ tab_cnt }})</span></span>
               </button>
 
-              <div id="tab-ld-{{ s.id }}" class="accordion-panel">
+              <!-- ★ 初期は閉じた状態 -->
+              <div id="tab-ld-{{ s.id }}" class="accordion-panel hidden">
                 <div class="ld-scroll">
                   {% if _all_accounts and _all_accounts|length > 0 %}
                     <div class="grid grid-cols-1 gap-4">
@@ -436,12 +447,13 @@
                 <button class="acc-trigger accordion-trigger"
                         data-acc-target="#tab-ld-{{ s.id }}"
                         aria-controls="tab-ld-{{ s.id }}"
-                        aria-expanded="true">
-                  <span class="caret accordion-caret rotate-180">▾</span>
+                        aria-expanded="false">
+                  <span class="caret accordion-caret">▾</span>
                   <span>Livedoor <span class="ml-1 text-xs opacity-80">({{ tab_cnt }})</span></span>
                 </button>
 
-                <div id="tab-ld-{{ s.id }}" class="accordion-panel">
+                <!-- ★ 初期は閉じた状態 -->
+                <div id="tab-ld-{{ s.id }}" class="accordion-panel hidden">
                   <div class="ld-scroll">
                     {% if _all_accounts and _all_accounts|length > 0 %}
                       <div class="grid grid-cols-1 gap-4">
@@ -630,8 +642,16 @@
     const panel = document.querySelector(sel); if(!panel) return;
     const caret = btn.querySelector('.accordion-caret,.caret');
     const isOpen = !panel.classList.contains('hidden');
-    if(isOpen){ panel.classList.add('hidden'); caret && caret.classList.remove('rotate-180'); btn.setAttribute('aria-expanded','false'); }
-    else{ panel.classList.remove('hidden'); caret && caret.classList.add('rotate-180'); btn.setAttribute('aria-expanded','true'); fitAccountScrollHeight(panel.closest('.site-panel')); }
+    if(isOpen){
+      panel.classList.add('hidden');
+      caret && caret.classList.remove('rotate-180');
+      btn.setAttribute('aria-expanded','false');
+    }else{
+      panel.classList.remove('hidden');
+      caret && caret.classList.add('rotate-180');
+      btn.setAttribute('aria-expanded','true');
+      fitAccountScrollHeight(panel.closest('.site-panel'));
+    }
   });
 
   /* ================== DOM Ready ================== */
@@ -640,6 +660,7 @@
       tr.addEventListener('click', ()=> selectSite(tr.getAttribute('data-site-id'), true), {passive:true});
     });
 
+    // 生成ロック復元
     document.querySelectorAll('a[data-account-id]').forEach(a=>{
       const aid=a.getAttribute('data-account-id');
       if(localStorage.getItem(`gen-lock:${aid}`)==='1'){ disableLink(a); }
