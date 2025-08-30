@@ -3,12 +3,12 @@
 
 {% block content %}
 <style>
-  /* ===================== ベース色 (#3A1F5C) ===================== */
+  /* ===================== 基本色（#3A1F5C） ===================== */
   :root{
-    --seo-bg: #3A1F5C;
-    --pane: #44286D;       /* 面の色 */
-    --pane-2:#4D2F7D;      /* ヘッダや見出し */
-    --edge: rgba(255,255,255,.14);
+    --seo-bg:#3A1F5C;
+    --pane:#44286D;
+    --pane-2:#4D2F7D;
+    --edge:rgba(255,255,255,.14);
 
     --txt:#fff;
     --txt-dim:#E7E1FA;
@@ -20,103 +20,103 @@
 
     --ok:#22C55E;
     --ok-strong:#16A34A;
-    --muted: rgba(255,255,255,.12);
+    --muted:rgba(255,255,255,.12);
   }
 
-  /* ===================== 背景とレイアウト ===================== */
+  /* ===================== 背景と全体レイアウト ===================== */
   html, body,
-  main, #main, #content, .content, .page-wrapper, .page-content {
-    background: var(--seo-bg) !important;
-    color: var(--txt);
-    height: 100% !important;
-    overflow: hidden !important; /* ← ページ全体はスクロールしない */
-    max-width: 100% !important;
-    margin: 0 !important; padding: 0 !important;
+  main, #main, #content, .content, .page-wrapper, .page-content{
+    background:var(--seo-bg)!important;
+    color:var(--txt);
+    height:100%!important;
+    overflow:hidden!important; /* ページ全体はスクロールさせない */
+    max-width:100%!important;
+    margin:0!important; padding:0!important;
   }
 
-  .ext-page{ height: 100vh; display:grid; grid-template-rows:auto 1fr; }
+  .ext-page{
+    height:100vh;
+    display:flex; flex-direction:column;
+  }
 
   .page-title{
-    color: var(--txt);
-    font-size: 2.1rem;
-    line-height: 1.2;
-    font-weight: 800;
-    letter-spacing: .02em;
-    padding: 16px 18px 10px;
-    text-shadow: 0 2px 10px rgba(0,0,0,.25);
+    color:var(--txt);
+    font-size:2.2rem;
+    line-height:1.2;
+    font-weight:800;
+    letter-spacing:.02em;
+    padding:18px 18px 8px;
+    text-shadow:0 2px 10px rgba(0,0,0,.25);
   }
 
-  /* WordPress設定画面のように左右を完全に揃えて固定高グリッド */
+  /* WP設定画面のように左右を“つなげる”2カラム（ギャップ 0） */
   .seo-layout{
     display:grid;
-    grid-template-columns: minmax(640px, 1fr) 460px;
-    gap: 0;
-    height: calc(100vh - 72px); /* タイトル分を引く */
-    border-top: 1px solid var(--edge);
+    grid-template-columns:minmax(640px,1fr) 460px;
+    gap:0;                  /* ← つなげる */
+    flex:1;                 /* 高さは残りを占有 */
+    min-height:0;           /* ← スクロールが効くためのキー */
+    border-top:1px solid var(--edge);
   }
   @media (max-width: 1200px){
-    .seo-layout{ grid-template-columns: 1fr; height: auto; }
+    .seo-layout{ grid-template-columns:1fr; }
   }
 
-  .left-pane{
-    background: var(--pane);
-    display:grid;
-    grid-template-rows: auto 1fr;
-    border-right: 1px solid var(--edge);
+  .left-pane, .right-pane{
+    background:var(--pane);
+    display:flex; flex-direction:column;
+    min-height:0;           /* ← 内部スクロールのためのキー */
   }
-  .right-pane{
-    background: var(--pane);
-    display:grid;
-    grid-template-rows: auto 1fr;
-    border-left: 1px solid var(--edge);
-    overflow: hidden; /* 右側は固定。内部で必要箇所のみスクロール */
-  }
+  /* 分割感を消す（つなげる） */
+  .left-pane{ border-right:none; }
+  .right-pane{ border-left:none; box-shadow: inset 6px 0 0 #ffffff20; }
 
   /* ===================== 左：サイト欄（のみスクロール） ===================== */
   .search-wrap{
-    background: var(--pane-2);
-    border-bottom: 1px solid var(--edge);
-    padding: 12px 14px;
+    background:var(--pane-2);
+    border-bottom:1px solid var(--edge);
+    padding:12px 14px;
   }
   .search-wrap input{
     width:100%; border-radius:10px; border:1px solid var(--edge);
-    background: rgba(255,255,255,.10); color:var(--txt);
-    padding:10px 12px; outline: none;
+    background:rgba(255,255,255,.10); color:var(--txt);
+    padding:10px 12px; outline:none;
   }
-  .search-wrap input::placeholder{ color: var(--txt-dim); }
+  .search-wrap input::placeholder{ color:var(--txt-dim); }
 
   .sites-scroll{
-    overflow: auto;        /* ← 左列だけスクロール */
-    height: 100%;
+    flex:1;                 /* ← 余白を全て占有 */
+    min-height:0;           /* ← スクロールONの肝 */
+    overflow:auto;          /* ← 左列だけスクロール */
   }
 
-  table.tbl{ width:100%; border-collapse: separate; border-spacing: 0; }
+  table.tbl{ width:100%; border-collapse:separate; border-spacing:0; }
   .tbl thead th{
-    position: sticky; top: 0; z-index: 2;
-    background: var(--pane-2);
-    color: var(--txt); border-bottom: 1px solid var(--edge);
+    position:sticky; top:0; z-index:2;
+    background:var(--pane-2);
+    color:var(--txt); border-bottom:1px solid var(--edge);
     text-align:left; font-weight:700; padding:10px 12px; font-size:.95rem;
   }
-  .tbl td{ padding:10px 12px; color:var(--txt); vertical-align: middle; }
+  .tbl td{ padding:10px 12px; color:var(--txt); vertical-align:middle; }
 
-  .tbl tbody tr{ background: var(--row); border-bottom: 1px solid var(--edge); }
-  .tbl tbody tr:nth-child(odd){ background: var(--row-alt); }
-  .tbl tbody tr:hover{ background: var(--row-hover); }
+  .tbl tbody tr{ background:var(--row); border-bottom:1px solid var(--edge); cursor:pointer; }
+  .tbl tbody tr:nth-child(odd){ background:var(--row-alt); }
+  .tbl tbody tr:hover{ background:var(--row-hover); }
   .tbl tbody tr.is-active{
-    background: var(--row-active);
-    box-shadow: inset -6px 0 0 #fff; /* 右ペインに“つながる”白帯 */
+    background:var(--row-active);
+    /* 右ペインと連結して見える白いバー */
+    box-shadow: inset -7px 0 0 #fff;
   }
 
   .cell-center{ text-align:center; }
   .cell-num-rose{ color:#FF8EBE; font-weight:700; text-align:center; }
   .cell-num-violet{ color:#C9B7FF; font-weight:700; text-align:center; }
-
-  .site-name-link{ color:var(--txt); text-decoration: underline; text-underline-offset:2px; }
+  .site-name-link{ color:var(--txt); text-decoration:underline; text-underline-offset:2px; }
   .site-name-link:hover{ color:#C9B7FF; }
 
   .badge{ display:inline-flex; align-items:center; gap:6px; padding:4px 8px;
-          border-radius:999px; font-size:.8rem; background: var(--muted); color:#fff; }
-  .badge .count{ background: rgba(0,0,0,.5); padding:1px 6px; border-radius:999px; font-weight:700; }
+          border-radius:999px; font-size:.8rem; background:var(--muted); color:#fff; }
+  .badge .count{ background:rgba(0,0,0,.5); padding:1px 6px; border-radius:999px; font-weight:700; }
   .badge-ld{ background:#A888F8; color:#1e1333; }
   .badge-note{ background:#7F7396; color:#160f22; }
   .badge-ame{ background:#2ED3B7; color:#06261E; }
@@ -124,56 +124,54 @@
   .gsc-btn{
     display:inline-flex; align-items:center; gap:.35rem;
     padding:.35rem .6rem; border-radius:.5rem; font-size:.85rem;
-    background: var(--muted); color:#fff; border:1px solid var(--edge);
+    background:var(--muted); color:#fff; border:1px solid var(--edge);
   }
-  .gsc-btn:hover{ background: rgba(255,255,255,.18); }
+  .gsc-btn:hover{ background:rgba(255,255,255,.18); }
 
-  /* ===================== 右：アカウント（WP 設定画面風） ===================== */
-  /* 以前のデザイン風のサイト見出しカード */
+  /* ===================== 右：アカウント（WP見出しカード風） ===================== */
   .site-head{
-    background: linear-gradient(180deg, var(--pane-2), #5a3694);
-    border-bottom: 1px solid var(--edge);
-    padding: 12px 16px;
+    background:linear-gradient(180deg, var(--pane-2), #5a3694);
+    border-bottom:1px solid var(--edge);
+    padding:12px 16px;
   }
   .site-head-inner{
-    background: rgba(0,0,0,.12);
+    background:rgba(0,0,0,.12);
     border:1px solid var(--edge);
-    border-radius: 10px;
-    padding: 12px 14px;
+    border-radius:10px;
+    padding:12px 14px;
     display:flex; align-items:center; justify-content:space-between; gap:12px;
     color:#fff;
   }
-  .site-head .title{
-    font-weight: 700; font-size: 1rem; line-height:1.1;
-  }
+  .site-head .title{ font-weight:700; font-size:1rem; line-height:1.1; }
+
   .btn-outline{
     display:inline-flex; align-items:center; justify-content:center;
     gap:.4rem; padding:.5rem .8rem; border-radius:.6rem;
-    background: rgba(255,255,255,.10); color:#fff; border:1px solid var(--edge);
-    font-weight: 700;
+    background:rgba(255,255,255,.10); color:#fff; border:1px solid var(--edge);
+    font-weight:700;
   }
-  .btn-outline:hover{ background: rgba(255,255,255,.18); }
+  .btn-outline:hover{ background:rgba(255,255,255,.18); }
 
-  /* 右の本文は固定。中のld-scrollだけをスクロール */
-  .right-body{ overflow: hidden; padding: 14px; }
+  .right-body{ flex:1; min-height:0; overflow:hidden; padding:14px; }
   .card{
-    background: linear-gradient(135deg,#5b2f7f,#7b49a3);
-    border: 1px solid var(--edge);
-    border-radius: 12px;
+    background:linear-gradient(135deg,#5b2f7f,#7b49a3);
+    border:1px solid var(--edge);
+    border-radius:12px;
     color:#fff;
   }
   .acc-trigger{
     width:100%; text-align:left; padding:14px 16px;
-    background: linear-gradient(135deg,#6b3b94,#8b58b6);
+    background:linear-gradient(135deg,#6b3b94,#8b58b6);
     color:#fff; border-bottom:1px solid var(--edge);
     display:flex; align-items:center; gap:10px; cursor:pointer;
-    border-top-left-radius: 12px; border-top-right-radius: 12px;
+    border-top-left-radius:12px; border-top-right-radius:12px;
   }
-  .caret{ font-size:1.8rem; line-height:1; color:#F6EDFF; transition: transform .12s ease; }
-  .accordion-panel{ display:block; }      /* 初期開状態 */
+  .caret{ font-size:1.8rem; line-height:1; color:#F6EDFF; transition:transform .12s ease; }
+  .accordion-panel{ display:block; }
   .accordion-panel.hidden{ display:none; }
 
-  .ld-scroll{ overflow:auto; max-height: calc(100vh - 72px - 140px); padding: 12px; }
+  .ld-scroll{ flex:1; min-height:0; overflow:auto; padding:12px; }
+
   .metric{ display:flex; flex-wrap:wrap; gap:1rem; }
   .btn{
     display:inline-flex; align-items:center; justify-content:center; gap:.4rem;
@@ -181,11 +179,8 @@
     border:1px solid rgba(255,255,255,.22);
     transition: filter .12s ease, background .12s ease, opacity .12s ease;
   }
-  .btn-green{ background: var(--ok); color:#05210f; border-color:#15803d; }
-  .btn-green:hover{ background: var(--ok-strong); color:#fff; }
-
-  /* つながりの強調（選択時の白帯と対になる薄いインセット） */
-  .seo-layout.connected .right-pane{ box-shadow: inset 6px 0 0 #ffffff20; }
+  .btn-green{ background:var(--ok); color:#05210f; border-color:#15803d; }
+  .btn-green:hover{ background:var(--ok-strong); color:#fff; }
 </style>
 
 {% set ALLOW_MULTI_BLOG_USER_IDS = [1, 2, 5] %}
@@ -194,7 +189,7 @@
   <div class="page-title">SEO強化ページ</div>
 
   <div id="seoLayout" class="seo-layout">
-    <!-- ================= 左：サイト欄（スクロール専用） ================= -->
+    <!-- ============ 左：サイト欄（スクロール専用） ============ -->
     <section class="left-pane">
       <div class="search-wrap">
         <input id="siteSearch" type="search" placeholder="サイトを検索" autocomplete="off">
@@ -215,27 +210,16 @@
           </thead>
           <tbody id="siteTbody">
           {% for s in sites %}
-            {% set _raw = (s.url or '')|replace('https://','')|replace('http://','')|replace('www.','') %}
             <tr data-site-id="{{ s.id }}">
-              <td>
-                <a href="{{ s.url }}" target="_blank" class="site-name-link">{{ s.name }}</a>
-              </td>
-              <td class="cell-center">
-                <span class="badge badge-ld">LD <span class="count">{{ s.ld_count|default(0) }}</span></span>
-              </td>
-              <td class="cell-center">
-                <span class="badge badge-note">note <span class="count">{{ s.note_count|default(0) }}</span></span>
-              </td>
-              <td class="cell-center">
-                <span class="badge badge-ame">Ame <span class="count">{{ s.ameba_count|default(0) }}</span></span>
-              </td>
+              <td><a href="{{ s.url }}" target="_blank" class="site-name-link">{{ s.name }}</a></td>
+              <td class="cell-center"><span class="badge badge-ld">LD <span class="count">{{ s.ld_count|default(0) }}</span></span></td>
+              <td class="cell-center"><span class="badge badge-note">note <span class="count">{{ s.note_count|default(0) }}</span></span></td>
+              <td class="cell-center"><span class="badge badge-ame">Ame <span class="count">{{ s.ameba_count|default(0) }}</span></span></td>
               <td class="cell-num-rose">{{ s.clicks or 0 }}</td>
               <td class="cell-num-violet">{{ s.impressions or 0 }}</td>
               <td class="cell-center">
-                {% set gsc_url = (s.url or '') %}
-                {% if gsc_url %}
-                  {% set rsrc = 'https://search.google.com/search-console/performance/search-analytics?resource_id=' ~ gsc_url %}
-                  <a class="gsc-btn" href="{{ rsrc }}" target="_blank" rel="noopener">GSC ↗</a>
+                {% if s.url %}
+                  <a class="gsc-btn" href="{{ 'https://search.google.com/search-console/performance/search-analytics?resource_id=' ~ s.url }}" target="_blank" rel="noopener">GSC ↗</a>
                 {% else %}
                   <span class="gsc-btn" style="opacity:.5; pointer-events:none;">GSC</span>
                 {% endif %}
@@ -247,7 +231,7 @@
       </div>
     </section>
 
-    <!-- ================= 右：アカウント（固定。中だけ必要に応じてスクロール） ================= -->
+    <!-- ============ 右：アカウント欄（WP設定見出し風） ============ -->
     <aside id="sitePanes" class="right-pane">
       {% for s in sites %}
         {% set _all_accounts = [] %}
@@ -264,7 +248,7 @@
 
         {% if loop.first %}
         <div id="site-panel-{{ s.id }}" class="site-panel">
-          <!-- ★ 昔の見出しカード風に戻す -->
+          <!-- 以前のカード風見出し -->
           <div class="site-head">
             <div class="site-head-inner">
               <div class="title">{{ s.name }}</div>
@@ -338,7 +322,7 @@
                   {% endif %}
                 </div>
 
-                <div class="px-5 py-4 border-t" style="border-color:var(--edge)">
+                <div class="px-5 py-4" style="border-top:1px solid var(--edge)">
                   {% if can_add_livedoor %}
                     <button id="addBtn-{{ s.id }}" type="button" class="btn-outline text-sm"
                             data-site-id="{{ s.id }}" onclick="newAccountStart(this)">＋ ブログ追加</button>
@@ -355,7 +339,7 @@
       {% endfor %}
     </aside>
 
-    {# ================= 非アクティブサイトは template に退避 ================= #}
+    {# ============ 非アクティブサイトは template に退避 ============ #}
     {% for s in sites %}
       {% if not loop.first %}
         {% set _all_accounts = [] %}
@@ -445,7 +429,7 @@
                     {% endif %}
                   </div>
 
-                  <div class="px-5 py-4 border-t" style="border-color:var(--edge)">
+                  <div class="px-5 py-4" style="border-top:1px solid var(--edge)">
                     {% if can_add_livedoor %}
                       <button id="addBtn-{{ s.id }}" type="button" class="btn-outline text-sm"
                               data-site-id="{{ s.id }}" onclick="newAccountStart(this)">＋ ブログ追加</button>
@@ -465,7 +449,7 @@
   </div>
 </div>
 
-<!-- ===================== CAPTCHAモーダル & Toast（既存） ===================== -->
+<!-- ===================== CAPTCHAモーダル & Toast ===================== -->
 <div id="captchaModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
   <div class="bg-white p-6 rounded-2xl shadow-lg w-[420px] max-w-[92vw] relative">
     <button onclick="closeCaptcha()" class="absolute top-2 right-2 text-gray-500 hover:text-gray-800 text-xl leading-none">×</button>
@@ -508,18 +492,18 @@
   function lockAndGo(el){
     const aid = el.getAttribute('data-account-id'); if(!aid) return true;
     const key = lockKey(aid);
-    if(localStorage.getItem(key) === '1'){ disableLink(el); return false; }
+    if(localStorage.getItem(key)==='1'){ disableLink(el); return false; }
     localStorage.setItem(key,'1'); disableLink(el); return true;
   }
 
-  /* ================== 左：検索フィルタ（高速） ================== */
+  /* ================== 左：検索フィルタ ================== */
   const siteSearch = document.getElementById('siteSearch');
   function filterSites(q){
     const needle = (q||'').toLowerCase().replace(/\s+/g,'');
-    let firstVisible = null;
+    let firstVisible=null;
     document.querySelectorAll('#siteTbody tr').forEach(tr=>{
-      const name = (tr.querySelector('.site-name-link')?.textContent || '').toLowerCase().replace(/\s+/g,'');
-      const show = !needle || name.includes(needle);
+      const name=(tr.querySelector('.site-name-link')?.textContent||'').toLowerCase().replace(/\s+/g,'');
+      const show=!needle || name.includes(needle);
       tr.style.display = show ? '' : 'none';
       if(show && !firstVisible) firstVisible = tr;
     });
@@ -529,50 +513,51 @@
   }
   let _t=null; siteSearch?.addEventListener('input',e=>{ clearTimeout(_t); _t=setTimeout(()=>filterSites(e.target.value), 90); });
 
-  /* ================== 右：ld-scroll 高さフィット ================== */
+  /* ================== 右：ld-scroll 高さ調整 ================== */
   function fitAccountScrollHeight(scope){
     (scope||document).querySelectorAll('.ld-scroll').forEach(sc=>{
-      const h = Math.max(220, window.innerHeight - 72 - 160); /* タイトル＆ヘッダぶん引く */
+      // flex+min-height:0 を使用しているため明示高さは不要だが、
+      // iOSなどの端末向けに最小高さを保険で設定
+      const h = Math.max(220, window.innerHeight - 160);
+      sc.style.minHeight = '0px';
       sc.style.maxHeight = h + 'px';
     });
   }
   window.addEventListener('resize', ()=>fitAccountScrollHeight(document), {passive:true});
 
-  /* ================== サイト選択 → 右を切替（左右接続強調） ================== */
+  /* ================== サイト選択（左右の“連結”強調） ================== */
   function selectSite(siteId, store=true){
     document.querySelectorAll('.site-panel').forEach(p=>p.classList.add('hidden'));
-    let panel = document.getElementById('site-panel-'+siteId);
+    let panel=document.getElementById('site-panel-'+siteId);
     if(!panel){
-      const tpl = document.getElementById('tpl-site-'+siteId);
+      const tpl=document.getElementById('tpl-site-'+siteId);
       if(tpl){
-        const frag = tpl.content.cloneNode(true);
+        const frag=tpl.content.cloneNode(true);
         document.getElementById('sitePanes').appendChild(frag);
-        panel = document.getElementById('site-panel-'+siteId);
+        panel=document.getElementById('site-panel-'+siteId);
       }
     }
     if(panel) panel.classList.remove('hidden');
 
     document.querySelectorAll('#siteTbody tr').forEach(tr=>tr.classList.remove('is-active'));
-    const row = document.querySelector(`#siteTbody tr[data-site-id="${siteId}"]`);
+    const row=document.querySelector(`#siteTbody tr[data-site-id="${siteId}"]`);
     if(row) row.classList.add('is-active');
-
-    document.getElementById('seoLayout')?.classList.add('connected');
 
     if(store) sessionStorage.setItem(SELECT_KEY, siteId);
 
-    // 右の内容は最上部へ。ページ自体はスクロールしない
+    // 右ペインは先頭へ、ページ自体はスクロールしない
     document.querySelectorAll('.ld-scroll').forEach(n=>n.scrollTop=0);
     fitAccountScrollHeight(panel);
   }
 
   function initialSiteId(){
-    const q = new URLSearchParams(location.search).get('site_id'); if(q) return q;
-    const saved = sessionStorage.getItem(SELECT_KEY); if(saved) return saved;
-    const first = document.querySelector('#siteTbody tr')?.getAttribute('data-site-id');
+    const q=new URLSearchParams(location.search).get('site_id'); if(q) return q;
+    const saved=sessionStorage.getItem(SELECT_KEY); if(saved) return saved;
+    const first=document.querySelector('#siteTbody tr')?.getAttribute('data-site-id');
     return first || '';
   }
 
-  /* ================== アコーディオン ================== */
+  /* ================== アコーディオン（開閉） ================== */
   document.addEventListener('click', (e)=>{
     const btn = e.target.closest('.accordion-trigger'); if(!btn) return;
     const sel = btn.getAttribute('data-acc-target');
@@ -589,7 +574,7 @@
       tr.addEventListener('click', ()=> selectSite(tr.getAttribute('data-site-id'), true), {passive:true});
     });
 
-    // ロック復元（高速化：最小限）
+    // 以前の生成ロックを復元
     document.querySelectorAll('a[data-account-id]').forEach(a=>{
       const aid=a.getAttribute('data-account-id');
       if(localStorage.getItem(`gen-lock:${aid}`)==='1'){ disableLink(a); }
@@ -609,7 +594,7 @@
     clearTimeout(el.__t); el.__t=setTimeout(()=>{ el.classList.add('opacity-0'); setTimeout(()=>el.classList.add('hidden'),260); }, ms);
   }
 
-  /* ================== CAPTCHA / 進捗 / 削除（既存） ================== */
+  /* ================== CAPTCHA / 進捗 / 削除 ================== */
   let progressInterval=null, lastStatus=null, captchaSubmitLocked=false, maxSeenPct=0;
   function clampPct(x){ return Math.max(0, Math.min(100, Math.round(Number(x)||0))); }
   function setAccProgress(pct, instant=false){
@@ -674,10 +659,10 @@
   function renderNewAccountCard(siteId, account){
     let panel=document.querySelector(`#tab-ld-${siteId}`); if(!panel){ selectSite(siteId,true); panel=document.querySelector(`#tab-ld-${siteId}`); }
     if(!panel) return;
-    const gridWrap=panel.querySelector('.ld-scroll .grid')||panel.querySelector('.ld-scroll'); if(!gridWrap) return;
+    const wrap=panel.querySelector('.ld-scroll .grid')||panel.querySelector('.ld-scroll'); if(!wrap) return;
     if(account && document.getElementById(`acc-card-${account.id}`)) return;
 
-    const grid=gridWrap.classList.contains('grid') ? gridWrap : (()=>{ const d=document.createElement('div'); d.className='grid grid-cols-1 gap-4'; gridWrap.appendChild(d); return d; })();
+    const grid=wrap.classList.contains('grid') ? wrap : (()=>{ const d=document.createElement('div'); d.className='grid grid-cols-1 gap-4'; wrap.appendChild(d); return d; })();
     const acc=account||{}; const card=document.createElement('div'); card.id=`acc-card-${acc.id}`; card.className='card p-4';
     const url=acc.public_url||'';
     card.innerHTML=`
