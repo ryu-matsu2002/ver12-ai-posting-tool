@@ -110,9 +110,9 @@
   }
   .sites-scroll:hover::-webkit-scrollbar-thumb{ background: rgba(255,255,255,.38); }
 
-  /* 右側の内部スクロールも同じ細さで統一 */
+  /* 右側の内部スクロールも同じ細さで統一（高さはJSで実測） */
   .ld-scroll{
-    overflow:auto; max-height: calc(100vh - 72px - 140px); padding: 12px;
+    overflow:auto; padding: 12px;
     scrollbar-width: thin;
     scrollbar-color: rgba(255,255,255,.35) transparent;
   }
@@ -246,6 +246,13 @@
   }
   .btn-green{ background: var(--ok); color:#05210f; border-color:#15803d; }
   .btn-green:hover{ background: var(--ok-strong); color:#fff; }
+
+  /* disabledボタンの見た目を明確に */
+  .btn[disabled], .btn-outline[disabled]{
+    opacity: .6 !important;
+    cursor: not-allowed !important;
+    pointer-events: none !important;
+  }
 
   /* WP風の“つながり”を右側でも表現（薄い白のインセット） */
   .seo-layout.connected .right-pane{ box-shadow: inset 6px 0 0 #ffffff20; }
@@ -613,10 +620,12 @@
     });
   }
 
-  /* ================== 右：ld-scroll 高さフィット ================== */
+  /* ================== 右：ld-scroll 高さフィット（実測版） ================== */
   function fitAccountScrollHeight(scope){
     (scope||document).querySelectorAll('.ld-scroll').forEach(sc=>{
-      const h = Math.max(220, window.innerHeight - 72 - 160); /* タイトル＆ヘッダぶん引く */
+      const rect = sc.getBoundingClientRect();
+      const h = Math.max(220, Math.floor(window.innerHeight - rect.top - 8));
+      sc.style.height = h + 'px';
       sc.style.maxHeight = h + 'px';
     });
   }
@@ -624,7 +633,7 @@
     fitSiteScrollHeight();
     fitAccountScrollHeight(document);
   }, {passive:true});
-  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ fitSiteScrollHeight(); }}, {passive:true});
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ fitSiteScrollHeight(); fitAccountScrollHeight(document); }}, {passive:true});
 
   /* ================== サイト選択 → 右を切替（左右接続強調） ================== */
   function selectSite(siteId, store=true){
@@ -679,7 +688,7 @@
   function initSorting(){
     document.querySelectorAll('th.sortable').forEach(th=>{
       th.addEventListener('click', ()=>{
-        const key = th.dataset.sort;
+        const key = th.dataset.sort;           // "clicks" or "impr"
         const current = th.dataset.order;
         const next = current === 'asc' ? 'desc' : 'asc';
         // 一旦リセット
@@ -759,7 +768,11 @@
   }
   function restoreCaptchaButton(siteId, accountId, label){
     const btn=document.querySelector(`button[data-site-id="${siteId}"][data-account-id="${accountId}"]`);
-    if(!btn) return; btn.disabled=false; btn.innerText=label||"新規ブログ作成開始";
+    if(!btn) return;
+    btn.disabled=false;
+    btn.classList.remove('pointer-events-none','opacity-60');
+    btn.removeAttribute('aria-busy');
+    btn.innerText=label||"新規ブログ作成開始";
   }
 
   async function newAccountStart(button){
@@ -792,24 +805,24 @@
     const gridWrap=panel.querySelector('.ld-scroll .grid')||panel.querySelector('.ld-scroll'); if(!gridWrap) return;
     if(account && document.getElementById(`acc-card-${account.id}`)) return;
 
-    const grid=gridWrap.classList.contains('grid') ? gridWrap : (()=>{ const d=document.createElement('div'); d.className='grid grid-cols-1 gap-4'; gridWrap.appendChild(d); return d; })();
+    const grid=gridWrap.classList.contains('grid') ? gridWrap : (function(){ const d=document.createElement('div'); d.className='grid grid-cols-1 gap-4'; gridWrap.appendChild(d); return d; })();
     const acc=account||{}; const card=document.createElement('div'); card.id=`acc-card-${acc.id}`; card.className='card p-4';
     const url=acc.public_url||'';
-    card.innerHTML=`
-      <div class="flex items-start justify-between gap-3">
-        <div class="min-w-0">${url ? `<a href="${url}" target="_blank" class="underline break-all text-white">${url}</a>` : ``}</div>
-      </div>
-      <div class="metric mt-2">
-        <div>投稿完了: <b>${acc.stat_posted || 0}</b></div>
-        <div>記事生成済み: <b>${Math.max((acc.stat_total||0) - (acc.stat_posted||0), 0)}</b></div>
-        <div>総記事数: <b>${acc.stat_total || 0}</b></div>
-      </div>
-      <div class="mt-3" id="actionArea-acc-${acc.id}">
-        <button type="button" class="btn btn-green w-full"
-          data-site-id="${siteId}" data-account-id="${acc.id}" data-platform="livedoor"
-          onclick="handleCaptchaClick(this)">新規ブログ作成開始</button>
-      </div>
-    `;
+    const linkHtml = url ? ('<a href="' + url + '" target="_blank" class="underline break-all text-white">' + url + '</a>') : '';
+    card.innerHTML =
+      '<div class="flex items-start justify-between gap-3">' +
+        '<div class="min-w-0">' + linkHtml + '</div>' +
+      '</div>' +
+      '<div class="metric mt-2">' +
+        '<div>投稿完了: <b>' + (acc.stat_posted || 0) + '</b></div>' +
+        '<div>記事生成済み: <b>' + Math.max((acc.stat_total||0) - (acc.stat_posted||0), 0) + '</b></div>' +
+        '<div>総記事数: <b>' + (acc.stat_total || 0) + '</b></div>' +
+      '</div>' +
+      '<div class="mt-3" id="actionArea-acc-' + acc.id + '">' +
+        '<button type="button" class="btn btn-green w-full" ' +
+          'data-site-id="' + siteId + '" data-account-id="' + acc.id + '" data-platform="livedoor" ' +
+          'onclick="handleCaptchaClick(this)">新規ブログ作成開始</button>' +
+      '</div>';
     grid.prepend(card);
     fitAccountScrollHeight(panel.closest('.site-panel'));
   }
@@ -819,7 +832,11 @@
     const accountId=button.getAttribute("data-account-id");
     const platform=button.getAttribute("data-platform")||"livedoor";
     if(siteId) sessionStorage.setItem(SELECT_KEY, siteId);
-    button.disabled=true; button.innerText="📷 CAPTCHA取得中…";
+    // 完全に押せない & 視覚的にも無効
+    button.disabled=true;
+    button.classList.add('pointer-events-none','opacity-60');
+    button.setAttribute('aria-busy','true');
+    button.innerText="📷 CAPTCHA取得中…";
     openCaptchaModal(siteId, accountId, platform);
   }
 
