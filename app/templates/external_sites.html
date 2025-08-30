@@ -46,13 +46,13 @@
     text-shadow: 0 2px 10px rgba(0,0,0,.25);
   }
 
-  /* WordPress設定画面風の左右固定2カラム */
+  /* WordPress設定画面風の左右固定2カラム（背景を親で統一） */
   .seo-layout{
     display:grid;
     grid-template-columns: minmax(560px, 1fr) 420px; /* 細身 */
     gap: 0;
     height: calc(100vh - 72px);
-    background: var(--pane);            /* 背景を親で統一（左右一体化） */
+    background: var(--pane);
     border-top: 1px solid var(--edge);
     min-height: 0;                      /* 子スクロールを有効化 */
   }
@@ -65,7 +65,7 @@
     display:grid;
     grid-template-rows: auto 1fr;
     border-right: none;
-    min-height: 0; /* ← これが無いと内部スクロールが効かない */
+    min-height: 0;
   }
   .right-pane{
     background: transparent;
@@ -90,11 +90,12 @@
   .search-wrap input::placeholder{ color: var(--txt-dim); }
 
   .sites-scroll{
-    overflow: auto;        /* ← 左列だけスクロール */
-    height: 100%;
+    overflow: auto;          /* ← 左列だけスクロール */
+    height: 100%;            /* 実際の高さはJSで上書き */
     min-height: 0;
-    padding-bottom: 24px;              /* ← 最下行が隠れない余白 */
+    padding-bottom: 24px;    /* 最下行が隠れない余白 */
     scroll-padding-bottom: 24px;
+    box-sizing: border-box;
 
     /* 細い“棒だけ”のオーバーレイスクロール */
     scrollbar-width: thin;                           /* Firefox */
@@ -140,9 +141,18 @@
     color: var(--txt); border-bottom: 1px solid var(--edge);
     font-weight:700; padding:10px 12px; font-size:.92rem;
     white-space: nowrap;
-    text-align: center;                /* ← ヘッダー中央揃え */
+    text-align: center;                /* ヘッダー中央揃え */
+    user-select: none;
   }
   .tbl thead th:first-child{ text-align:left; }  /* サイト名だけ左寄せ */
+
+  /* 並び替えUI（矢印） */
+  th.sortable{ cursor:pointer; padding-right: 22px; position:relative; }
+  th.sortable::after{
+    content: attr(data-arrow);
+    position:absolute; right:6px; top:50%; transform:translateY(-52%);
+    opacity:.9;
+  }
 
   .tbl td{
     padding:10px 12px; color:var(--txt);
@@ -173,7 +183,7 @@
   .badge .count{
     background: rgba(0,0,0,.5);
     padding:0 6px; border-radius:999px; font-weight:700;
-    color:#fff;                              /* ← 数字を白字に */
+    color:#fff;                              /* 数字を白字 */
   }
   .badge-ld{ background:#A888F8; color:#1e1333; }
   .badge-note{ background:#7F7396; color:#160f22; }
@@ -253,9 +263,9 @@
         <input id="siteSearch" type="search" placeholder="サイトを検索" autocomplete="off">
       </div>
 
-      <div class="sites-scroll">
+      <div class="sites-scroll" id="sitesScroll">
         <table class="tbl" id="siteTable">
-          <!-- 列幅を強制する colgroup を追加 -->
+          <!-- 列幅を強制する colgroup -->
           <colgroup>
             <col class="col-name">
             <col class="col-ld">
@@ -271,8 +281,8 @@
             <th>ライブドア</th>
             <th>note</th>
             <th>アメブロ</th>
-            <th>クリック数</th>
-            <th>表示回数</th>
+            <th class="sortable" data-sort="clicks" data-arrow="↕">クリック数</th>
+            <th class="sortable" data-sort="impr" data-arrow="↕">表示回数</th>
             <th>GSC</th>
           </tr>
           </thead>
@@ -292,8 +302,8 @@
               <td class="cell-center">
                 <span class="badge badge-ame">Ame <span class="count">{{ s.ameba_count|default(0) }}</span></span>
               </td>
-              <td class="cell-num-rose">{{ s.clicks or 0 }}</td>
-              <td class="cell-num-violet">{{ s.impressions or 0 }}</td>
+              <td class="cell-num-rose col-clicks">{{ s.clicks or 0 }}</td>
+              <td class="cell-num-violet col-impr">{{ s.impressions or 0 }}</td>
               <td class="cell-center">
                 {% set gsc_url = (s.url or '') %}
                 {% if gsc_url %}
@@ -344,7 +354,7 @@
                 <span>Livedoor <span class="ml-1 text-xs opacity-80">({{ tab_cnt }})</span></span>
               </button>
 
-              <!-- ★ 初期は閉じた状態 -->
+              <!-- 初期は閉じた状態 -->
               <div id="tab-ld-{{ s.id }}" class="accordion-panel hidden">
                 <div class="ld-scroll">
                   {% if _all_accounts and _all_accounts|length > 0 %}
@@ -452,7 +462,7 @@
                   <span>Livedoor <span class="ml-1 text-xs opacity-80">({{ tab_cnt }})</span></span>
                 </button>
 
-                <!-- ★ 初期は閉じた状態 -->
+                <!-- 初期は閉じた状態 -->
                 <div id="tab-ld-{{ s.id }}" class="accordion-panel hidden">
                   <div class="ld-scroll">
                     {% if _all_accounts and _all_accounts|length > 0 %}
@@ -593,6 +603,16 @@
   }
   let _t=null; siteSearch?.addEventListener('input',e=>{ clearTimeout(_t); _t=setTimeout(()=>filterSites(e.target.value), 90); });
 
+  /* ================== スクロール領域の高さを実測でフィット（ズーム対策） ================== */
+  function fitSiteScrollHeight(){
+    document.querySelectorAll('.sites-scroll').forEach(sc=>{
+      const rect = sc.getBoundingClientRect();
+      const h = Math.max(200, Math.floor(window.innerHeight - rect.top - 8)); // 下に少しだけ余白
+      sc.style.height = h + 'px';
+      sc.style.maxHeight = h + 'px';
+    });
+  }
+
   /* ================== 右：ld-scroll 高さフィット ================== */
   function fitAccountScrollHeight(scope){
     (scope||document).querySelectorAll('.ld-scroll').forEach(sc=>{
@@ -600,7 +620,11 @@
       sc.style.maxHeight = h + 'px';
     });
   }
-  window.addEventListener('resize', ()=>fitAccountScrollHeight(document), {passive:true});
+  window.addEventListener('resize', ()=>{
+    fitSiteScrollHeight();
+    fitAccountScrollHeight(document);
+  }, {passive:true});
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ fitSiteScrollHeight(); }}, {passive:true});
 
   /* ================== サイト選択 → 右を切替（左右接続強調） ================== */
   function selectSite(siteId, store=true){
@@ -635,6 +659,42 @@
     return first || '';
   }
 
+  /* ================== 並び替え（クリック数 / 表示回数） ================== */
+  function numFromCell(tr, cls){
+    const t = tr.querySelector('.'+cls)?.textContent || '0';
+    const n = parseInt(String(t).replace(/[^\d\-]/g,''), 10);
+    return isNaN(n) ? 0 : n;
+  }
+  function sortSites(key, dir){
+    const tbody = document.getElementById('siteTbody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    const cls  = key === 'clicks' ? 'col-clicks' : 'col-impr';
+    rows.sort((a,b)=>{
+      const av = numFromCell(a, cls);
+      const bv = numFromCell(b, cls);
+      return dir === 'asc' ? (av - bv) : (bv - av);
+    });
+    rows.forEach(r=>tbody.appendChild(r));
+  }
+  function initSorting(){
+    document.querySelectorAll('th.sortable').forEach(th=>{
+      th.addEventListener('click', ()=>{
+        const key = th.dataset.sort;
+        const current = th.dataset.order;
+        const next = current === 'asc' ? 'desc' : 'asc';
+        // 一旦リセット
+        document.querySelectorAll('th.sortable').forEach(h=>{
+          h.dataset.order = '';
+          h.setAttribute('data-arrow','↕');
+        });
+        // 今回の列に適用
+        th.dataset.order = next;
+        th.setAttribute('data-arrow', next === 'asc' ? '↑' : '↓');
+        sortSites(key, next);
+      }, {passive:true});
+    });
+  }
+
   /* ================== アコーディオン ================== */
   document.addEventListener('click', (e)=>{
     const btn = e.target.closest('.accordion-trigger'); if(!btn) return;
@@ -654,22 +714,6 @@
     }
   });
 
-  /* ================== DOM Ready ================== */
-  document.addEventListener('DOMContentLoaded', ()=>{
-    document.querySelectorAll('#siteTbody tr').forEach(tr=>{
-      tr.addEventListener('click', ()=> selectSite(tr.getAttribute('data-site-id'), true), {passive:true});
-    });
-
-    // 生成ロック復元
-    document.querySelectorAll('a[data-account-id]').forEach(a=>{
-      const aid=a.getAttribute('data-account-id');
-      if(localStorage.getItem(`gen-lock:${aid}`)==='1'){ disableLink(a); }
-    });
-
-    const initId = initialSiteId(); if(initId) selectSite(initId, false);
-    fitAccountScrollHeight(document);
-  });
-
   /* ================== Toast ================== */
   function showToast(message, type='success', ms=3600){
     const el=document.getElementById('toast'), box=document.getElementById('toastInner'), msg=document.getElementById('toastMsg');
@@ -680,7 +724,7 @@
     clearTimeout(el.__t); el.__t=setTimeout(()=>{ el.classList.add('opacity-0'); setTimeout(()=>el.classList.add('hidden'),260); }, ms);
   }
 
-  /* ================== CAPTCHA / 進捗 / 削除（既存） ================== */
+  /* ================== CAPTCHA / 進捗 / 削除 ================== */
   let progressInterval=null, lastStatus=null, captchaSubmitLocked=false, maxSeenPct=0;
   function clampPct(x){ return Math.max(0, Math.min(100, Math.round(Number(x)||0))); }
   function setAccProgress(pct, instant=false){
@@ -788,6 +832,7 @@
       .then(r=>r.json())
       .then(data=>{
         if(data && data.captcha_url){
+          maxSeenPct=0; setAccProgress(15);
           document.getElementById("captchaImage").src=data.captcha_url+"?t="+Date.now();
           document.getElementById("captchaModal").classList.remove("hidden");
           document.getElementById("captchaForm").reset();
@@ -809,6 +854,7 @@
       btn.classList.remove("bg-gray-500","pointer-events-none","opacity-70");
       btn.classList.add("bg-blue-600"); btn.innerText="送信";
     }
+    setAccProgress(0,true); captchaSubmitLocked=false;
   }
 
   function submitCaptcha(event){
@@ -817,6 +863,7 @@
     const accountId=sessionStorage.getItem("currentAccountId");
     const platform=sessionStorage.getItem("currentPlatform")||"livedoor";
     const btn=document.getElementById("captchaSubmitBtn");
+    if(captchaSubmitLocked) return; captchaSubmitLocked=true;
     setAccProgress(40); btn.innerText="⏳ 送信中…"; btn.disabled=true; btn.setAttribute("aria-busy","true");
     btn.classList.remove("bg-blue-600"); btn.classList.add("bg-gray-500","pointer-events-none","opacity-70");
     const fd=new FormData(document.getElementById("captchaForm"));
@@ -824,20 +871,22 @@
     fetch("/submit_captcha",{method:"POST",body:payload})
       .then(r=>r.json())
       .then(data=>{
-        if(data.status==="captcha_failed"){ showToast("CAPTCHA突破に失敗しました。再度お試しください。","error"); restoreCaptchaButton(siteId, accountId, "❌ 再挑戦"); closeCaptcha(); return; }
+        if(data.status==="captcha_failed"){ showToast("CAPTCHA突破に失敗しました。再度お試しください。","error"); restoreCaptchaButton(siteId, accountId, "❌ 再挑戦"); updateCaptchaStatusUI(data); closeCaptcha(); return; }
         if(data.status==="captcha_success" && data.api_key_received){
           const sid=data.site_id||siteId, aid=data.account_id||accountId;
-          switchToPostCTA(sid,aid);
+          setAccProgress(100,true); switchToPostCTA(sid,aid);
+          if(progressInterval){ clearInterval(progressInterval); progressInterval=null; }
           closeCaptcha(); showToast("アカウント作成が完了！『このボタンをクリックして完了してください』を押してください"); return;
         }
         if(data.status==="recreate_required"){ showToast("ブログ作成に失敗。『↻ ブログを再作成』からやり直してください。","error"); restoreCaptchaButton(siteId, accountId, "↻ ブログを再作成"); closeCaptcha(); return; }
-        if(data.status==="captcha_success"){ startProgressPolling(); return; }
+        if(data.status==="captcha_success"){ setCaptchaDoneUI(siteId, accountId); startProgressPolling(); return; }
         showToast("予期しない応答が返されました","error"); restoreCaptchaButton(siteId, accountId, "⚠ 不明な応答"); closeCaptcha();
       })
       .catch(err=>{ console.error(err); showToast("CAPTCHA送信中にエラーが発生しました","error"); restoreCaptchaButton(siteId, accountId, "❌ 再挑戦"); closeCaptcha(); });
   }
 
   function startProgressPolling(){
+    lastStatus=null; maxSeenPct=0;
     if(progressInterval) clearInterval(progressInterval);
     progressInterval=setInterval(()=>{
       const siteId=sessionStorage.getItem("currentSiteId");
@@ -846,11 +895,13 @@
         .then(r=>r.json())
         .then(data=>{
           if(!data) return;
+          setAccProgress( percentForStep(data.step,data) );
+          if(data.step && data.step!==lastStatus){ lastStatus=data.step; updateCaptchaStatusUI(data); }
           const done = ((typeof data.progress==='number' && data.progress>=100) || /api[\s_-]*key|apikey|api取得完了|received/i.test(String(data.step||'')));
           if(done){
             const sid=data.site_id||siteId, aid=data.account_id||accountId;
             if(sid && aid) switchToPostCTA(sid,aid);
-            clearInterval(progressInterval); progressInterval=null;
+            setAccProgress(100); clearInterval(progressInterval); progressInterval=null;
             closeCaptcha(); showToast("アカウント作成が完了！『このボタンをクリックして完了してください』を押してください");
           }
         })
@@ -876,5 +927,25 @@
       alert(`削除しました（削除記事: ${data.deleted_articles || 0}）`);
     }catch(e){ console.error(e); alert(e.message || "削除に失敗しました"); }
   }
+
+  /* ================== DOM Ready ================== */
+  document.addEventListener('DOMContentLoaded', ()=>{
+    document.querySelectorAll('#siteTbody tr').forEach(tr=>{
+      tr.addEventListener('click', ()=> selectSite(tr.getAttribute('data-site-id'), true), {passive:true});
+    });
+
+    // 生成ロック復元
+    document.querySelectorAll('a[data-account-id]').forEach(a=>{
+      const aid=a.getAttribute('data-account-id');
+      if(localStorage.getItem(`gen-lock:${aid}`)==='1'){ disableLink(a); }
+    });
+
+    const initId = initialSiteId(); if(initId) selectSite(initId, false);
+
+    // 初期レイアウト調整
+    fitSiteScrollHeight();
+    fitAccountScrollHeight(document);
+    initSorting();
+  });
 </script>
 {% endblock %}
