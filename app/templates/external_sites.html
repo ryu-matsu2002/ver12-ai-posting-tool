@@ -19,6 +19,9 @@
 
     --link:#ffe9ff;
     --link-hover:#ffffff;
+
+    /* 指定の背景色 */
+    --seo-bg: #3A1F5C;
   }
 
   /* ===== ベース ===== */
@@ -91,8 +94,8 @@
   .prop-title,
   .site-name{ font-weight: 500 !important; }
 
-  .tcd-wrap{
-    background: var(--tcd-darker);
+  .tcd-wrap.seo-page{
+    background: var(--seo-bg); /* ← 指定の濃紫 */
     border-radius: 14px;
     padding: 28px;
     margin: 0 auto;
@@ -101,11 +104,11 @@
     contain: paint;
   }
   @media (max-width: 1024px){
-    .tcd-wrap{ padding: 18px; }
+    .tcd-wrap.seo-page{ padding: 18px; }
   }
 
   /* ===== 2カラム（7:3） ===== */
-  .tcd-layout{ display:flex; gap:18px; align-items: stretch; }
+  .tcd-layout{ display:flex; gap:0; align-items: stretch; } /* ← 中央の溝を0にして“連結感” */
   .tcd-sidebar{ flex: 0 0 70%; max-width:70%; min-width:0; }
   .right-outer{ flex: 0 0 30%; max-width:30%; min-width:0; }
   @media (max-width: 1280px){
@@ -121,7 +124,8 @@
   .tcd-sidebar{
     background: linear-gradient(180deg, var(--tcd-darker) 0%, var(--tcd-dark) 100%);
     color:#fff;
-    border-radius: 12px;
+    border-top-left-radius: 12px;
+    border-bottom-left-radius: 12px;
     display:flex; flex-direction: column;
     overflow:hidden;
   }
@@ -160,19 +164,18 @@
   .site-table{
     border: 1px solid rgba(255,255,255,.28);
     border-radius: 10px;
-    /* sticky を効かせるため hidden → visible に修正 */
-    overflow: visible;
+    overflow: visible; /* sticky を効かせるため */
     background: rgba(255,255,255,.06);
   }
   .site-table-head{
     position: sticky;
-    top: 0;                 /* ← スクロール時も固定 */
+    top: 0;
     z-index: 5;
     display: grid;
-    grid-template-columns: 1.2fr .42fr .42fr .42fr;
+    /* 列: サイト名 | LD | note | Ame | クリック数 | 表示回数 */
+    grid-template-columns: 1.2fr .42fr .42fr .42fr .5fr .5fr;
     gap: 0;
     padding: 10px 12px;
-    /* 透けやズレに見えないように少し濃いめ */
     background: linear-gradient(0deg, rgba(0,0,0,.35), rgba(0,0,0,.35));
     backdrop-filter: blur(2px);
     font-size: .92rem;
@@ -181,7 +184,7 @@
   .site-rows{ display:block; }
   .site-row{
     display: grid;
-    grid-template-columns: 1.2fr .42fr .42fr .42fr;
+    grid-template-columns: 1.2fr .42fr .42fr .42fr .5fr .5fr; /* ← 同じ列幅 */
     gap: 0;
     align-items: center;
     padding: 12px 12px;
@@ -224,20 +227,28 @@
   }
   .pf-ame .pf-count{ background-color: rgba(0,0,0,.55) !important; }
 
+  /* 数値セル（右寄せ） */
+  .num{
+    text-align: right;
+    font-weight: 600;
+  }
+
   /* ===== 右ペイン：右側全体は固定、内部だけスクロール ===== */
   .right-outer{
     background: var(--pane-bg);
-    border-radius: 12px;
+    border-top-right-radius: 12px;
+    border-bottom-right-radius: 12px;
     border: 1px solid var(--pane-border);
+    border-left: 6px solid #ffffff; /* ← 左と“つながる”白ライン */
     position: relative;
-    overflow: hidden;        /* 右下の白被りを防止 */
+    overflow: hidden;
     min-height: 520px;
   }
   .right-scroll{
     position: absolute;
-    inset: 0;                /* 右コンテナを全面化 */
+    inset: 0;
     overflow: auto;
-    padding: 26px 28px 36px; /* 最下部が白に隠れないように余白増し */
+    padding: 26px 28px 36px;
   }
 
   .tcd-card{
@@ -259,7 +270,7 @@
     z-index: 5;
   }
 
-  /* Livedoor見出し：sticky をやめてズレを解消（通常フロー） */
+  /* Livedoor見出し（通常フロー） */
   .tcd-acc-trigger{
     width:100%; text-align:left; padding:14px 20px;
     display:flex; align-items:center; gap:14px; cursor: pointer;
@@ -267,18 +278,15 @@
     background: linear-gradient(135deg, #7a4a75, #9a6194);
     border-bottom: 1px solid var(--card-edge);
     color:#fff;
-    /* position: sticky; top: … を削除してズレ防止 */
   }
-  /* 見出し直下のカードが食い込んで見えないよう軽く余白 */
   .tcd-acc-trigger + .accordion-panel{ padding-top: 10px; }
 
   .tcd-caret{ font-size:2.1rem; line-height:1; color:#f3e7f2; transition:transform .2s ease; }
 
-  /* アカウントカード領域（必要に応じて使うなら） */
   .ld-panel{ padding: 0; }
   .ld-scroll{
     overflow: auto;
-    max-height: 480px;   /* 使わない場合は未使用でもOK */
+    max-height: 480px;
     padding: 16px;
   }
 
@@ -311,7 +319,7 @@
 
 {% set ALLOW_MULTI_BLOG_USER_IDS = [1, 2, 5] %}
 
-<div class="tcd-wrap">
+<div class="tcd-wrap seo-page">
   <div class="tcd-layout">
     {# ================= 左：サイト一覧 ================= #}
     <aside class="tcd-sidebar">
@@ -327,6 +335,8 @@
             <div>ライブドア</div>
             <div>note</div>
             <div>アメブロ</div>
+            <div class="num">クリック数</div>
+            <div class="num">表示回数</div>
           </div>
           <div id="siteList" class="site-rows">
             {% for s in sites %}
@@ -344,6 +354,8 @@
                 <div><span class="pf-badge pf-ld">LD <span class="pf-count">{{ s.ld_count|default(0) }}</span></span></div>
                 <div><span class="pf-badge pf-note">note <span class="pf-count">{{ s.note_count|default(0) }}</span></span></div>
                 <div><span class="pf-badge pf-ame">Ame <span class="pf-count">{{ s.ameba_count|default(0) }}</span></span></div>
+                <div class="num">{{ s.clicks|default(0) }}</div>
+                <div class="num">{{ s.impressions|default(0) }}</div>
               </a>
             {% endfor %}
           </div>
@@ -727,17 +739,14 @@
 
   /* ===== 右：アカウント一覧の表示域を実測してフィットさせる ===== */
   function fitAccountScrollHeight(scope){
-    // scope: 現在表示中のsite-panel要素 or document
     const panel = (scope && scope.querySelector) ? scope : document;
     const rightScroll = document.getElementById('rightScroll');
     if(!rightScroll) return;
 
-    // 全ての ld-scroll を対象に高さ再計算
     panel.querySelectorAll('.ld-scroll').forEach(sc=>{
-      // rightScroll の内側下端から、この sc の上端までの差分を可動域に
       const rsRect = rightScroll.getBoundingClientRect();
       const rTop   = sc.getBoundingClientRect().top;
-      const available = Math.max(180, Math.floor(rsRect.bottom - rTop - 14)); // 余白少し
+      const available = Math.max(180, Math.floor(rsRect.bottom - rTop - 14));
       sc.style.maxHeight = available + 'px';
     });
   }
@@ -764,11 +773,9 @@
 
     if (store) sessionStorage.setItem(SELECT_KEY, siteId);
 
-    // 右スクロール位置を先頭へ
     const rs = document.getElementById('rightScroll');
     if (rs) rs.scrollTop = 0;
 
-    // 高さフィット
     fitAccountScrollHeight(panel);
   }
 
@@ -822,7 +829,6 @@
     const initId = initialSiteId();
     if (initId) selectSite(initId, false);
 
-    // 初期高さフィット
     fitAccountScrollHeight(document);
   });
 
@@ -839,13 +845,12 @@
     const isOpen = !panel.classList.contains('hidden');
 
     if (isOpen) {
-      panel.classList.add('hidden');            // 完全に閉じる（領域が消える）
+      panel.classList.add('hidden');
       if (caret) caret.classList.remove('rotate-180');
       btn.setAttribute('aria-expanded', 'false');
       return;
     }
 
-    // 開く時：他を閉じる必要があればここで処理（同一カード内）
     const card = btn.closest('.tcd-card');
     if (card) {
       card.querySelectorAll('.accordion-panel').forEach(p => p.classList.add('hidden'));
@@ -857,7 +862,6 @@
     if (caret) caret.classList.add('rotate-180');
     btn.setAttribute('aria-expanded', 'true');
 
-    // 開いた後にスクロール領域の高さを実測してセット
     fitAccountScrollHeight(panel.closest('.site-panel'));
   });
 
@@ -1049,7 +1053,6 @@
     `;
     grid.prepend(card);
 
-    // 追加後も高さを再フィット
     fitAccountScrollHeight(panel.closest('.site-panel'));
   }
 
@@ -1248,7 +1251,6 @@
       if (card) {
         const panel = card.closest(`[id^="tab-ld-"]`);
         card.remove();
-        // なくなった後も高さ再フィット
         fitAccountScrollHeight(panel.closest('.site-panel'));
         if (panel) {
           const hasCards = panel.querySelector('.ld-scroll .grid')?.children.length > 0;
