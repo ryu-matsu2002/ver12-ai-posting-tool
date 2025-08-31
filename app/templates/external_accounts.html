@@ -3,6 +3,58 @@
 {% block title %}外部ブログアカウント一覧{% endblock %}
 
 {% block content %}
+{% block content %}
+<style>
+  /* ==== 外部SEOページと同じテーマ（このページ内だけに適用） ==== */
+  :root{
+    --seo-bg:#3A1F5C; --pane:#44286D; --pane-2:#4D2F7D; --edge:rgba(255,255,255,.14);
+    --txt:#fff; --txt-dim:#E7E1FA; --row:#54307EAA; --row-alt:#593587AA; --row-hover:#68449C;
+  }
+  /* ページ背景をパープルに（ベーステンプレの白を上書き） */
+  html, body, main, #main, #content, .content, .page-wrapper, .page-content{
+    background:var(--seo-bg) !important; color:var(--txt);
+  }
+
+  /* ラッパー（後述の .extacc で全体を包む） */
+  .extacc h2{ color:var(--txt); font-size:2.1rem; font-weight:800; letter-spacing:.02em;
+              margin:0 0 12px; text-shadow:0 2px 10px rgba(0,0,0,.25); }
+
+  /* 絞り込みフォームをカード風に */
+  .extacc form{
+    background:var(--pane-2); border:1px solid var(--edge); border-radius:12px;
+    padding:10px 12px; color:var(--txt);
+  }
+  .extacc label{ color:var(--txt-dim); }
+  .extacc select{ background:rgba(255,255,255,.10); color:var(--txt); border:1px solid var(--edge);
+                  border-radius:10px; padding:6px 10px; }
+  .extacc button[type="submit"]{ background:#2563EB; color:#fff; border:1px solid #1D4ED8;
+                                 padding:.45rem .8rem; border-radius:.6rem; }
+
+  /* テーブルを外部SEOページ風に */
+  .extacc table{ width:100%; border-collapse:separate; border-spacing:0; border:1px solid var(--edge);
+                 background:var(--pane); border-radius:12px; overflow:hidden; }
+  .extacc thead{ background:var(--pane-2) !important; color:var(--txt); }
+  .extacc th{ font-weight:700; padding:10px 12px; border-bottom:1px solid var(--edge); text-align:left; }
+  .extacc td{ padding:10px 12px; color:var(--txt); }
+  .extacc tbody tr{ background:var(--row); border-bottom:1px solid var(--edge); }
+  .extacc tbody tr:nth-child(odd){ background:var(--row-alt); }
+  .extacc tbody tr:hover{ background:var(--row-hover); }
+
+  /* リンク色（記事一覧・ソート） */
+  .extacc a{ color:#C9B7FF; }
+  .extacc a:hover{ color:#fff; text-decoration:underline; }
+
+  /* Pill（LD / note / Ame）— 文字色を白に固定しつつテーマに馴染ませる */
+  .extacc .text-white{ color:#fff !important; }
+  .extacc .bg-orange-600{ background:#A888F8 !important; }  /* livedoor */
+  .extacc .bg-blue-600{   background:#7F7396 !important; }  /* note    */
+  .extacc .bg-green-600{  background:#2ED3B7 !important; color:#06261E !important; } /* Ame */
+  /* “記事一覧”リンクの青もテーマ色に寄せる */
+  .extacc .text-blue-600{ color:#C9B7FF !important; }
+  .extacc .text-blue-600:hover{ color:#fff !important; }
+</style>
+
+<div class="extacc">
 <h2 class="text-2xl font-bold mb-6 flex items-center">
   🚀 外部無料ブログアカウント一覧
 </h2>
@@ -138,4 +190,5 @@
 {% if not has_accounts %}
   <p class="text-gray-500">まだ外部ブログアカウントはありません。</p>
 {% endif %}
+</div>
 {% endblock %}
