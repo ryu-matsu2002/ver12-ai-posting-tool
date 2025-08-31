@@ -131,8 +131,8 @@
   /* 列幅（ログ表を目安にスリム化） */
   .tbl col.col-name{ width:auto; }
   .tbl col.col-ld, .tbl col.col-note, .tbl col.col-ame{ width: 84px; }
-  .tbl col.col-clicks{ width: 86px; }
-  .tbl col.col-impr{ width: 110px; }
+  .tbl col.col-clicks{ width: 96px; }     /* ← 余白少し広げる */
+  .tbl col.col-impr{ width: 118px; }      /* ← 余白少し広げる */
   .tbl col.col-gsc{ width: 80px; }
 
   .tbl thead th{
@@ -146,13 +146,23 @@
   }
   .tbl thead th:first-child{ text-align:left; }  /* サイト名だけ左寄せ */
 
-  /* 並び替えUI（矢印） */
-  th.sortable{ cursor:pointer; padding-right: 22px; position:relative; }
-  th.sortable::after{
-    content: attr(data-arrow);
-    position:absolute; right:6px; top:50%; transform:translateY(-52%);
-    opacity:.9;
+  /* 見出しの矢印を“隣に”表示するためのラッパー */
+  .th-wrap{
+    display:inline-flex; align-items:center; justify-content:center;
+    gap:8px; line-height:1;
   }
+  .sort-btn{
+    appearance:none; -webkit-appearance:none;
+    border:0; background:transparent; color:#fff;
+    font-size:.95rem; line-height:1; padding:0 2px;
+    cursor:pointer; border-radius:4px; min-width:1.25em;
+  }
+  .sort-btn:hover{ background: rgba(255,255,255,.12); }
+  .sort-btn[aria-pressed="true"]{ background: rgba(255,255,255,.18); }
+
+  /* 旧：擬似要素の矢印は使用しない（消す） */
+  th.sortable{ cursor:pointer; position:relative; padding-right: 0; }
+  th.sortable::after{ content: none !important; }
 
   .tbl td{
     padding:10px 12px; color:var(--txt);
@@ -226,6 +236,7 @@
     border-radius: 12px;
     color:#fff;
   }
+
   .acc-trigger{
     width:100%; text-align:left; padding:14px 16px;
     background: linear-gradient(135deg,#6b3b94,#8b58b6);
@@ -234,7 +245,9 @@
     border-top-left-radius: 12px; border-top-right-radius: 12px;
   }
   .caret{ font-size:1.8rem; line-height:1; color:#F6EDFF; transition: transform .12s ease; }
-  .accordion-panel{ display:block; }      /* JSでhidden付与・除去 */
+
+  /* アコーディオン中身：上=スクロール領域、下=ボタンバー（常時見える） */
+  .accordion-panel{ display:grid; grid-template-rows: 1fr auto; }
   .accordion-panel.hidden{ display:none; }
 
   .metric{ display:flex; flex-wrap:wrap; gap:1rem; }
@@ -288,9 +301,19 @@
             <th>ライブドア</th>
             <th>note</th>
             <th>アメブロ</th>
-            <!-- ▼ 表示回数と同じ矢印（↓）をクリック数にも常時表示 -->
-            <th class="sortable" data-sort="clicks" data-arrow="↓">クリック数</th>
-            <th class="sortable" data-sort="impr"   data-arrow="↓">表示回数</th>
+            <!-- ▼ クリック数／表示回数：テキストの“隣に”矢印ボタン -->
+            <th class="sortable" data-sort="clicks">
+              <span class="th-wrap">
+                <span>クリック数</span>
+                <button type="button" class="sort-btn" data-col="clicks" aria-label="クリック数の並び替え" aria-pressed="false">↕</button>
+              </span>
+            </th>
+            <th class="sortable" data-sort="impr">
+              <span class="th-wrap">
+                <span>表示回数</span>
+                <button type="button" class="sort-btn" data-col="impr" aria-label="表示回数の並び替え" aria-pressed="false">↕</button>
+              </span>
+            </th>
             <th>GSC</th>
           </tr>
           </thead>
@@ -625,7 +648,10 @@
   function fitAccountScrollHeight(scope){
     (scope||document).querySelectorAll('.ld-scroll').forEach(sc=>{
       const rect = sc.getBoundingClientRect();
-      const h = Math.max(220, Math.floor(window.innerHeight - rect.top - 8));
+      // 下段の“＋ ブログ追加”行の高さぶんを差し引く（存在しない場合は既定 72px）
+      const toolbar = sc.parentElement.querySelector('.border-t');
+      const reserve  = Math.max((toolbar ? toolbar.getBoundingClientRect().height : 72), 56);
+      const h = Math.max(220, Math.floor(window.innerHeight - rect.top - 8 - reserve));
       sc.style.height = h + 'px';
       sc.style.maxHeight = h + 'px';
     });
@@ -687,21 +713,29 @@
     rows.forEach(r=>tbody.appendChild(r));
   }
   function initSorting(){
-    document.querySelectorAll('th.sortable').forEach(th=>{
-      th.addEventListener('click', ()=>{
-        const key = th.dataset.sort;           // "clicks" or "impr"
-        const current = th.dataset.order;
+    const buttons = document.querySelectorAll('.sort-btn');
+    buttons.forEach(btn=>{
+      btn.addEventListener('click', (ev)=>{
+        ev.stopPropagation(); /* ヘッダーの他イベントを拾わない */
+        const th = btn.closest('th.sortable');
+        const key = th?.dataset.sort;
+        const current = th?.dataset.order || '';
         const next = current === 'asc' ? 'desc' : 'asc';
-        // 一旦リセット（既定は「↓」に揃える）
+
+        /* すべてをリセット */
         document.querySelectorAll('th.sortable').forEach(h=>{
           h.dataset.order = '';
-          h.setAttribute('data-arrow','↓');
+          const b = h.querySelector('.sort-btn');
+          if(b){ b.textContent = '↕'; b.setAttribute('aria-pressed','false'); }
         });
-        // 今回の列に適用
+
+        /* 今回の列を適用 */
         th.dataset.order = next;
-        th.setAttribute('data-arrow', next === 'asc' ? '↑' : '↓');
+        btn.textContent = (next === 'asc' ? '↑' : '↓');
+        btn.setAttribute('aria-pressed','true');
+
         sortSites(key, next);
-      }, {passive:true});
+      }, {passive:false});
     });
   }
 
