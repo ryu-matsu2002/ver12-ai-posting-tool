@@ -202,6 +202,24 @@ def _fallback_anchor_from_url(u: str) -> str:
         pass
     return u
 
+def _clean_anchor_text(url: str, title: str) -> str:
+    """
+    取得したページタイトルから「 - サイト名」「｜サイト名」「| サイト名」「：サイト名」などの
+    末尾ブランド表記を除去して、アンカーに使う“記事タイトルだけ”を返す。
+    - 区切りは「空白付きハイフン」「パイプ」「全角縦棒」「コロン」を対象
+    - 左右の空白を除去し、最も“長い”セグメントを採用（多くのサイトで記事タイトルが最長）
+    """
+    t = (title or "").strip()
+    if not t:
+        return t
+    # 区切りで末尾のサイト名を外す（例: "記事タイトル - サイト名" / "サイト名 | 記事タイトル" など）
+    parts = _re.split(r'(?:\s-\s|\s–\s|\s—\s|\s\|\s|｜|：|:|»)', t)
+    parts = [p.strip() for p in parts if p and p.strip()]
+    if len(parts) >= 2:
+        # 記事タイトルが最も長くなるケースが多いので長さ優先で選ぶ
+        t = max(parts, key=lambda s: len(s))
+    return t[:120]
+
 def _fetch_page_title(u: str, timeout: int = 8) -> Optional[str]:
     """URLへHTTP GETしてタイトルを取得（短時間タイムアウト/軽量UA）"""
     try:
@@ -232,7 +250,7 @@ def _prefetch_anchor_texts(urls: List[str], max_workers: int = 8) -> dict:
     def _job(u: str):
         t = _fetch_page_title(u)
         if t and t.strip():
-            anchors[u] = t.strip()
+            anchors[u] = _clean_anchor_text(u, t.strip())
     try:
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
             futs = [ex.submit(_job, u) for u in uniq]
@@ -584,6 +602,8 @@ def generate_and_schedule_external_articles(
                     article_ids.append(art.id)
                     # ★ URLに対応するアンカーテキスト（タイトル）を用意
                     anchor_txt = anchor_map.get(link) or _fallback_anchor_from_url(link)
+                    # 念のためここでもクリーンアップ（フォールバック時は影響なし）
+                    anchor_txt = _clean_anchor_text(link, anchor_txt)
                     # HTML表示用にエスケープしておく（挿入箇所で二重エスケープしないようここで）
                     safe_anchor_txt = _html.escape(anchor_txt, quote=True)[:120]
 

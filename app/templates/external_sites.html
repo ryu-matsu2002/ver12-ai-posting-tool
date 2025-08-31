@@ -271,6 +271,19 @@
     pointer-events: none !important;
   }
 
+  /* === CAPTCHA取得中（aria-busy=true）のボタンは灰色固定 & クリック不可 === */
+  .btn[aria-busy="true"]{
+    background:#6B7280 !important;   /* gray-500 */
+    border-color:#4B5563 !important;  /* gray-600 */
+    color:#E5E7EB !important;         /* gray-200 */
+    pointer-events:none !important;
+    cursor:not-allowed !important;
+    opacity:1 !important;             /* 文字の視認性を優先 */
+  }
+  .btn[aria-busy="true"]:hover{
+    filter:none !important;
+  }
+
   /* WP風の“つながり”を右側でも表現（薄い白のインセット） */
   .seo-layout.connected .right-pane{ box-shadow: inset 6px 0 0 #ffffff20; }
 </style>
