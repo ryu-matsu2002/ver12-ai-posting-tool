@@ -4,13 +4,15 @@ import random
 import logging
 from typing import List, Tuple, Set, Iterable, Optional
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import requests
 from flask import current_app
 from xml.etree import ElementTree as ET
 
 from concurrent.futures import ThreadPoolExecutor, as_completed  # ★ 並列化
+import html as _html  # ★ タイトルのエスケープ用
+import re as _re      # ★ タイトル抽出にも利用（既存と衝突しないよう別名に合わせる）
 
 from app import db
 from app.models import Site, Keyword, Article, ExternalArticleSchedule
@@ -21,7 +23,6 @@ from app.google_client import (
 from .article_generator import _chat, _compose_body, TOKENS, TEMP, _generate  # ★ _generate を流用
 
 # 追加: タイトルのフォールバック生成用
-import re as _re
 def _fallback_title_from_keyword(kw: str) -> str:
     """タイトルが空のときに必ず返すフォールバック"""
     kw = (kw or "").strip()
@@ -157,6 +158,89 @@ def _daily_slots_jst(per_day: int) -> List[Tuple[int, int]]:
 
 def _ensure_http_url(u: str) -> str:
     return u.strip()
+
+#
+# ====== 追加：リンク先タイトル取得ユーティリティ ======
+#
+_ANCHOR_UA = "ai-posting-tool/1.0 (+title-fetch)"
+
+def _extract_html_title(text: str) -> Optional[str]:
+    """HTML文字列から <meta property='og:title'> もしくは <title> を抽出"""
+    if not text:
+        return None
+    # og:title 優先
+    m = _re.search(r'<meta[^>]+property=["\']og:title["\'][^>]*content=["\']([^"\']+)["\']', text, flags=_re.I)
+    if m and m.group(1).strip():
+        return m.group(1).strip()
+    # 一般的な <title>
+    m = _re.search(r'<title[^>]*>(.*?)</title\s*>', text, flags=_re.I | _re.S)
+    if m:
+        # 改行・余白の整理
+        t = _re.sub(r'\s+', ' ', (m.group(1) or '').strip())
+        return t or None
+    return None
+
+def _fallback_anchor_from_url(u: str) -> str:
+    """
+    タイトルが取れない場合のフォールバック：
+      1) パス末尾のスラッグっぽい部分をスペース区切りタイトル化
+      2) それでもダメならドメイン
+      3) 最後にURL全体
+    """
+    try:
+        pu = urlparse(u)
+        # スラッグ候補
+        path = (pu.path or "").rstrip("/")
+        slug = path.split("/")[-1] if path else ""
+        slug = _re.sub(r'[-_]+', ' ', slug).strip()
+        slug = slug.title() if slug else ""
+        if slug:
+            return slug[:120]
+        if pu.netloc:
+            return pu.netloc
+    except Exception:
+        pass
+    return u
+
+def _fetch_page_title(u: str, timeout: int = 8) -> Optional[str]:
+    """URLへHTTP GETしてタイトルを取得（短時間タイムアウト/軽量UA）"""
+    try:
+        # http/https のみ対象（mailto:, javascript: 等は除外）
+        pu = urlparse(u)
+        if pu.scheme not in ("http", "https"):
+            return None
+        r = requests.get(u, timeout=timeout, headers={"User-Agent": _ANCHOR_UA})
+        if r.status_code != 200:
+            return None
+        # HTML以外は除外
+        ctype = (r.headers.get("Content-Type") or "").lower()
+        if "text/html" not in ctype:
+            return None
+        # エンコーディングはrequestsが推定する、失敗時はtextが空になる可能性あり
+        return _extract_html_title(r.text or "")
+    except Exception:
+        return None
+
+def _prefetch_anchor_texts(urls: List[str], max_workers: int = 8) -> dict:
+    """
+    渡されたURLのページタイトルを並列で事前取得して dict で返す。
+    取得失敗時は dict に入れない（呼び出し側でフォールバック）。
+    """
+    anchors: dict[str, str] = {}
+    # ユニーク化して負荷を抑制
+    uniq = list({u for u in urls if isinstance(u, str)})
+    def _job(u: str):
+        t = _fetch_page_title(u)
+        if t and t.strip():
+            anchors[u] = t.strip()
+    try:
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futs = [ex.submit(_job, u) for u in uniq]
+            for _ in as_completed(futs):
+                pass
+    except Exception:
+        logging.exception("[external_seo] タイトル事前取得中に例外")
+    return anchors
 
 
 def _base_and_topic(site: Site) -> Tuple[str, str]:
@@ -410,6 +494,9 @@ def generate_and_schedule_external_articles(
     link_plan: List[str] = fixed50 + random50
     assert len(link_plan) == 100
 
+    # ★ 新規：リンク先のページタイトルを事前取得（アンカーテキスト用）
+    anchor_map = _prefetch_anchor_texts(link_plan)
+
     # 記事とリンクの対応をランダム化（均等性担保のため記事側をシャッフル）
     random.shuffle(gen_queue)
 
@@ -423,7 +510,7 @@ def generate_and_schedule_external_articles(
 
     # 1) まず枠を作成（Article: pending / ExternalArticleSchedule: pending）
     article_ids: List[int] = []
-    per_article_link: List[str] = []
+    per_article_link: List[Tuple[str, str]] = []  # (url, anchor_text)
 
     with app.app_context():
         try:
@@ -473,7 +560,7 @@ def generate_and_schedule_external_articles(
 
                     art = Article(
                         keyword=kw_str,
-                        title="",   # ← ここを必ず非空に
+                        title=placeholder_title,  # ← プレースホルダを実際に設定
                         body="",
                         user_id=user_id,
                         site_id=site_id,
@@ -495,7 +582,12 @@ def generate_and_schedule_external_articles(
                     db.session.add(sched)
 
                     article_ids.append(art.id)
-                    per_article_link.append(link)
+                    # ★ URLに対応するアンカーテキスト（タイトル）を用意
+                    anchor_txt = anchor_map.get(link) or _fallback_anchor_from_url(link)
+                    # HTML表示用にエスケープしておく（挿入箇所で二重エスケープしないようここで）
+                    safe_anchor_txt = _html.escape(anchor_txt, quote=True)[:120]
+
+                    per_article_link.append((link, safe_anchor_txt))
 
                     created_cnt += 1
                     idx += 1
@@ -512,11 +604,16 @@ def generate_and_schedule_external_articles(
 
 
         # 本文の「中間」にリンクブロックを差し込む
-    def _insert_link_mid(html: str, link: str) -> str:
-    # 「関連情報はこちら：リンク」の形で挿入
+    def _insert_link_mid(html: str, link_url: str, anchor_text: str) -> str:
+        """
+        「関連情報はこちら：{アンカーテキスト}」の形で挿入。
+        別タブ遷移（target=_blank）、安全のため rel を付与。
+        """
+        safe_url = _html.escape(link_url, quote=True)
+        # anchor_text は事前にエスケープ済み
         snippet = (
             f"<p>関連情報はこちら："
-            f"<a href='{link}' target='_blank' rel='nofollow noopener'>{link}</a>"
+            f"<a href='{safe_url}' target='_blank' rel='nofollow noopener noreferrer'>{anchor_text}</a>"
             f"</p>"
         )
 
@@ -544,7 +641,7 @@ def generate_and_schedule_external_articles(
 
     from app.article_generator import _unique_title
 
-    def _gen_and_append(aid: int, link: str):
+    def _gen_and_append(aid: int, link_url: str, anchor_text: str):
         _generate(app, aid, TITLE_PROMPT, BODY_PROMPT,
                   format="html", self_review=False, user_id=user_id)
 
@@ -560,8 +657,8 @@ def generate_and_schedule_external_articles(
             # 🔧 類似タイトルがある場合はユニーク化
             art.title = _unique_title(art.keyword, TITLE_PROMPT)
 
-            # 本文にリンクを差し込み
-            art.body = _insert_link_mid(art.body or "", link)
+            # 本文に「タイトル付きリンク」を差し込み（別タブ）
+            art.body = _insert_link_mid(art.body or "", link_url, anchor_text)
 
             if art.status not in ("done", "gen"):
                 art.status = "done"
@@ -571,10 +668,10 @@ def generate_and_schedule_external_articles(
 
     try:
         with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = [
-                executor.submit(_gen_and_append, aid, link)
-                for aid, link in zip(article_ids, per_article_link)
-            ]
+            futures = []
+            for aid, pair in zip(article_ids, per_article_link):
+                url, anchor = pair
+                futures.append(executor.submit(_gen_and_append, aid, url, anchor))
             for f in as_completed(futures):
                 try:
                     f.result()

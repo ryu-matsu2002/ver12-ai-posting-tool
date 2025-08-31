@@ -131,26 +131,25 @@ def _name_tokens(name: str) -> list[str]:
 
 def _keyword_seed_from_site(site) -> tuple[str | None, bool]:
     """
-    サイト名/URLから「1語」を安定に選ぶ。
+    サイト名から「1語」を安定に選ぶ。
     戻り値: (seed, is_jp)  /  抽出できなければ (None, False)
     """
     name = (getattr(site, "name", "") or "").strip()
-    url = (getattr(site, "url", "") or "").strip()
-    salt = f"{getattr(site, 'id', '')}-{name}-{url}"
+    # salt は id+name のみ（URLは含めない）
+    salt = f"{getattr(site, 'id', '')}-{name}"
 
     name_toks = _name_tokens(name)
-    domain_toks = _domain_tokens(url)
 
     # 日本語と英語で候補を分ける
     jp_cands = [t for t in name_toks if _has_cjk(t) and t not in STOPWORDS_JP]
-    en_cands = [t for t in (name_toks + domain_toks) if not _has_cjk(t)]
+    en_cands = [t for t in name_toks if not _has_cjk(t)]
     en_cands = [t for t in en_cands if t.lower() not in STOPWORDS_EN]
 
     # 長さフィルタ（1文字や長すぎは除外）
     jp_cands = [t for t in jp_cands if 2 <= len(t) <= 12]
     en_cands = [t for t in en_cands if 2 <= len(t) <= 15]
 
-    # 同一サイトでは安定して同じ語を選ぶ（塩＝site.id+name+url）
+    # 同一サイトでは安定して同じ語を選ぶ（塩＝site.id+name）
     def _pick(stable_list: list[str]) -> str | None:
         if not stable_list:
             return None
@@ -167,7 +166,7 @@ def _guess_genre(site) -> tuple[str, bool]:
     """
     サイトからジャンル語(日本語/英語)と日本語フラグを推定。
     1) 明示属性（primary_genre_name / genre_name / genre.name など）
-    2) site.name / site.url の語からヒューリスティック
+    2) site.name の語からヒューリスティック（URLは参照しない）
     """
     # 1) 明示属性
     for attr in ("primary_genre_name", "genre_name", "genre", "main_genre", "category", "category_name"):
@@ -180,11 +179,9 @@ def _guess_genre(site) -> tuple[str, bool]:
             txt = name.strip()
             return txt, _has_cjk(txt)
 
-    # 2) ヒューリスティック
+    # 2) ヒューリスティック（サイト名のみ）
     name = (getattr(site, "name", "") or "")
-    url = (getattr(site, "url", "") or "")
-    txt = (name + " " + url).lower()
-    toks = set(_domain_tokens(url))
+    txt = name.lower()
 
     JP = [
         ("ピラティス", ("pilates", "ピラティス", "yoga", "体幹", "姿勢", "fitness", "stretch")),
@@ -194,7 +191,7 @@ def _guess_genre(site) -> tuple[str, bool]:
         ("ビジネス", ("business", "marketing", "sales", "seo", "経営", "起業", "副業")),
     ]
     for label, keys in JP:
-        if any(k in txt for k in keys) or any(k in toks for k in keys):
+        if any(k in txt for k in keys):
             return label, True
 
     EN = [
@@ -205,11 +202,11 @@ def _guess_genre(site) -> tuple[str, bool]:
         ("Business", ("business", "marketing", "sales", "seo", "startup")),
     ]
     for label, keys in EN:
-        if any(k in txt for k in keys) or any(k in toks for k in keys):
+        if any(k in txt for k in keys):
             return label, False
 
     # どれにも該当しなければ汎用
-    return ("日々", _has_cjk(name) or _has_cjk(url))
+    return ("日々", _has_cjk(name))
 
 
 def _too_similar_to_site(title: str, site) -> bool:
