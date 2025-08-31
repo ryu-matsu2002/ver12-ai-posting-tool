@@ -1,15 +1,21 @@
 import asyncio
+import os
 from datetime import datetime
 from pathlib import Path
 import logging
 import re as _re
 from urllib.parse import urlparse
-
-from app import db
-from app.models import ExternalBlogAccount
-from app.enums import BlogType
+from typing import List
 
 logger = logging.getLogger(__name__)
+
+# OpenAI（タイトル生成用）
+try:
+    from openai import AsyncOpenAI
+except Exception:
+    AsyncOpenAI = None
+OPENAI_MODEL_FOR_TITLES = os.getenv("OPENAI_TITLE_MODEL", "gpt-4o-mini")
+OPENAI_TIMEOUT_SEC = float(os.getenv("OPENAI_TIMEOUT_SEC", "12"))
 
 # 可能ならサインアップ時の CAPTCHA 手動入力ツールを流用（存在しなければフォールバックへ）
 try:
@@ -240,6 +246,170 @@ def _too_similar_to_site(title: str, site) -> bool:
             return True
 
     return False
+
+# ─────────────────────────────
+# タイトル生成ユーティリティ
+# ─────────────────────────────
+def _strip_numbering(s: str) -> str:
+    """行頭の番号・記号を除去"""
+    s = (s or "").strip()
+    s = _re.sub(r"^[\s\-\*\u2022\u25CF\u25A0\u30FB\d]+[.)、．]?\s*", "", s)
+    return s.strip("　").strip()
+
+def _split_lines_as_titles(text: str) -> List[str]:
+    lines = [_strip_numbering(x) for x in (text or "").splitlines()]
+    seen, out = set(), []
+    for t in lines:
+        t = t.strip()
+        if not t:
+            continue
+        if t in seen:
+            continue
+        seen.add(t)
+        out.append(t)
+    return out
+
+def _title_prompt(site) -> str:
+    """ご提示プロンプトを基に、類似禁止の指示を強化"""
+    site_name = (getattr(site, "name", "") or "").strip()
+    domain_words = ", ".join(_domain_tokens(getattr(site, "url", "") or ""))
+    seed, _ = _keyword_seed_from_site(site)
+    genre, _ = _guess_genre(site)
+    seed = seed or ""
+    genre = genre or ""
+    return f"""あなたはSEOとコンテンツマーケティングの専門家です。
+キャッチコピーを考える天才です。
+
+入力されたサイトジャンルから連想して、
+WEBサイトの「サイトタイトル」を32文字以内で考えてください。
+
+日本一のマーケッター神田昌典さんが考えたようなコピーをイメージしてください！
+
+条件：
+・キャッチコピー的な要素をタイトルに含めてください
+・サイトは「役に立つ情報を発信していくサイト」です
+・元サイト名やドメイン由来語に似せない（連想語も避ける）
+・日本語で書く
+・各タイトルは32文字以内
+・出力は**シンプルに縦に羅列（番号なし）**で10案
+
+# 生成のヒント
+- 想定ジャンル/テーマ: {genre}
+- 連想キーワードの種: {seed}
+- 似せてはいけない語: {site_name} / {domain_words}
+"""
+
+def _score_title(t: str, site) -> float:
+    """
+    “必ず10案から選ぶ”ためのスコアリング。
+    0〜100想定。高いほど良い。
+    """
+    if not t:
+        return -1
+    score = 100.0
+    # 長さ（32超は強い減点、32以内は微加点）
+    L = len(t)
+    if L > 32:
+        score -= 2.5 * (L - 32) + 20
+    else:
+        score += max(0, 6 - abs(28 - L) // 3)  # ざっくり32付近を好む
+    # 日本語らしさ
+    if not _has_cjk(t):
+        score -= 35
+    # 類似（強い減点）
+    if _too_similar_to_site(t, site):
+        score -= 60
+    # 記号だらけなど軽微な減点
+    if _re.search(r"[!！?？]{3,}", t):
+        score -= 5
+    return score
+
+def _pick_best_from_candidates(cands: List[str], site) -> str | None:
+    """まず厳格フィルタ→空ならスコアで10案から必ず選ぶ"""
+    strict = [
+        t for t in cands
+        if t and len(t) <= 32 and _has_cjk(t) and not _too_similar_to_site(t, site)
+        and t not in {"日々のブログ", "ひびのブログ"}
+    ]
+    pool = strict if strict else cands  # 空なら全候補から選ぶ
+    if not pool:
+        return None
+    # スコア降順、同点はsaltで安定選択
+    scored = sorted(pool, key=lambda x: (_score_title(x, site)), reverse=True)
+    top_score = _score_title(scored[0], site)
+    # 同点群を抽出
+    ties = [t for t in scored if abs(_score_title(t, site) - top_score) < 1e-6]
+    
+    # 同点が1つだけならそれを採用。ただし32字トリム後の最終類似を確認
+    if len(ties) == 1:
+        cand = ties[0][:32]
+        return cand if not _too_similar_to_site(cand, site) else None
+    # 同点が複数なら salt で安定選択 → それでも似すぎなら次点を順に試す
+    salt = f"{getattr(site,'id','')}-{getattr(site,'name','')}-{getattr(site,'url','')}"
+    order = list(ties)
+    start = _deterministic_index(salt, len(order))
+    order = order[start:] + order[:start]
+    for t in order:
+        cand = t[:32]
+        if _has_cjk(cand) and not _too_similar_to_site(cand, site):
+            return cand
+    # ここまで来たら、同点以外（scored全体）からも順に拾う
+    for t in scored:
+        cand = t[:32]
+        if _has_cjk(cand) and not _too_similar_to_site(cand, site):
+            return cand
+    # ✅ それでも全滅なら「最初の10案から必ず選ぶ」ポリシーで最上位を返す
+    return (scored[0][:32] if scored else (cands[0][:32] if cands else None))
+
+async def _gen_titles_with_openai(site) -> List[str]:
+    """
+    1回だけ呼び出して10案取得（再生成しない）。
+    失敗時は空配列。
+    """
+    if AsyncOpenAI is None:
+        return []
+    try:
+        client = AsyncOpenAI(timeout=OPENAI_TIMEOUT_SEC)
+        res = await client.chat.completions.create(
+            model=OPENAI_MODEL_FOR_TITLES,
+            temperature=0.7,
+            top_p=0.95,
+            max_tokens=400,
+            messages=[
+                {"role": "system", "content": "You are a skilled Japanese copywriter and SEO strategist."},
+                {"role": "user", "content": _title_prompt(site)},
+            ],
+        )
+        text = ""
+        try:
+            if res and getattr(res, "choices", None):
+                text = (res.choices[0].message.content or "").strip()
+        except Exception:
+            # choices が空/不正でも全体はフォールバックに流れる
+            text = ""
+        cands = _split_lines_as_titles(text)
+        # 取り過ぎた場合も10件に丸める
+        return cands[:10]
+    except Exception as e:
+        logger.warning("[TitleGen] OpenAI error (single shot): %s", e)
+        return []
+
+async def generate_blog_title(site) -> str:
+    """
+    gpt-4o-miniの“最初の10案”から必ずベストを選ぶ。
+    API失敗や0件のみフォールバック。
+    """
+    cands = await _gen_titles_with_openai(site)
+    if cands:
+        best = _pick_best_from_candidates(cands, site)
+        if best:
+            logger.info("[TitleGen] picked: %s (from %d candidates)", best, len(cands))
+            return best[:32]
+    # 失敗時のみフォールバック
+    try:
+        return _craft_blog_title(site)[:32]
+    except Exception:
+        return "こつこつブログ"
 
 
 def _templates_jp(topic: str) -> list[str]:
@@ -933,11 +1103,11 @@ async def recover_atompub_key(page, livedoor_id: str | None, nickname: str, emai
         await _save_shot(page, "ld_create_landing")
         logger.info("[LD-Recover] create到達: url=%s title=%s", page.url, (await page.title()))
 
-        # 2) タイトル生成 → 送信（それ以外は何もしない）
+        # 2) タイトル生成 → 送信（1回生成・10案から必ず選ぶ）
         try:
-            desired_title = _craft_blog_title(site)
+            desired_title = await generate_blog_title(site)
         except Exception:
-            desired_title = "こつこつブログ"  # 「日々のブログ」は使わない安全フォールバック
+            desired_title = "こつこつブログ"  # 最終フォールバック
 
         ok_submit = await _set_title_and_submit(page, desired_title)
         if not ok_submit:

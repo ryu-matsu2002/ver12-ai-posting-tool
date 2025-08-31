@@ -435,7 +435,7 @@
                           {% if not acc.api_key %}
                             <button type="button" class="btn btn-green w-full"
                               data-site-id="{{ s.id }}" data-account-id="{{ acc.id }}" data-platform="livedoor"
-                              onclick="handleCaptchaClick(this)">クリックで新規ブログ作成開始</button>
+                              onclick="handleCaptchaClick(this)">クリックで新規ブログ制作開始</button>
                           {% else %}
                             {% set _generated_once =
                                  (acc.generation_locked) or
@@ -543,7 +543,7 @@
                             {% if not acc.api_key %}
                               <button type="button" class="btn btn-green w-full"
                                 data-site-id="{{ s.id }}" data-account-id="{{ acc.id }}" data-platform="livedoor"
-                                onclick="handleCaptchaClick(this)">クリックで新規ブログ作成開始</button>
+                                onclick="handleCaptchaClick(this)">クリックで新規ブログ制作開始</button>
                             {% else %}
                               {% set _generated_once =
                                    (acc.generation_locked) or
@@ -626,8 +626,9 @@
   function lockKey(aid){ return `gen-lock:${aid}`; }
   function disableLink(el){
     el.classList.add('opacity-50','pointer-events-none','cursor-not-allowed');
+    el.setAttribute('aria-busy','true');                /* ← 生成中は灰色＋無効化 */
     if(!el.dataset.originalText){ el.dataset.originalText = el.textContent; }
-    el.textContent = '制作中…';  /* ← 作成中 → 制作中 */
+    el.textContent = '生成中…';
   }
   function lockAndGo(el){
     const aid = el.getAttribute('data-account-id'); if(!aid) return true;
@@ -845,7 +846,7 @@
     const area=document.getElementById(`actionArea-acc-${accountId}`); if(!area) return;
     area.innerHTML=""; const a=document.createElement('a');
     a.href=`/generate?site_id=${siteId}&account_id=${accountId}`; a.className="btn btn-green w-full";
-    a.textContent="こちらをクリックすると完了"; /* ← 文言変更 */
+    a.textContent="こちらをクリックすると完了";
     a.setAttribute('data-account-id', accountId);
     a.setAttribute('onclick','return lockAndGo(this)'); area.appendChild(a);
   }
@@ -855,13 +856,13 @@
     btn.disabled=false;
     btn.classList.remove('pointer-events-none','opacity-60');
     btn.removeAttribute('aria-busy');
-    btn.innerText=label||"新規ブログ作成開始";
+    btn.innerText=label||"新規ブログ制作開始";
   }
 
   async function newAccountStart(button){
     const siteId=button.getAttribute('data-site-id'); if(!siteId) return;
     sessionStorage.setItem(SELECT_KEY, siteId);
-    button.disabled=true; const old=button.innerText; button.innerText="制作中…"; /* ← 作成中→制作中 */
+    button.disabled=true; const old=button.innerText; button.innerText="制作中…";
     try{
       const body=new URLSearchParams(); body.append("site_id", siteId);
       const res=await fetch("/external-seo/new-account",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body,credentials:"same-origin"});
@@ -871,7 +872,7 @@
       if(!ALLOW_MULTI_BLOG_USER_IDS.includes(CURRENT_USER_ID)){
         const addBtn=document.getElementById(`addBtn-${siteId}`); if(addBtn){ addBtn.disabled=true; addBtn.classList.add("opacity-60","cursor-not-allowed"); }
       }
-      ensureLdOpen(siteId); /* ← 追加後も開いたまま */
+      ensureLdOpen(siteId);
     }catch(err){ alert(err.message||"ブログ作成に失敗しました"); }
     finally{ button.disabled=false; button.innerText=old; }
   }
@@ -905,7 +906,7 @@
       '<div class="mt-3" id="actionArea-acc-' + acc.id + '">' +
         '<button type="button" class="btn btn-green w-full" ' +
           'data-site-id="' + siteId + '" data-account-id="' + acc.id + '" data-platform="livedoor" ' +
-          'onclick="handleCaptchaClick(this)">新規ブログ作成開始</button>' +
+          'onclick="handleCaptchaClick(this)">新規ブログ制作開始</button>' +
       '</div>';
     grid.prepend(card);
     ensureLdOpen(siteId);
@@ -985,9 +986,9 @@
           const sid=data.site_id||siteId, aid=data.account_id||accountId;
           setAccProgress(100,true); switchToPostCTA(sid,aid);
           if(progressInterval){ clearInterval(progressInterval); progressInterval=null; }
-          closeCaptcha(); showToast("アカウント作成が完了！「こちらをクリックすると完了」を押してください"); ensureLdOpen(sid); return;
+          closeCaptcha(); /* 完了トーストは表示しない */ ensureLdOpen(sid); return;
         }
-        if(data.status==="recreate_required"){ showToast("ブログ作成に失敗。『↻ ブログを再作成』からやり直してください。","error"); restoreCaptchaButton(siteId, accountId, "↻ ブログを再作成"); closeCaptcha(); return; }
+        if(data.status==="recreate_required"){ showToast("ブログ制作に失敗。『↻ ブログを再制作』からやり直してください。","error"); restoreCaptchaButton(siteId, accountId, "↻ ブログを再制作"); closeCaptcha(); return; }
         if(data.status==="captcha_success"){ setCaptchaDoneUI(siteId, accountId); startProgressPolling(); return; }
         showToast("予期しない応答が返されました","error"); restoreCaptchaButton(siteId, accountId, "⚠ 不明な応答"); closeCaptcha();
       })
@@ -1011,7 +1012,7 @@
             const sid=data.site_id||siteId, aid=data.account_id||accountId;
             if(sid && aid) switchToPostCTA(sid,aid);
             setAccProgress(100); clearInterval(progressInterval); progressInterval=null;
-            closeCaptcha(); showToast("アカウント作成が完了！「こちらをクリックすると完了」を押してください");
+            closeCaptcha(); /* 完了トーストは表示しない */
             ensureLdOpen(sid);
           }
         })
@@ -1044,7 +1045,7 @@
       tr.addEventListener('click', ()=> selectSite(tr.getAttribute('data-site-id'), true), {passive:true});
     });
 
-    // 生成ロック復元
+    // 生成ロック復元（ページ再訪時はボタンを灰色・無効に戻す）
     document.querySelectorAll('a[data-account-id]').forEach(a=>{
       const aid=a.getAttribute('data-account-id');
       if(localStorage.getItem(`gen-lock:${aid}`)==='1'){ disableLink(a); }
