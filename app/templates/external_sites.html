@@ -409,8 +409,8 @@
             {# 注意ボックス（条件未達） #}
             {% if not can_start_extseo %}
               <div class="note-box mb-3">
-                外部SEOの開始には、<b>通常記事が50件以上</b>必要です（現在: <b>{{ s.normal_post_count | default(0) }}</b> 件）。
-                条件を満たすと、ブログの追加・生成ボタンが有効になります。
+                外部SEOの開始には、<b>WP記事が100記事以上</b>必要です。（現在: <b>{{ s.normal_post_count | default(0) }}</b> 件）。
+                条件を満たすと、ブログの制作・生成ボタンが有効になります。
               </div>
             {% endif %}
 
@@ -460,7 +460,7 @@
                             {% else %}
                               <button type="button" class="btn btn-green w-full cursor-not-allowed" disabled
                                 title="通常記事が50件以上で開始できます">
-                                クリックで新規ブログ制作開始（要: 通常記事50件）
+                                クリックで新規ブログ制作開始
                               </button>
                             {% endif %}
                           {% else %}
@@ -501,7 +501,7 @@
                       <button id="addBtn-{{ s.id }}" type="button" class="btn-outline text-sm opacity-60 cursor-not-allowed"
                               data-site-id="{{ s.id }}" disabled>＋ ブログ追加</button>
                       {% if not can_start_extseo %}
-                        <span class="text-xs opacity-80">（通常記事が50件以上で追加できます / 現在: {{ s.normal_post_count | default(0) }} 件）</span>
+                        <span class="text-xs opacity-80">（WP記事が100件以上で制作可能 / 現在: {{ s.normal_post_count | default(0) }} 件）</span>
                       {% endif %}
                     </div>
                   {% endif %}
@@ -636,7 +636,7 @@
                                 class="btn-outline text-sm opacity-60 cursor-not-allowed"
                                 data-site-id="{{ s.id }}" disabled>＋ ブログ追加</button>
                         {% if not can_start_extseo %}
-                          <span class="text-xs opacity-80">（通常記事が50件以上で追加できます / 現在: {{ s.normal_post_count | default(0) }} 件）</span>
+                          <span class="text-xs opacity-80">（wp記事が100件以上で制作可能 / 現在: {{ s.normal_post_count | default(0) }} 件）</span>
                         {% endif %}
                       </div>
                     {% endif %}
