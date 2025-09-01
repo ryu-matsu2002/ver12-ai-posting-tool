@@ -106,7 +106,7 @@ def _domain_tokens(url: str) -> list[str]:
 
 
 # ─────────────────────────────────────────────
-# サイト名トークン化・ジャンル推定・日本語タイトル生成
+# サイト名トークン化（ジャンル推定はLLMに一本化）
 # ─────────────────────────────────────────────
 STOPWORDS_JP = {
     "株式会社", "有限会社", "合同会社", "公式", "オフィシャル", "ブログ", "サイト", "ホームページ",
@@ -167,53 +167,45 @@ def _keyword_seed_from_site(site) -> tuple[str | None, bool]:
         return seed, _has_cjk(seed)
     return None, False
 
+# LLMにジャンル推定を依頼（出力は「医療脱毛」「不動産投資」など一般名詞のみ）
+async def _infer_genre_with_openai(site) -> str:
+    if AsyncOpenAI is None:
+        return ""
+    name = (getattr(site, "name", "") or "").strip()
+    url  = (getattr(site, "url", "") or "").strip()
+    bad  = ", ".join(_domain_tokens(url))
+    prompt = f"""以下の情報から、そのサイトのジャンル名を日本語で1〜4語に要約して返してください。
+ブランド名・固有名詞・ドメイン語は使わず、一般名詞で。
+出力はジャンル名だけ（句読点・説明なし）。
 
-def _guess_genre(site) -> tuple[str, bool]:
-    """
-    サイトからジャンル語(日本語/英語)と日本語フラグを推定。
-    1) 明示属性（primary_genre_name / genre_name / genre.name など）
-    2) site.name の語からヒューリスティック（URLは参照しない）
-    """
-    # 1) 明示属性
-    for attr in ("primary_genre_name", "genre_name", "genre", "main_genre", "category", "category_name"):
-        v = getattr(site, attr, None)
-        if isinstance(v, str) and v.strip():
-            txt = v.strip()
-            return txt, _has_cjk(txt)
-        name = getattr(v, "name", None)
-        if isinstance(name, str) and name.strip():
-            txt = name.strip()
-            return txt, _has_cjk(txt)
+サイト名: {name}
+参考URLドメインの語（避ける語）: {bad or "なし"}
+例: 医療脱毛 / 不動産投資 / 子育て / 料理レシピ / 中古車査定 / プログラミング学習"""
+    try:
+        client = AsyncOpenAI(timeout=OPENAI_TIMEOUT_SEC)
+        res = await client.chat.completions.create(
+            model=OPENAI_MODEL_FOR_TITLES,
+            temperature=0.2,
+            top_p=0.95,
+            max_tokens=50,
+            messages=[
 
-    # 2) ヒューリスティック（サイト名のみ）
-    name = (getattr(site, "name", "") or "")
-    txt = name.lower()
-
-    JP = [
-        ("ピラティス", ("pilates", "ピラティス", "yoga", "体幹", "姿勢", "fitness", "stretch")),
-        ("留学", ("studyabroad", "abroad", "留学", "ielts", "toefl", "海外", "study")),
-        ("旅行", ("travel", "trip", "観光", "hotel", "onsen", "温泉", "tour")),
-        ("美容", ("beauty", "esthetic", "skin", "hair", "美容", "コスメ", "メイク")),
-        ("ビジネス", ("business", "marketing", "sales", "seo", "経営", "起業", "副業")),
-    ]
-    for label, keys in JP:
-        if any(k in txt for k in keys):
-            return label, True
-
-    EN = [
-        ("Pilates", ("pilates", "yoga", "fitness", "posture", "stretch")),
-        ("Study Abroad", ("studyabroad", "abroad", "study", "ielts", "toefl")),
-        ("Travel", ("travel", "trip", "hotel", "onsen", "tour")),
-        ("Beauty", ("beauty", "esthetic", "skin", "hair", "cosme", "makeup")),
-        ("Business", ("business", "marketing", "sales", "seo", "startup")),
-    ]
-    for label, keys in EN:
-        if any(k in txt for k in keys):
-            return label, False
-
-    # どれにも該当しなければ汎用
-    return ("日々", _has_cjk(name))
-
+                {"role": "system", "content": "You are a concise classifier that answers only with a short Japanese noun phrase."},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        txt = (res.choices[0].message.content or "").strip()
+        # 1行目・装飾除去
+        genre = _strip_numbering(txt.splitlines()[0] if txt else "").replace("ジャンル", "").strip("：: 　")
+        # ドメイン語が混ざっていたら落とす
+        for w in _domain_tokens(url):
+            if w and w.lower() in genre.lower():
+                genre = genre.replace(w, "").strip()
+        # 長すぎる説明が来たら最初の10〜16文字程度に丸める
+        return genre[:24]
+    except Exception as e:
+        logger.warning("[GenreInfer] OpenAI error: %s", e)
+        return ""
 
 def _too_similar_to_site(title: str, site) -> bool:
     """
@@ -269,14 +261,11 @@ def _split_lines_as_titles(text: str) -> List[str]:
         out.append(t)
     return out
 
-def _title_prompt(site) -> str:
-    """ご提示プロンプトを基に、類似禁止の指示を強化"""
+def _title_prompt_from_genre(genre: str, site) -> str:
+    """ご提示プロンプトをそのまま使用（ジャンルは必ず活かす）"""
     site_name = (getattr(site, "name", "") or "").strip()
     domain_words = ", ".join(_domain_tokens(getattr(site, "url", "") or ""))
-    seed, _ = _keyword_seed_from_site(site)
-    genre, _ = _guess_genre(site)
-    seed = seed or ""
-    genre = genre or ""
+    g = (genre or "総合情報").strip()
     return f"""あなたはSEOとコンテンツマーケティングの専門家です。
 キャッチコピーを考える天才です。
 
@@ -291,12 +280,12 @@ WEBサイトの「サイトタイトル」を32文字以内で考えてくださ
 ・元サイト名やドメイン由来語に似せない（連想語も避ける）
 ・日本語で書く
 ・各タイトルは32文字以内
+・ジャンル「{g}」に関係する語を必ず1語以上入れる
+・番号や記号を付けず、1行に1案で**10案だけ**出力
 ・出力は**シンプルに縦に羅列（番号なし）**で10案
 
-# 生成のヒント
-- 想定ジャンル/テーマ: {genre}
-- 連想キーワードの種: {seed}
-- 似せてはいけない語: {site_name} / {domain_words}
+# 似せてはいけない語（サイト固有/ドメイン由来）:
+{site_name} / {domain_words}
 """
 
 def _score_title(t: str, site) -> float:
@@ -361,7 +350,7 @@ def _pick_best_from_candidates(cands: List[str], site) -> str | None:
     # ✅ それでも全滅なら「最初の10案から必ず選ぶ」ポリシーで最上位を返す
     return (scored[0][:32] if scored else (cands[0][:32] if cands else None))
 
-async def _gen_titles_with_openai(site) -> List[str]:
+async def _gen_titles_with_openai(site, genre: str) -> List[str]:
     """
     1回だけ呼び出して10案取得（再生成しない）。
     失敗時は空配列。
@@ -377,7 +366,7 @@ async def _gen_titles_with_openai(site) -> List[str]:
             max_tokens=400,
             messages=[
                 {"role": "system", "content": "You are a skilled Japanese copywriter and SEO strategist."},
-                {"role": "user", "content": _title_prompt(site)},
+                {"role": "user", "content": _title_prompt_from_genre(genre, site)},
             ],
         )
         text = ""
@@ -396,118 +385,17 @@ async def _gen_titles_with_openai(site) -> List[str]:
 
 async def generate_blog_title(site) -> str:
     """
-    gpt-4o-miniの“最初の10案”から必ずベストを選ぶ。
-    API失敗や0件のみフォールバック。
+    フロー：サイト名→ジャンル推定→10案生成→ベスト選定
     """
-    cands = await _gen_titles_with_openai(site)
+    genre = await _infer_genre_with_openai(site)
+    cands = await _gen_titles_with_openai(site, genre)
     if cands:
         best = _pick_best_from_candidates(cands, site)
         if best:
             logger.info("[TitleGen] picked: %s (from %d candidates)", best, len(cands))
             return best[:32]
-    # 失敗時のみフォールバック
-    try:
-        return _craft_blog_title(site)[:32]
-    except Exception:
-        return "こつこつブログ"
-
-
-def _templates_jp(topic: str) -> list[str]:
-    base = (topic or "").strip() or "日々"
-    return [
-        f"{base}ブログ",
-        f"{base}ブログ日記",
-        f"{base}のブログ",
-        f"{base}の記録ブログ",
-        f"{base}の暮らしブログ",
-        f"{base}のメモ帳",
-        f"{base}の覚え書き",
-        f"{base}のジャーナル",
-        f"{base}手帖",
-        f"{base}ノート",
-        f"{base}の小部屋",
-        f"{base}ログ",
-    ]
-
-
-def _templates_en(topic: str) -> list[str]:
-    base = topic.strip() or "Notes"
-    return [f"{base} Blog"]  # ダミー（呼ばれない想定）
-
-
-def _japanese_base_word(site) -> str:
-    """
-    1) まずジャンル推定で日本語ラベルを取得（ピラティス/旅行/美容/ビジネス…）
-    2) 取れなければ「日々」
-    ※ “サイト名そのもの”は使わない（似すぎ回避）
-    """
-    topic, is_jp = _guess_genre(site)
-    if _has_cjk(topic):
-        return topic.strip()
-    return "日々"
-
-
-def _craft_blog_title(site) -> str:
-    """
-    仕様（ご指定反映）：
-      - 生成結果は日本語ベース
-      - サイト名/URLから抽出したキーワードやジャンル語を使って“ブログ風”に
-      - 「日々のブログ」にはしない（明示的に禁止）
-      - 元サイト名/ドメインに似すぎない
-      - 同一サイトでは決定論的に安定
-    """
-    site_name = (getattr(site, "name", "") or "").strip()
-    site_url = (getattr(site, "url", "") or "").strip()
-    salt = f"{getattr(site, 'id', '')}-{site_name}-{site_url}"
-
-    # まずはサイトから1語シードを取る（日本語があれば優先）
-    seed, seed_is_jp = _keyword_seed_from_site(site)
-    if not seed:
-        # ジャンル推定語（JPなら優先）
-        topic, is_jp = _guess_genre(site)
-        seed = topic if _has_cjk(topic) else "暮らし"  # デフォルトは「暮らし」
-        seed_is_jp = True
-
-    # ブログ風テンプレ（“ブログ”を含むパターン中心＋バリエーション）
-    base = seed.strip()
-    # 「日々のブログ」は禁止語として明示除外
-    banned_exact = {"日々のブログ", "ひびのブログ"}
-    candidates = [
-        f"{base}ブログ",
-        f"{base}のブログ",
-        f"{base}ブログ記録",
-        f"{base}の記録ブログ",
-        f"{base}のメモブログ",
-        f"{base}のノート",
-        f"{base}ログ",
-        f"{base}手帖",
-    ]
-
-    # 許容判定
-    def acceptable(title: str) -> bool:
-        if not title or not title.strip():
-            return False
-        if title in banned_exact:
-            return False
-        if _too_similar_to_site(title, site):
-            return False
-        # 日本語らしさ：少なくとも1文字はCJK
-        if not _has_cjk(title):
-            return False
-        return True
-
-    # saltで開始位置を決め、順回しで最初に通ったものを採用
-    start = _deterministic_index(salt, len(candidates))
-    for i in range(len(candidates)):
-        t = candidates[(start + i) % len(candidates)]
-        if acceptable(t):
-            return t[:48]
-
-    # 最終フォールバック（禁止の「日々のブログ」は含めない）
-    fallbacks = [f"{base}ブログ", f"{base}ログ", f"{base}手帖", "こつこつブログ"]
-    return fallbacks[_deterministic_index(salt, len(fallbacks))][:48]
-
-
+    # 失敗時フォールバック（極小・安全）
+    return "役立ち情報ガイド"
 
 # ─────────────────────────────────────────────
 # blog_id スラッグ生成・入力欄設定ヘルパ
@@ -1107,7 +995,7 @@ async def recover_atompub_key(page, livedoor_id: str | None, nickname: str, emai
         try:
             desired_title = await generate_blog_title(site)
         except Exception:
-            desired_title = "こつこつブログ"  # 最終フォールバック
+            desired_title = "役立ち情報ガイド"
 
         ok_submit = await _set_title_and_submit(page, desired_title)
         if not ok_submit:

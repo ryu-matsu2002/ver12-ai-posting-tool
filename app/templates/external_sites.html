@@ -286,6 +286,16 @@
 
   /* WP風の“つながり”を右側でも表現（薄い白のインセット） */
   .seo-layout.connected .right-pane{ box-shadow: inset 6px 0 0 #ffffff20; }
+
+  /* 注意ボックス */
+  .note-box{
+    background: rgba(255,255,255,.12);
+    border: 1px dashed var(--edge);
+    color: var(--txt);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: .9rem;
+  }
 </style>
 
 {% set ALLOW_MULTI_BLOG_USER_IDS = [1, 2, 5] %}
@@ -382,7 +392,9 @@
         {% endif %}
         {% set tab_cnt = s.ld_count | default(_all_accounts|length) %}
         {% set livedoor_count = _all_accounts | length %}
-        {% set can_add_livedoor = (current_user.id in ALLOW_MULTI_BLOG_USER_IDS) or (livedoor_count == 0) %}
+        {# === ここで can_start_extseo を定義（アクティブ側） === #}
+        {% set can_start_extseo = (s.normal_post_count | default(0) >= 50) %}
+        {% set can_add_livedoor = ((current_user.id in ALLOW_MULTI_BLOG_USER_IDS) or (livedoor_count == 0)) and can_start_extseo %}
 
         {% if loop.first %}
         <div id="site-panel-{{ s.id }}" class="site-panel">
@@ -394,6 +406,14 @@
           </div>
 
           <div class="right-body">
+            {# 注意ボックス（条件未達） #}
+            {% if not can_start_extseo %}
+              <div class="note-box mb-3">
+                外部SEOの開始には、<b>通常記事が50件以上</b>必要です（現在: <b>{{ s.normal_post_count | default(0) }}</b> 件）。
+                条件を満たすと、ブログの追加・生成ボタンが有効になります。
+              </div>
+            {% endif %}
+
             <div class="card">
               <button class="acc-trigger accordion-trigger"
                       data-acc-target="#tab-ld-{{ s.id }}"
@@ -433,9 +453,16 @@
 
                         <div class="mt-3" id="actionArea-acc-{{ acc.id }}">
                           {% if not acc.api_key %}
-                            <button type="button" class="btn btn-green w-full"
-                              data-site-id="{{ s.id }}" data-account-id="{{ acc.id }}" data-platform="livedoor"
-                              onclick="handleCaptchaClick(this)">クリックで新規ブログ制作開始</button>
+                            {% if can_start_extseo %}
+                              <button type="button" class="btn btn-green w-full"
+                                data-site-id="{{ s.id }}" data-account-id="{{ acc.id }}" data-platform="livedoor"
+                                onclick="handleCaptchaClick(this)">クリックで新規ブログ制作開始</button>
+                            {% else %}
+                              <button type="button" class="btn btn-green w-full cursor-not-allowed" disabled
+                                title="通常記事が50件以上で開始できます">
+                                クリックで新規ブログ制作開始（要: 通常記事50件）
+                              </button>
+                            {% endif %}
                           {% else %}
                             {% set _generated_once =
                                  (acc.generation_locked) or
@@ -445,10 +472,15 @@
                             {% if _generated_once %}
                               <button class="btn-outline w-full cursor-not-allowed" disabled>記事生成は実行済み（再実行不可）</button>
                             {% else %}
-                              <a href="/generate?site_id={{ s.id }}&account_id={{ acc.id }}"
-                                 class="btn btn-green w-full"
-                                 data-account-id="{{ acc.id }}"
-                                 onclick="return lockAndGo(this)">こちらをクリックすると完了</a>
+                              {% if can_start_extseo %}
+                                <a href="/generate?site_id={{ s.id }}&account_id={{ acc.id }}"
+                                   class="btn btn-green w-full"
+                                   data-account-id="{{ acc.id }}"
+                                   onclick="return lockAndGo(this)">こちらをクリックすると完了</a>
+                              {% else %}
+                                <button class="btn btn-green w-full cursor-not-allowed" disabled
+                                  title="通常記事が50件以上で開始できます">こちらをクリックすると完了（要: 通常記事50件）</button>
+                              {% endif %}
                             {% endif %}
                           {% endif %}
                         </div>
@@ -465,8 +497,13 @@
                     <button id="addBtn-{{ s.id }}" type="button" class="btn-outline text-sm"
                             data-site-id="{{ s.id }}" onclick="newAccountStart(this)">＋ ブログ追加</button>
                   {% else %}
-                    <button id="addBtn-{{ s.id }}" type="button" class="btn-outline text-sm opacity-60 cursor-not-allowed"
-                            data-site-id="{{ s.id }}" disabled>＋ ブログ追加</button>
+                    <div class="flex items-center gap-3">
+                      <button id="addBtn-{{ s.id }}" type="button" class="btn-outline text-sm opacity-60 cursor-not-allowed"
+                              data-site-id="{{ s.id }}" disabled>＋ ブログ追加</button>
+                      {% if not can_start_extseo %}
+                        <span class="text-xs opacity-80">（通常記事が50件以上で追加できます / 現在: {{ s.normal_post_count | default(0) }} 件）</span>
+                      {% endif %}
+                    </div>
                   {% endif %}
                 </div>
               </div>
@@ -490,7 +527,9 @@
         {% endif %}
         {% set tab_cnt = s.ld_count | default(_all_accounts|length) %}
         {% set livedoor_count = _all_accounts | length %}
-        {% set can_add_livedoor = (current_user.id in ALLOW_MULTI_BLOG_USER_IDS) or (livedoor_count == 0) %}
+        {# === ここでも can_start_extseo を定義（template側） === #}
+        {% set can_start_extseo = (s.normal_post_count | default(0) >= 50) %}
+        {% set can_add_livedoor = ((current_user.id in ALLOW_MULTI_BLOG_USER_IDS) or (livedoor_count == 0)) and can_start_extseo %}
 
         <template id="tpl-site-{{ s.id }}">
           <div id="site-panel-{{ s.id }}" class="site-panel">
@@ -502,6 +541,13 @@
             </div>
 
             <div class="right-body">
+              {% if not can_start_extseo %}
+                <div class="note-box mb-3">
+                  外部SEOの開始には、<b>通常記事が50件以上</b>必要です（現在: <b>{{ s.normal_post_count | default(0) }}</b> 件）。
+                  条件を満たすと、ブログの追加・生成ボタンが有効になります。
+                </div>
+              {% endif %}
+
               <div class="card">
                 <button class="acc-trigger accordion-trigger"
                         data-acc-target="#tab-ld-{{ s.id }}"
@@ -541,9 +587,16 @@
 
                           <div class="mt-3" id="actionArea-acc-{{ acc.id }}">
                             {% if not acc.api_key %}
-                              <button type="button" class="btn btn-green w-full"
-                                data-site-id="{{ s.id }}" data-account-id="{{ acc.id }}" data-platform="livedoor"
-                                onclick="handleCaptchaClick(this)">クリックで新規ブログ制作開始</button>
+                              {% if can_start_extseo %}
+                                <button type="button" class="btn btn-green w-full"
+                                  data-site-id="{{ s.id }}" data-account-id="{{ acc.id }}" data-platform="livedoor"
+                                  onclick="handleCaptchaClick(this)">クリックで新規ブログ制作開始</button>
+                              {% else %}
+                                <button type="button" class="btn btn-green w-full cursor-not-allowed" disabled
+                                  title="通常記事が50件以上で開始できます">
+                                  クリックで新規ブログ制作開始（要: 通常記事50件）
+                                </button>
+                              {% endif %}
                             {% else %}
                               {% set _generated_once =
                                    (acc.generation_locked) or
@@ -553,10 +606,15 @@
                               {% if _generated_once %}
                                 <button class="btn-outline w-full cursor-not-allowed" disabled>記事生成は実行済み（再実行不可）</button>
                               {% else %}
-                                <a href="/generate?site_id={{ s.id }}&account_id={{ acc.id }}"
-                                   class="btn btn-green w-full"
-                                   data-account-id="{{ acc.id }}"
-                                   onclick="return lockAndGo(this)">こちらをクリックすると完了</a>
+                                {% if can_start_extseo %}
+                                  <a href="/generate?site_id={{ s.id }}&account_id={{ acc.id }}"
+                                     class="btn btn-green w-full"
+                                     data-account-id="{{ acc.id }}"
+                                     onclick="return lockAndGo(this)">こちらをクリックすると完了</a>
+                                {% else %}
+                                  <button class="btn btn-green w-full cursor-not-allowed" disabled
+                                    title="通常記事が50件以上で開始できます">こちらをクリックすると完了（要: 通常記事50件）</button>
+                                {% endif %}
                               {% endif %}
                             {% endif %}
                           </div>
@@ -573,9 +631,14 @@
                       <button id="addBtn-{{ s.id }}" type="button" class="btn-outline text-sm"
                               data-site-id="{{ s.id }}" onclick="newAccountStart(this)">＋ ブログ追加</button>
                     {% else %}
-                      <button id="addBtn-{{ s.id }}" type="button"
-                              class="btn-outline text-sm opacity-60 cursor-not-allowed"
-                              data-site-id="{{ s.id }}" disabled>＋ ブログ追加</button>
+                      <div class="flex items-center gap-3">
+                        <button id="addBtn-{{ s.id }}" type="button"
+                                class="btn-outline text-sm opacity-60 cursor-not-allowed"
+                                data-site-id="{{ s.id }}" disabled>＋ ブログ追加</button>
+                        {% if not can_start_extseo %}
+                          <span class="text-xs opacity-80">（通常記事が50件以上で追加できます / 現在: {{ s.normal_post_count | default(0) }} 件）</span>
+                        {% endif %}
+                      </div>
                     {% endif %}
                   </div>
                 </div>

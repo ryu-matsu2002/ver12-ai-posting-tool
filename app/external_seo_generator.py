@@ -21,6 +21,8 @@ from app.google_client import (
     fetch_top_pages_for_site,     # impressions降順のpage上位取得（任意件）
 )
 from .article_generator import _chat, _compose_body, TOKENS, TEMP, _generate  # ★ _generate を流用
+from sqlalchemy import or_  # ← 最終ガード用（source != 'external' を扱うため）
+
 
 # 追加: タイトルのフォールバック生成用
 def _fallback_title_from_keyword(kw: str) -> str:
@@ -159,6 +161,21 @@ def _daily_slots_jst(per_day: int) -> List[Tuple[int, int]]:
 def _ensure_http_url(u: str) -> str:
     return u.strip()
 
+# 追加：末尾スラッシュとプロトコル違いを吸収する軽い正規化
+def _norm_url(u: Optional[str]) -> str:
+    if not isinstance(u, str):
+        return ""
+    u = u.strip()
+    try:
+        pu = urlparse(u)
+        scheme = "https" if pu.scheme in ("https", "http") else pu.scheme
+        netloc = pu.netloc.lower()
+        path = (pu.path or "/").rstrip("/") or "/"
+        # クエリやフラグメントは正規化対象から外す（同一コンテンツ想定）
+        return f"{scheme}://{netloc}{path}"
+    except Exception:
+        return u.rstrip("/")
+
 #
 # ====== 追加：リンク先タイトル取得ユーティリティ ======
 #
@@ -270,12 +287,13 @@ def _base_and_topic(site: Site) -> Tuple[str, str]:
 # ===============================
 # URL収集（固定5リンク & ランダム候補）
 # ===============================
-def _build_fixed_links(site: Site) -> List[str]:
+def _build_fixed_links(site: Site, article_pool: Optional[Iterable[str]] = None) -> List[str]:
     """
-    固定5リンク：
+    固定5リンク（不足時はプールから補完）：
       - base（サイトTOP）
       - base/topic
       - GSC page impressions 上位3件
+      - 3件に満たない分は article_pool（既存記事URL集合）からランダムで補完
     """
     base, sales = _base_and_topic(site)
     fixed = [base, sales]
@@ -303,9 +321,45 @@ def _build_fixed_links(site: Site) -> List[str]:
         logging.warning(f"[external_seo] 固定リンク: GSC上位page取得失敗: {e}")
 
     # 固定は最大5本に丸める（不足はそのまま）
+    # GSCで5本に満たない場合、記事プールから補完
+    if len(fixed) < 5 and article_pool:
+        base_url = site.url.rstrip("/")
+        # プールから base/topic と重複しない記事URLを補充
+        pool = [u.strip() for u in article_pool if isinstance(u, str)]
+        # 末尾スラッシュ等の軽い正規化
+        used = {_norm_url(u) for u in fixed}
+        cand = []
+        for u in pool:
+            if not u.startswith(base_url):
+                continue
+            nu = _norm_url(u)
+            if nu not in used:
+                cand.append(u)
+                used.add(nu)
+            if len(fixed) + len(cand) >= 5:
+                break
+        fixed.extend(cand[: max(0, 5 - len(fixed))])
+
+    # それでも不足なら定番URLで補完（最後の保険）
+    if len(fixed) < 5:
+        base = site.url.rstrip("/")
+        fallbacks = [
+            f"{base}/category/news/",
+            f"{base}/category/blog/",
+            f"{base}/about/",
+            f"{base}/contact/",
+            f"{base}/privacy-policy/",
+            f"{base}/sitemap/",
+        ]
+        for u in fallbacks:
+            if u not in fixed:
+                fixed.append(u)
+            if len(fixed) >= 5:
+                break
+
     fixed = fixed[:5]
     if len(fixed) < 5:
-        logging.warning(f"[external_seo] 固定リンクが {len(fixed)} 件しか用意できません（想定:5件）: {fixed}")
+        logging.warning(f"[external_seo] 固定リンクが {len(fixed)} 件（想定5）。補完後も不足: {fixed}")
     return fixed
 
 
@@ -428,6 +482,32 @@ def _pick_random_unique(urls: Iterable[str], n: int, excluded: Iterable[str] = (
         return random.sample(pool, len(pool)) if pool else []
     return random.sample(pool, n)
 
+# === 追加: ランダム5本（固定に入っていない記事から）を選ぶ ===
+def _pick_random_k_from_pool(article_pool: Iterable[str], k: int, excluded: Iterable[str]) -> List[str]:
+    pool = []
+    exn = {_norm_url(u) for u in (excluded or [])}
+    for u in article_pool or []:
+        if not isinstance(u, str):
+            continue
+        if _norm_url(u) in exn:
+            continue
+        pool.append(u.strip())
+    # ユニーク化
+    # 正規化キーでユニークにする（/ と /無しの重複を排除）
+    seen = set()
+    uniq = []
+    for u in pool:
+        nu = _norm_url(u)
+        if nu in seen:
+            continue
+        seen.add(nu)
+        uniq.append(u)
+    pool = uniq
+    if not pool:
+        return []
+    if len(pool) <= k:
+        return pool
+    return random.sample(pool, k)
 
 # ===============================
 # 外部SEO：並列生成 + スケジューリング
@@ -451,6 +531,19 @@ def generate_and_schedule_external_articles(
     app = current_app._get_current_object()
     site = Site.query.get(site_id)
     assert site, "Site not found"
+
+    # === 最終ガード：通常記事が50件未満なら中断 ==========================
+    # external/generator を直接叩かれても UI/ルートをすり抜けられないようにサーバ側でブロック
+    normal_count = (
+        Article.query
+        .filter(Article.site_id == site_id)
+        .filter(or_(Article.source.is_(None), Article.source != "external"))
+        .filter(Article.status.in_(["done", "published", "posted"]))
+        .count()
+    )
+    if normal_count < 50:
+        raise RuntimeError(f"[external_seo] 通常記事が50件未満のため中断しました（現在:{normal_count}件）。")
+    # ================================================================
 
     # === キーワード上位40件（impressions降順） ===
     try:
@@ -493,24 +586,45 @@ def generate_and_schedule_external_articles(
     gen_queue: List[str] = [kw for (kw, n) in dist for _ in range(n)]
     assert len(gen_queue) == 100, f"配分エラー: {len(gen_queue)} != 100"
 
-    # === リンク計画 ===
-    fixed5 = _build_fixed_links(site)  # [base, base/sales, top_page1, top_page2, top_page3]
-    if len(fixed5) < 2:
-        raise RuntimeError("[external_seo] 固定リンク（base, base/sales）が確保できませんでした。サイトURLをご確認ください。")
-
-    fixed50 = []
-    for u in fixed5:
-        fixed50 += [u] * 10
-    fixed50 = fixed50[:50]  # 念のため丸め
-
-    # ランダム50（固定5は除外、同一URL再利用不可）
+    # === リンク計画（新仕様）===
+    # 1) 記事URLプールを収集
     all_urls = _collect_all_site_urls(site)
-    random50 = _pick_random_unique(all_urls, 50, excluded=set(fixed5))
+
+    # 2) 固定5（不足は記事プールで補完して必ず5本）
+    fixed5 = _build_fixed_links(site, article_pool=all_urls)
+    if len(fixed5) < 2:
+        raise RuntimeError("[external-seo] 固定リンク（base, /topic/）が確保できませんでした。サイトURLをご確認ください。")
+    if len(fixed5) < 5:
+        logging.warning(f"[external-seo] 固定5が {len(fixed5)} 本。補完後も不足: {fixed5}")
+    # 固定50＝各10回
+    fixed50: List[str] = []
+    for u in fixed5[:5]:
+        fixed50.extend([u] * 10)
+    fixed50 = fixed50[:50]
+
+    # 3) ランダム5＝固定5に入らなかった記事から5本（足りなければある分）
+    fixed5n = {_norm_url(u) for u in fixed5}
+    remain_pool = [u for u in all_urls if _norm_url(u) not in fixed5n]
+    random5 = _pick_random_k_from_pool(remain_pool, 5, excluded=fixed5)
+    if not random5:
+        logging.warning("[external-seo] ランダム候補が0件。固定からの再循環で埋めます。")
+        random5 = fixed5[:5] if fixed5 else []
+    # ランダム50＝選んだ5本を各10回（5未満でも循環で50本に）
+    random50: List[str] = []
+    i = 0
+    if not random5:
+        # 最後の保険：固定を循環
+        seed = fixed5[:5]
+    else:
+        seed = random5
+    while len(random50) < 50 and seed:
+        random50.append(seed[i % len(seed)])
+        i += 1
     if len(random50) < 50:
-        raise RuntimeError(f"[external_seo] ランダムリンクが50件に満たないため中断しました（{len(random50)}件）。サイトのURL収集設定をご確認ください。")
+        raise RuntimeError(f"[external-seo] ランダム50の構築に失敗（{len(random50)}/50）。URL収集設定をご確認ください。")
 
     link_plan: List[str] = fixed50 + random50
-    assert len(link_plan) == 100
+    assert len(link_plan) == 100, f"リンク計画が100本に満たない: {len(link_plan)}"
 
     # ★ 新規：リンク先のページタイトルを事前取得（アンカーテキスト用）
     anchor_map = _prefetch_anchor_texts(link_plan)

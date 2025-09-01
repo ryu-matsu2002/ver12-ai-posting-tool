@@ -3507,11 +3507,11 @@ def delete_genre(username, genre_id):
 def external_seo_sites():
     from app.models import (
         Site, ExternalSEOJob, ExternalArticleSchedule,
-        ExternalBlogAccount, BlogType, ExternalSEOJobLog
+        ExternalBlogAccount, BlogType, ExternalSEOJobLog, Article
     )
     from app import db
     from sqlalchemy.orm import selectinload
-    from sqlalchemy import func
+    from sqlalchemy import func, or_
 
     sites = (
         Site.query
@@ -3657,6 +3657,23 @@ def external_seo_sites():
         dedup_list = list(dedup_map.values())
         s.livedoor_accounts = dedup_list
         s.ld_count = len(dedup_list)  # ← この値をテンプレの (n) に使う
+
+    # ▼ 各サイトの「通常記事（外部SEO以外で投稿済み）」件数をテンプレに渡す
+    site_ids = [s.id for s in sites]
+    if site_ids:
+        normal_counts = dict(
+            db.session.query(Article.site_id, func.count(Article.id))
+            .filter(Article.site_id.in_(site_ids))
+            .filter(or_(Article.source.is_(None), Article.source != "external"))
+            .filter(Article.status.in_(["done", "published", "posted"]))
+            .group_by(Article.site_id)
+            .all()
+        )
+    else:
+        normal_counts = {}
+    for s in sites:
+        # テンプレート側で can_start_extseo 判定用に参照
+        s.normal_post_count = normal_counts.get(s.id, 0)
 
     return render_template(
         "external_sites.html",
@@ -4953,8 +4970,9 @@ def external_seo_generate(site_id, blog_id):
 from flask import request, jsonify, current_app
 from flask_login import login_required, current_user
 from datetime import datetime, timedelta, timezone
-from app.models import ExternalBlogAccount, BlogType
+from app.models import ExternalBlogAccount, BlogType, Article
 from app.external_seo_generator import generate_and_schedule_external_articles
+from sqlalchemy import or_
 
 
 JST = timezone(timedelta(hours=9))
@@ -4979,6 +4997,21 @@ def external_seo_generate_and_schedule():
 
     if not site_id:
         return jsonify({"ok": False, "error": "site_id is required"}), 400
+    
+    # ▼ 通常記事（外部SEO以外で投稿済み）が 50 本未満なら実行をブロック
+    normal_count = (
+        Article.query
+        .filter(Article.site_id == site_id)
+        .filter(or_(Article.source.is_(None), Article.source != "external"))
+        .filter(Article.status.in_(["done", "published", "posted"]))
+        .count()
+    )
+    if normal_count < 50:
+        return jsonify({
+            "ok": False,
+            "error": "外部SEO開始の条件を満たしてません",
+            "count": normal_count
+        }), 400
 
     if start_date_s:
         try:
@@ -5039,8 +5072,9 @@ def external_seo_new_account():
     例外時も必ずJSONで返す。
     """
     from flask import request, jsonify
-    from app.models import Site, ExternalBlogAccount, BlogType
+    from app.models import Site, ExternalBlogAccount, BlogType, Article
     from app import db
+    from sqlalchemy import or_
     import logging
     from datetime import datetime
 
@@ -5097,6 +5131,21 @@ def external_seo_new_account():
             return jsonify({"ok": False, "error": "Site が見つかりません"}), 200
         if (not current_user.is_admin) and (site.user_id != current_user.id):
             return jsonify({"ok": False, "error": "権限がありません"}), 200
+        
+        # ▼ 通常記事（外部SEO以外で投稿済み）が 50 本未満ならブロック
+        normal_count = (
+            Article.query
+            .filter(Article.site_id == site_id)
+            .filter(or_(Article.source.is_(None), Article.source != "external"))
+            .filter(Article.status.in_(["done", "published", "posted"]))
+            .count()
+        )
+        if normal_count < 50:
+            return jsonify({
+                "ok": False,
+                "error": "外部SEO開始の条件を満たしてません",
+                "count": normal_count
+            }), 400
 
         # 表示用スラッグ（カードのタイトルに使う）
         display_slug = _slugify_from_site(site)
