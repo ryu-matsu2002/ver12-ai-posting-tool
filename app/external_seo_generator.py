@@ -221,21 +221,64 @@ def _fallback_anchor_from_url(u: str) -> str:
 
 def _clean_anchor_text(url: str, title: str) -> str:
     """
-    取得したページタイトルから「 - サイト名」「｜サイト名」「| サイト名」「：サイト名」などの
-    末尾ブランド表記を除去して、アンカーに使う“記事タイトルだけ”を返す。
-    - 区切りは「空白付きハイフン」「パイプ」「全角縦棒」「コロン」を対象
-    - 左右の空白を除去し、最も“長い”セグメントを採用（多くのサイトで記事タイトルが最長）
+    取得タイトルからサイト名などのブランド表記を除去し、アンカーは“記事タイトルだけ”にする。
+    優先規則:
+      1) 「記事タイトル – サイト名」「記事タイトル | サイト名」等 → 左側（先頭セグメント）を優先
+      2) 「サイト名 | 記事タイトル」等 → 先頭がブランドっぽければ末尾（最後のセグメント）
+      3) それでも判定不能なら、?！などを含むほうを優先
     """
     t = (title or "").strip()
     if not t:
         return t
-    # 区切りで末尾のサイト名を外す（例: "記事タイトル - サイト名" / "サイト名 | 記事タイトル" など）
+
+    # URL からコアドメイン（brand 判定用）を作る
+    core = ""
+    try:
+        host = urlparse(url).netloc.lower()
+        if host:
+            labels = [p for p in host.split(".") if p not in {"www", "m", "amp", "co", "ne", "or", "com", "net", "org", "jp", "io", "dev"}]
+            if labels:
+                core = labels[-2] if len(labels) >= 2 else labels[-1]
+    except Exception:
+        pass
+
+    # 分割（一般的な区切りを網羅）
     parts = _re.split(r'(?:\s-\s|\s–\s|\s—\s|\s\|\s|｜|：|:|»)', t)
     parts = [p.strip() for p in parts if p and p.strip()]
+    if len(parts) < 2:
+        return t[:120]
+
+    def is_brandish(s: str) -> bool:
+        sl = s.lower()
+        if core and core in sl:
+            return True
+        # よくあるブランド語
+        if _re.search(r'(公式|サイト|store|shop|online|オンライン|通販|公式サイト)', s, flags=_re.I):
+            return True
+        # やたら短い（ブランド名/カテゴリ名っぽい）
+        return len(s) <= 6
+
+    left, right = parts[0], parts[-1]
+
+    # 先頭がブランドっぽければ末尾、そうでなければ先頭
+    cand = right if is_brandish(left) else left
+
+    # さらに、疑問符/感嘆符を含むもの（記事タイトルに多い）を優先
+    def score(s: str) -> int:
+        sc = 0
+        if _re.search(r'[!?？！]', s): sc += 2
+        if 8 <= len(s) <= 80: sc += 1
+        if ' ' in s: sc += 1
+        if is_brandish(s): sc -= 3
+        return sc
+
     if len(parts) >= 2:
-        # 記事タイトルが最も長くなるケースが多いので長さ優先で選ぶ
-        t = max(parts, key=lambda s: len(s))
-    return t[:120]
+        scored = sorted(parts, key=lambda x: score(x), reverse=True)
+        # 基本候補とスコア比較してよりタイトルらしい方を選択
+        cand = scored[0] if score(scored[0]) > score(cand) else cand
+
+    return cand[:120]
+
 
 def _fetch_page_title(u: str, timeout: int = 8) -> Optional[str]:
     """URLへHTTP GETしてタイトルを取得（短時間タイムアウト/軽量UA）"""
