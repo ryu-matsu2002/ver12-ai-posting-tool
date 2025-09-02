@@ -269,37 +269,69 @@ def _split_lines_as_titles(text: str) -> List[str]:
         out.append(t)
     return out
 
-def _title_prompt(site) -> str:
-    """ご提示プロンプトを基に、類似禁止の指示を強化"""
-    site_name = (getattr(site, "name", "") or "").strip()
-    domain_words = ", ".join(_domain_tokens(getattr(site, "url", "") or ""))
-    seed, _ = _keyword_seed_from_site(site)
-    genre, _ = _guess_genre(site)
-    seed = seed or ""
-    genre = genre or ""
-    return f"""あなたはSEOとコンテンツマーケティングの専門家です。
+# ─────────────────────────────────────────────
+# LLMでジャンル推定（短い日本語一般名詞）＋ 指定プロンプトの生成
+# ─────────────────────────────────────────────
+async def _infer_genre_with_openai(site) -> str:
+    """サイト名から '医療脱毛' '不動産投資' などの一般名詞ジャンルを1〜4語で抽出"""
+    if AsyncOpenAI is None:
+        return ""
+    name = (getattr(site, "name", "") or "").strip()
+    url  = (getattr(site, "url", "") or "").strip()
+    bad  = ", ".join(_domain_tokens(url))
+    prompt = f"""以下の情報から、そのサイトのジャンル名を日本語で1〜4語に要約して返してください。
+ブランド名・固有名詞・ドメイン語は使わず、一般名詞で。
+出力はジャンル名だけ（句読点・説明なし）。
+
+サイト名: {name}
+参考URLドメインの語（避ける語）: {bad or "なし"}
+例: 医療脱毛 / 不動産投資 / 子育て / 料理レシピ / 中古車査定 / プログラミング学習"""
+    try:
+        client = AsyncOpenAI(timeout=OPENAI_TIMEOUT_SEC)
+        res = await client.chat.completions.create(
+            model=OPENAI_MODEL_FOR_TITLES,
+            temperature=0.2,
+            top_p=0.95,
+            max_tokens=50,
+            messages=[
+                {"role": "system", "content": "You are a concise classifier that answers only with a short Japanese noun phrase."},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        txt = (res.choices[0].message.content or "").strip()
+        genre = _strip_numbering((txt.splitlines()[0] if txt else "")).replace("ジャンル", "").strip('「」"\'：: 　')
+        # ドメイン語が混入したら落とす
+        for w in _domain_tokens(url):
+            if w and w.lower() in genre.lower():
+                genre = genre.replace(w, "").strip()
+        return genre[:24]
+    except Exception as e:
+        logger.warning("[GenreInfer] OpenAI error: %s", e)
+        return ""
+
+def _title_prompt_from_genre(genre: str) -> str:
+    """あなた指定のプロンプト本文をそのまま使用。末尾でジャンルを渡す。"""
+    base = """あなたはSEOとコンテンツマーケティングの専門家です。
 キャッチコピーを考える天才です。
 
-入力されたサイトジャンルから連想して、
-WEBサイトの「サイトタイトル」を32文字以内で考えてください。
+入力されたサイトジャンルから連想して
+WEBサイトの「サイトタイトル」を32文字以内で10個考えてください。 
+日本一のマーケッター神田昌典さんが考えたような感じでお願いします！
 
-日本一のマーケッター神田昌典さんが考えたようなコピーをイメージしてください！
+タイトルごとに改行してください
 
-条件：
-・キャッチコピー的な要素をタイトルに含めてください
-・サイトは「役に立つ情報を発信していくサイト」です
-・元サイト名やドメイン由来語に似せない（連想語も避ける）
-・日本語で書く
-・各タイトルは32文字以内
-・出力は**シンプルに縦に羅列（番号なし）**で10案
 
-# 生成のヒント
-- 想定ジャンル/テーマ: {genre}
-- 連想キーワードの種: {seed}
-- 似せてはいけない語: {site_name} / {domain_words}
-"""
+###条件###
+タイトルの中にキャッチコピー的なテキストを入れてください
+役に立つ情報を発信していくサイトです
 
-def _score_title(t: str, site) -> float:
+###具体例###
+「転職」というキーワードに対する出力文：
+転職アドバイザーが全力で教える転職ノウハウ"""
+    g = (genre or "総合情報").strip()
+    return f"{base}\n\n【サイトジャンル】{g}\n"
+
+def _score_title(t: str, site, prefer_kw: str | None = None) -> float:
     """
     “必ず10案から選ぶ”ためのスコアリング。
     0〜100想定。高いほど良い。
@@ -322,9 +354,17 @@ def _score_title(t: str, site) -> float:
     # 記号だらけなど軽微な減点
     if _re.search(r"[!！?？]{3,}", t):
         score -= 5
+
+    # ★ プロンプト反映：推定ジャンル語が含まれていれば微加点
+    if prefer_kw:
+        try:
+            if _norm(prefer_kw) and _norm(prefer_kw) in _norm(t):
+                score += 8
+        except Exception:
+            pass    
     return score
 
-def _pick_best_from_candidates(cands: List[str], site) -> str | None:
+def _pick_best_from_candidates(cands: List[str], site, prefer_keyword: str | None = None) -> str | None:
     """まず厳格フィルタ→空ならスコアで10案から必ず選ぶ"""
     strict = [
         t for t in cands
@@ -335,10 +375,10 @@ def _pick_best_from_candidates(cands: List[str], site) -> str | None:
     if not pool:
         return None
     # スコア降順、同点はsaltで安定選択
-    scored = sorted(pool, key=lambda x: (_score_title(x, site)), reverse=True)
-    top_score = _score_title(scored[0], site)
+    scored = sorted(pool, key=lambda x: (_score_title(x, site, prefer_keyword)), reverse=True)
+    top_score = _score_title(scored[0], site, prefer_keyword)
     # 同点群を抽出
-    ties = [t for t in scored if abs(_score_title(t, site) - top_score) < 1e-6]
+    ties = [t for t in scored if abs(_score_title(t, site, prefer_keyword) - top_score) < 1e-6]
     
     # 同点が1つだけならそれを採用。ただし32字トリム後の最終類似を確認
     if len(ties) == 1:
@@ -361,7 +401,7 @@ def _pick_best_from_candidates(cands: List[str], site) -> str | None:
     # ✅ それでも全滅なら「最初の10案から必ず選ぶ」ポリシーで最上位を返す
     return (scored[0][:32] if scored else (cands[0][:32] if cands else None))
 
-async def _gen_titles_with_openai(site) -> List[str]:
+async def _gen_titles_with_openai(site, genre: str) -> List[str]:
     """
     1回だけ呼び出して10案取得（再生成しない）。
     失敗時は空配列。
@@ -377,7 +417,7 @@ async def _gen_titles_with_openai(site) -> List[str]:
             max_tokens=400,
             messages=[
                 {"role": "system", "content": "You are a skilled Japanese copywriter and SEO strategist."},
-                {"role": "user", "content": _title_prompt(site)},
+                {"role": "user", "content": _title_prompt_from_genre(genre)},
             ],
         )
         text = ""
@@ -396,12 +436,19 @@ async def _gen_titles_with_openai(site) -> List[str]:
 
 async def generate_blog_title(site) -> str:
     """
-    gpt-4o-miniの“最初の10案”から必ずベストを選ぶ。
-    API失敗や0件のみフォールバック。
+    もとのサイト名→ジャンル推定→指定プロンプトで10案→ベスト選択。
+    API失敗/0件のみフォールバック。
     """
-    cands = await _gen_titles_with_openai(site)
+    # 1) ジャンル推定（LLM）。だめなら既存ヒューリスティック。
+    genre = await _infer_genre_with_openai(site)
+    if not genre:
+        g, _ = _guess_genre(site)
+        genre = g or "総合情報"
+    # 2) 指定プロンプトで10案生成
+    cands = await _gen_titles_with_openai(site, genre)
     if cands:
-        best = _pick_best_from_candidates(cands, site)
+        # 3) プロンプト反映（ジャンル語）＋“似すぎ回避”で最良案
+        best = _pick_best_from_candidates(cands, site, prefer_keyword=genre)
         if best:
             logger.info("[TitleGen] picked: %s (from %d candidates)", best, len(cands))
             return best[:32]
