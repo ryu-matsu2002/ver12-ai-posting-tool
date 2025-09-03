@@ -7,83 +7,137 @@
 
     <h1 class="text-2xl font-bold mb-6">📊 ランキング分析</h1>
 
-    <!-- ✅ タブ -->
-    <div class="flex gap-4 mb-4 flex-wrap">
-      <button class="tab-btn px-4 py-2 rounded bg-blue-100 text-blue-800 font-semibold" data-type="site">サイト数</button>
-      <button class="tab-btn px-4 py-2 rounded bg-gray-100 text-gray-800" data-type="impressions">表示回数</button>
-      <button class="tab-btn px-4 py-2 rounded bg-gray-100 text-gray-800" data-type="clicks">クリック数</button>
-      <button class="tab-btn px-4 py-2 rounded bg-gray-100 text-gray-800" data-type="posted_articles">投稿完了記事数</button>
+    <!-- タブ -->
+    <div id="tab-bar" class="flex gap-2 mb-3 flex-wrap">
+      <button class="tab-btn px-3 py-1 rounded border transition" data-type="site">サイト数</button>
+      <button class="tab-btn px-3 py-1 rounded border transition" data-type="impressions">表示回数</button>
+      <button class="tab-btn px-3 py-1 rounded border transition" data-type="clicks">クリック数</button>
+      <button class="tab-btn px-3 py-1 rounded border transition" data-type="posted_articles">投稿完了記事数</button>
     </div>
 
-    <!-- ✅ 期間フィルター -->
-    <div class="flex gap-2 mb-4 flex-wrap">
-      <button class="period-btn px-3 py-1 rounded border" data-period="1d">24時間</button>
-      <button class="period-btn px-3 py-1 rounded border" data-period="7d">7日間</button>
-      <button class="period-btn px-3 py-1 rounded border" data-period="28d">28日間</button>
-      <button class="period-btn px-3 py-1 rounded border bg-blue-200 font-bold" data-period="3m">3か月</button>
-      <button class="period-btn px-3 py-1 rounded border" data-period="6m">6か月</button>
-      <button class="period-btn px-3 py-1 rounded border" data-period="12m">12か月</button>
-      <button class="period-btn px-3 py-1 rounded border" data-period="16m">16か月</button>
-      <button onclick="toggleCustomDate()" class="px-3 py-1 rounded border bg-gray-100">📅 カスタム</button>
+    <!-- 期間フィルター（タイプに応じて動的生成） -->
+    <div class="flex items-center gap-2 mb-3 flex-wrap">
+      <div id="period-bar" class="flex gap-2 flex-wrap"></div>
+      <button id="custom-toggle" onclick="toggleCustomDate()" class="px-3 py-1 rounded border bg-gray-100 hover:bg-gray-200">
+        📅 カスタム
+      </button>
     </div>
 
-    <!-- ✅ カスタム期間 -->
+    <!-- カスタム期間 -->
     <div id="custom-date-box" class="mb-4 hidden space-x-2">
-      <label>開始日: <input type="date" id="start_date" class="border rounded p-1 text-sm"></label>
-      <label>終了日: <input type="date" id="end_date" class="border rounded p-1 text-sm"></label>
-      <button onclick="reloadRanking()" class="px-3 py-1 bg-blue-600 text-white rounded">適用</button>
+      <label class="text-sm">開始日:
+        <input type="date" id="start_date" class="border rounded p-1 text-sm">
+      </label>
+      <label class="text-sm">終了日:
+        <input type="date" id="end_date" class="border rounded p-1 text-sm">
+      </label>
+      <button onclick="reloadRanking()" class="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">適用</button>
     </div>
 
-    <!-- ✅ ランキング表 -->
+    <!-- ランキング表 -->
     <div class="border rounded shadow bg-white overflow-x-auto">
       <table class="min-w-full text-sm text-left">
-        <thead class="bg-gray-100 text-gray-800 sticky top-0 z-10" id="ranking-thead"></thead>
+        <thead class="bg-gray-50 text-gray-800 sticky top-0 z-10" id="ranking-thead"></thead>
         <tbody id="ranking-body"></tbody>
       </table>
     </div>
 
-    <!-- ✅ ローディング表示 -->
-    <div id="loading" class="text-center mt-6 text-blue-600 font-semibold hidden">読み込み中...</div>
+    <!-- ローディング -->
+    <div id="loading" class="text-center mt-4 text-blue-600 font-semibold hidden">読み込み中...</div>
   </div>
 </div>
 
+<style>
+  /* 列幅・省略表示（Tailwindの @apply は使わない） */
+  #ranking-thead th, #ranking-body td { padding: 0.25rem 0.5rem; vertical-align: middle; }
+  .col-rank  { width: 56px;  white-space: nowrap; }
+  .col-user  { width: 160px; white-space: nowrap; }
+  .col-value { width: 96px;  text-align: right; }
+  .site-cell { max-width: 520px; }
+  .site-link { color: #2563eb; text-decoration: none; display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .site-link:hover { text-decoration: underline; }
+  tbody tr:nth-child(odd){ background-color:#ffffff; }
+  tbody tr:nth-child(even){ background-color:#f9fafb; }
+  tbody tr:hover{ background-color:#eff6ff; }
+</style>
+
 <script>
-let currentType = "site";
-let currentOrder = "desc";
-let currentPeriod = "3m";
+let currentType   = "site";
+let currentOrder  = "desc";
+let currentPeriod = "28d";   // 初期は28日を基準に
+const periodBar   = document.getElementById("period-bar");
+const tabBar      = document.getElementById("tab-bar");
+
+/** タイプ毎に表示する期間 */
+const PERIODS_BY_TYPE = {
+  site:            ["1d","7d","28d","3m","6m","12m","16m"],
+  posted_articles: ["1d","7d","28d","3m","6m","12m","16m"],
+  impressions:     ["7d","28d","3m","6m","12m","16m"], // 24hは非表示（GSCは日次集計のため）
+  clicks:          ["7d","28d","3m","6m","12m","16m"],
+};
+/** ラベル表記 */
+const PERIOD_LABEL = {
+  "1d":"24時間","7d":"7日間","28d":"28日間","3m":"3か月","6m":"6か月","12m":"12か月","16m":"16か月"
+};
+
+/** ボタンのクラス（Tailwindを直接付け替える） */
+const BASE_BTN    = "px-3 py-1 rounded border transition";
+const ACTIVE_BTN  = "bg-blue-600 text-white font-semibold border-blue-600";
+const INACTIVE_BTN= "bg-gray-100 text-gray-800 hover:bg-gray-200";
 
 window.addEventListener("DOMContentLoaded", () => {
+  renderTabs();
+  renderPeriods();
   loadRanking();
-
-  document.querySelectorAll(".tab-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("bg-blue-100","text-blue-800"));
-      btn.classList.add("bg-blue-100","text-blue-800");
-      currentType = btn.dataset.type;
-      loadRanking();
-    });
-  });
-
-  document.querySelectorAll(".period-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll(".period-btn").forEach(b => b.classList.remove("bg-blue-200","font-bold"));
-      btn.classList.add("bg-blue-200","font-bold");
-      currentPeriod = btn.dataset.period;   // 1d/7d/3m...
-      loadRanking();
-    });
-  });
 });
 
+/** タブ描画＋イベント */
+function renderTabs(){
+  tabBar.querySelectorAll(".tab-btn").forEach(btn => {
+    const type = btn.dataset.type;
+    btn.className = `tab-btn ${BASE_BTN} ${type === currentType ? ACTIVE_BTN : INACTIVE_BTN}`;
+    btn.onclick = () => {
+      currentType = type;
+      // 許可外の期間を選んでいたら 28日間へ
+      const allowed = PERIODS_BY_TYPE[currentType];
+      if (!allowed.includes(currentPeriod)) currentPeriod = "28d";
+      renderTabs();
+      renderPeriods();
+      loadRanking();
+    };
+  });
+}
+
+/** 期間ボタン描画（タイプに応じて出し分け） */
+function renderPeriods(){
+  const allowed = PERIODS_BY_TYPE[currentType];
+  periodBar.innerHTML = "";
+  allowed.forEach(code => {
+    const b = document.createElement("button");
+    b.className = `period-btn ${BASE_BTN} ${currentPeriod === code ? ACTIVE_BTN : INACTIVE_BTN}`;
+    b.dataset.period = code;
+    b.textContent = PERIOD_LABEL[code];
+    b.onclick = () => {
+      currentPeriod = code;
+      renderPeriods();
+      loadRanking();
+    };
+    periodBar.appendChild(b);
+  });
+}
+
+/** カスタム日付ボックスの表示切替 */
 function toggleCustomDate() {
   document.getElementById("custom-date-box").classList.toggle("hidden");
 }
 
-// ← 新規：カスタム適用
+/** カスタム適用 */
 function reloadRanking() {
   currentPeriod = "custom";
   loadRanking();
 }
 
+/** 昇降順切替 */
 function toggleSort() {
   currentOrder = currentOrder === "desc" ? "asc" : "desc";
   loadRanking();
@@ -93,6 +147,7 @@ function setLoading(on) {
   document.getElementById("loading").classList[on ? "remove" : "add"]("hidden");
 }
 
+/** データ取得＆テーブル描画 */
 async function loadRanking() {
   const thead = document.getElementById("ranking-thead");
   const tbody = document.getElementById("ranking-body");
@@ -102,7 +157,7 @@ async function loadRanking() {
 
   try {
     const start = document.getElementById("start_date")?.value;
-    const end = document.getElementById("end_date")?.value;
+    const end   = document.getElementById("end_date")?.value;
 
     const params = new URLSearchParams({
       type: currentType,
@@ -111,15 +166,12 @@ async function loadRanking() {
     });
     if (currentPeriod === "custom") {
       if (start) params.set("start_date", start);
-      if (end) params.set("end_date", end);
+      if (end)   params.set("end_date", end);
     }
 
     const res = await fetch(`/api/admin/rankings?${params.toString()}`, {
       credentials: "same-origin",
-      headers: {
-        "Accept": "application/json",
-        "X-Requested-With": "XMLHttpRequest"
-      }
+      headers: { "Accept": "application/json", "X-Requested-With": "XMLHttpRequest" }
     });
 
     const ct = res.headers.get("content-type") || "";
@@ -128,43 +180,48 @@ async function loadRanking() {
     const json = await res.json();
     if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
 
-    // サーバは成功時に配列のみ返す実装なので、配列と想定
     const data = Array.isArray(json) ? json : (json.data || []);
 
     if (currentType === "site") {
       thead.innerHTML = `
         <tr>
-          <th class="p-2 w-[60px]">順位</th>
-          <th class="p-2 w-[150px]">ユーザー名</th>
-          <th class="p-2 cursor-pointer" onclick="toggleSort()">サイト数 ${currentOrder === "desc" ? "↓" : "↑"}</th>
+          <th class="col-rank p-2">順位</th>
+          <th class="col-user p-2">ユーザー名</th>
+          <th class="col-value p-2 cursor-pointer text-right" onclick="toggleSort()">
+            サイト数 ${currentOrder === "desc" ? "↓" : "↑"}
+          </th>
         </tr>`;
-      if (data.length === 0) {
+      if (!data.length) {
         tbody.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-gray-500">データが見つかりませんでした。</td></tr>`;
       } else {
         tbody.innerHTML = data.map((row, i) => `
           <tr class="border-b">
-            <td class="p-2">${i < 3 ? ["🥇","🥈","🥉"][i] : `#${i+1}`}</td>
-            <td class="p-2">${row.last_name} ${row.first_name}</td>
-            <td class="p-2 text-center">${row.site_count ?? 0}</td>
+            <td class="col-rank p-2">${i < 3 ? ["🥇","🥈","🥉"][i] : `#${i+1}`}</td>
+            <td class="col-user p-2">${row.last_name} ${row.first_name}</td>
+            <td class="col-value p-2">${row.site_count ?? 0}</td>
           </tr>`).join("");
       }
     } else {
       thead.innerHTML = `
         <tr>
-          <th class="p-2 w-[60px]">順位</th>
-          <th class="p-2">サイト名</th>
-          <th class="p-2">ユーザー名</th>
-          <th class="p-2 cursor-pointer" onclick="toggleSort()">値 ${currentOrder === "desc" ? "↓" : "↑"}</th>
+          <th class="col-rank p-2">順位</th>
+          <th class="p-2 site-cell">サイト名</th>
+          <th class="col-user p-2">ユーザー名</th>
+          <th class="col-value p-2 cursor-pointer" onclick="toggleSort()">
+            値 ${currentOrder === "desc" ? "↓" : "↑"}
+          </th>
         </tr>`;
-      if (data.length === 0) {
+      if (!data.length) {
         tbody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-gray-500">データが見つかりませんでした。</td></tr>`;
       } else {
         tbody.innerHTML = data.map((row, i) => `
           <tr class="border-b">
-            <td class="p-2">${i < 3 ? ["🥇","🥈","🥉"][i] : `#${i+1}`}</td>
-            <td class="p-2 text-blue-600 underline"><a href="${row.site_url}" target="_blank" rel="noopener">${row.site_name}</a></td>
-            <td class="p-2">${row.user_name}</td>
-            <td class="p-2 text-center">${row.value ?? 0}</td>
+            <td class="col-rank p-2">${i < 3 ? ["🥇","🥈","🥉"][i] : `#${i+1}`}</td>
+            <td class="p-2 site-cell">
+              <a class="site-link" href="${row.site_url}" target="_blank" rel="noopener">${row.site_name}</a>
+            </td>
+            <td class="col-user p-2">${row.user_name}</td>
+            <td class="col-value p-2">${row.value ?? 0}</td>
           </tr>`).join("");
       }
     }
@@ -173,7 +230,7 @@ async function loadRanking() {
     document.getElementById("ranking-body").innerHTML =
       `<tr><td colspan="4" class="p-4 text-center text-red-600">読み込みに失敗しました：${err.message}</td></tr>`;
   } finally {
-    setLoading(false); // ← 失敗時も確実にOFF
+    setLoading(false);
   }
 }
 </script>
