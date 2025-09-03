@@ -2424,6 +2424,7 @@ def api_rankings():
         )
         results = (
             db.session.query(
+                subquery.c.user_id,
                 subquery.c.last_name,
                 subquery.c.first_name,
                 subquery.c.site_count
@@ -2434,7 +2435,7 @@ def api_rankings():
         )
         data = [
             {
-                "user_id": r.user_id,
+                "user_id": int(r.user_id),
                 "last_name": r.last_name,
                 "first_name": r.first_name,
                 "site_count": int(r.site_count or 0),
