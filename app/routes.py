@@ -2401,7 +2401,10 @@ def view_errors(username):
 @bp.route("/api/rankings")
 @login_required
 def api_rankings():
-    rank_type = request.args.get("type", "site")  # site | impressions | clicks
+    # site | impressions | clicks
+    rank_type = request.args.get("type", "site").lower()
+    limit = min(max(int(request.args.get("limit", 50)), 1), 50)
+
 
     # ✅ ユーザー別：登録サイト数ランキング（ダッシュボード用）
     if rank_type == "site":
@@ -2425,7 +2428,7 @@ def api_rankings():
                 subquery.c.site_count
             )
             .order_by(subquery.c.site_count.desc())
-            .limit(50)
+            .limit(limit)
             .all()
         )
         data = [
@@ -2435,6 +2438,8 @@ def api_rankings():
         return jsonify(data)
 
     # ✅ 28日合計：サイト別の表示回数 / クリック数（管理ページと同ロジック）
+    # ※ 表示回数・クリック数では「ユーザーID=1のみ除外」
+    from app.models import GSCDailyTotal
     latest_date = db.session.query(func.max(GSCDailyTotal.date)).scalar()
     if not latest_date:
         return jsonify([])
@@ -2451,10 +2456,11 @@ def api_rankings():
         )
         .join(GSCDailyTotal, GSCDailyTotal.site_id == Site.id)
         .join(User, User.id == Site.user_id)
+        .filter(~User.id.in_([1]))  # ← ここで user_id=1 を除外
         .filter(GSCDailyTotal.date >= start_date, GSCDailyTotal.date <= latest_date)
         .group_by(Site.id, Site.name, Site.url, User.username)
         .order_by(func.coalesce(func.sum(metric_col), 0).desc())
-        .limit(50)
+        .limit(limit)
         .all()
     )
     return jsonify([

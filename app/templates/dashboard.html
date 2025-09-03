@@ -70,14 +70,17 @@
     <!-- タブ -->
     <div class="flex items-center gap-2 mb-2">
       <!-- 既定はサイト登録数 -->
-      <button id="tab-site" class="rank-tab is-active" data-type="site">サイト登録数</button>
-      <button id="tab-impr" class="rank-tab" data-type="impressions">表示回数（直近28日）</button>
+      <button id="tab-site"   class="rank-tab is-active" data-type="site">サイト登録数</button>
+      <button id="tab-impr"   class="rank-tab" data-type="impressions">表示回数（直近28日）</button>
       <button id="tab-clicks" class="rank-tab" data-type="clicks">クリック数（直近28日）</button>
     </div>
 
     <!-- テーブル（高さは従来と同じ） -->
     <div id="ranking-container" class="overflow-y-auto max-h-[500px] border border-gray-200 rounded">
-      <table class="w-full bg-white shadow text-sm">
+      <table id="ranking-table" class="w-full bg-white shadow text-sm table-fixed">  <!-- table-fixed で列幅安定 -->
+        <colgroup id="rank-colgroup">
+          <!-- JSでタブに応じて差し替え -->
+        </colgroup>
         <thead class="bg-gray-100 text-gray-700 sticky top-0 z-10" id="ranking-thead"></thead>
         <tbody id="ranking-body"></tbody>
       </table>
@@ -90,12 +93,16 @@
   window.addEventListener("DOMContentLoaded", () => {
     // 既定タブ：サイト登録数
     setActiveTab(document.getElementById("tab-site"));
+    renderHeadAndCols("site");
     loadRanking("site");
-    // クリックで切替
+
+    // クリックで切替（ページ全体は再読込しない）
     document.querySelectorAll(".rank-tab").forEach(btn => {
       btn.addEventListener("click", () => {
+        const type = btn.dataset.type;
         setActiveTab(btn);
-        loadRanking(btn.dataset.type);
+        renderHeadAndCols(type);   // 見出し・列幅だけ更新
+        loadRanking(type);         // 本体データだけAjax更新
       });
     });
   });
@@ -105,31 +112,48 @@
     btn.classList.add("is-active");
   }
 
-  // ===== ランキング読み込み（/api/rankings を利用） =====
-  function loadRanking(type) {
+  // ===== 見出し＆colgroup（列幅）をタブ毎に差し替え =====
+  function renderHeadAndCols(type){
     const thead = document.getElementById("ranking-thead");
-    const tbody = document.getElementById("ranking-body");
-    tbody.innerHTML = "";
+    const colg  = document.getElementById("rank-colgroup");
 
-    // 見出しは「管理ページの表」に合わせる
     if (type === "site") {
+      // 列幅：順位(64px) / 名前(自動) / 値(120px) → 余りは名前へ寄せる
+      colg.innerHTML = `
+        <col style="width:64px">
+        <col>
+        <col style="width:120px">
+      `;
       thead.innerHTML = `
         <tr>
-          <th class="p-2 text-left w-16">順位</th>
-          <th class="p-2 text-left">ユーザー名</th>
-          <th class="p-2 text-right w-28">値</th>
+          <th class="p-2 text-left">順位</th>
+          <th class="p-2 text-left">名前</th>
+          <th class="p-2 text-right">サイト数</th>
         </tr>
       `;
     } else {
+      // 列幅：順位(64px) / サイト名(50%) / 名前(30%) / 値(20%≒120px~固定寄り)
+      colg.innerHTML = `
+        <col style="width:64px">
+        <col style="width:50%">
+        <col style="width:30%">
+        <col style="width:20%">
+      `;
       thead.innerHTML = `
         <tr>
-          <th class="p-2 text-left w-16">順位</th>
+          <th class="p-2 text-left">順位</th>
           <th class="p-2 text-left">サイト名</th>
-          <th class="p-2 text-left w-44">ユーザー名</th>
-          <th class="p-2 text-right w-28">値</th>
+          <th class="p-2 text-left">名前</th>
+          <th class="p-2 text-right">値</th>
         </tr>
       `;
     }
+  }
+
+  // ===== ランキング読み込み（/api/rankings を利用） =====
+  function loadRanking(type) {
+    const tbody = document.getElementById("ranking-body");
+    tbody.innerHTML = "";
 
     fetch(`/api/rankings?type=${encodeURIComponent(type)}`)
       .then(res => {
@@ -143,24 +167,24 @@
           tr.className = "border-b";
 
           if (type === "site") {
-            // ユーザー単位（サイト登録数）
+            // ユーザー単位（サイト登録数） — 名前表示＆サイト数の値
             const fullName = `${row.last_name || ""} ${row.first_name || ""}`.trim();
             tr.innerHTML = `
               <td class="p-2 font-semibold">${icon}</td>
-              <td class="p-2 truncate">${fullName || "—"}</td>
+              <td class="p-2 truncate">${escapeHtml(fullName || "—")}</td>
               <td class="p-2 text-right font-semibold">${row.site_count ?? 0}</td>
             `;
           } else {
-            // サイト単位（表示回数／クリック数）
+            // サイト単位（表示回数／クリック数） — “名前” 表示に統一
             const siteName = row.site_name || row.site_url || `site#${row.site_id}`;
-            const username = row.username || "";
+            const nameText = row.username || ""; // ユーザー名→表記は“名前”
             const href = row.site_url ? row.site_url : "#";
             tr.innerHTML = `
               <td class="p-2 font-semibold">${icon}</td>
               <td class="p-2 truncate">
                 <a href="${href}" target="_blank" class="text-blue-600 underline">${escapeHtml(siteName)}</a>
               </td>
-              <td class="p-2 truncate">${escapeHtml(username)}</td>
+              <td class="p-2 truncate">${escapeHtml(nameText)}</td>
               <td class="p-2 text-right font-semibold">${row.value ?? 0}</td>
             `;
           }
@@ -257,34 +281,32 @@
   .text-custom-brand {
     color: #23185E;
   }
-  /* タブ風ボタン */
-  /* タブ風ボタン（Tailwind不要の純CSS版） */
-.rank-tab{
-  display:inline-flex;
-  align-items:center;
-  gap:.25rem;
-  padding:.375rem .75rem;        /* py-1.5 px-3 */
-  border-radius:.375rem;         /* rounded-md */
-  border:1px solid #D1D5DB;      /* border-gray-300 */
-  background:#fff;               /* bg-white */
-  color:#1F2937;                 /* text-gray-800 */
-  font-size:.875rem;             /* text-sm */
-  line-height:1.25rem;
-  cursor:pointer;
-  transition:background .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease;
-}
-.rank-tab:hover{ background:#F9FAFB; }
-.rank-tab.is-active{
-  background:#2563EB;            /* bg-blue-600 */
-  color:#fff;                     /* text-white */
-  border-color:#2563EB;          /* border-blue-600 */
-}
-/* キーボード操作のフォーカス見やすく */
-.rank-tab:focus{
-  outline:2px solid #93C5FD;
-  outline-offset:2px;
-}
 
+  /* タブ風ボタン（純CSS） */
+  .rank-tab{
+    display:inline-flex;
+    align-items:center;
+    gap:.25rem;
+    padding:.375rem .75rem;        /* py-1.5 px-3 */
+    border-radius:.375rem;         /* rounded-md */
+    border:1px solid #D1D5DB;      /* border-gray-300 */
+    background:#fff;               /* bg-white */
+    color:#1F2937;                 /* text-gray-800 */
+    font-size:.875rem;             /* text-sm */
+    line-height:1.25rem;
+    cursor:pointer;
+    transition:background .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease;
+  }
+  .rank-tab:hover{ background:#F9FAFB; }
+  .rank-tab.is-active{
+    background:#2563EB;            /* bg-blue-600 */
+    color:#fff;                     /* text-white */
+    border-color:#2563EB;          /* border-blue-600 */
+  }
+  .rank-tab:focus{
+    outline:2px solid #93C5FD;     /* focus-visible */
+    outline-offset:2px;
+  }
 </style>
 {% endblock %}
 
