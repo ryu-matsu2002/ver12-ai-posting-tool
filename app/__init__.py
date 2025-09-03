@@ -108,7 +108,8 @@ def create_app() -> Flask:
         from .models import User  # 循環 import 回避
         @login_manager.user_loader
         def load_user(user_id: str) -> User | None:  # type: ignore[name-defined]
-            return User.query.get(int(user_id))
+            # SQLAlchemy 2.x 推奨のセッションAPI。例外連鎖を避けやすい
+            return db.session.get(User, int(user_id))
         
         # ✅ 修正①: external_bp の import & 登録は app context 内で最後に行う
         #from .controllers.external_seo import external_bp
@@ -124,6 +125,17 @@ def create_app() -> Flask:
         except Exception:
             # Redis が落ちていてもアプリ全体は止めない
             pass
+
+    # --- DBセッションのクリーンアップ: リクエスト終了時にロールバック＆解放 ---
+    @app.teardown_request
+    def _cleanup_session(exception):
+        try:
+            if exception is not None:
+                # 直前にDB例外が起きていたら必ずROLLBACK
+                db.session.rollback()
+        finally:
+            # 正常/異常に関わらず remove して接続とスコープを解放
+            db.session.remove()    
 
     # ✅ スケジューラー起動（--preload により1回のみ呼ばれる）
     # ✅ スケジューラ起動（ファイルロックで“1プロセスだけ”に制限）
