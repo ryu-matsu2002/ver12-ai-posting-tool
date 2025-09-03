@@ -76,3 +76,5 @@ def run():
         if updated:
             db.session.commit()
         print(f"[backfill_blog_name] total={total} updated={updated} skipped={skipped}")
+if __name__ == "__main__":
+    run()
