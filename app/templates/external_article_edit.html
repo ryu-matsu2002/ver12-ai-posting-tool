@@ -3,40 +3,78 @@
 {% block title %}外部SEO | 記事編集{% endblock %}
 
 {% block content %}
-<h2 class="text-2xl font-bold mb-6">外部SEO記事 編集</h2>
+<style>
+  :root{
+    --seo-bg:#3A1F5C; --pane:#44286D; --pane-2:#4D2F7D; --edge:rgba(255,255,255,.14);
+    --txt:#fff; --txt-dim:#E7E1FA;
+    --blue:#2563EB; --blue-h:#3B82F6; --gray:#6B7280; --gray-h:#4B5563;
+  }
 
-{# 一覧ページURLを安全に組み立て（account_id が無い環境では site_id を使用） #}
+  /* 背景・文字色を紫テーマに統一 */
+  html, body, main, #main, #content, .content, .page-wrapper, .page-content{
+    background:var(--seo-bg) !important; color:var(--txt) !important;
+  }
+  h1,h2,h3,h4,label,span,p{ color:var(--txt) !important; }
+
+  .page-title{
+    font-size:1.6rem; font-weight:800; letter-spacing:.02em; margin:0 0 14px;
+    text-shadow:0 2px 10px rgba(0,0,0,.25);
+  }
+
+  .form-box{
+    background:var(--pane); border:1px solid var(--edge);
+    border-radius:14px; padding:16px;
+  }
+  .field{ margin-bottom:16px; }
+  .label{ display:block; font-weight:700; margin-bottom:6px; color:var(--txt-dim) !important; }
+  .input, .textarea{
+    width:100%; background:var(--pane-2); color:var(--txt);
+    border:1px solid var(--edge); border-radius:10px;
+    padding:10px 12px; outline:none;
+  }
+  .input:focus, .textarea:focus{
+    box-shadow:0 0 0 3px rgba(201,183,255,.25);
+  }
+  .textarea{ min-height:450px; resize:vertical; }
+
+  .actions{ display:flex; gap:.6rem; }
+
+  .btn{
+    display:inline-block; padding:.55rem 1rem; border-radius:.6rem;
+    font-weight:700; font-size:.95rem; color:#fff !important;
+  }
+  .btn-blue{ background:var(--blue); }
+  .btn-blue:hover{ background:var(--blue-h); }
+  .btn-gray{ background:var(--gray); }
+  .btn-gray:hover{ background:var(--gray-h); }
+  .btn-ghost{ background:transparent; border:1px solid var(--edge); color:var(--txt) !important; }
+  .btn-ghost:hover{ background:rgba(255,255,255,.06); }
+</style>
+
+<h2 class="page-title">記事編集</h2>
+
+{# 一覧ページURLを安全に組み立て #}
 {% set acct_id = (article.account_id if (article.account_id is defined and article.account_id) else article.site_id) %}
 {% set list_url = url_for('main.external_account_articles', acct_id=acct_id) %}
 
-<form method="post">
-  <div class="mb-4">
-    <label class="block font-semibold mb-1">タイトル</label>
-    <input type="text" name="title" value="{{ article.title }}"
-           class="w-full border px-3 py-2 rounded">
+<div class="mb-4">
+  <a href="{{ list_url }}" class="btn-ghost">← 記事一覧に戻る</a>
+</div>
+
+<form method="post" class="form-box">
+  <div class="field">
+    <label class="label">タイトル</label>
+    <input type="text" name="title" value="{{ article.title }}" class="input">
   </div>
 
-  <div class="mb-4">
-    <label class="block font-semibold mb-1">本文</label>
-    <textarea name="body" rows="20"
-              class="w-full border px-3 py-2 rounded">{{ article.body }}</textarea>
+  <div class="field">
+    <label class="label">本文 (HTML形式)</label>
+    <textarea name="body" rows="20" class="textarea">{{ article.body }}</textarea>
   </div>
 
-  <div class="flex space-x-4">
-    {# ← 追加：記事一覧に戻る（保存の左） #}
-    <a href="{{ list_url }}"
-       class="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50">
-      記事一覧に戻る
-    </a>
-
-    <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
-      保存
-    </button>
-
-    <a href="{{ request.referrer or list_url }}"
-       class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600">
-      キャンセル
-    </a>
+  <div class="actions">
+    <button type="submit" class="btn btn-blue">更新</button>
+    <a href="{{ request.referrer or list_url }}" class="btn btn-gray">キャンセル</a>
   </div>
 </form>
 {% endblock %}
