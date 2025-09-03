@@ -27,7 +27,7 @@
   <div class="bg-white shadow rounded p-6 text-center">
     <p class="text-xl font-bold text-red-600 mb-2">エラー</p>
     <p class="text-4xl font-extrabold text-red-600">
-      {{ error or 0 }} 
+      {{ error or 0 }}
       {% if error %}
         <a href="{{ url_for('main.view_errors', username=current_user.username) }}" class="text-blue-500 underline">エラー詳細</a>
       {% endif %}
@@ -63,9 +63,19 @@
     </div>
   </div>
 
-  <!-- 👑 ランキング -->
+  <!-- 👑 ランキング（3タブ） -->
   <div class="w-full lg:w-[70%] pl-40">
-    <h2 class="text-2xl font-bold mb-4">👑 登録サイト数ランキング</h2>
+    <h2 class="text-2xl font-bold mb-3">👑 ランキング</h2>
+
+    <!-- タブ -->
+    <div class="flex items-center gap-2 mb-2">
+      <!-- 既定はサイト登録数 -->
+      <button id="tab-site" class="rank-tab is-active" data-type="site">サイト登録数</button>
+      <button id="tab-impr" class="rank-tab" data-type="impressions">表示回数（直近28日）</button>
+      <button id="tab-clicks" class="rank-tab" data-type="clicks">クリック数（直近28日）</button>
+    </div>
+
+    <!-- テーブル（高さは従来と同じ） -->
     <div id="ranking-container" class="overflow-y-auto max-h-[500px] border border-gray-200 rounded">
       <table class="w-full bg-white shadow text-sm">
         <thead class="bg-gray-100 text-gray-700 sticky top-0 z-10" id="ranking-thead"></thead>
@@ -76,47 +86,101 @@
 </div>
 
 <script>
+  // ===== 初期化 =====
   window.addEventListener("DOMContentLoaded", () => {
-    console.log("✅ loadRanking実行");
-    loadRanking();
+    // 既定タブ：サイト登録数
+    setActiveTab(document.getElementById("tab-site"));
+    loadRanking("site");
+    // クリックで切替
+    document.querySelectorAll(".rank-tab").forEach(btn => {
+      btn.addEventListener("click", () => {
+        setActiveTab(btn);
+        loadRanking(btn.dataset.type);
+      });
+    });
   });
 
-  function loadRanking() {
-    fetch(`/api/rankings?type=site`)
+  function setActiveTab(btn){
+    document.querySelectorAll(".rank-tab").forEach(b => b.classList.remove("is-active"));
+    btn.classList.add("is-active");
+  }
+
+  // ===== ランキング読み込み（/api/rankings を利用） =====
+  function loadRanking(type) {
+    const thead = document.getElementById("ranking-thead");
+    const tbody = document.getElementById("ranking-body");
+    tbody.innerHTML = "";
+
+    // 見出しは「管理ページの表」に合わせる
+    if (type === "site") {
+      thead.innerHTML = `
+        <tr>
+          <th class="p-2 text-left w-16">順位</th>
+          <th class="p-2 text-left">ユーザー名</th>
+          <th class="p-2 text-right w-28">値</th>
+        </tr>
+      `;
+    } else {
+      thead.innerHTML = `
+        <tr>
+          <th class="p-2 text-left w-16">順位</th>
+          <th class="p-2 text-left">サイト名</th>
+          <th class="p-2 text-left w-44">ユーザー名</th>
+          <th class="p-2 text-right w-28">値</th>
+        </tr>
+      `;
+    }
+
+    fetch(`/api/rankings?type=${encodeURIComponent(type)}`)
       .then(res => {
         if (!res.ok) throw new Error(`APIエラー: ${res.status}`);
         return res.json();
       })
-      .then(data => {
-        console.log("✅ データ取得:", data);
-        const tbody = document.getElementById("ranking-body");
-        const thead = document.getElementById("ranking-thead");
-        tbody.innerHTML = "";
-        thead.innerHTML = `
-          <tr>
-            <th class="p-2 text-left">順位</th>
-            <th class="p-2 text-left">ユーザー名</th>
-            <th class="p-2 text-center">登録サイト数</th>
-          </tr>
-        `;
-
-        data.slice(0, 50).forEach((row, index) => {
-          const icon = index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : "#" + (index + 1);
+      .then(rows => {
+        rows.slice(0, 50).forEach((row, idx) => {
+          const icon = idx === 0 ? "🥇" : idx === 1 ? "🥈" : idx === 2 ? "🥉" : `#${idx + 1}`;
           const tr = document.createElement("tr");
           tr.className = "border-b";
-          tr.innerHTML = `
-            <td class="p-2 font-semibold">${icon}</td>
-            <td class="p-2 truncate w-[180px]">${row.last_name} ${row.first_name}</td>
-            <td class="p-2 text-center">${row.site_count}</td>
-          `;
+
+          if (type === "site") {
+            // ユーザー単位（サイト登録数）
+            const fullName = `${row.last_name || ""} ${row.first_name || ""}`.trim();
+            tr.innerHTML = `
+              <td class="p-2 font-semibold">${icon}</td>
+              <td class="p-2 truncate">${fullName || "—"}</td>
+              <td class="p-2 text-right font-semibold">${row.site_count ?? 0}</td>
+            `;
+          } else {
+            // サイト単位（表示回数／クリック数）
+            const siteName = row.site_name || row.site_url || `site#${row.site_id}`;
+            const username = row.username || "";
+            const href = row.site_url ? row.site_url : "#";
+            tr.innerHTML = `
+              <td class="p-2 font-semibold">${icon}</td>
+              <td class="p-2 truncate">
+                <a href="${href}" target="_blank" class="text-blue-600 underline">${escapeHtml(siteName)}</a>
+              </td>
+              <td class="p-2 truncate">${escapeHtml(username)}</td>
+              <td class="p-2 text-right font-semibold">${row.value ?? 0}</td>
+            `;
+          }
           tbody.appendChild(tr);
         });
       })
       .catch(err => {
         console.error("❌ ランキング読み込み失敗:", err);
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td colspan="4" class="p-3 text-red-600">ランキングの取得に失敗しました。</td>`;
+        tbody.appendChild(tr);
       });
   }
 
+  // XSS対策の簡易エスケープ
+  function escapeHtml(s){
+    return String(s || "").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  }
+
+  // ====== チャット（既存） ======
   const chatUsername = "{{ current_user.username }}";
   const messageLog = [];
   const phrases = ["今日もがんばろう！", "SEO最適化中！", "記事作成順調！", "GSC記事生成を実装！"];
@@ -193,11 +257,38 @@
   .text-custom-brand {
     color: #23185E;
   }
+  /* タブ風ボタン */
+  /* タブ風ボタン（Tailwind不要の純CSS版） */
+.rank-tab{
+  display:inline-flex;
+  align-items:center;
+  gap:.25rem;
+  padding:.375rem .75rem;        /* py-1.5 px-3 */
+  border-radius:.375rem;         /* rounded-md */
+  border:1px solid #D1D5DB;      /* border-gray-300 */
+  background:#fff;               /* bg-white */
+  color:#1F2937;                 /* text-gray-800 */
+  font-size:.875rem;             /* text-sm */
+  line-height:1.25rem;
+  cursor:pointer;
+  transition:background .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease;
+}
+.rank-tab:hover{ background:#F9FAFB; }
+.rank-tab.is-active{
+  background:#2563EB;            /* bg-blue-600 */
+  color:#fff;                     /* text-white */
+  border-color:#2563EB;          /* border-blue-600 */
+}
+/* キーボード操作のフォーカス見やすく */
+.rank-tab:focus{
+  outline:2px solid #93C5FD;
+  outline-offset:2px;
+}
+
 </style>
 {% endblock %}
+
 {% block scripts %}
   {{ super() }}
-  <script>
-    console.log("✅ Dashboard scripts loaded");
-  </script>
+  <script>console.log("✅ Dashboard scripts loaded");</script>
 {% endblock %}

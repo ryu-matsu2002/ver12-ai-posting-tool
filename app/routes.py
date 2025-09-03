@@ -2249,10 +2249,11 @@ def root_redirect():
 
 
 # ─────────── Dashboard
-from app.models import UserSiteQuota, Article, SiteQuotaLog, Site, User  # ← User を追加
-from sqlalchemy import case
+from app.models import UserSiteQuota, Article, SiteQuotaLog, Site, User, GSCDailyTotal  # ← User を追加
+from sqlalchemy import case, func  # ← func を追加
 from flask import g
 from collections import defaultdict
+from datetime import timedelta  # ← 追加
 
 @bp.route("/<username>/dashboard")
 @login_required
@@ -2314,6 +2315,48 @@ def dashboard(username):
     used_quota = sum(site_count_map.get(q.plan_type, 0) for q in quotas)
     remaining_quota = max(total_quota - used_quota, 0)
 
+    # ─────────── 追加：直近28日の「表示回数／クリック数」サイト別ランキング（管理ページと同じロジック）
+    # DBに格納済みの GSC 日次の「最新日付」を終端にして 28日合計を出す
+    latest_date = db.session.query(func.max(GSCDailyTotal.date)).scalar()
+    rank_impr_28d = []
+    rank_clicks_28d = []
+    if latest_date:
+        start_date = latest_date - timedelta(days=27)
+        # 表示回数 Top50
+        rank_impr_28d = (
+            db.session.query(
+                Site.id.label("site_id"),
+                Site.name.label("site_name"),
+                Site.url.label("site_url"),
+                User.username.label("username"),
+                func.coalesce(func.sum(GSCDailyTotal.impressions), 0).label("value"),
+            )
+            .join(GSCDailyTotal, GSCDailyTotal.site_id == Site.id)
+            .join(User, User.id == Site.user_id)
+            .filter(GSCDailyTotal.date >= start_date, GSCDailyTotal.date <= latest_date)
+            .group_by(Site.id, Site.name, Site.url, User.username)
+            .order_by(func.coalesce(func.sum(GSCDailyTotal.impressions), 0).desc())
+            .limit(50)
+            .all()
+        )
+        # クリック数 Top50
+        rank_clicks_28d = (
+            db.session.query(
+                Site.id.label("site_id"),
+                Site.name.label("site_name"),
+                Site.url.label("site_url"),
+                User.username.label("username"),
+                func.coalesce(func.sum(GSCDailyTotal.clicks), 0).label("value"),
+            )
+            .join(GSCDailyTotal, GSCDailyTotal.site_id == Site.id)
+            .join(User, User.id == Site.user_id)
+            .filter(GSCDailyTotal.date >= start_date, GSCDailyTotal.date <= latest_date)
+            .group_by(Site.id, Site.name, Site.url, User.username)
+            .order_by(func.coalesce(func.sum(GSCDailyTotal.clicks), 0).desc())
+            .limit(50)
+            .all()
+        )
+
 
     return render_template(
         "dashboard.html",
@@ -2326,6 +2369,9 @@ def dashboard(username):
         posted=g.posted,
         error=g.error,
         plans=plans,
+        # ▼ ランキング用（テンプレのタブから使用）
+        rank_impr_28d=rank_impr_28d,
+        rank_clicks_28d=rank_clicks_28d,
     )
 
 
@@ -2355,46 +2401,71 @@ def view_errors(username):
 @bp.route("/api/rankings")
 @login_required
 def api_rankings():
-    rank_type = request.args.get("type", "site")
-
-    if rank_type != "site":
-        return jsonify({"error": "This endpoint only supports site rankings."}), 400
+    rank_type = request.args.get("type", "site")  # site | impressions | clicks
 
     # ✅ ユーザー別：登録サイト数ランキング（ダッシュボード用）
-    excluded_user_ids = [1, 2, 14]  # ← 除外したいID
-    subquery = (
-        db.session.query(
-            User.id.label("user_id"),
-            User.last_name,
-            User.first_name,
-            func.count(Site.id).label("site_count")
+    if rank_type == "site":
+        excluded_user_ids = [1, 2, 14]  # ← 除外したいID
+        subquery = (
+            db.session.query(
+                User.id.label("user_id"),
+                User.last_name,
+                User.first_name,
+                func.count(Site.id).label("site_count")
+            )
+            .filter(~User.id.in_(excluded_user_ids))
+            .outerjoin(Site, Site.user_id == User.id)
+            .group_by(User.id, User.last_name, User.first_name)
+            .subquery()
         )
-        .filter(~User.id.in_(excluded_user_ids))  # 🔥 ここを追加
-        .outerjoin(Site, Site.user_id == User.id)
-        .group_by(User.id, User.last_name, User.first_name)
-        .subquery()
-    )
+        results = (
+            db.session.query(
+                subquery.c.last_name,
+                subquery.c.first_name,
+                subquery.c.site_count
+            )
+            .order_by(subquery.c.site_count.desc())
+            .limit(50)
+            .all()
+        )
+        data = [
+            {"last_name": r.last_name, "first_name": r.first_name, "site_count": r.site_count}
+            for r in results
+        ]
+        return jsonify(data)
 
-    results = (
+    # ✅ 28日合計：サイト別の表示回数 / クリック数（管理ページと同ロジック）
+    latest_date = db.session.query(func.max(GSCDailyTotal.date)).scalar()
+    if not latest_date:
+        return jsonify([])
+    start_date = latest_date - timedelta(days=27)
+
+    metric_col = GSCDailyTotal.impressions if rank_type in ("impressions", "impr") else GSCDailyTotal.clicks
+    rows = (
         db.session.query(
-            subquery.c.last_name,
-            subquery.c.first_name,
-            subquery.c.site_count
+            Site.id.label("site_id"),
+            Site.name.label("site_name"),
+            Site.url.label("site_url"),
+            User.username.label("username"),
+            func.coalesce(func.sum(metric_col), 0).label("value"),
         )
-        .order_by(subquery.c.site_count.desc())
+        .join(GSCDailyTotal, GSCDailyTotal.site_id == Site.id)
+        .join(User, User.id == Site.user_id)
+        .filter(GSCDailyTotal.date >= start_date, GSCDailyTotal.date <= latest_date)
+        .group_by(Site.id, Site.name, Site.url, User.username)
+        .order_by(func.coalesce(func.sum(metric_col), 0).desc())
         .limit(50)
         .all()
     )
-
-    data = [
+    return jsonify([
         {
-            "last_name": row.last_name,
-            "first_name": row.first_name,
-            "site_count": row.site_count
-        }
-        for row in results
-    ]
-    return jsonify(data)
+            "site_id": r.site_id,
+            "site_name": r.site_name,
+            "site_url": r.site_url,
+            "username": r.username,
+            "value": int(r.value or 0),
+        } for r in rows
+    ])
 
 
 # ─────────── プロンプト CRUD（新規登録のみ）
