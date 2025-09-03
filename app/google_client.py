@@ -206,8 +206,9 @@ def update_site_daily_totals(site: Site, days: int = 35) -> int:
     today_jst = datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(JST).date()
     # 例：28日表示に完全一致させるには、start = today_jst - timedelta(days=27)
     span = max(1, int(days))
-    start_d = today_jst - timedelta(days=span - 1)
-    end_d = today_jst
+    # ✅ GSC UI に合わせて「昨日まで」
+    end_d = today_jst - timedelta(days=1)
+    start_d = end_d - timedelta(days=span - 1)
 
     # まず既知の URI（設定済みがあればそれ）から試行
     first = _resolve_property_uri(site)
@@ -319,3 +320,29 @@ def fetch_all_pages_for_site(site: Site, days: int = 180, limit: int = 25000) ->
     except Exception as e:
         logging.error(f"[GSC] fetch_all_pages_for_site failed: {e}")
         return []
+
+# app/google_client.py に追加（必要なときだけ呼ぶ）
+def fetch_totals_direct(property_uri: str, start_d: date, end_d: date) -> dict:
+    """
+    GSC UIの28日合計に寄せるため、dimensionsなしで直接合計を取得。
+    dataState='FINAL' を指定。
+    """
+    service = get_search_console_service()
+    body = {
+        "startDate": start_d.isoformat(),
+        "endDate": end_d.isoformat(),
+        "dimensions": [],           # ← 無次元で合計
+        "dataState": "FINAL",       # ← UI寄せ
+        "rowLimit": 1
+    }
+    resp = service.searchanalytics().query(siteUrl=property_uri, body=body).execute()
+    # rowsが空でも totals を見る（APIは 'rows' なしで totals を返す場合あり）
+    totals = resp.get("rows", [{}])
+    if totals and "clicks" in totals[0]:
+        return {"clicks": int(totals[0].get("clicks", 0) or 0),
+                "impressions": int(totals[0].get("impressions", 0) or 0)}
+    # フォールバック: APIのトップレベルに totals があることも
+    return {
+        "clicks": int(resp.get("clicks", 0) or 0),
+        "impressions": int(resp.get("impressions", 0) or 0),
+    }

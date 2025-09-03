@@ -1671,6 +1671,9 @@ def admin_rankings():
             # customは yyyy-mm-dd（ローカル=JST想定）をそのまま日付として使う
             start_jst_date = datetime.strptime(start_str, "%Y-%m-%d").date() if start_str else None
             end_jst_date   = datetime.strptime(end_str, "%Y-%m-%d").date()   if end_str   else jst_date(now_jst)
+            # ✅ GSC集計（impressions/clicks）は「昨日締め」に丸める
+            if rank_type in ("impressions", "clicks") and end_jst_date >= jst_date(now_jst):
+                end_jst_date = end_jst_date - timedelta(days=1)
         except ValueError:
             return jsonify({"error": "日付形式が不正です (YYYY-MM-DD)"}), 400
     else:
@@ -1678,8 +1681,14 @@ def admin_rankings():
             start_jst_date, end_jst_date = None, None
         else:
             start_dt_jst = presets.get(period, now_jst - timedelta(days=90))  # デフォは3か月相当
-            start_jst_date = jst_date(start_dt_jst)
-            end_jst_date   = jst_date(now_jst)
+            # ✅ GSC集計（impressions/clicks）は昨日で締める
+            if rank_type in ("impressions", "clicks"):
+                end_dt_jst   = now_jst - timedelta(days=1)
+                start_jst_date = jst_date(start_dt_jst if start_dt_jst < end_dt_jst else end_dt_jst)
+                end_jst_date   = jst_date(end_dt_jst)
+            else:
+                start_jst_date = jst_date(start_dt_jst)
+                end_jst_date   = jst_date(now_jst)
 
     try:
         # ====== 1) サイト数（総数）======
@@ -3143,8 +3152,9 @@ def log(username, site_id):
     # --- 当該サイトの直近28日合計（JST）を取得（記事行の表示＆並べ替え用） ---
     JST = timezone(timedelta(hours=9))
     today_jst = datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(JST).date()
-    start_d = today_jst - timedelta(days=27)
-    end_d   = today_jst
+    # ✅ GSC UI と同じ「昨日までの28日」
+    end_d   = today_jst - timedelta(days=1)
+    start_d = end_d - timedelta(days=27)
 
     gsc_row = (
         db.session.query(
@@ -3215,8 +3225,9 @@ def log_sites(username):
     # ---------- GSC合計（直近28日・JST） ----------
     JST = timezone(timedelta(hours=9))
     today_jst = datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(JST).date()
-    start_d = today_jst - timedelta(days=27)
-    end_d   = today_jst
+    # ✅ GSC UI と同じ「昨日までの28日」
+    end_d   = today_jst - timedelta(days=1)
+    start_d = end_d - timedelta(days=27)
 
     gsc_sub = (
         db.session.query(
