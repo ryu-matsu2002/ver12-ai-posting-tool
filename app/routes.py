@@ -1610,12 +1610,13 @@ def regenerate_user_stuck_articles(uid):
 
 # 先頭の import を修正
 # 既存の import に追加（上の方）
-from flask import Blueprint, request, jsonify, Response, redirect, url_for, render_template
+from flask import Blueprint, request, jsonify, Response, redirect, url_for, render_template, current_app
 from flask_login import login_required, current_user
-from sqlalchemy import func, desc, asc, cast, Date, and_
+from sqlalchemy import func, desc, asc, and_
 from datetime import datetime, timedelta, timezone
 from app import db
-from app.models import User, Site, Article
+from app.models import User, Site, Article, GSCDailyTotal
+
 
 # ← これを先頭の import セクションに追加
 from app.utils.monitor import (
@@ -1703,10 +1704,21 @@ def admin_rankings():
             return Response(json.dumps(data, ensure_ascii=False), mimetype="application/json")
 
         # ====== 2) 表示回数 / クリック数：GSCMetricから期間合算 ======
+                # ====== 2) 表示回数 / クリック数：GSCDailyTotal から期間SUM ======
         elif rank_type in ("impressions", "clicks"):
-            # モデル読み込み（あなたのmodels.pyにあるものを使用）
-            # from app.models import GSCMetric  # 既に同モジュール内なので再import不要
-            metric_sum = func.sum(GSCMetric.impressions) if rank_type == "impressions" else func.sum(GSCMetric.clicks)
+            metric_col = (
+                func.coalesce(func.sum(GSCDailyTotal.impressions), 0)
+                if rank_type == "impressions"
+                else func.coalesce(func.sum(GSCDailyTotal.clicks), 0)
+            ).label("value")
+
+            # 期間は JST の日付（start_jst_date / end_jst_date）が既に決まっている
+            # GSCDailyTotal.date は Date カラムなので、そのまま inclusive でOK
+            join_on = and_(
+                GSCDailyTotal.site_id == Site.id,
+                (GSCDailyTotal.date >= start_jst_date) if start_jst_date else True,
+                (GSCDailyTotal.date <= end_jst_date) if end_jst_date else True,
+            )
 
             q = (
                 db.session.query(
@@ -1715,33 +1727,26 @@ def admin_rankings():
                     Site.url.label("site_url"),
                     User.last_name,
                     User.first_name,
-                    metric_sum.label("value"),
+                    metric_col,
                 )
                 .join(User, Site.user_id == User.id)
-                .join(GSCMetric, GSCMetric.site_id == Site.id)
+                .outerjoin(GSCDailyTotal, join_on)
+                .group_by(Site.id, Site.name, Site.url, User.last_name, User.first_name)
+                .order_by(sort_func(metric_col))
             )
 
-            # 期間フィルタ（GSCMetric.date は Date 型。JST日付で inclusive）
-            if start_jst_date:
-                q = q.filter(GSCMetric.date >= start_jst_date)
-            if end_jst_date:
-                q = q.filter(GSCMetric.date <= end_jst_date)
-
-            # サイトにGSCを接続済みのものだけ見るなら以下を有効化
-            # q = q.filter(Site.gsc_connected.is_(True))
-
-            q = (
-                q.group_by(Site.id, Site.name, Site.url, User.last_name, User.first_name)
-                 .order_by(sort_func(metric_sum))
-            )
             rows = q.all()
-            data = [{
-                "site_name": r.site_name,
-                "site_url": r.site_url,
-                "user_name": f"{r.last_name} {r.first_name}",
-                "value": int(r.value or 0),
-            } for r in rows]
+            data = [
+                {
+                    "site_name": r.site_name,
+                    "site_url": r.site_url,
+                    "user_name": f"{r.last_name} {r.first_name}",
+                    "value": int(r.value or 0),
+                }
+                for r in rows
+            ]
             return Response(json.dumps(data, ensure_ascii=False), mimetype="application/json")
+
 
         # ====== 3) 投稿完了記事数：posted_at をJST期間で計上 ======
         elif rank_type == "posted_articles":

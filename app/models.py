@@ -420,3 +420,37 @@ class ExternalSEOJobLog(db.Model):
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
     job = db.relationship("ExternalSEOJob", back_populates="logs")
+
+# ──── GSC 日次合計（ランキング・ダッシュボード用の“正”データ） ────
+class GSCDailyTotal(db.Model):
+    __tablename__ = "gsc_daily_totals"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    site_id = db.Column(db.Integer, db.ForeignKey("site.id"), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+
+    # GSCのプロパティURI（URLプレフィックスは末尾 / 必須、ドメインプロパティは sc-domain:example.com）
+    property_uri = db.Column(db.String(255), nullable=False)
+
+    # GSC側の “日付” 単位（JSTで集計した1日分を1レコードとして保存）
+    date = db.Column(db.Date, nullable=False, index=True)
+
+    # GSC UI と完全一致させるための合計値（加工なし）
+    clicks = db.Column(db.Integer, nullable=False, default=0)
+    impressions = db.Column(db.Integer, nullable=False, default=0)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # 速度 & 一意性
+    __table_args__ = (
+        db.UniqueConstraint(
+            "site_id", "property_uri", "date",
+            name="uq_gsc_daily_totals_site_prop_date"
+        ),
+        db.Index("ix_gsc_daily_totals_site_date", "site_id", "date"),
+    )
+
+    # 参照（必要に応じて利用）
+    site = db.relationship("Site", backref=db.backref("gsc_daily_totals", lazy="dynamic"))
+    user = db.relationship("User", backref=db.backref("gsc_daily_totals", lazy="dynamic"))

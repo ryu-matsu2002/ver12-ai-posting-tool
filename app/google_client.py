@@ -1,12 +1,12 @@
 import os
 import requests
 import logging
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from flask import current_app
-from app.models import Site, GSCMetric  # ✅ 追加
+from app.models import Site, GSCMetric, GSCDailyTotal, GSCConfig  # ✅ 追加
 from app import db
 
 # ────── Service Account 認証情報の読み込み ──────
@@ -86,51 +86,128 @@ def fetch_search_queries_for_site(site: Site, days: int = 28, row_limit: int = 1
 
 # ────── 🔄 メトリクス取得（クリック数・表示回数） ──────
 def update_gsc_metrics(site: Site):
-    if not site.gsc_connected:
-        return
-
+    """
+    互換用：内部的には “日次合計の保存” に置き換え。
+    （既存呼び出し元があっても壊さないために残しておく）
+    """
     try:
-        # ✅ 修正: URL末尾に / を補完（GSC APIは完全一致が必須）
-        site_url = site.url
-        if not site_url.endswith("/"):
-            site_url += "/"
-
-        service = get_search_console_service()
-        today = date.today()
-        start_date = today - timedelta(days=30)
-
-        request = {
-            "startDate": start_date.isoformat(),
-            "endDate": today.isoformat(),
-            "dimensions": ["query"],
-            "rowLimit": 25000
-        }
-
-        response = service.searchanalytics().query(siteUrl=site_url, body=request).execute()
-        rows = response.get("rows", [])
-
-        clicks = sum(row.get("clicks", 0) for row in rows)
-        impressions = sum(row.get("impressions", 0) for row in rows)
-
-        site.clicks = clicks
-        site.impressions = impressions
-        db.session.commit()
-
-        logging.info(f"[GSC] ✅ メトリクス更新完了 - site: {site_url} | Clicks: {clicks}, Impressions: {impressions}")
-
+        update_site_daily_totals(site, days=35)
     except Exception as e:
-        logging.error(f"[GSC] メトリクス取得失敗 - {site.url} - {e}")
+        logging.error(f"[GSC] update_gsc_metrics (compat) failed - {site.url} - {e}")
 
 # ────── 🔁 全接続サイトを一括更新（スケジューラー用）──────
 def update_all_gsc_sites():
     sites = Site.query.filter_by(gsc_connected=True).all()
+    total_upsert = 0
     for site in sites:
-        update_gsc_metrics(site)
+        try:
+            total_upsert += update_site_daily_totals(site, days=35)
+        except Exception as e:
+            logging.error(f"[GSC] site batch failed: {site.url} - {e}")
+    logging.info(f"[GSC] batch done: upsert={total_upsert} rows")
 
 
 # 追加：内部ヘルパー
 def _site_url_norm(site: Site) -> str:
     return site.url if site.url.endswith("/") else site.url + "/"
+
+# 追加：GSCのプロパティURIを決定（あれば GSCConfig 優先）
+def _resolve_property_uri(site: Site) -> str:
+    cfg = GSCConfig.query.filter_by(site_id=site.id).order_by(GSCConfig.id.desc()).first()
+    if cfg and cfg.property_uri:
+        return cfg.property_uri.strip()
+    # fallback: URLプレフィックス
+    return _site_url_norm(site)
+
+def fetch_daily_totals_for_property(property_uri: str, start_d: date, end_d: date):
+    """
+    GSCから dimensions=['date'] で “日別合計” をそのまま取得する。
+    返り値は Search Console API の rows（keys[0]が'YYYY-MM-DD'）。
+    """
+    service = get_search_console_service()
+    body = {
+        "startDate": start_d.isoformat(),
+        "endDate": end_d.isoformat(),
+        "dimensions": ["date"],
+        "rowLimit": 25000
+    }
+    logging.info(f"[GSC] daily totals: {property_uri} {start_d}..{end_d}")
+    resp = service.searchanalytics().query(siteUrl=property_uri, body=body).execute()
+    rows = resp.get("rows", [])
+    logging.info(f"[GSC] daily totals rows={len(rows)} {property_uri}")
+    return rows
+
+def upsert_gsc_daily_totals(site: Site, property_uri: str, rows: list[dict]) -> int:
+    """
+    rows（date次元の合計）を GSCDailyTotal に upsert。戻り値は upsert 件数。
+    """
+    if not rows:
+        return 0
+
+    # すでにある日付を一括で取得しておく（小さな期間なのでこれで十分高速）
+    dates = [date.fromisoformat(r["keys"][0]) for r in rows if r.get("keys")]
+    existing = {
+        (x.date): x
+        for x in GSCDailyTotal.query
+            .filter(GSCDailyTotal.site_id == site.id,
+                    GSCDailyTotal.property_uri == property_uri,
+                    GSCDailyTotal.date.in_(dates))
+            .all()
+    }
+
+    upsert_cnt = 0
+    for r in rows:
+        if not r.get("keys"):
+            continue
+        d = date.fromisoformat(r["keys"][0])
+        clicks = int(r.get("clicks", 0) or 0)
+        impressions = int(r.get("impressions", 0) or 0)
+
+        row = existing.get(d)
+        if row:
+            # 値が違うときのみ更新
+            if row.clicks != clicks or row.impressions != impressions:
+                row.clicks = clicks
+                row.impressions = impressions
+                upsert_cnt += 1
+        else:
+            db.session.add(GSCDailyTotal(
+                site_id=site.id,
+                user_id=site.user_id,
+                property_uri=property_uri,
+                date=d,
+                clicks=clicks,
+                impressions=impressions
+            ))
+            upsert_cnt += 1
+
+    if upsert_cnt:
+        db.session.commit()
+    return upsert_cnt
+
+def update_site_daily_totals(site: Site, days: int = 35) -> int:
+    """
+    サイトの直近N日（デフォ35日）の “日次合計” を取得して DB に保存。
+    GSC UIと一致させるため、JSTの「今日」基準で範囲を組む。
+    戻り値は upsert件数。
+    """
+    if not site.gsc_connected:
+        return 0
+
+    JST = timezone(timedelta(hours=9))
+    today_jst = datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(JST).date()
+    # 例：28日表示に完全一致させるには、start = today_jst - timedelta(days=27)
+    span = max(1, int(days))
+    start_d = today_jst - timedelta(days=span - 1)
+    end_d = today_jst
+
+    prop = _resolve_property_uri(site)
+    rows = fetch_daily_totals_for_property(prop, start_d, end_d)
+    upserted = upsert_gsc_daily_totals(site, prop, rows)
+    logging.info(f"[GSC] upserted={upserted} site={site.name} prop={prop}")
+    return upserted
+
+
 
 def _run_search_analytics(site: Site, days: int, dimensions: list[str], row_limit: int,
                           order_by_impressions: bool = False):
