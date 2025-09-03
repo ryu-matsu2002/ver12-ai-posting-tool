@@ -1,10 +1,179 @@
+{# app/templates/external_article_preview.html （このファイル名で運用している想定） #}
 {% extends "base.html" %}
 {% block title %}外部SEO記事プレビュー{% endblock %}
 
 {% block content %}
-<h2 class="text-2xl font-bold mb-6">{{ article.title }}</h2>
+<style>
+  /* ====== 外部SEOページ（紫テーマ）と統一 ====== */
+  :root{
+    --seo-bg:#3A1F5C; --pane:#44286D; --pane-2:#4D2F7D; --edge:rgba(255,255,255,.14);
+    --txt:#fff; --txt-dim:#E7E1FA; --muted:#C9B7FF;
+    --accent:#8B5CF6; --accent-2:#A78BFA; --shadow:rgba(0,0,0,.25);
+  }
+  html, body, main, #main, #content, .content, .page-wrapper, .page-content{
+    background:var(--seo-bg) !important; color:var(--txt) !important;
+  }
 
-<div class="prose max-w-none">
-  {{ article.body | safe }}
+  /* レイアウト */
+  .article-wrap{
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 16px 14px 40px;
+  }
+
+  .backline{
+    margin: 6px 0 18px;
+  }
+  .backline a{
+    color: var(--muted); text-decoration:none;
+  }
+  .backline a:hover{ color:#fff; text-decoration:underline; }
+
+  /* 記事カード */
+  .article-card{
+    background: linear-gradient(180deg, var(--pane-2), var(--pane));
+    border:1px solid var(--edge);
+    border-radius:18px;
+    box-shadow: 0 10px 30px var(--shadow);
+    overflow:hidden;
+  }
+
+  /* ヒーロー（タイトル帯） */
+  .hero{
+    padding: 26px 26px 18px;
+    border-bottom:1px solid var(--edge);
+    background: radial-gradient(1200px 400px at 20% -10%, rgba(255,255,255,.08), transparent 60%),
+                radial-gradient(900px 300px at 85% -20%, rgba(255,255,255,.06), transparent 60%),
+                var(--pane-2);
+  }
+  .hero h1{
+    margin:0 0 6px;
+    font-size: clamp(1.5rem, 2.4vw + 1rem, 2.2rem);
+    font-weight: 800;
+    line-height: 1.35;
+    color:#fff;
+    text-shadow: 0 2px 10px rgba(0,0,0,.25);
+    letter-spacing:.01em;
+  }
+  .meta{
+    display:flex; gap:14px; align-items:center; flex-wrap:wrap;
+    color: var(--txt-dim); font-size:.9rem;
+  }
+  .meta .dot{ width:6px; height:6px; border-radius:50%; background:var(--muted); opacity:.8; }
+
+  /* 本文タイポグラフィ（読み物らしく） */
+  .article-body{
+    padding: 22px 26px 28px;
+    color:#fff;
+  }
+  .article-body :is(p,li){
+    line-height:1.95; font-size:1.02rem;
+  }
+  .article-body p{ margin: 0 0 1.05rem; }
+  .article-body strong{ font-weight:800; }
+  .article-body em{ opacity:.95; }
+
+  .article-body h2{
+    margin: 2.0rem 0 .8rem;
+    font-size:1.35rem; font-weight:800; letter-spacing:.01em; color:#fff;
+    position:relative; padding-bottom:.45rem;
+  }
+  .article-body h2::after{
+    content:""; position:absolute; left:0; bottom:0;
+    width:110px; height:3px; border-radius:2px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  }
+  .article-body h3{
+    margin: 1.5rem 0 .6rem; font-size:1.15rem; font-weight:800; color:#fff;
+  }
+
+  .article-body ul, .article-body ol{
+    margin: .6rem 0 1.1rem 1.2rem; padding-left: .6rem;
+  }
+  .article-body ul{ list-style: disc; }
+  .article-body ol{ list-style: decimal; }
+  .article-body li{ margin: .3rem 0; }
+
+  .article-body a{
+    color: var(--muted); text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .article-body a:hover{ color:#fff; }
+
+  blockquote{
+    margin: 1.2rem 0;
+    padding: .9rem 1rem .9rem 1rem;
+    border-left: 4px solid var(--accent);
+    background: rgba(255,255,255,.05);
+    border-radius: 10px;
+    color:#fff;
+  }
+
+  /* 画像・表の体裁 */
+  .article-body img{
+    max-width:100%; height:auto; border-radius:12px;
+    display:block; margin: 1rem auto;
+    box-shadow: 0 6px 20px rgba(0,0,0,.25);
+  }
+  .article-body table{
+    width:100%; border-collapse:separate; border-spacing:0;
+    margin: 1rem 0; border:1px solid var(--edge);
+    background: rgba(0,0,0,.12); border-radius:12px; overflow:hidden;
+  }
+  .article-body thead th{
+    background: rgba(255,255,255,.06);
+    color:#fff; padding:.6rem .7rem; text-align:left; font-weight:800;
+    border-bottom:1px solid var(--edge);
+  }
+  .article-body tbody td{
+    padding:.55rem .7rem; color:#fff; border-bottom:1px solid var(--edge);
+  }
+  .article-body tbody tr:last-child td{ border-bottom:none; }
+
+  /* 下部操作 */
+  .article-actions{
+    display:flex; gap:.6rem; padding:0 26px 22px;
+    border-top:1px solid var(--edge);
+  }
+  .btn{
+    display:inline-block; padding:.55rem 1rem; border-radius:.65rem;
+    color:#fff !important; font-weight:700; font-size:.95rem; text-decoration:none;
+  }
+  .btn-ghost{ background:transparent; border:1px solid var(--edge); color:#fff !important; }
+  .btn-ghost:hover{ background:rgba(255,255,255,.07); }
+</style>
+
+<div class="article-wrap">
+  <div class="backline">
+    {# 直前のページ or 記事一覧に戻す — ルート名は実装側で存在する方を使う #}
+    {% set back_url = request.referrer or url_for('main.external_accounts') %}
+    <a href="{{ back_url }}">← 戻る</a>
+  </div>
+
+  <article class="article-card">
+    <header class="hero">
+      <h1>{{ article.title }}</h1>
+      <div class="meta">
+        {# 投稿日・更新日などがあれば表示（存在するプロパティのみ） #}
+        {% if article.updated_at %}
+          <span>更新日: {{ to_jst(article.updated_at).strftime("%Y-%m-%d %H:%M") }}</span>
+          <span class="dot"></span>
+        {% elif article.created_at %}
+          <span>作成日: {{ to_jst(article.created_at).strftime("%Y-%m-%d %H:%M") }}</span>
+          <span class="dot"></span>
+        {% endif %}
+        <span>プレビュー</span>
+      </div>
+    </header>
+
+    <section class="article-body prose prose-invert max-w-none">
+      {# 本文（生成HTML）— 安全にそのまま出力 #}
+      {{ article.body | safe }}
+    </section>
+
+    <div class="article-actions">
+      <a href="{{ back_url }}" class="btn btn-ghost">← 一覧へ戻る</a>
+    </div>
+  </article>
 </div>
 {% endblock %}
