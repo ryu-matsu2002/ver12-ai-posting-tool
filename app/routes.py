@@ -3140,11 +3140,36 @@ def log(username, site_id):
 
     articles = q.all()
 
-    # 🔽 並び替え（Python側）
+    # --- 当該サイトの直近28日合計（JST）を取得（記事行の表示＆並べ替え用） ---
+    JST = timezone(timedelta(hours=9))
+    today_jst = datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(JST).date()
+    start_d = today_jst - timedelta(days=27)
+    end_d   = today_jst
+
+    gsc_row = (
+        db.session.query(
+            func.coalesce(func.sum(GSCDailyTotal.clicks), 0),
+            func.coalesce(func.sum(GSCDailyTotal.impressions), 0),
+        )
+        .filter(
+            GSCDailyTotal.site_id == site_id,
+            GSCDailyTotal.date >= start_d,
+            GSCDailyTotal.date <= end_d,
+        )
+        .first()
+    )
+    site_gsc = {
+        "clicks": int(gsc_row[0] or 0),
+        "impressions": int(gsc_row[1] or 0),
+    }
+
+    # 🔽 並び替え（Python側）: クリック/表示回数はサイト合計でソート
     if sort_key == "clicks":
-        articles.sort(key=lambda a: a.site.clicks or 0, reverse=(sort_order == "desc"))
+        keyval = site_gsc["clicks"]
+        articles.sort(key=lambda _a: keyval, reverse=(sort_order == "desc"))
     elif sort_key == "impr":
-        articles.sort(key=lambda a: a.site.impressions or 0, reverse=(sort_order == "desc"))
+        keyval = site_gsc["impressions"]
+        articles.sort(key=lambda _a: keyval, reverse=(sort_order == "desc"))
 
     site = Site.query.get_or_404(site_id)
 
@@ -3156,7 +3181,8 @@ def log(username, site_id):
         sort_key=sort_key,
         sort_order=sort_order,
         selected_source=source,  # ✅ フィルタUIの状態保持用
-        jst=JST
+        jst=JST,
+        site_gsc=site_gsc,  # ✅ 追加: テンプレートへ渡す
     )
 
 
@@ -3169,7 +3195,8 @@ def log_sites(username):
         abort(403)
 
     from sqlalchemy import case
-    from app.models import Genre
+    from app.models import Genre, GSCDailyTotal
+    from datetime import datetime, timedelta, timezone
 
     # GETパラメータ
     status_filter = request.args.get("plan_type", "all")
@@ -3182,23 +3209,40 @@ def log_sites(username):
     except ValueError:
         genre_id = 0
 
-    # ---------- サブクエリ（集計） ----------
+    # ---------- GSC合計（直近28日・JST） ----------
+    JST = timezone(timedelta(hours=9))
+    today_jst = datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(JST).date()
+    start_d = today_jst - timedelta(days=27)
+    end_d   = today_jst
+
+    gsc_sub = (
+        db.session.query(
+            GSCDailyTotal.site_id.label("site_id"),
+            func.coalesce(func.sum(GSCDailyTotal.clicks), 0).label("clicks"),
+            func.coalesce(func.sum(GSCDailyTotal.impressions), 0).label("impressions"),
+        )
+        .filter(GSCDailyTotal.date >= start_d, GSCDailyTotal.date <= end_d)
+        .group_by(GSCDailyTotal.site_id)
+    ).subquery()
+
+    # ---------- サブクエリ（記事数などの集計＋GSC合計をJOIN） ----------
     subquery = (
         db.session.query(
             Site.id.label("id"),
             Site.name.label("name"),
             Site.url.label("url"),
             Site.plan_type.label("plan_type"),
-            Site.clicks.label("clicks"),
-            Site.impressions.label("impressions"),
             Site.gsc_connected.label("gsc_connected"),
             Site.created_at.label("created_at"),
             func.count(Article.id).label("total"),
             func.sum(case((Article.status == "done", 1), else_=0)).label("done"),
             func.sum(case((Article.status == "posted", 1), else_=0)).label("posted"),
             func.sum(case((Article.status == "error", 1), else_=0)).label("error"),
+            func.coalesce(gsc_sub.c.clicks, 0).label("clicks"),
+            func.coalesce(gsc_sub.c.impressions, 0).label("impressions"),
         )
         .outerjoin(Article, Site.id == Article.site_id)
+        .outerjoin(gsc_sub, gsc_sub.c.site_id == Site.id)
         .filter(Site.user_id == current_user.id)
         .group_by(Site.id)
     ).subquery()

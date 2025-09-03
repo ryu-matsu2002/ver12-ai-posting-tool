@@ -75,8 +75,9 @@
       <tr class="{% if loop.index0 % 2 == 0 %}bg-white{% else %}bg-blue-50{% endif %}">
         <td class="px-2 py-2"><input type="checkbox" name="selected_ids" value="{{ a.id }}"></td>
         <td class="px-2 py-2">{{ a.keyword }}</td>
-        <td class="px-2 py-2 text-center text-rose-600">{{ a.site.clicks or 0 }}</td>
-        <td class="px-2 py-2 text-center text-purple-600">{{ a.site.impressions or 0 }}</td>
+        <!-- サイト合計（直近28日）で統一表示 -->
+        <td class="px-2 py-2 text-center text-rose-600">{{ site_gsc.clicks }}</td>
+        <td class="px-2 py-2 text-center text-purple-600">{{ site_gsc.impressions }}</td>
         <td class="px-2 py-2">
           {% if a.status == "posted" %}<span class="text-green-600 font-bold">投稿完了</span>
           {% elif a.status == "done" %}<span class="text-red-600 font-bold">記事生成済み</span>
