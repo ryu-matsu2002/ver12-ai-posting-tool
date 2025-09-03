@@ -3197,6 +3197,9 @@ def log_sites(username):
     from sqlalchemy import case
     from app.models import Genre, GSCDailyTotal
     from datetime import datetime, timedelta, timezone
+    from sqlalchemy import func, asc, desc
+    from sqlalchemy.orm import selectinload
+
 
     # GETパラメータ
     status_filter = request.args.get("plan_type", "all")
@@ -3238,8 +3241,8 @@ def log_sites(username):
             func.sum(case((Article.status == "done", 1), else_=0)).label("done"),
             func.sum(case((Article.status == "posted", 1), else_=0)).label("posted"),
             func.sum(case((Article.status == "error", 1), else_=0)).label("error"),
-            func.coalesce(gsc_sub.c.clicks, 0).label("clicks"),
-            func.coalesce(gsc_sub.c.impressions, 0).label("impressions"),
+            func.coalesce(func.max(gsc_sub.c.clicks), 0).label("clicks"),
+            func.coalesce(func.max(gsc_sub.c.impressions), 0).label("impressions"),
         )
         .outerjoin(Article, Site.id == Article.site_id)
         .outerjoin(gsc_sub, gsc_sub.c.site_id == Site.id)
