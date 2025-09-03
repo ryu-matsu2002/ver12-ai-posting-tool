@@ -2433,7 +2433,12 @@ def api_rankings():
             .all()
         )
         data = [
-            {"last_name": r.last_name, "first_name": r.first_name, "site_count": r.site_count}
+            {
+                "user_id": r.user_id,
+                "last_name": r.last_name,
+                "first_name": r.first_name,
+                "site_count": int(r.site_count or 0),
+            }
             for r in results
         ]
         return jsonify(data)

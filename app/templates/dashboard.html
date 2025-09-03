@@ -104,6 +104,9 @@
         loadRanking(type);         // データだけAjax更新
       });
     });
+
+    // タブの可視状態に応じてリフレッシュ間隔を調整
+    document.addEventListener("visibilitychange", schedulePresenceRefresh);
   });
 
   function setActiveTab(btn){
@@ -117,16 +120,18 @@
     var colg  = document.getElementById("rank-colgroup");
 
     if (type === "site") {
-      // 列幅：順位(64px) / 名前(50%) / サイト数(50%)
+      // 列幅：順位 / 名前 / サイト数 / オンライン
       colg.innerHTML =
         '<col style="width:64px">' +
         '<col style="width:50%">' +
-        '<col style="width:50%">';
+        '<col style="width:20%">' +
+        '<col style="width:30%">';
       thead.innerHTML =
         '<tr>' +
           '<th class="p-2 text-left sep-col">順位</th>' +
           '<th class="p-2 text-left">名前</th>' +
           '<th class="p-2 text-right">サイト数</th>' +
+          '<th class="p-2 text-left">オンライン</th>' +
         '</tr>';
     } else {
       // 列幅：順位(64px) / サイト名(50%) / 名前(30%) / 値(20%)
@@ -157,18 +162,21 @@
         return res.json();
       })
       .then(function(rows){
-        rows.slice(0, 50).forEach(function(row, idx){
+        rows = rows.slice(0, 50);
+
+        rows.forEach(function(row, idx){
           var icon = (idx === 0) ? "🥇" : (idx === 1) ? "🥈" : (idx === 2) ? "🥉" : "#" + (idx + 1);
           var tr = document.createElement("tr");
           tr.className = "border-b";
 
           if (type === "site") {
-            // ユーザー単位（サイト登録数） — 名前表示＆サイト数の値
+            // ユーザー単位（サイト登録数） — 名前表示＆サイト数＋オンライン列のプレースホルダ
             var fullName = buildName(row);
             tr.innerHTML =
               '<td class="p-2 font-semibold sep-col">' + icon + '</td>' +
               '<td class="p-2 truncate second-col-pad">' + escapeHtml(fullName || "—") + '</td>' +
-              '<td class="p-2 text-right font-semibold">' + (row.site_count != null ? row.site_count : 0) + '</td>';
+              '<td class="p-2 text-right font-semibold">' + (row.site_count != null ? row.site_count : 0) + '</td>' +
+              '<td class="p-2" data-presence data-user-id="' + (row.user_id ?? "") + '">—</td>';
           } else {
             // サイト単位（表示回数／クリック数） — “名前” 表示（姓+名 → user_name → username）
             var siteName = row.site_name || row.site_url || ("site#" + row.site_id);
@@ -184,10 +192,26 @@
           }
           tbody.appendChild(tr);
         });
+
+        // presence を一括取得して反映（サイトタブのみ）
+        if (type === "site") {
+          var ids = rows.map(function(r){ return r.user_id; }).filter(Boolean);
+          if (ids.length) {
+            fetch("/presence/status?user_ids=" + encodeURIComponent(Array.from(new Set(ids)).join(",")))
+              .then(function(res){ return res.json(); })
+              .then(function(data){ renderPresence(data); })
+              .catch(function(err){ console.warn("presence fetch failed:", err); });
+          }
+          schedulePresenceRefresh(); // 定期更新（画面可視時は短め）
+        } else {
+          // 他タブでは定期更新を停止
+          clearInterval(presenceTimer);
+        }
       })
       .catch(function(err){
         console.error("❌ ランキング読み込み失敗:", err);
         var tr = document.createElement("tr");
+        // 現在すべてのタブで列数は4
         tr.innerHTML = '<td colspan="4" class="p-3 text-red-600">ランキングの取得に失敗しました。</td>';
         tbody.appendChild(tr);
       });
@@ -205,6 +229,62 @@
   // XSS対策の簡易エスケープ
   function escapeHtml(s){
     return String(s || "").replace(/[&<>"']/g, function(m){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[m]); });
+  }
+
+  // ---- Presence描画（/presence/status の結果をテーブルへ反映）
+  function renderPresence(data){
+    var onlineSet = new Set((data.online_ids || []).map(Number));
+    var lastMap = data.last_seen_at || {};
+    document.querySelectorAll('[data-presence][data-user-id]').forEach(function(td){
+      var uid = td.getAttribute('data-user-id');
+      if (!uid) return;
+      if (onlineSet.has(Number(uid))) {
+        td.innerHTML = '<span class="inline-flex items-center gap-1">' +
+          '<span class="w-2 h-2 rounded-full bg-green-500 inline-block"></span>' +
+          '<span class="text-green-700">オンライン中</span>' +
+        '</span>';
+      } else {
+        var iso = lastMap[uid];
+        td.innerHTML = '<span class="text-gray-500">' + timeagoJp(iso) + '</span>';
+      }
+    });
+  }
+
+  // ISO文字列 → 日本語相対時刻
+  function timeagoJp(iso){
+    if (!iso) return "未オンライン";
+    var t = new Date(iso);
+    var sec = Math.max(1, Math.floor((Date.now() - t.getTime()) / 1000));
+    if (sec < 90) return "1分以内";
+    var min = Math.floor(sec/60);
+    if (min < 60) return min + "分前";
+    var hr = Math.floor(min/60);
+    if (hr < 24) return hr + "時間前";
+    var day = Math.floor(hr/24);
+    if (day < 7) return day + "日前";
+    var wk = Math.floor(day/7);
+    if (wk < 5) return wk + "週間前";
+    var mon = Math.floor(day/30);
+    if (mon < 12) return mon + "か月前";
+    var yr = Math.floor(day/365);
+    return yr + "年前";
+  }
+
+  // 45–90秒ごとの軽量更新（ランキング本体は再取得しない）
+  var presenceTimer;
+  function schedulePresenceRefresh(){
+    clearInterval(presenceTimer);
+    var interval = document.hidden ? 90000 : 45000;
+    presenceTimer = setInterval(function(){
+      var tds = document.querySelectorAll('[data-presence][data-user-id]');
+      if (!tds.length) return;
+      var ids = Array.from(new Set(Array.from(tds).map(function(td){ return td.getAttribute('data-user-id'); }).filter(Boolean)));
+      if (!ids.length) return;
+      fetch("/presence/status?user_ids=" + encodeURIComponent(ids.join(",")))
+        .then(function(res){ return res.json(); })
+        .then(function(data){ renderPresence(data); })
+        .catch(function(){});
+    }, interval);
   }
 
   // ====== チャット（既存） ======
