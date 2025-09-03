@@ -1146,6 +1146,7 @@ def create_blog_and_fetch_api_key(session_id: str, *, nickname: str, email: str,
     blog_id  = result.get("blog_id")
     api_key  = result.get("api_key")
     endpoint = result.get("endpoint")
+    blog_title = result.get("blog_title")  # ← 追加：作成時に入力したブログ名
 
     acct = db.session.query(ExternalBlogAccount).filter(
         ExternalBlogAccount.blog_type == BlogType.LIVEDOOR,
@@ -1166,6 +1167,9 @@ def create_blog_and_fetch_api_key(session_id: str, *, nickname: str, email: str,
         acct.blog_created = True
     if hasattr(acct, "email_verified"):
         acct.email_verified = True
+    # ★ 追加：実際に作成したブログ名を保存（他ロジックは変更しない）
+    if hasattr(acct, "blog_name") and blog_title:
+        acct.blog_name = blog_title    
 
     db.session.commit()
     pwctl.run(pwctl.set_step(session_id, "api_key_ok"))

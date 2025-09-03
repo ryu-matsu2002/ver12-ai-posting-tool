@@ -341,6 +341,7 @@ class ExternalBlogAccount(db.Model):
     atompub_key_enc   = db.Column(db.String(255), nullable=True)
     atompub_endpoint  = db.Column(db.String(255), nullable=True)  # ← この行を追加
     api_post_enabled  = db.Column(db.Boolean,     default=False, nullable=False)
+    blog_name   = db.Column(db.String(200), nullable=True, index=True)
         # 🔸 CAPTCHA分離ステップ用のフラグとセッション識別子
     is_captcha_completed = db.Column(db.Boolean, default=False, nullable=False)  # CAPTCHAが完了したか
     captcha_session_id = db.Column(db.String(64), nullable=True, index=True)     # CAPTCHA対応中セッションの識別子（UUIDなど）
