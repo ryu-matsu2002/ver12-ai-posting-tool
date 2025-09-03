@@ -701,9 +701,9 @@
   function lockKey(aid){ return `gen-lock:${aid}`; }
   function disableLink(el){
     el.classList.add('opacity-50','pointer-events-none','cursor-not-allowed');
-    el.setAttribute('aria-busy','true');                /* ← 生成中は灰色＋無効化 */
+    el.setAttribute('aria-busy','true');                /* ← 制作中は灰色＋無効化 */
     if(!el.dataset.originalText){ el.dataset.originalText = el.textContent; }
-    el.textContent = '生成中…';
+    el.textContent = '制作中…';
   }
   function lockAndGo(el){
     const aid = el.getAttribute('data-account-id'); if(!aid) return true;
