@@ -1612,8 +1612,8 @@ def regenerate_user_stuck_articles(uid):
 # 既存の import に追加（上の方）
 from flask import Blueprint, request, jsonify, Response, redirect, url_for, render_template
 from flask_login import login_required, current_user
-from sqlalchemy import func, desc, asc
-from datetime import datetime, timedelta
+from sqlalchemy import func, desc, asc, cast, Date, and_
+from datetime import datetime, timedelta, timezone
 from app import db
 from app.models import User, Site, Article
 
@@ -1624,58 +1624,66 @@ from app.utils.monitor import (
     get_latest_restart_log,
     get_last_restart_time,
 )
+import json
 
 # ※ admin_bp は既存の Blueprint を使用
 
-@admin_bp.route("/api/admin/rankings")  # ← フロントのfetch先が /api/admin/rankings ならこのまま
+@admin_bp.route("/api/admin/rankings")
 @login_required
 def admin_rankings():
-    # 非管理者ガード（未ログイン時でも安全）
+    # 管理者チェック
     if not getattr(current_user, "is_admin", False):
         return jsonify({"error": "管理者のみアクセス可能です"}), 403
 
-    # クエリ
-    rank_type = (request.args.get("type") or "site").lower()
-    order = (request.args.get("order") or "desc").lower()
-    period = (request.args.get("period") or "3m").lower()
-    start_date_str = request.args.get("start_date")
-    end_date_str = request.args.get("end_date")
-
-    # 24h エイリアス対応
-    if period == "24h":
-        period = "1d"
+    # ==== クエリ取得 ====
+    rank_type = (request.args.get("type") or "site").lower()        # site / impressions / clicks / posted_articles
+    order     = (request.args.get("order") or "desc").lower()       # asc / desc
+    period    = (request.args.get("period") or "3m").lower()        # 1d / 7d / 28d / 3m / 6m / 12m / 16m / custom / all
+    start_str = request.args.get("start_date")
+    end_str   = request.args.get("end_date")
 
     sort_func = asc if order == "asc" else desc
 
-    # 現在時刻（← 修正：datetime.utcnow()）
-    now = datetime.utcnow()
+    # ==== JST日付の境界を作る（GSCに合わせる） ====
+    JST = timezone(timedelta(hours=9))
+    now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+    now_jst = now_utc.astimezone(JST)
 
-    predefined_periods = {
-        "1d":  now - timedelta(days=1),
-        "7d":  now - timedelta(days=7),
-        "28d": now - timedelta(days=28),
-        "3m":  now - timedelta(days=90),
-        "6m":  now - timedelta(days=180),
-        "12m": now - timedelta(days=365),
-        "16m": now - timedelta(days=480),
+    # プリセット → JST基準の開始日時を決定
+    def jst_date(d: datetime) -> datetime.date:
+        return d.astimezone(JST).date()
+
+    presets = {
+        "1d":  now_jst - timedelta(days=1),
+        "7d":  now_jst - timedelta(days=7),
+        "28d": now_jst - timedelta(days=28),
+        "3m":  now_jst - timedelta(days=90),
+        "6m":  now_jst - timedelta(days=180),
+        "12m": now_jst - timedelta(days=365),
+        "16m": now_jst - timedelta(days=480),
         "all": None,
     }
 
-    # 期間決定
+    # 期間決定（JST日付で保持）
     if period == "custom":
         try:
-            start_date = datetime.strptime(start_date_str, "%Y-%m-%d") if start_date_str else None
-            end_date = datetime.strptime(end_date_str, "%Y-%m-%d") if end_date_str else now
+            # customは yyyy-mm-dd（ローカル=JST想定）をそのまま日付として使う
+            start_jst_date = datetime.strptime(start_str, "%Y-%m-%d").date() if start_str else None
+            end_jst_date   = datetime.strptime(end_str, "%Y-%m-%d").date()   if end_str   else jst_date(now_jst)
         except ValueError:
             return jsonify({"error": "日付形式が不正です (YYYY-MM-DD)"}), 400
     else:
-        start_date = predefined_periods.get(period, now - timedelta(days=90))
-        end_date = now
+        if period == "all":
+            start_jst_date, end_jst_date = None, None
+        else:
+            start_dt_jst = presets.get(period, now_jst - timedelta(days=90))  # デフォは3か月相当
+            start_jst_date = jst_date(start_dt_jst)
+            end_jst_date   = jst_date(now_jst)
 
     try:
-        # ── ランキング種別ごと ─────────────────────────────
+        # ====== 1) サイト数（総数）======
         if rank_type == "site":
-            subquery = (
+            subq = (
                 db.session.query(
                     User.id.label("user_id"),
                     User.last_name,
@@ -1686,54 +1694,68 @@ def admin_rankings():
                 .group_by(User.id, User.last_name, User.first_name)
                 .subquery()
             )
-
-            results = (
-                db.session.query(
-                    subquery.c.last_name,
-                    subquery.c.first_name,
-                    subquery.c.site_count
-                )
-                .order_by(sort_func(subquery.c.site_count))
+            rows = (
+                db.session.query(subq.c.last_name, subq.c.first_name, subq.c.site_count)
+                .order_by(sort_func(subq.c.site_count))
                 .all()
             )
-
-            data = [
-                {
-                    "last_name": row.last_name,
-                    "first_name": row.first_name,
-                    "site_count": row.site_count or 0,
-                }
-                for row in results
-            ]
+            data = [{"last_name": r.last_name, "first_name": r.first_name, "site_count": int(r.site_count or 0)} for r in rows]
             return Response(json.dumps(data, ensure_ascii=False), mimetype="application/json")
 
+        # ====== 2) 表示回数 / クリック数：GSCMetricから期間合算 ======
         elif rank_type in ("impressions", "clicks"):
-            metric_column = Site.impressions if rank_type == "impressions" else Site.clicks
-            query = (
+            # モデル読み込み（あなたのmodels.pyにあるものを使用）
+            # from app.models import GSCMetric  # 既に同モジュール内なので再import不要
+            metric_sum = func.sum(GSCMetric.impressions) if rank_type == "impressions" else func.sum(GSCMetric.clicks)
+
+            q = (
                 db.session.query(
+                    Site.id.label("site_id"),
                     Site.name.label("site_name"),
                     Site.url.label("site_url"),
                     User.last_name,
                     User.first_name,
-                    metric_column.label("value")
+                    metric_sum.label("value"),
                 )
                 .join(User, Site.user_id == User.id)
-                .filter(metric_column.isnot(None))
+                .join(GSCMetric, GSCMetric.site_id == Site.id)
             )
-            results = query.order_by(sort_func(metric_column)).all()
-            data = [
-                {
-                    "site_name": row.site_name,
-                    "site_url": row.site_url,
-                    "user_name": f"{row.last_name} {row.first_name}",
-                    "value": row.value or 0,
-                }
-                for row in results
-            ]
+
+            # 期間フィルタ（GSCMetric.date は Date 型。JST日付で inclusive）
+            if start_jst_date:
+                q = q.filter(GSCMetric.date >= start_jst_date)
+            if end_jst_date:
+                q = q.filter(GSCMetric.date <= end_jst_date)
+
+            # サイトにGSCを接続済みのものだけ見るなら以下を有効化
+            # q = q.filter(Site.gsc_connected.is_(True))
+
+            q = (
+                q.group_by(Site.id, Site.name, Site.url, User.last_name, User.first_name)
+                 .order_by(sort_func(metric_sum))
+            )
+            rows = q.all()
+            data = [{
+                "site_name": r.site_name,
+                "site_url": r.site_url,
+                "user_name": f"{r.last_name} {r.first_name}",
+                "value": int(r.value or 0),
+            } for r in rows]
             return Response(json.dumps(data, ensure_ascii=False), mimetype="application/json")
 
+        # ====== 3) 投稿完了記事数：posted_at をJST期間で計上 ======
         elif rank_type == "posted_articles":
-            query = (
+            # JST日付 → UTCの境界に変換（JST 00:00:00 をUTCに直す）
+            def jst_date_to_utc_start(d: datetime.date) -> datetime:
+                # JST 00:00 -> UTC前日 15:00
+                return datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=JST).astimezone(timezone.utc)
+
+            def jst_date_to_utc_end(d: datetime.date) -> datetime:
+                # JST 23:59:59.999 -> 翌日JST 00:00 の直前 = UTC同日 14:59:59.999...
+                nxt = datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=JST) + timedelta(days=1)
+                return nxt.astimezone(timezone.utc)
+
+            q = (
                 db.session.query(
                     Site.name.label("site_name"),
                     Site.url.label("site_url"),
@@ -1745,32 +1767,29 @@ def admin_rankings():
                 .join(Article, Article.site_id == Site.id)
                 .filter(Article.status == "posted")
             )
-            if start_date:
-                query = query.filter(Article.posted_at >= start_date)
-            if end_date:
-                query = query.filter(Article.posted_at <= end_date)
 
-            results = (
-                query.group_by(Site.id, Site.name, Site.url, User.last_name, User.first_name)
-                     .order_by(sort_func(func.count(Article.id)))
-                     .all()
+            if start_jst_date:
+                q = q.filter(Article.posted_at >= jst_date_to_utc_start(start_jst_date))
+            if end_jst_date:
+                q = q.filter(Article.posted_at <  jst_date_to_utc_end(end_jst_date))  # endは翌日0時未満で閉区間相当
+
+            q = (
+                q.group_by(Site.id, Site.name, Site.url, User.last_name, User.first_name)
+                 .order_by(sort_func(func.count(Article.id)))
             )
-            data = [
-                {
-                    "site_name": row.site_name,
-                    "site_url": row.site_url,
-                    "user_name": f"{row.last_name} {row.first_name}",
-                    "value": row.value or 0,
-                }
-                for row in results
-            ]
+            rows = q.all()
+            data = [{
+                "site_name": r.site_name,
+                "site_url": r.site_url,
+                "user_name": f"{r.last_name} {r.first_name}",
+                "value": int(r.value or 0),
+            } for r in rows]
             return Response(json.dumps(data, ensure_ascii=False), mimetype="application/json")
 
         else:
             return jsonify({"error": "不正なランキングタイプです"}), 400
 
     except Exception as e:
-        # 失敗時もJSONで返す（Networkで原因を見える化）
         current_app.logger.exception("[admin_rankings] server error")
         return jsonify({"error": "server_error", "detail": str(e)}), 500
 
