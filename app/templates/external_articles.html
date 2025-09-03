@@ -9,14 +9,12 @@
     --txt:#fff; --txt-dim:#E7E1FA; --row:#54307EAA; --row-alt:#593587AA; --row-hover:#68449C;
   }
 
-  /* 背景/文字色を外部SEOページと統一 */
+  /* 背景と文字色を外部SEOページと統一 */
   html, body, main, #main, #content, .content, .page-wrapper, .page-content{
     background:var(--seo-bg) !important; color:var(--txt) !important;
   }
-
   h2, h3, p, th, td, a, span{ color:var(--txt) !important; }
-  a{ color:#C9B7FF !important; }
-  a:hover{ color:#fff !important; text-decoration:underline; }
+  a{ color:#C9B7FF !important; } a:hover{ color:#fff !important; text-decoration:underline; }
 
   /* テーブル */
   table{
@@ -35,20 +33,24 @@
   tbody tr:nth-child(odd){ background:var(--row-alt); }
   tbody tr:hover{ background:var(--row-hover); }
 
-  /* 列幅：右端に余白が残るよう操作列を左寄せ＆適度な幅に */
-  /* 4列構成：キーワード / 状態 / 予定日 / 操作(プレビュー含む) */
-  /* 操作列は wrap 可能にして見切れ防止 */
-  .col-actions{ width:34%; }    /* 操作（左側に寄せ、右に余白が残るイメージ） */
-  .col-key{ width:30%; }
-  .col-state{ width:12%; }
-  .col-date{ width:14%; }
+  /* 列幅（右端の見切れ防止。操作は左寄せ・wrap可） */
+  .col-key{ width:26%; }
+  .col-state{ width:10%; }
+  .col-date{ width:12%; }
+  .col-title{ width:30%; }
+  .col-actions{ width:22%; }  /* 右端に余白が残りやすいバランス */
 
-  /* バッジ */
+  /* タイトル列：長文は省略表示 */
+  .title-ellipsis{
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+
+  /* 状態バッジ */
   .state-badge{ font-weight:600; }
-  .state-posted{ background:#16A34A; color:#fff; }    /* 投稿完了: 緑 */
-  .state-done{   background:#2563EB; color:#fff; }    /* 生成済み: 青 */
-  .state-gen{    background:#D97706; color:#fff; }    /* 生成中: 橙 */
-  .state-error{  background:#DC2626; color:#fff; }    /* エラー: 赤 */
+  .state-posted{ background:#16A34A; color:#fff; }  /* 投稿完了 */
+  .state-done{   background:#2563EB; color:#fff; }  /* 記事生成済み */
+  .state-gen{    background:#D97706; color:#fff; }  /* 記事生成中 */
+  .state-error{  background:#DC2626; color:#fff; }  /* エラー */
 
   /* ボタン（白文字で統一） */
   .btn{ display:inline-flex; align-items:center; padding:.25rem .5rem; border-radius:.375rem;
@@ -59,11 +61,8 @@
   .btn-emer{  background:#059669; }   .btn-emer:hover{  background:#10B981; }
   .btn-disabled{ opacity:.5; pointer-events:none; }
 
-  /* 操作ボタン並び：折り返しOK、右端見切れ防止 */
-  .actions{
-    display:flex; flex-wrap:wrap; gap:.35rem;
-    justify-content:flex-start;   /* 左寄せ */
-  }
+  /* 操作ボタン行：折り返しOK、左寄せ（右端見切れ防止） */
+  .actions{ display:flex; flex-wrap:wrap; gap:.35rem; justify-content:flex-start; }
 </style>
 
 <h2 class="text-2xl font-bold mb-6 flex items-center">
@@ -83,6 +82,7 @@
     <col class="col-key">
     <col class="col-state">
     <col class="col-date">
+    <col class="col-title">
     <col class="col-actions">
   </colgroup>
   <thead>
@@ -90,6 +90,7 @@
       <th class="px-3 py-2">検索キーワード</th>
       <th class="px-3 py-2">現在の状態</th>
       <th class="px-3 py-2">投稿予定日</th>
+      <th class="px-3 py-2">Q&amp;A記事タイトル</th>
       <th class="px-3 py-2">操作</th>
     </tr>
   </thead>
@@ -128,10 +129,12 @@
         <td class="px-3 py-2">
           {% if sched.scheduled_date %}{{ to_jst(sched.scheduled_date).strftime("%Y-%m-%d %H:%M") }}{% endif %}
         </td>
-
+        <td class="px-3 py-2 title-ellipsis" title="{{ art.title if art else '' }}">
+          {{ art.title if art else "" }}
+        </td>
         <td class="px-3 py-2">
           <div class="actions">
-            {# プレビュー（ボタン化・白文字） #}
+            {# プレビュー（ボタン） #}
             {% if art %}
               <a class="btn btn-blue"
                  href="{{ url_for('main.external_article_preview', article_id=art.id) }}" target="_blank">
