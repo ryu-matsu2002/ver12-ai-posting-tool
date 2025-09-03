@@ -372,8 +372,11 @@
               <td class="cell-center">
                 <span class="badge badge-ame">Ame <span class="count">{{ s.ameba_count|default(0) }}</span></span>
               </td>
-              <td class="cell-num-rose col-clicks">{{ s.clicks or 0 }}</td>
-              <td class="cell-num-violet col-impr">{{ s.impressions or 0 }}</td>
+              {# 28日合計（JST・昨日まで）が供給されていればそれを優先。無ければ従来値にフォールバック #}
+              {% set _clicks_28 = (s.clicks_28d is defined and s.clicks_28d is not none) and s.clicks_28d or s.clicks %}
+              {% set _impr_28   = (s.impressions_28d is defined and s.impressions_28d is not none) and s.impressions_28d or s.impressions %}
+              <td class="cell-num-rose col-clicks">{{ _clicks_28 or 0 }}</td>
+              <td class="cell-num-violet col-impr">{{ _impr_28 or 0 }}</td>
               <td class="cell-center">
                 {% set gsc_url = (s.url or '') %}
                 {% if gsc_url %}
