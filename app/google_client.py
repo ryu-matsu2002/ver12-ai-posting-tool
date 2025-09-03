@@ -5,6 +5,7 @@ from datetime import datetime, date, timedelta, timezone
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from flask import current_app
 from app.models import Site, GSCMetric, GSCDailyTotal, GSCConfig  # ✅ 追加
 from app import db
@@ -113,10 +114,13 @@ def _site_url_norm(site: Site) -> str:
 
 # 追加：GSCのプロパティURIを決定（あれば GSCConfig 優先）
 def _resolve_property_uri(site: Site) -> str:
+    """
+    既に GSCConfig があればそれを返す。なければ URL プレフィックスを返す。
+    （実際の呼び出し側で候補を試し、成功した URI を GSCConfig に保存する）
+    """
     cfg = GSCConfig.query.filter_by(site_id=site.id).order_by(GSCConfig.id.desc()).first()
     if cfg and cfg.property_uri:
         return cfg.property_uri.strip()
-    # fallback: URLプレフィックス
     return _site_url_norm(site)
 
 def fetch_daily_totals_for_property(property_uri: str, start_d: date, end_d: date):
@@ -132,8 +136,12 @@ def fetch_daily_totals_for_property(property_uri: str, start_d: date, end_d: dat
         "rowLimit": 25000
     }
     logging.info(f"[GSC] daily totals: {property_uri} {start_d}..{end_d}")
-    resp = service.searchanalytics().query(siteUrl=property_uri, body=body).execute()
-    rows = resp.get("rows", [])
+    try:
+        resp = service.searchanalytics().query(siteUrl=property_uri, body=body).execute()
+        rows = resp.get("rows", [])
+    except HttpError as e:
+        # 呼び出し元でハンドリングしたいのでそのまま投げ直す
+        raise
     logging.info(f"[GSC] daily totals rows={len(rows)} {property_uri}")
     return rows
 
@@ -201,11 +209,53 @@ def update_site_daily_totals(site: Site, days: int = 35) -> int:
     start_d = today_jst - timedelta(days=span - 1)
     end_d = today_jst
 
-    prop = _resolve_property_uri(site)
-    rows = fetch_daily_totals_for_property(prop, start_d, end_d)
-    upserted = upsert_gsc_daily_totals(site, prop, rows)
-    logging.info(f"[GSC] upserted={upserted} site={site.name} prop={prop}")
-    return upserted
+    # まず既知の URI（設定済みがあればそれ）から試行
+    first = _resolve_property_uri(site)
+    candidates = [first]
+    # バリアントを追加（http/https, www 有無, sc-domain）
+    try:
+        from urllib.parse import urlparse
+        p = urlparse(_site_url_norm(site))
+        host = p.hostname or ""
+        bare = host.replace("www.", "")
+        candidates += [
+            f"https://{host}/",
+            f"http://{host}/",
+            f"https://www.{bare}/",
+            f"http://www.{bare}/",
+            f"sc-domain:{bare}",
+        ]
+    except Exception:
+        pass
+    # 重複除去
+    seen = set()
+    candidates = [x for x in candidates if not (x in seen or seen.add(x))]
+
+    last_err = None
+    for prop in candidates:
+        try:
+            rows = fetch_daily_totals_for_property(prop, start_d, end_d)
+            upserted = upsert_gsc_daily_totals(site, prop, rows)
+            logging.info(f"[GSC] upserted={upserted} site={site.name} prop={prop}")
+            # 成功した prop を学習保存（次回以降ダイレクトに使う）
+            cfg = GSCConfig(site_id=site.id, user_id=site.user_id, property_uri=prop)
+            db.session.add(cfg)
+            db.session.commit()
+            return upserted
+        except HttpError as e:
+            # 403 や 404 など → 次の候補へ
+            status = getattr(e, "status_code", None) or getattr(e.resp, "status", None)
+            logging.warning(f"[GSC] try prop failed ({status}): {prop}")
+            last_err = e
+            continue
+        except Exception as e:
+            logging.exception(f"[GSC] unexpected error for prop={prop}: {e}")
+            last_err = e
+            continue
+    # すべて失敗した場合のみ raise
+    if last_err:
+        raise last_err
+    return 0
 
 
 
