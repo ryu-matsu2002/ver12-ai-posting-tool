@@ -3594,7 +3594,7 @@ def external_seo_sites():
     from app import db
     from sqlalchemy.orm import selectinload
     from sqlalchemy import func, or_
-    from datetime import timedelta
+    from datetime import datetime, timedelta, timezone
 
     sites = (
         Site.query
@@ -3758,35 +3758,34 @@ def external_seo_sites():
         # テンプレート側で can_start_extseo 判定用に参照
         s.normal_post_count = normal_counts.get(s.id, 0)
 
-    # === GSC 28日合計を「GSC日次テーブルの最新日付」を終端にして集計（サイト一覧と同一ロジック） ===
-    # ※ モデル名は “サイト一覧ページで実際に使っているもの” に統一すること
-    from app.models import GscSiteDaily  # ← 必ずサイト一覧と同じモデルに合わせる
+    # === GSC 直近28日合計（JSTで「昨日まで」）→ サイト一覧と完全同一ロジック ===
+    from app.models import GSCDailyTotal  # ← サイト一覧と同じモデルを使用
 
     clicks28 = {}
     impr28   = {}
     if site_ids:
-        # DBに入っている最新日付（max(date)）を終端にすることで、タイムゾーン差/計上締めのズレを排除
-        latest_date = db.session.query(func.max(GscSiteDaily.date)).scalar()
-        if latest_date:
-            start_date = latest_date - timedelta(days=27)  # 直近28日 = 最新日含めて27日戻す
-            rows = (
-                db.session.query(
-                    GscSiteDaily.site_id,
-                    func.coalesce(func.sum(GscSiteDaily.clicks), 0).label("clicks"),
-                    func.coalesce(func.sum(GscSiteDaily.impressions), 0).label("impr"),
-                )
-                .filter(GscSiteDaily.site_id.in_(site_ids))
-                .filter(GscSiteDaily.date >= start_date, GscSiteDaily.date <= latest_date)
-                .group_by(GscSiteDaily.site_id)
-                .all()
-            )
-            clicks28 = {sid: c for sid, c, _ in rows}
-            impr28   = {sid: i for sid, _, i in rows}
+        JST = timezone(timedelta(hours=9))
+        today_jst = datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(JST).date()
+        end_d   = today_jst - timedelta(days=1)   # 昨日まで
+        start_d = end_d - timedelta(days=27)      # 直近28日
 
-    # サイトオブジェクトに注入（テンプレートでは clicks_28d / impressions_28d を最優先で表示）
+        rows = (
+            db.session.query(
+                GSCDailyTotal.site_id,
+                func.coalesce(func.sum(GSCDailyTotal.clicks), 0).label("clicks"),
+                func.coalesce(func.sum(GSCDailyTotal.impressions), 0).label("impressions"),
+            )
+            .filter(GSCDailyTotal.site_id.in_(site_ids))
+            .filter(GSCDailyTotal.date >= start_d, GSCDailyTotal.date <= end_d)
+            .group_by(GSCDailyTotal.site_id)
+            .all()
+        )
+        clicks28 = {sid: c for sid, c, _ in rows}
+        impr28   = {sid: i for sid, _, i in rows}
+
     for s in sites:
         s.clicks_28d      = clicks28.get(s.id, 0)
-        s.impressions_28d = impr28.get(s.id, 0) 
+        s.impressions_28d = impr28.get(s.id, 0)
 
     return render_template(
         "external_sites.html",
