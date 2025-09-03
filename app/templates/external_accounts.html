@@ -14,9 +14,13 @@
     background:var(--seo-bg) !important; color:var(--txt);
   }
 
-  /* ラッパー（後述の .extacc で全体を包む） */
-  .extacc h2{ color:var(--txt); font-size:2.1rem; font-weight:800; letter-spacing:.02em;
-              margin:0 0 12px; text-shadow:0 2px 10px rgba(0,0,0,.25); }
+  /* ラッパー */
+  .extacc h2{
+    color:var(--txt); font-size:2.1rem; font-weight:800; letter-spacing:.02em;
+    margin:0 0 12px; text-shadow:0 2px 10px rgba(0,0,0,.25);
+  }
+  /* セクション見出し（サイト名。「AI関連サイト」等を白に固定） */
+  .extacc h3{ color:var(--txt) !important; }
 
   /* 絞り込みフォームをカード風に */
   .extacc form{
@@ -24,20 +28,45 @@
     padding:10px 12px; color:var(--txt);
   }
   .extacc label{ color:var(--txt-dim); }
-  .extacc select{ background:rgba(255,255,255,.10); color:var(--txt); border:1px solid var(--edge);
-                  border-radius:10px; padding:6px 10px; }
-  .extacc button[type="submit"]{ background:#2563EB; color:#fff; border:1px solid #1D4ED8;
-                                 padding:.45rem .8rem; border-radius:.6rem; }
+  /* セレクトの白地問題を強制解消 */
+  .extacc select{
+    background:var(--pane) !important; color:var(--txt) !important;
+    border:1px solid var(--edge) !important; border-radius:10px; padding:6px 10px;
+    appearance:none; -webkit-appearance:none; -moz-appearance:none;
+  }
+  .extacc select option{
+    background:var(--pane); color:var(--txt);
+  }
+  .extacc button[type="submit"]{
+    background:#2563EB; color:#fff; border:1px solid #1D4ED8;
+    padding:.45rem .8rem; border-radius:.6rem;
+  }
 
-  /* テーブルを外部SEOページ風に */
-  .extacc table{ width:100%; border-collapse:separate; border-spacing:0; border:1px solid var(--edge);
-                 background:var(--pane); border-radius:12px; overflow:hidden; }
+  /* テーブル：列幅固定＋数字列のズレを排除 */
+  .extacc table{
+    width:100%; border-collapse:separate; border-spacing:0; border:1px solid var(--edge);
+    background:var(--pane); border-radius:12px; overflow:hidden; table-layout:fixed;
+  }
   .extacc thead{ background:var(--pane-2) !important; color:var(--txt); }
-  .extacc th{ font-weight:700; padding:10px 12px; border-bottom:1px solid var(--edge); text-align:left; }
-  .extacc td{ padding:10px 12px; color:var(--txt); }
+  .extacc th{
+    font-weight:700; padding:10px 12px; border-bottom:1px solid var(--edge);
+    text-align:left; white-space:nowrap;
+  }
+  .extacc td{ padding:10px 12px; color:var(--txt); vertical-align:middle; }
   .extacc tbody tr{ background:var(--row); border-bottom:1px solid var(--edge); }
   .extacc tbody tr:nth-child(odd){ background:var(--row-alt); }
   .extacc tbody tr:hover{ background:var(--row-hover); }
+
+  /* 数字列の体裁（桁ズレ防止） */
+  .extacc .num, .extacc th.num{
+    text-align:right; font-variant-numeric: tabular-nums; font-feature-settings:"tnum";
+    white-space:nowrap;
+  }
+
+  /* ブログ名セルのトリム */
+  .extacc .blogname{
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
 
   /* リンク色（記事一覧・ソート） */
   .extacc a{ color:#C9B7FF; }
@@ -54,140 +83,149 @@
 </style>
 
 <div class="extacc">
-<h2 class="text-2xl font-bold mb-6 flex items-center">
-  🚀 外部無料ブログアカウント一覧
-</h2>
+  <h2 class="text-2xl font-bold mb-6 flex items-center">
+    🚀 外部無料ブログアカウント一覧
+  </h2>
 
-{# ── フィルター ── #}
-<form method="get" class="mb-6 flex items-center space-x-4">
-  <label for="site_id" class="text-sm font-medium">サイトで絞り込み：</label>
-  <select name="site_id" id="site_id" class="border rounded px-2 py-1 text-sm">
-    <option value="">-- 全サイトからランダム表示 --</option>
-    {% for s in all_sites %}
-      <option value="{{ s.id }}" {% if site_id and site_id == s.id %}selected{% endif %}>
-        {{ s.name }}
-      </option>
-    {% endfor %}
-  </select>
-  {% if selected_blog_type %}<input type="hidden" name="blog_type" value="{{ selected_blog_type }}">{% endif %}
-  {% if selected_sort %}<input type="hidden" name="sort" value="{{ selected_sort }}">{% endif %}
-  {% if search_query %}<input type="hidden" name="q" value="{{ search_query }}">{% endif %}
-  <button type="submit"
-          class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded">
-    絞り込む
-  </button>
-</form>
+  {# ── フィルター ── #}
+  <form method="get" class="mb-6 flex items-center space-x-4">
+    <label for="site_id" class="text-sm font-medium">サイトで絞り込み：</label>
+    <select name="site_id" id="site_id" class="border rounded px-2 py-1 text-sm">
+      <option value="">-- 全サイトからランダム表示 --</option>
+      {% for s in all_sites %}
+        <option value="{{ s.id }}" {% if site_id and site_id == s.id %}selected{% endif %}>
+          {{ s.name }}
+        </option>
+      {% endfor %}
+    </select>
+    {% if selected_blog_type %}<input type="hidden" name="blog_type" value="{{ selected_blog_type }}">{% endif %}
+    {% if selected_sort %}<input type="hidden" name="sort" value="{{ selected_sort }}">{% endif %}
+    {% if search_query %}<input type="hidden" name="q" value="{{ search_query }}">{% endif %}
+    <button type="submit" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded">
+      絞り込む
+    </button>
+  </form>
 
-{# ── ソートトグル計算 ── #}
-{% set current_sort = selected_sort or request.args.get('sort') %}
-{% set posted_toggle    = 'posted_asc'    if current_sort == 'posted_desc'    else 'posted_desc' %}
-{% set generated_toggle = 'generated_asc' if current_sort == 'generated_desc' else 'generated_desc' %}
-{% set total_toggle     = 'total_asc'     if current_sort == 'total_desc'     else 'total_desc' %}
+  {# ── ソートトグル計算 ── #}
+  {% set current_sort = selected_sort or request.args.get('sort') %}
+  {% set posted_toggle    = 'posted_asc'    if current_sort == 'posted_desc'    else 'posted_desc' %}
+  {% set generated_toggle = 'generated_asc' if current_sort == 'generated_desc' else 'generated_desc' %}
+  {% set total_toggle     = 'total_asc'     if current_sort == 'total_desc'     else 'total_desc' %}
 
-{% set has_accounts = false %}
+  {% set has_accounts = false %}
 
-{% for site in all_sites %}
-  {% set site_accounts = accts | selectattr("site_id", "equalto", site.id) | list %}
-  {% if site_accounts %}
-    {% set has_accounts = true %}
+  {% for site in all_sites %}
+    {% set site_accounts = accts | selectattr("site_id", "equalto", site.id) | list %}
+    {% if site_accounts %}
+      {% set has_accounts = true %}
 
-    <h3 class="text-lg font-bold mt-8 mb-2">{{ site.name }}</h3>
-    <table class="w-full text-sm border mb-4 table-fixed">
-      {# ★ 6列を均等（16.66%）に固定 #}
-      <colgroup>
-        <col style="width:16.66%">
-        <col style="width:16.66%">
-        <col style="width:16.66%">
-        <col style="width:16.66%">
-        <col style="width:16.66%">
-        <col style="width:16.66%">
-      </colgroup>
-      <thead class="bg-gray-100">
-        <tr>
-          <th class="px-3 py-2">ブログ</th>
-          <th class="px-3 py-2">メール</th>
+      <h3 class="text-lg font-bold mt-8 mb-2">{{ site.name }}</h3>
+      <table class="w-full text-sm border mb-4 table-fixed">
+        {# 6列を固定幅 #}
+        <colgroup>
+          <col style="width:14%">
+          <col style="width:30%">
+          <col style="width:12%">
+          <col style="width:12%">
+          <col style="width:12%">
+          <col style="width:20%">
+        </colgroup>
+        <thead class="bg-gray-100">
+          <tr>
+            <th class="px-3 py-2">ブログ</th>
+            <th class="px-3 py-2">ブログ名</th>
 
-          <th class="px-3 py-2 text-right">
-            <a class="hover:underline"
-               href="{{ url_for('main.external_accounts',
-                                site_id=site_id,
-                                blog_type=selected_blog_type,
-                                q=search_query,
-                                sort=posted_toggle) }}">
-              投稿完了
-              {% if current_sort and current_sort.startswith('posted_') %}
-                {% if current_sort.endswith('desc') %}⬇{% else %}⬆{% endif %}
-              {% else %}↕{% endif %}
-            </a>
-          </th>
-          <th class="px-3 py-2 text-right">
-            <a class="hover:underline"
-               href="{{ url_for('main.external_accounts',
-                                site_id=site_id,
-                                blog_type=selected_blog_type,
-                                q=search_query,
-                                sort=generated_toggle) }}">
-              記事生成済み
-              {% if current_sort and current_sort.startswith('generated_') %}
-                {% if current_sort.endswith('desc') %}⬇{% else %}⬆{% endif %}
-              {% else %}↕{% endif %}
-            </a>
-          </th>
-          <th class="px-3 py-2 text-right">
-            <a class="hover:underline"
-               href="{{ url_for('main.external_accounts',
-                                site_id=site_id,
-                                blog_type=selected_blog_type,
-                                q=search_query,
-                                sort=total_toggle) }}">
-              総記事数
-              {% if current_sort and current_sort.startswith('total_') %}
-                {% if current_sort.endswith('desc') %}⬇{% else %}⬆{% endif %}
-              {% else %}↕{% endif %}
-            </a>
-          </th>
+            <th class="px-3 py-2 num">
+              <a class="hover:underline"
+                 href="{{ url_for('main.external_accounts',
+                                  site_id=site_id,
+                                  blog_type=selected_blog_type,
+                                  q=search_query,
+                                  sort=posted_toggle) }}">
+                投稿完了
+                {% if current_sort and current_sort.startswith('posted_') %}
+                  {% if current_sort.endswith('desc') %}⬇{% else %}⬆{% endif %}
+                {% else %}↕{% endif %}
+              </a>
+            </th>
+            <th class="px-3 py-2 num">
+              <a class="hover:underline"
+                 href="{{ url_for('main.external_accounts',
+                                  site_id=site_id,
+                                  blog_type=selected_blog_type,
+                                  q=search_query,
+                                  sort=generated_toggle) }}">
+                記事生成済み
+                {% if current_sort and current_sort.startswith('generated_') %}
+                  {% if current_sort.endswith('desc') %}⬇{% else %}⬆{% endif %}
+                {% else %}↕{% endif %}
+              </a>
+            </th>
+            <th class="px-3 py-2 num">
+              <a class="hover:underline"
+                 href="{{ url_for('main.external_accounts',
+                                  site_id=site_id,
+                                  blog_type=selected_blog_type,
+                                  q=search_query,
+                                  sort=total_toggle) }}">
+                総記事数
+                {% if current_sort and current_sort.startswith('total_') %}
+                  {% if current_sort.endswith('desc') %}⬇{% else %}⬆{% endif %}
+                {% else %}↕{% endif %}
+              </a>
+            </th>
 
-          <th class="px-3 py-2">記事一覧</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for a in site_accounts %}
-          {% set posted    = a.posted_cnt or 0 %}
-          {% set generated = a.generated_cnt or 0 %}
-          {% set total     = a.total_cnt or (posted + generated) %}
-
-          <tr class="border-b">
-            <td class="px-3 py-2">
-              <span class="px-2 py-1 rounded text-white text-xs
-                    {% if a.blog_type.value == 'note' %} bg-blue-600
-                    {% elif a.blog_type.value == 'ameba' %} bg-green-600
-                    {% elif a.blog_type.value == 'livedoor' %} bg-orange-600
-                    {% else %} bg-gray-600 {% endif %}">
-                {{ a.blog_type.value }}
-              </span>
-            </td>
-
-            <td class="px-3 py-2 font-mono truncate">
-              {{ a.email }}
-            </td>
-
-            <td class="px-3 py-2 text-right">{{ posted }}</td>
-            <td class="px-3 py-2 text-right">{{ generated }}</td>
-            <td class="px-3 py-2 text-right">{{ total }}</td>
-
-            <td class="px-3 py-2">
-              <a href="{{ url_for('main.external_account_articles', acct_id=a.id) }}"
-                 class="text-blue-600 hover:underline">記事一覧</a>
-            </td>
+            <th class="px-3 py-2">記事一覧</th>
           </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  {% endif %}
-{% endfor %}
+        </thead>
+        <tbody>
+          {% for a in site_accounts %}
+            {% set posted    = a.posted_cnt or 0 %}
+            {% set generated = a.generated_cnt or 0 %}
+            {% set total     = a.total_cnt or (posted + generated) %}
 
-{% if not has_accounts %}
-  <p class="text-gray-500">まだ外部ブログアカウントはありません。</p>
-{% endif %}
+            {# ブログ名のフォールバック（存在するものを順に採用） #}
+            {% set blogname =
+               a.blog_name
+               or a.title
+               or a.display_name
+               or a.blog_title
+               or (a.blog_url|default('', true)
+                     |replace('https://','')
+                     |replace('http://','')
+                     |split('/')|first)
+               or '-' %}
+
+            <tr class="border-b">
+              <td class="px-3 py-2">
+                <span class="px-2 py-1 rounded text-white text-xs
+                      {% if a.blog_type.value == 'note' %} bg-blue-600
+                      {% elif a.blog_type.value == 'ameba' %} bg-green-600
+                      {% elif a.blog_type.value == 'livedoor' %} bg-orange-600
+                      {% else %} bg-gray-600 {% endif %}">
+                  {{ a.blog_type.value }}
+                </span>
+              </td>
+
+              <td class="px-3 py-2 blogname" title="{{ blogname }}">{{ blogname }}</td>
+
+              <td class="px-3 py-2 num">{{ posted }}</td>
+              <td class="px-3 py-2 num">{{ generated }}</td>
+              <td class="px-3 py-2 num">{{ total }}</td>
+
+              <td class="px-3 py-2">
+                <a href="{{ url_for('main.external_account_articles', acct_id=a.id) }}"
+                   class="text-blue-600 hover:underline">記事一覧</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  {% endfor %}
+
+  {% if not has_accounts %}
+    <p class="text-gray-500">まだ外部ブログアカウントはありません。</p>
+  {% endif %}
 </div>
 {% endblock %}
