@@ -43,6 +43,10 @@ class User(db.Model, UserMixin):
     has_purchased = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    # ── プレゼンス表示用（UTCで保存、表示は相対表記などで）
+    last_seen_at = db.Column(DateTime(timezone=True), nullable=True)
+    share_presence = db.Column(db.Boolean, nullable=False, default=True)
+
     # リレーション（削除時に関連データも自動削除）
     prompts = db.relationship("PromptTemplate", backref="user", lazy=True, cascade="all, delete-orphan")
     articles = db.relationship("Article", backref="user", lazy='selectin', cascade="all, delete-orphan")

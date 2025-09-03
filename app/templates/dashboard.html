@@ -75,12 +75,10 @@
       <button id="tab-clicks" class="rank-tab" data-type="clicks">クリック数（直近28日）</button>
     </div>
 
-    <!-- テーブル（高さは従来と同じ） -->
+    <!-- テーブル -->
     <div id="ranking-container" class="overflow-y-auto max-h-[500px] border border-gray-200 rounded">
-      <table id="ranking-table" class="w-full bg-white shadow text-sm table-fixed">  <!-- table-fixed で列幅安定 -->
-        <colgroup id="rank-colgroup">
-          <!-- JSでタブに応じて差し替え -->
-        </colgroup>
+      <table id="ranking-table" class="w-full bg-white shadow text-sm table-fixed">
+        <colgroup id="rank-colgroup"></colgroup>
         <thead class="bg-gray-100 text-gray-700 sticky top-0 z-10" id="ranking-thead"></thead>
         <tbody id="ranking-body"></tbody>
       </table>
@@ -90,132 +88,137 @@
 
 <script>
   // ===== 初期化 =====
-  window.addEventListener("DOMContentLoaded", () => {
+  window.addEventListener("DOMContentLoaded", function () {
     // 既定タブ：サイト登録数
     setActiveTab(document.getElementById("tab-site"));
     renderHeadAndCols("site");
     loadRanking("site");
 
     // クリックで切替（ページ全体は再読込しない）
-    document.querySelectorAll(".rank-tab").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const type = btn.dataset.type;
+    var tabs = document.querySelectorAll(".rank-tab");
+    tabs.forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var type = btn.getAttribute("data-type");
         setActiveTab(btn);
         renderHeadAndCols(type);   // 見出し・列幅だけ更新
-        loadRanking(type);         // 本体データだけAjax更新
+        loadRanking(type);         // データだけAjax更新
       });
     });
   });
 
   function setActiveTab(btn){
-    document.querySelectorAll(".rank-tab").forEach(b => b.classList.remove("is-active"));
+    document.querySelectorAll(".rank-tab").forEach(function(b){ b.classList.remove("is-active"); });
     btn.classList.add("is-active");
   }
 
   // ===== 見出し＆colgroup（列幅）をタブ毎に差し替え =====
   function renderHeadAndCols(type){
-    const thead = document.getElementById("ranking-thead");
-    const colg  = document.getElementById("rank-colgroup");
+    var thead = document.getElementById("ranking-thead");
+    var colg  = document.getElementById("rank-colgroup");
 
     if (type === "site") {
-      // 列幅：順位(64px) / 名前(自動) / 値(120px) → 余りは名前へ寄せる
-      colg.innerHTML = `
-        <col style="width:64px">
-        <col>
-        <col style="width:120px">
-      `;
-      thead.innerHTML = `
-        <tr>
-          <th class="p-2 text-left">順位</th>
-          <th class="p-2 text-left">名前</th>
-          <th class="p-2 text-right">サイト数</th>
-        </tr>
-      `;
+      // 列幅：順位(64px) / 名前(50%) / サイト数(50%)
+      colg.innerHTML =
+        '<col style="width:64px">' +
+        '<col style="width:50%">' +
+        '<col style="width:50%">';
+      thead.innerHTML =
+        '<tr>' +
+          '<th class="p-2 text-left sep-col">順位</th>' +
+          '<th class="p-2 text-left">名前</th>' +
+          '<th class="p-2 text-right">サイト数</th>' +
+        '</tr>';
     } else {
-      // 列幅：順位(64px) / サイト名(50%) / 名前(30%) / 値(20%≒120px~固定寄り)
-      colg.innerHTML = `
-        <col style="width:64px">
-        <col style="width:50%">
-        <col style="width:30%">
-        <col style="width:20%">
-      `;
-      thead.innerHTML = `
-        <tr>
-          <th class="p-2 text-left">順位</th>
-          <th class="p-2 text-left">サイト名</th>
-          <th class="p-2 text-left">名前</th>
-          <th class="p-2 text-right">値</th>
-        </tr>
-      `;
+      // 列幅：順位(64px) / サイト名(50%) / 名前(30%) / 値(20%)
+      var valueLabel = (type === "impressions") ? "表示回数" : "クリック数";
+      colg.innerHTML =
+        '<col style="width:64px">' +
+        '<col style="width:50%">' +
+        '<col style="width:30%">' +
+        '<col style="width:20%">';
+      thead.innerHTML =
+        '<tr>' +
+          '<th class="p-2 text-left sep-col">順位</th>' +
+          '<th class="p-2 text-left">サイト名</th>' +
+          '<th class="p-2 text-left">名前</th>' +
+          '<th class="p-2 text-right">' + valueLabel + '</th>' +
+        '</tr>';
     }
   }
 
   // ===== ランキング読み込み（/api/rankings を利用） =====
   function loadRanking(type) {
-    const tbody = document.getElementById("ranking-body");
+    var tbody = document.getElementById("ranking-body");
     tbody.innerHTML = "";
 
-    fetch(`/api/rankings?type=${encodeURIComponent(type)}`)
-      .then(res => {
-        if (!res.ok) throw new Error(`APIエラー: ${res.status}`);
+    fetch("/api/rankings?type=" + encodeURIComponent(type))
+      .then(function(res){
+        if (!res.ok) throw new Error("APIエラー: " + res.status);
         return res.json();
       })
-      .then(rows => {
-        rows.slice(0, 50).forEach((row, idx) => {
-          const icon = idx === 0 ? "🥇" : idx === 1 ? "🥈" : idx === 2 ? "🥉" : `#${idx + 1}`;
-          const tr = document.createElement("tr");
+      .then(function(rows){
+        rows.slice(0, 50).forEach(function(row, idx){
+          var icon = (idx === 0) ? "🥇" : (idx === 1) ? "🥈" : (idx === 2) ? "🥉" : "#" + (idx + 1);
+          var tr = document.createElement("tr");
           tr.className = "border-b";
 
           if (type === "site") {
             // ユーザー単位（サイト登録数） — 名前表示＆サイト数の値
-            const fullName = `${row.last_name || ""} ${row.first_name || ""}`.trim();
-            tr.innerHTML = `
-              <td class="p-2 font-semibold">${icon}</td>
-              <td class="p-2 truncate">${escapeHtml(fullName || "—")}</td>
-              <td class="p-2 text-right font-semibold">${row.site_count ?? 0}</td>
-            `;
+            var fullName = buildName(row);
+            tr.innerHTML =
+              '<td class="p-2 font-semibold sep-col">' + icon + '</td>' +
+              '<td class="p-2 truncate second-col-pad">' + escapeHtml(fullName || "—") + '</td>' +
+              '<td class="p-2 text-right font-semibold">' + (row.site_count != null ? row.site_count : 0) + '</td>';
           } else {
-            // サイト単位（表示回数／クリック数） — “名前” 表示に統一
-            const siteName = row.site_name || row.site_url || `site#${row.site_id}`;
-            const nameText = row.username || ""; // ユーザー名→表記は“名前”
-            const href = row.site_url ? row.site_url : "#";
-            tr.innerHTML = `
-              <td class="p-2 font-semibold">${icon}</td>
-              <td class="p-2 truncate">
-                <a href="${href}" target="_blank" class="text-blue-600 underline">${escapeHtml(siteName)}</a>
-              </td>
-              <td class="p-2 truncate">${escapeHtml(nameText)}</td>
-              <td class="p-2 text-right font-semibold">${row.value ?? 0}</td>
-            `;
+            // サイト単位（表示回数／クリック数） — “名前” 表示（姓+名 → user_name → username）
+            var siteName = row.site_name || row.site_url || ("site#" + row.site_id);
+            var nameText = buildName(row);
+            var href = row.site_url ? row.site_url : "#";
+            tr.innerHTML =
+              '<td class="p-2 font-semibold sep-col">' + icon + '</td>' +
+              '<td class="p-2 truncate second-col-pad">' +
+                '<a href="' + href + '" target="_blank" class="text-blue-600 underline">' + escapeHtml(siteName) + '</a>' +
+              '</td>' +
+              '<td class="p-2 truncate">' + escapeHtml(nameText) + '</td>' +
+              '<td class="p-2 text-right font-semibold">' + (row.value != null ? row.value : 0) + '</td>';
           }
           tbody.appendChild(tr);
         });
       })
-      .catch(err => {
+      .catch(function(err){
         console.error("❌ ランキング読み込み失敗:", err);
-        const tr = document.createElement("tr");
-        tr.innerHTML = `<td colspan="4" class="p-3 text-red-600">ランキングの取得に失敗しました。</td>`;
+        var tr = document.createElement("tr");
+        tr.innerHTML = '<td colspan="4" class="p-3 text-red-600">ランキングの取得に失敗しました。</td>';
         tbody.appendChild(tr);
       });
   }
 
+  // “名前”のフォールバック：last_name+first_name → user_name → username
+  function buildName(row){
+    var lf = [row.last_name, row.first_name].filter(Boolean).join(" ").trim();
+    if (lf) return lf;
+    if (row.user_name) return row.user_name;
+    if (row.username) return row.username;
+    return "";
+  }
+
   // XSS対策の簡易エスケープ
   function escapeHtml(s){
-    return String(s || "").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    return String(s || "").replace(/[&<>"']/g, function(m){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[m]); });
   }
 
   // ====== チャット（既存） ======
-  const chatUsername = "{{ current_user.username }}";
-  const messageLog = [];
-  const phrases = ["今日もがんばろう！", "SEO最適化中！", "記事作成順調！", "GSC記事生成を実装！"];
+  var chatUsername = "{{ current_user.username }}";
+  var messageLog = [];
+  var phrases = ["今日もがんばろう！", "SEO最適化中！", "記事作成順調！", "GSC記事生成を実装！"];
 
   function toggleChat() {
-    const chat = document.getElementById("chatWindow");
-    const messages = document.getElementById("chatMessages");
+    var chat = document.getElementById("chatWindow");
+    var messages = document.getElementById("chatMessages");
     chat.classList.toggle("hidden");
     if (!chat.dataset.initialized) {
-      const greeting = document.createElement("div");
-      greeting.textContent = `🤖 こんにちは、${chatUsername}さん！ご質問があればお気軽にどうぞ。`;
+      var greeting = document.createElement("div");
+      greeting.textContent = "🤖 こんにちは、" + chatUsername + "さん！ご質問があればお気軽にどうぞ。";
       greeting.className = "text-left text-blue-700";
       messages.appendChild(greeting);
       chat.dataset.initialized = true;
@@ -223,28 +226,28 @@
   }
 
   function robotTalk() {
-    const robot = document.getElementById('robotImage');
-    const bubble = document.getElementById('speechBubble');
+    var robot = document.getElementById('robotImage');
+    var bubble = document.getElementById('speechBubble');
     if (!robot || !bubble) return;
     robot.classList.add('dance-animation');
-    setTimeout(() => robot.classList.remove('dance-animation'), 800);
-    const random = phrases[Math.floor(Math.random() * phrases.length)];
+    setTimeout(function(){ robot.classList.remove('dance-animation'); }, 800);
+    var random = phrases[Math.floor(Math.random() * phrases.length)];
     bubble.textContent = random;
     bubble.classList.remove('hidden');
-    setTimeout(() => bubble.classList.add('hidden'), 2500);
+    setTimeout(function(){ bubble.classList.add('hidden'); }, 2500);
   }
 
   function sendMessage() {
-    const input = document.getElementById("chatInput");
-    const messages = document.getElementById("chatMessages");
-    const userText = input.value.trim();
+    var input = document.getElementById("chatInput");
+    var messages = document.getElementById("chatMessages");
+    var userText = (input.value || "").trim();
     if (!userText) return;
-    const userMsg = document.createElement("div");
+    var userMsg = document.createElement("div");
     userMsg.textContent = "👤 " + userText;
     userMsg.className = "text-right text-gray-800";
     messages.appendChild(userMsg);
     messageLog.push({ role: "user", content: userText });
-    const botMsg = document.createElement("div");
+    var botMsg = document.createElement("div");
     botMsg.textContent = "🤖 考え中...";
     botMsg.className = "text-left text-blue-700";
     messages.appendChild(botMsg);
@@ -255,13 +258,13 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: userText, history: messageLog, username: chatUsername })
     })
-      .then(res => res.json())
-      .then(data => {
-        botMsg.textContent = "🤖 " + data.reply;
-        messageLog.push({ role: "assistant", content: data.reply });
+      .then(function(res){ return res.json(); })
+      .then(function(data){
+        botMsg.textContent = "🤖 " + (data.reply || "");
+        messageLog.push({ role: "assistant", content: data.reply || "" });
         messages.scrollTop = messages.scrollHeight;
       })
-      .catch(() => {
+      .catch(function(){
         botMsg.textContent = "🤖 エラーが発生しました。";
       });
   }
@@ -275,38 +278,54 @@
     75% { transform: rotate(3deg); }
     100% { transform: rotate(0deg); }
   }
-  .dance-animation {
-    animation: robot-dance 0.8s ease-in-out;
-  }
-  .text-custom-brand {
-    color: #23185E;
-  }
+  .dance-animation { animation: robot-dance 0.8s ease-in-out; }
+  .text-custom-brand { color: #23185E; }
 
   /* タブ風ボタン（純CSS） */
   .rank-tab{
     display:inline-flex;
     align-items:center;
     gap:.25rem;
-    padding:.375rem .75rem;        /* py-1.5 px-3 */
-    border-radius:.375rem;         /* rounded-md */
-    border:1px solid #D1D5DB;      /* border-gray-300 */
-    background:#fff;               /* bg-white */
-    color:#1F2937;                 /* text-gray-800 */
-    font-size:.875rem;             /* text-sm */
+    padding:.375rem .75rem;
+    border-radius:.375rem;
+    border:1px solid #D1D5DB;
+    background:#fff;
+    color:#1F2937;
+    font-size:.875rem;
     line-height:1.25rem;
     cursor:pointer;
     transition:background .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease;
   }
   .rank-tab:hover{ background:#F9FAFB; }
   .rank-tab.is-active{
-    background:#2563EB;            /* bg-blue-600 */
-    color:#fff;                     /* text-white */
-    border-color:#2563EB;          /* border-blue-600 */
+    background:#2563EB;
+    color:#fff;
+    border-color:#2563EB;
   }
   .rank-tab:focus{
-    outline:2px solid #93C5FD;     /* focus-visible */
+    outline:2px solid #93C5FD;
     outline-offset:2px;
   }
+
+  /* ランキング表の視認性向上：Rank列を区切る・2列目に余白で“離す” */
+  #ranking-table th:first-child,
+  #ranking-table td:first-child{
+    border-right:1px solid #E5E7EB; /* gray-200 */
+    white-space:nowrap;
+  }
+  #ranking-table th,
+  #ranking-table td{
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  /* 2列目（名前/サイト名）に少し左余白を追加して Rank から離す */
+  #ranking-table th:nth-child(2),
+  #ranking-table td:nth-child(2){
+    padding-left:1rem; /* 16px */
+  }
+  /* table-fixed 時の見栄えを安定化 */
+  #ranking-table { table-layout: fixed; }
 </style>
 {% endblock %}
 

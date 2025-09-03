@@ -2253,7 +2253,7 @@ from app.models import UserSiteQuota, Article, SiteQuotaLog, Site, User, GSCDail
 from sqlalchemy import case, func  # ← func を追加
 from flask import g
 from collections import defaultdict
-from datetime import timedelta  # ← 追加
+from datetime import datetime, timedelta, timezone  # ← JST計算のため
 
 @bp.route("/<username>/dashboard")
 @login_required
@@ -2315,13 +2315,14 @@ def dashboard(username):
     used_quota = sum(site_count_map.get(q.plan_type, 0) for q in quotas)
     remaining_quota = max(total_quota - used_quota, 0)
 
-    # ─────────── 追加：直近28日の「表示回数／クリック数」サイト別ランキング（管理ページと同じロジック）
-    # DBに格納済みの GSC 日次の「最新日付」を終端にして 28日合計を出す
-    latest_date = db.session.query(func.max(GSCDailyTotal.date)).scalar()
+    # ─────────── 直近28日の「表示回数／クリック数」サイト別ランキング（管理ページと同じ：JST・前日締め）
+    JST = timezone(timedelta(hours=9))
+    today_jst = datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(JST).date()
+    end_date = today_jst - timedelta(days=1)      # ← 昨日を終端に固定
+    start_date = end_date - timedelta(days=27)    # ← 28日間（両端含む）
     rank_impr_28d = []
     rank_clicks_28d = []
-    if latest_date:
-        start_date = latest_date - timedelta(days=27)
+    if end_date:
         # 表示回数 Top50
         rank_impr_28d = (
             db.session.query(
@@ -2333,7 +2334,7 @@ def dashboard(username):
             )
             .join(GSCDailyTotal, GSCDailyTotal.site_id == Site.id)
             .join(User, User.id == Site.user_id)
-            .filter(GSCDailyTotal.date >= start_date, GSCDailyTotal.date <= latest_date)
+            .filter(GSCDailyTotal.date >= start_date, GSCDailyTotal.date <= end_date)
             .group_by(Site.id, Site.name, Site.url, User.username)
             .order_by(func.coalesce(func.sum(GSCDailyTotal.impressions), 0).desc())
             .limit(50)
@@ -2350,7 +2351,7 @@ def dashboard(username):
             )
             .join(GSCDailyTotal, GSCDailyTotal.site_id == Site.id)
             .join(User, User.id == Site.user_id)
-            .filter(GSCDailyTotal.date >= start_date, GSCDailyTotal.date <= latest_date)
+            .filter(GSCDailyTotal.date >= start_date, GSCDailyTotal.date <= end_date)
             .group_by(Site.id, Site.name, Site.url, User.username)
             .order_by(func.coalesce(func.sum(GSCDailyTotal.clicks), 0).desc())
             .limit(50)
@@ -2406,7 +2407,7 @@ def api_rankings():
     limit = min(max(int(request.args.get("limit", 50)), 1), 50)
 
 
-    # ✅ ユーザー別：登録サイト数ランキング（ダッシュボード用）
+    # ✅ ユーザー別：登録サイト数ランキング（管理者側と同じく除外なし）
     if rank_type == "site":
         excluded_user_ids = [1, 2, 14]  # ← 除外したいID
         subquery = (
@@ -2437,13 +2438,12 @@ def api_rankings():
         ]
         return jsonify(data)
 
-    # ✅ 28日合計：サイト別の表示回数 / クリック数（管理ページと同ロジック）
-    # ※ 表示回数・クリック数では「ユーザーID=1のみ除外」
+    # ✅ 28日合計：サイト別の表示回数 / クリック数（JST・前日締め）※除外は現状維持
     from app.models import GSCDailyTotal
-    latest_date = db.session.query(func.max(GSCDailyTotal.date)).scalar()
-    if not latest_date:
-        return jsonify([])
-    start_date = latest_date - timedelta(days=27)
+    JST = timezone(timedelta(hours=9))
+    today_jst = datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(JST).date()
+    end_date = today_jst - timedelta(days=1)
+    start_date = end_date - timedelta(days=27)
 
     metric_col = GSCDailyTotal.impressions if rank_type in ("impressions", "impr") else GSCDailyTotal.clicks
     rows = (
@@ -2457,7 +2457,7 @@ def api_rankings():
         .join(GSCDailyTotal, GSCDailyTotal.site_id == Site.id)
         .join(User, User.id == Site.user_id)
         .filter(~User.id.in_([1]))  # ← ここで user_id=1 を除外
-        .filter(GSCDailyTotal.date >= start_date, GSCDailyTotal.date <= latest_date)
+        .filter(GSCDailyTotal.date >= start_date, GSCDailyTotal.date <= end_date)
         .group_by(Site.id, Site.name, Site.url, User.username)
         .order_by(func.coalesce(func.sum(metric_col), 0).desc())
         .limit(limit)
