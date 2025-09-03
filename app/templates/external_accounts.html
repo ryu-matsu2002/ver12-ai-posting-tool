@@ -184,7 +184,7 @@
             {% set generated = a.generated_cnt or 0 %}
             {% set total     = a.total_cnt or (posted + generated) %}
 
-            {# ブログ名のフォールバック（存在するものを順に採用） #}
+            {# ブログ名のフォールバック（splitを使わず、プロトコル除去のみ） #}
             {% set blogname =
                a.blog_name
                or a.title
@@ -192,8 +192,7 @@
                or a.blog_title
                or (a.blog_url|default('', true)
                      |replace('https://','')
-                     |replace('http://','')
-                     |split('/')|first)
+                     |replace('http://',''))
                or '-' %}
 
             <tr class="border-b">
