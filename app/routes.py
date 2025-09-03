@@ -3594,6 +3594,7 @@ def external_seo_sites():
     from app import db
     from sqlalchemy.orm import selectinload
     from sqlalchemy import func, or_
+    from datetime import datetime, timedelta, timezone
 
     sites = (
         Site.query
@@ -3756,6 +3757,47 @@ def external_seo_sites():
     for s in sites:
         # テンプレート側で can_start_extseo 判定用に参照
         s.normal_post_count = normal_counts.get(s.id, 0)
+
+    # === GSC 28日合計（JST 昨日まで）をサイト一覧と同じ条件で集計して注入 ===
+    # ※ モデル名はプロジェクトに合わせて置き換え：例) GscSiteDaily / SearchConsoleDaily など
+    try:
+        JST = timezone(timedelta(hours=9))
+        today_jst = datetime.now(JST).date()
+        end_date = today_jst - timedelta(days=1)     # 昨日まで
+        start_date = end_date - timedelta(days=27)   # 直近28日
+
+        # 例: GSC日次テーブル: columns = site_id, date, clicks, impressions
+        from app.models import GscSiteDaily  # ←実際のモデル名に合わせて
+
+        if site_ids:
+            rows = (
+                db.session.query(
+                    GscSiteDaily.site_id,
+                    func.coalesce(func.sum(GscSiteDaily.clicks), 0).label("clicks"),
+                    func.coalesce(func.sum(GscSiteDaily.impressions), 0).label("impr"),
+                )
+                .filter(GscSiteDaily.site_id.in_(site_ids))
+                .filter(GscSiteDaily.date.between(start_date, end_date))
+                .group_by(GscSiteDaily.site_id)
+                .all()
+            )
+        else:
+            rows = []
+
+        clicks28 = {sid: c for sid, c, _ in rows}
+        impr28   = {sid: i for sid, _, i in rows}
+
+        for s in sites:
+            # テンプレで最優先されるキー名に上書き代入
+            s.clicks_28d      = clicks28.get(s.id, 0)
+            s.impressions_28d = impr28.get(s.id, 0)
+    except Exception:
+        # 何かあってもページが落ちないようフォールバック（ログは任意）
+        for s in sites:
+            if not hasattr(s, "clicks_28d"):
+                s.clicks_28d = getattr(s, "clicks", 0)
+            if not hasattr(s, "impressions_28d"):
+                s.impressions_28d = getattr(s, "impressions", 0)    
 
     return render_template(
         "external_sites.html",
