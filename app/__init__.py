@@ -159,29 +159,29 @@ def create_app() -> Flask:
         app.logger.info("ℹ️ SCHEDULER: skipped (SCHEDULER_ENABLED=%s, JOBS_ROLE=%s)",
                         os.getenv("SCHEDULER_ENABLED"), os.getenv("JOBS_ROLE"))        
 
-    # === PWController 起動（フックを動的に選択して登録）========================
+    # === PWController 起動（“jobs”ロールのみ）========================
+    role = os.getenv("JOBS_ROLE", "").strip().lower()
+
     def _start_pw_controller_once():
         try:
-            # 🔸遅延 import（循環importを避ける）
             from app.services.pw_controller import pwctl  # type: ignore
             headless = os.getenv("PWCTL_HEADLESS", "1") == "1"
             pwctl.start(headless=headless)
-            app.logger.info("✅ PWController started (headless=%s)", headless)
+            app.logger.info("✅ PWController started (headless=%s, role=%s)", headless, role)
         except Exception as e:
             app.logger.exception("⚠️ PWController start failed: %s", e)
 
-    # Flask のバージョン差を吸収して“存在するフック”に登録
-    _hook = getattr(app, "before_serving", None) or getattr(app, "before_first_request", None)
-    if callable(_hook):
-        _hook(_start_pw_controller_once)
+    if role == "jobs":
+        _hook = getattr(app, "before_serving", None) or getattr(app, "before_first_request", None)
+        if callable(_hook):
+            _hook(_start_pw_controller_once)
+        else:
+            try:
+                _start_pw_controller_once()
+            except Exception:
+                app.logger.exception("⚠️ PWController immediate start failed")
     else:
-        # どちらのフックも無い超古い/超新しい派生環境向けフォールバック
-        try:
-            _start_pw_controller_once()
-        except Exception:
-            app.logger.exception("⚠️ PWController immediate start failed")
-# ========================================================================
-       
+        app.logger.info("ℹ️ PWController: disabled on role=%s", role)
 
 
     login_manager.login_view = "main.login"
