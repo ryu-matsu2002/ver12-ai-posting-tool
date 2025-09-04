@@ -10,7 +10,8 @@ import redis
 import fcntl  # 単一起動のためのファイルロック（Linux）
 from logging.handlers import RotatingFileHandler  # ✅ 追加
 from dotenv import load_dotenv
-load_dotenv()
+# .env は systemd から渡された環境変数を上書きしない（明示）
+load_dotenv(override=False)
 
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
@@ -138,9 +139,9 @@ def create_app() -> Flask:
             # 正常/異常に関わらず remove して接続とスコープを解放
             db.session.remove()    
 
-    # ✅ スケジューラー起動（--preload により1回のみ呼ばれる）
-    # ✅ スケジューラ起動（ファイルロックで“1プロセスだけ”に制限）
-    if os.getenv("SCHEDULER_ENABLED") == "1":
+    # ✅ スケジューラー起動（jobsロールのプロセスだけ）
+    #    systemd から JOBS_ROLE=jobs を与えたときのみ起動する
+    if os.getenv("SCHEDULER_ENABLED") == "1" and os.getenv("JOBS_ROLE", "web") == "jobs":
         lock_path = "/tmp/ai_posting_scheduler.lock"
         try:  
             app._scheduler_lockfile = open(lock_path, "w")
@@ -154,6 +155,9 @@ def create_app() -> Flask:
                app.logger.info("ℹ️ SCHEDULER: lock already held -> 他プロセスで稼働中のためスキップ")
         except Exception as e:
             app.logger.exception("⚠️ SCHEDULER: lock 初期化に失敗したためスキップ: %s", e)
+    else:
+        app.logger.info("ℹ️ SCHEDULER: skipped (SCHEDULER_ENABLED=%s, JOBS_ROLE=%s)",
+                        os.getenv("SCHEDULER_ENABLED"), os.getenv("JOBS_ROLE"))        
 
     # === PWController 起動（フックを動的に選択して登録）========================
     def _start_pw_controller_once():
