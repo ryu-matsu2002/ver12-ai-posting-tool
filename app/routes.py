@@ -2458,6 +2458,9 @@ def api_rankings():
             Site.id.label("site_id"),
             Site.name.label("site_name"),
             Site.url.label("site_url"),
+            # 氏名も取得（フォールバック用に username も保持）
+            User.last_name.label("last_name"),
+            User.first_name.label("first_name"),
             User.username.label("username"),
             func.coalesce(func.sum(metric_col), 0).label("value"),
         )
@@ -2465,16 +2468,24 @@ def api_rankings():
         .join(User, User.id == Site.user_id)
         .filter(~User.id.in_([1]))  # ← ここで user_id=1 を除外
         .filter(GSCDailyTotal.date >= start_date, GSCDailyTotal.date <= end_date)
-        .group_by(Site.id, Site.name, Site.url, User.username)
+        .group_by(Site.id, Site.name, Site.url, User.last_name, User.first_name, User.username)
         .order_by(func.coalesce(func.sum(metric_col), 0).desc())
         .limit(limit)
         .all()
     )
+    def _display_name(r):
+        ln = (r.last_name or "").strip()
+        fn = (r.first_name or "").strip()
+        full = f"{ln}{fn}"
+        return full if full else (r.username or "")
+
     return jsonify([
         {
             "site_id": r.site_id,
             "site_name": r.site_name,
             "site_url": r.site_url,
+            # 新：氏名（姓+名）。互換のため username も当面残す
+            "display_name": _display_name(r),
             "username": r.username,
             "value": int(r.value or 0),
         } for r in rows
