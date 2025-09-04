@@ -206,4 +206,9 @@ def make_celery(app: Flask) -> Celery:
 # Redis client（Flask全体で使い回す）
 # --------------------------------------------------
 redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-redis_client = redis.StrictRedis.from_url(redis_url, decode_responses=True)
+redis_client = redis.StrictRedis.from_url(
+    redis_url,
+    decode_responses=True,
+    socket_connect_timeout=0.5,  # 接続タイムアウト
+    socket_timeout=0.8,          # コマンドタイムアウト
+)    

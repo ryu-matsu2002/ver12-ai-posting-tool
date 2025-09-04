@@ -2407,12 +2407,17 @@ def api_rankings():
     rank_type = request.args.get("type", "site").lower()
     limit = min(max(int(request.args.get("limit", 50)), 1), 50)
 
-    # Redis キャッシュキー
+    # Redis キャッシュキー（フェイルオープン）
     from app import redis_client
+    from flask import current_app
+    import json
     cache_key = f"rankings:{rank_type}:{limit}"
-    cached = redis_client.get(cache_key)
+    cached = None
+    try:
+        cached = redis_client.get(cache_key)
+    except Exception as e:
+        current_app.logger.warning(f"[rankings] redis GET failed: {e}")
     if cached:
-        import json
         return jsonify(json.loads(cached))
 
 
@@ -2451,8 +2456,10 @@ def api_rankings():
             }
             for r in results
         ]
-        import json
-        redis_client.setex(cache_key, 60, json.dumps(data))  # 60秒キャッシュ
+        try:
+            redis_client.setex(cache_key, 60, json.dumps(data))  # 60秒キャッシュ
+        except Exception as e:
+            current_app.logger.warning(f"[rankings] redis SETEX failed: {e}")
         return jsonify(data)
 
     # ✅ 28日合計：サイト別の表示回数 / クリック数（JST・前日締め）※除外は現状維持
@@ -2504,8 +2511,10 @@ def api_rankings():
             "value": int(r.value or 0),
         } for r in rows
     ]
-    import json
-    redis_client.setex(cache_key, 60, json.dumps(data))  # 60秒キャッシュ
+    try:
+        redis_client.setex(cache_key, 60, json.dumps(data))  # 60秒キャッシュ
+    except Exception as e:
+        current_app.logger.warning(f"[rankings] redis SETEX failed: {e}")
     return jsonify(data)
 
 
