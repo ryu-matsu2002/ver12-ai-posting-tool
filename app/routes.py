@@ -2407,6 +2407,14 @@ def api_rankings():
     rank_type = request.args.get("type", "site").lower()
     limit = min(max(int(request.args.get("limit", 50)), 1), 50)
 
+    # Redis キャッシュキー
+    from app import redis_client
+    cache_key = f"rankings:{rank_type}:{limit}"
+    cached = redis_client.get(cache_key)
+    if cached:
+        import json
+        return jsonify(json.loads(cached))
+
 
     # ✅ ユーザー別：登録サイト数ランキング（管理者側と同じく除外なし）
     if rank_type == "site":
@@ -2443,6 +2451,8 @@ def api_rankings():
             }
             for r in results
         ]
+        import json
+        redis_client.setex(cache_key, 60, json.dumps(data))  # 60秒キャッシュ
         return jsonify(data)
 
     # ✅ 28日合計：サイト別の表示回数 / クリック数（JST・前日締め）※除外は現状維持
@@ -2479,17 +2489,24 @@ def api_rankings():
         full = f"{ln}{fn}"
         return full if full else (r.username or "")
 
-    return jsonify([
+    data = [
         {
             "site_id": r.site_id,
             "site_name": r.site_name,
             "site_url": r.site_url,
-            # 新：氏名（姓+名）。互換のため username も当面残す
+            # ✅ テンプレの buildName(row) が参照するキーを返す
+            "last_name": r.last_name or "",
+            "first_name": r.first_name or "",
+            # 互換用に name / display_name も付けておく（任意）
+            "name": _display_name(r),
             "display_name": _display_name(r),
             "username": r.username,
             "value": int(r.value or 0),
         } for r in rows
-    ])
+    ]
+    import json
+    redis_client.setex(cache_key, 60, json.dumps(data))  # 60秒キャッシュ
+    return jsonify(data)
 
 
 

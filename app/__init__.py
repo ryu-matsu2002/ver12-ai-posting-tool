@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import logging  # ✅ 追加
+import redis
 import fcntl  # 単一起動のためのファイルロック（Linux）
 from logging.handlers import RotatingFileHandler  # ✅ 追加
 from dotenv import load_dotenv
@@ -201,3 +202,8 @@ def make_celery(app: Flask) -> Celery:
 
     celery.Task = ContextTask  # type: ignore[attr-defined]
     return celery
+# --------------------------------------------------
+# Redis client（Flask全体で使い回す）
+# --------------------------------------------------
+redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+redis_client = redis.StrictRedis.from_url(redis_url, decode_responses=True)

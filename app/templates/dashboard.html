@@ -157,11 +157,11 @@
     tbody.innerHTML = "";
 
     fetch("/api/rankings?type=" + encodeURIComponent(type))
-      .then(function(res){
+      .then(res => {
         if (!res.ok) throw new Error("APIエラー: " + res.status);
         return res.json();
       })
-      .then(function(rows){
+      .then(rows => {
         rows = rows.slice(0, 50);
 
         rows.forEach(function(row, idx){
@@ -176,7 +176,7 @@
               '<td class="p-2 font-semibold sep-col">' + icon + '</td>' +
               '<td class="p-2 truncate second-col-pad">' + escapeHtml(fullName || "—") + '</td>' +
               '<td class="p-2 text-right font-semibold">' + (row.site_count != null ? row.site_count : 0) + '</td>' +
-              '<td class="p-2 text-gray-500" data-presence data-user-id="' + (row.user_id ?? "") + '">読み込み中…</td>';
+              '<td class="p-2 text-gray-500" data-presence data-user-id="' + (row.user_id ?? "") + '">⏳</td>';
           } else {
             // サイト単位（表示回数／クリック数） — “名前” 表示（姓+名 → user_name → username）
             var siteName = row.site_name || row.site_url || ("site#" + row.site_id);
@@ -193,27 +193,19 @@
           tbody.appendChild(tr);
         });
 
-        // presence を一括取得して反映（サイトタブのみ）
+        // ✅ presence は後から別で非同期ロード
         if (type === "site") {
-          var ids = rows.map(function(r){ return r.user_id; }).filter(Boolean);
-          // このスコープの ids をリスナーから参照できるように保存
+          var ids = rows.map(r => r.user_id).filter(Boolean);
           window.__rankPresenceIds = Array.from(new Set(ids));
           if (ids.length) {
-            fetch("/presence/status?user_ids=" + encodeURIComponent(Array.from(new Set(ids)).join(",")))
-              .then(function(res){ return res.json(); })
-              .then(function(data){ renderPresence(data); })
-              .catch(function(err){ console.warn("presence fetch failed:", err); });
-              // ✅ 初回レース対策：2秒後にもう一度だけ取り直して反映
-            setTimeout(function(){
-              fetch("/presence/status?user_ids=" + encodeURIComponent(Array.from(new Set(ids)).join(",")))
-                .then(function(res){ return res.json(); })
-                .then(function(data){ renderPresence(data); })
-                .catch(function(){});
-            }, 2000);
+            requestAnimationFrame(() => {  // 描画完了後に呼ぶ
+              fetch("/presence/status?user_ids=" + encodeURIComponent(ids.join(",")))
+                .then(res => res.json())
+                .then(data => renderPresence(data))
+                .catch(() => {});
+            });
           }
-          schedulePresenceRefresh(); // 定期更新（画面可視時は短め）
         } else {
-          // 他タブでは定期更新を停止
           clearInterval(presenceTimer);
         }
       })
