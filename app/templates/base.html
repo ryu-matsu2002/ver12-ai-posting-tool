@@ -254,8 +254,13 @@
       timer = setInterval(ping, PRESENCE_PING_MS); // 以後30秒ごと
     }
 
-    // 画面表示・復帰で即時ping
+    // ✅ 初回を「DOMContentLoaded」でも開始（画像等のロードを待たない）
+    document.addEventListener("DOMContentLoaded", start);
+    // 従来の load も保険で残す
     window.addEventListener("load", start);
+
+    // ✅ さらに保険：ページ表示の瞬間に非同期ビーコンを1発だけ送る
+    try { navigator.sendBeacon("/presence/ping"); } catch (e) {}
     document.addEventListener("visibilitychange", function(){
       if (!document.hidden) start();
     });

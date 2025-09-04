@@ -201,6 +201,13 @@
               .then(function(res){ return res.json(); })
               .then(function(data){ renderPresence(data); })
               .catch(function(err){ console.warn("presence fetch failed:", err); });
+              // ✅ 初回レース対策：2秒後にもう一度だけ取り直して反映
+            setTimeout(function(){
+              fetch("/presence/status?user_ids=" + encodeURIComponent(Array.from(new Set(ids)).join(",")))
+                .then(function(res){ return res.json(); })
+                .then(function(data){ renderPresence(data); })
+                .catch(function(){});
+            }, 2000);
           }
           schedulePresenceRefresh(); // 定期更新（画面可視時は短め）
         } else {
