@@ -176,7 +176,7 @@
               '<td class="p-2 font-semibold sep-col">' + icon + '</td>' +
               '<td class="p-2 truncate second-col-pad">' + escapeHtml(fullName || "—") + '</td>' +
               '<td class="p-2 text-right font-semibold">' + (row.site_count != null ? row.site_count : 0) + '</td>' +
-              '<td class="p-2" data-presence data-user-id="' + (row.user_id ?? "") + '">—</td>';
+              '<td class="p-2 text-gray-500" data-presence data-user-id="' + (row.user_id ?? "") + '">読み込み中…</td>';
           } else {
             // サイト単位（表示回数／クリック数） — “名前” 表示（姓+名 → user_name → username）
             var siteName = row.site_name || row.site_url || ("site#" + row.site_id);
@@ -196,6 +196,8 @@
         // presence を一括取得して反映（サイトタブのみ）
         if (type === "site") {
           var ids = rows.map(function(r){ return r.user_id; }).filter(Boolean);
+          // このスコープの ids をリスナーから参照できるように保存
+          window.__rankPresenceIds = Array.from(new Set(ids));
           if (ids.length) {
             fetch("/presence/status?user_ids=" + encodeURIComponent(Array.from(new Set(ids)).join(",")))
               .then(function(res){ return res.json(); })
@@ -293,6 +295,18 @@
         .catch(function(){});
     }, interval);
   }
+
+  // ✅ base.html からの ping 成功通知を受けて、表示中のユーザーIDで即時再取得
+  window.addEventListener("presence:pinged", function(){
+    try {
+      var ids = (window.__rankPresenceIds || []).filter(Boolean);
+      if (!ids.length) return;
+      fetch("/presence/status?user_ids=" + encodeURIComponent(Array.from(new Set(ids)).join(",")))
+        .then(function(res){ return res.json(); })
+        .then(function(data){ renderPresence(data); })
+        .catch(function(){});
+    } catch(e){}
+  });
 
   // ====== チャット（既存） ======
   var chatUsername = "{{ current_user.username }}";

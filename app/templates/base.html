@@ -245,7 +245,12 @@
         credentials: "same-origin",
         cache: "no-store",
         headers: { "X-Requested-With": "XMLHttpRequest" }
-      }).catch(function(){ /* ネットワークエラーは無視 */ });
+      })
+      .then(function(){ 
+        // ✅ ping 成功したらイベント通知（ダッシュボードが拾って再取得）
+        try { window.dispatchEvent(new CustomEvent("presence:pinged")); } catch(e){}
+      })
+      .catch(function(){ /* ネットワークエラーは無視 */ });
     }
 
     function start() {
@@ -271,6 +276,8 @@
     window.addEventListener("pagehide", function(){
       try { navigator.sendBeacon("/presence/ping"); } catch (e) {}
     });
+    // ✅ ページ表示瞬間の保険 ping（最初の 1回だけ）
+    try { navigator.sendBeacon("/presence/ping"); } catch (e) {}
   })();
 </script>
 {% endif %}
