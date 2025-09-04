@@ -2250,6 +2250,7 @@ def root_redirect():
 
 # ─────────── Dashboard
 from app.models import UserSiteQuota, Article, SiteQuotaLog, Site, User, GSCDailyTotal  # ← User を追加
+from app.utils.cache import cache_get_json, cache_set_json
 from sqlalchemy import case, func  # ← func を追加
 from flask import g
 from collections import defaultdict
@@ -2406,6 +2407,21 @@ def api_rankings():
     rank_type = request.args.get("type", "site").lower()
     limit = min(max(int(request.args.get("limit", 50)), 1), 50)
 
+    # ---------- 共通キャッシュキー（昨日締めなので type/limit/日付で十分） ----------
+    if rank_type in ("impressions", "impr", "clicks", "site"):
+        cache_key = None
+        if rank_type == "site":
+            cache_key = f"rankings:site:{limit}"
+        else:
+            from datetime import datetime, timedelta, timezone
+            JST = timezone(timedelta(hours=9))
+            today_jst = datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(JST).date()
+            end_date = today_jst - timedelta(days=1)
+            cache_key = f"rankings:{rank_type}:{limit}:{end_date.isoformat()}"
+        cached = cache_get_json(cache_key) if cache_key else None
+        if cached:
+            return jsonify(cached)
+
 
     # ✅ ユーザー別：登録サイト数ランキング（管理者側と同じく除外なし）
     if rank_type == "site":
@@ -2442,6 +2458,7 @@ def api_rankings():
             }
             for r in results
         ]
+        cache_set_json(f"rankings:site:{limit}", data, ttl=300)
         return jsonify(data)
 
     # ✅ 28日合計：サイト別の表示回数 / クリック数（JST・前日締め）※除外は現状維持
@@ -2452,24 +2469,37 @@ def api_rankings():
     start_date = end_date - timedelta(days=27)
 
     metric_col = GSCDailyTotal.impressions if rank_type in ("impressions", "impr") else GSCDailyTotal.clicks
+
+    # 🔻 サブクエリでまず GSCDailyTotal を 28日範囲で集約 → 上位(limit*2)だけ取り出す
+    subq = (
+        db.session.query(
+            GSCDailyTotal.site_id.label("site_id"),
+            func.coalesce(func.sum(metric_col), 0).label("value")
+        )
+        .filter(GSCDailyTotal.date >= start_date, GSCDailyTotal.date <= end_date)
+        .group_by(GSCDailyTotal.site_id)
+        .order_by(func.coalesce(func.sum(metric_col), 0).desc())
+        .limit(limit * 2)
+        .subquery()
+    )
+
     rows = (
         db.session.query(
-            Site.id.label("site_id"),
+            subq.c.site_id,
             Site.name.label("site_name"),
             Site.url.label("site_url"),
             User.username.label("username"),
-            func.coalesce(func.sum(metric_col), 0).label("value"),
+            subq.c.value.label("value")
         )
-        .join(GSCDailyTotal, GSCDailyTotal.site_id == Site.id)
+        .join(Site, Site.id == subq.c.site_id)
         .join(User, User.id == Site.user_id)
-        .filter(~User.id.in_([1]))  # ← ここで user_id=1 を除外
-        .filter(GSCDailyTotal.date >= start_date, GSCDailyTotal.date <= end_date)
-        .group_by(Site.id, Site.name, Site.url, User.username)
-        .order_by(func.coalesce(func.sum(metric_col), 0).desc())
+        .filter(~User.id.in_([1]))
+        .order_by(subq.c.value.desc())
         .limit(limit)
         .all()
     )
-    return jsonify([
+
+    data = [
         {
             "site_id": r.site_id,
             "site_name": r.site_name,
@@ -2477,7 +2507,9 @@ def api_rankings():
             "username": r.username,
             "value": int(r.value or 0),
         } for r in rows
-    ])
+    ]
+    cache_set_json(f"rankings:{rank_type}:{limit}:{end_date.isoformat()}", data, ttl=300)
+    return jsonify(data)
 
 
 # ─────────── プロンプト CRUD（新規登録のみ）
