@@ -5,6 +5,7 @@ from flask_login import login_required, current_user
 from app import db
 from app.utils.presence import mark_online, online_id_set
 from app.models import User
+from sqlalchemy import or_
 
 bp = Blueprint("presence", __name__, url_prefix="/presence")
 
@@ -50,8 +51,15 @@ def status_batch():
         resp.headers["Cache-Control"] = "no-store"
         return resp
 
-    # 表示許可ユーザーだけ対象
-    q = User.query.filter(User.id.in_(user_ids), User.share_presence.is_(True))
+    # 表示許可ユーザーだけ対象（True / NULL / 自分自身 は可視）
+    q = User.query.filter(
+        User.id.in_(user_ids),
+        or_(
+            User.share_presence.is_(True),
+            User.share_presence.is_(None),
+            User.id == current_user.id
+        )
+    )
     # 多テナントなら以下のような境界を追加（例）
     # q = q.filter(User.tenant_id == current_user.tenant_id)
     users = q.all()

@@ -231,6 +231,45 @@
     setTimeout(() => bubble.classList.add("hidden"), 2500);
   }
 </script>
+
+{% if current_user.is_authenticated %}
+<script>
+  (function () {
+    var PRESENCE_PING_MS = 30000; // 30秒
+    var timer;
+
+    function ping() {
+      // CSRF免除済みの /presence/ping にPOST
+      fetch("/presence/ping", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "X-Requested-With": "XMLHttpRequest" }
+      }).catch(function(){ /* ネットワークエラーは無視 */ });
+    }
+
+    function start() {
+      clearInterval(timer);
+      ping(); // すぐ1回
+      timer = setInterval(ping, PRESENCE_PING_MS); // 以後30秒ごと
+    }
+
+    // 画面表示・復帰で即時ping
+    window.addEventListener("load", start);
+    document.addEventListener("visibilitychange", function(){
+      if (!document.hidden) start();
+    });
+    window.addEventListener("focus", start);
+    window.addEventListener("online", start);
+
+    // 離脱時の最終ping（非同期ビーコン）
+    window.addEventListener("pagehide", function(){
+      try { navigator.sendBeacon("/presence/ping"); } catch (e) {}
+    });
+  })();
+</script>
+{% endif %}
+
 {% endblock %}
 
   <style>
