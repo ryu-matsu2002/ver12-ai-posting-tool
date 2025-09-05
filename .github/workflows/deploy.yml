@@ -39,6 +39,9 @@ jobs:
         username: root
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         script: |
-          cd /var/www/ver12-ai-posting-tool
-          git pull origin main
-          sudo systemctl restart ai-posting.service
+          # systemd ユニット更新を反映してから、web と jobs の2サービスを再起動
+          sudo systemctl daemon-reload
+          sudo systemctl restart ai-posting-web.service
+          sudo systemctl restart ai-posting-jobs.service
+          sudo systemctl --no-pager --full status ai-posting-web.service  | tail -n 80 || true
+          sudo systemctl --no-pager --full status ai-posting-jobs.service | tail -n 80 || true
