@@ -120,10 +120,12 @@
     var colg  = document.getElementById("rank-colgroup");
 
     if (type === "site") {
-      // 列幅：順位 / 名前 / サイト数
+      // 列幅：順位(56px) / 名前(残りの半分) / サイト数(残りの半分)
+      // ※ table-layout: fixed なので <col> 本数は列数(3)に合わせる
       colg.innerHTML =
-        '<col style="width:60%">' + 
-        '<col style="width:40%">';
+        '<col style="width:56px">' +
+        '<col style="width:calc((100% - 56px)/2)">' +
+        '<col style="width:calc((100% - 56px)/2)">';
       thead.innerHTML =
         '<tr>' +
           '<th class="p-2 text-left sep-col">順位</th>' +
@@ -131,12 +133,13 @@
           '<th class="p-2 text-right">サイト数</th>' +
         '</tr>';
     } else {
-      // 列幅：順位(56px) / 名前(残りの半分) / サイト数(残りの半分)
-      // ※ table-layout: fixed を使っているため、<col> の本数は列数に合わせる
+      // 列幅：順位(64px) / サイト名(50%) / 名前(30%) / 値(20%)
+      var valueLabel = (type === "impressions") ? "表示回数" : "クリック数";
       colg.innerHTML =
-        '<col style="width:56px">' +
-        '<col style="width:calc((100% - 56px)/2)">' +
-        '<col style="width:calc((100% - 56px)/2)">';
+        '<col style="width:64px">' +
+        '<col style="width:50%">' +
+        '<col style="width:30%">' +
+        '<col style="width:20%">';
       thead.innerHTML =
         '<tr>' +
           '<th class="p-2 text-left sep-col">順位</th>' +
