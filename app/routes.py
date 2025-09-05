@@ -2403,28 +2403,41 @@ def view_errors(username):
 @bp.route("/api/rankings")
 @login_required
 def api_rankings():
-    # site | impressions | clicks
-    rank_type = request.args.get("type", "site").lower()
+    # 短時間で必ず応答させる安全網（Webだけ。トランザクション内で有効）
+    try:
+        db.session.execute("SET LOCAL statement_timeout = '5s'")
+    except Exception:
+        pass
+
+    rank_type = (request.args.get("type") or "site").lower()
     limit = min(max(int(request.args.get("limit", 50)), 1), 50)
 
-    # Redis キャッシュキー（フェイルオープン）
+    # ---- Redisキャッシュ（キーに“ランキング種別＋期間”を含める）----
     from app import redis_client
     from flask import current_app
     import json
-    cache_key = f"rankings:{rank_type}:{limit}"
-    cached = None
+    from datetime import datetime, timezone, timedelta
+
+    JST = timezone(timedelta(hours=9))
+    today_jst = datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(JST).date()
+    end_date = today_jst - timedelta(days=1)         # 前日締め
+    start_date = end_date - timedelta(days=27)       # 28日窓
+    cache_key = f"rankings:{rank_type}:{limit}:{start_date.isoformat()}:{end_date.isoformat()}"
+
     try:
         cached = redis_client.get(cache_key)
+        if cached:
+            return jsonify(json.loads(cached))
     except Exception as e:
         current_app.logger.warning(f"[rankings] redis GET failed: {e}")
-    if cached:
-        return jsonify(json.loads(cached))
 
-
-    # ✅ ユーザー別：登録サイト数ランキング（管理者側と同じく除外なし）
+    # ========== 1) ユーザー毎の登録サイト数ランキング ==========
     if rank_type == "site":
-        excluded_user_ids = [1, 2, 14]  # ← 除外したいID
-        subquery = (
+        # ここは “サイト数＝Siteの件数” を数えるだけ。重い列は持たない。
+        excluded_user_ids = [1, 2, 14]
+
+        # Site.user_id にインデックスが必要（下でコマンド案を出します）
+        subq = (
             db.session.query(
                 User.id.label("user_id"),
                 User.last_name,
@@ -2434,48 +2447,47 @@ def api_rankings():
             .filter(~User.id.in_(excluded_user_ids))
             .outerjoin(Site, Site.user_id == User.id)
             .group_by(User.id, User.last_name, User.first_name)
-            .subquery()
-        )
-        results = (
+        ).subquery()
+
+        rows = (
             db.session.query(
-                subquery.c.user_id,
-                subquery.c.last_name,
-                subquery.c.first_name,
-                subquery.c.site_count
+                subq.c.user_id,
+                subq.c.last_name,
+                subq.c.first_name,
+                subq.c.site_count
             )
-            .order_by(subquery.c.site_count.desc())
+            .order_by(subq.c.site_count.desc())
             .limit(limit)
             .all()
         )
+
         data = [
             {
                 "user_id": int(r.user_id),
-                "last_name": r.last_name,
-                "first_name": r.first_name,
+                "last_name": r.last_name or "",
+                "first_name": r.first_name or "",
                 "site_count": int(r.site_count or 0),
             }
-            for r in results
+            for r in rows
         ]
+
         try:
             redis_client.setex(cache_key, 60, json.dumps(data))  # 60秒キャッシュ
         except Exception as e:
             current_app.logger.warning(f"[rankings] redis SETEX failed: {e}")
         return jsonify(data)
 
-    # ✅ 28日合計：サイト別の表示回数 / クリック数（JST・前日締め）※除外は現状維持
+    # ========== 2) 28日合計：サイト別の表示回数 or クリック数 ==========
+    # テーブルからは “必要な列だけ” 取り出す。重い列（body, *_prompt など）は参照しない。
     from app.models import GSCDailyTotal
-    JST = timezone(timedelta(hours=9))
-    today_jst = datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(JST).date()
-    end_date = today_jst - timedelta(days=1)
-    start_date = end_date - timedelta(days=27)
 
     metric_col = GSCDailyTotal.impressions if rank_type in ("impressions", "impr") else GSCDailyTotal.clicks
+
     rows = (
         db.session.query(
             Site.id.label("site_id"),
             Site.name.label("site_name"),
             Site.url.label("site_url"),
-            # 氏名も取得（フォールバック用に username も保持）
             User.last_name.label("last_name"),
             User.first_name.label("first_name"),
             User.username.label("username"),
@@ -2483,13 +2495,14 @@ def api_rankings():
         )
         .join(GSCDailyTotal, GSCDailyTotal.site_id == Site.id)
         .join(User, User.id == Site.user_id)
-        .filter(~User.id.in_([1]))  # ← ここで user_id=1 を除外
+        .filter(~User.id.in_([1]))  # 例の除外
         .filter(GSCDailyTotal.date >= start_date, GSCDailyTotal.date <= end_date)
         .group_by(Site.id, Site.name, Site.url, User.last_name, User.first_name, User.username)
         .order_by(func.coalesce(func.sum(metric_col), 0).desc())
         .limit(limit)
         .all()
     )
+
     def _display_name(r):
         ln = (r.last_name or "").strip()
         fn = (r.first_name or "").strip()
@@ -2501,21 +2514,22 @@ def api_rankings():
             "site_id": r.site_id,
             "site_name": r.site_name,
             "site_url": r.site_url,
-            # ✅ テンプレの buildName(row) が参照するキーを返す
             "last_name": r.last_name or "",
             "first_name": r.first_name or "",
-            # 互換用に name / display_name も付けておく（任意）
-            "name": _display_name(r),
-            "display_name": _display_name(r),
+            "name": _display_name(r),          # 互換キー
+            "display_name": _display_name(r),  # 互換キー
             "username": r.username,
             "value": int(r.value or 0),
-        } for r in rows
+        }
+        for r in rows
     ]
+
     try:
-        redis_client.setex(cache_key, 60, json.dumps(data))  # 60秒キャッシュ
+        redis_client.setex(cache_key, 60, json.dumps(data))
     except Exception as e:
         current_app.logger.warning(f"[rankings] redis SETEX failed: {e}")
     return jsonify(data)
+
 
 
 
