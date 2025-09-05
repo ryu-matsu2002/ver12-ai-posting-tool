@@ -120,18 +120,15 @@
     var colg  = document.getElementById("rank-colgroup");
 
     if (type === "site") {
-      // 列幅：順位 / 名前 / サイト数 / オンライン
+      // 列幅：順位 / 名前 / サイト数
       colg.innerHTML =
-        '<col style="width:64px">' +
-        '<col style="width:50%">' +
-        '<col style="width:20%">' +
-        '<col style="width:30%">';
+        '<col style="width:60%">' + 
+        '<col style="width:40%">';
       thead.innerHTML =
         '<tr>' +
           '<th class="p-2 text-left sep-col">順位</th>' +
           '<th class="p-2 text-left">名前</th>' +
           '<th class="p-2 text-right">サイト数</th>' +
-          '<th class="p-2 text-left">オンライン</th>' +
         '</tr>';
     } else {
       // 列幅：順位(64px) / サイト名(50%) / 名前(30%) / 値(20%)
@@ -175,8 +172,7 @@
             tr.innerHTML =
               '<td class="p-2 font-semibold sep-col">' + icon + '</td>' +
               '<td class="p-2 truncate second-col-pad">' + escapeHtml(fullName || "—") + '</td>' +
-              '<td class="p-2 text-right font-semibold">' + (row.site_count != null ? row.site_count : 0) + '</td>' +
-              '<td class="p-2 text-gray-500" data-presence data-user-id="' + (row.user_id ?? "") + '">⏳</td>';
+              '<td class="p-2 text-right font-semibold">' + (row.site_count != null ? row.site_count : 0) + '</td>';
           } else {
             // サイト単位（表示回数／クリック数） — “名前” 表示（姓+名 → user_name → username）
             var siteName = row.site_name || row.site_url || ("site#" + row.site_id);
@@ -193,27 +189,14 @@
           tbody.appendChild(tr);
         });
 
-        // ✅ presence は後から別で非同期ロード
-        if (type === "site") {
-          var ids = rows.map(r => r.user_id).filter(Boolean);
-          window.__rankPresenceIds = Array.from(new Set(ids));
-          if (ids.length) {
-            requestAnimationFrame(() => {  // 描画完了後に呼ぶ
-              fetch("/presence/status?user_ids=" + encodeURIComponent(ids.join(",")))
-                .then(res => res.json())
-                .then(data => renderPresence(data))
-                .catch(() => {});
-            });
-          }
-        } else {
-          clearInterval(presenceTimer);
-        }
+        // presence 機能は廃止（オンライン取得/レンダリングなし）
       })
       .catch(function(err){
         console.error("❌ ランキング読み込み失敗:", err);
         var tr = document.createElement("tr");
-        // 現在すべてのタブで列数は4
-        tr.innerHTML = '<td colspan="4" class="p-3 text-red-600">ランキングの取得に失敗しました。</td>';
+        // 列数：site=3、その他=4
+        var colspan = (type === "site") ? 3 : 4;
+        tr.innerHTML = '<td colspan="' + colspan + '" class="p-3 text-red-600">ランキングの取得に失敗しました。</td>';
         tbody.appendChild(tr);
       });
   }
@@ -232,73 +215,7 @@
     return String(s || "").replace(/[&<>"']/g, function(m){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[m]); });
   }
 
-  // ---- Presence描画（/presence/status の結果をテーブルへ反映）
-  function renderPresence(data){
-    var onlineSet = new Set((data.online_ids || []).map(Number));
-    var lastMap = data.last_seen_at || {};
-    document.querySelectorAll('[data-presence][data-user-id]').forEach(function(td){
-      var uid = td.getAttribute('data-user-id');
-      if (!uid) return;
-      if (onlineSet.has(Number(uid))) {
-        td.innerHTML = '<span class="inline-flex items-center gap-1">' +
-          '<span class="w-2 h-2 rounded-full bg-green-500 inline-block"></span>' +
-          '<span class="text-green-700">オンライン中</span>' +
-        '</span>';
-      } else {
-        var iso = lastMap[uid];
-        td.innerHTML = '<span class="text-gray-500">' + timeagoJp(iso) + '</span>';
-      }
-    });
-  }
-
-  // ISO文字列 → 日本語相対時刻
-  function timeagoJp(iso){
-    if (!iso) return "未オンライン";
-    var t = new Date(iso);
-    var sec = Math.max(1, Math.floor((Date.now() - t.getTime()) / 1000));
-    if (sec < 90) return "1分以内";
-    var min = Math.floor(sec/60);
-    if (min < 60) return min + "分前";
-    var hr = Math.floor(min/60);
-    if (hr < 24) return hr + "時間前";
-    var day = Math.floor(hr/24);
-    if (day < 7) return day + "日前";
-    var wk = Math.floor(day/7);
-    if (wk < 5) return wk + "週間前";
-    var mon = Math.floor(day/30);
-    if (mon < 12) return mon + "か月前";
-    var yr = Math.floor(day/365);
-    return yr + "年前";
-  }
-
-  // 45–90秒ごとの軽量更新（ランキング本体は再取得しない）
-  var presenceTimer;
-  function schedulePresenceRefresh(){
-    clearInterval(presenceTimer);
-    var interval = document.hidden ? 90000 : 45000;
-    presenceTimer = setInterval(function(){
-      var tds = document.querySelectorAll('[data-presence][data-user-id]');
-      if (!tds.length) return;
-      var ids = Array.from(new Set(Array.from(tds).map(function(td){ return td.getAttribute('data-user-id'); }).filter(Boolean)));
-      if (!ids.length) return;
-      fetch("/presence/status?user_ids=" + encodeURIComponent(ids.join(",")))
-        .then(function(res){ return res.json(); })
-        .then(function(data){ renderPresence(data); })
-        .catch(function(){});
-    }, interval);
-  }
-
-  // ✅ base.html からの ping 成功通知を受けて、表示中のユーザーIDで即時再取得
-  window.addEventListener("presence:pinged", function(){
-    try {
-      var ids = (window.__rankPresenceIds || []).filter(Boolean);
-      if (!ids.length) return;
-      fetch("/presence/status?user_ids=" + encodeURIComponent(Array.from(new Set(ids)).join(",")))
-        .then(function(res){ return res.json(); })
-        .then(function(data){ renderPresence(data); })
-        .catch(function(){});
-    } catch(e){}
-  });
+  // presence 関連の描画・定期更新は廃止
 
   // ====== チャット（既存） ======
   var chatUsername = "{{ current_user.username }}";

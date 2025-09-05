@@ -20,7 +20,7 @@ from flask_migrate import Migrate
 from celery import Celery
 from multiprocessing import current_process
 from app.utils.datetime import to_jst  # ← 追加
-# app/__init__.py の先頭 import 群のどこか（Flask拡張の init より前でOK）
+
 
 
 # ── Flask-拡張の“空”インスタンスを先に作成 ───────────
@@ -80,11 +80,6 @@ def create_app() -> Flask:
     app.logger.addHandler(file_handler)
     app.logger.setLevel(logging.INFO)
     app.logger.info("✅ Flaskアプリが初期化されました")  # 明示ログ
-    # --- Presence: Jinja フィルタ登録（相対時間の日本語表示） ---
-    from app.utils.presence import timeago_jp
-    @app.template_filter("timeago_jp")
-    def _timeago_filter(dt):
-        return timeago_jp(dt)
 
     # --- 追加: Jinja から to_jst() を直接呼べるようにする ---
     @app.context_processor
@@ -99,9 +94,6 @@ def create_app() -> Flask:
         app.register_blueprint(main_bp)
         app.register_blueprint(admin_bp)
         app.register_blueprint(stripe_webhook_bp)
-        # --- Presence API BluePrint 登録（UI変更なし / APIのみ追加） ---
-        from .blueprints.presence import bp as presence_bp
-        app.register_blueprint(presence_bp)
 
         app.jinja_env.filters["comma"] = comma_filter
         from . import models
@@ -116,17 +108,7 @@ def create_app() -> Flask:
         # ✅ 修正①: external_bp の import & 登録は app context 内で最後に行う
         #from .controllers.external_seo import external_bp
         #app.register_blueprint(external_bp)
-    # --- Presence: すべてのリクエストで Redis TTL を更新（DBは触らない） ---
-    from flask_login import current_user
-    from app.utils.presence import mark_online as _mark_online
-    @app.before_request
-    def _touch_presence():
-        try:
-            if current_user.is_authenticated:
-                _mark_online(current_user.id)
-        except Exception:
-            # Redis が落ちていてもアプリ全体は止めない
-            pass
+    
 
     # --- DBセッションのクリーンアップ: リクエスト終了時にロールバック＆解放 ---
     @app.teardown_request
