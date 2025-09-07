@@ -2434,7 +2434,7 @@ def api_rankings():
     # ========== 1) ユーザー毎の登録サイト数ランキング ==========
     if rank_type == "site":
         # ここは “サイト数＝Siteの件数” を数えるだけ。重い列は持たない。
-        excluded_user_ids = [1, 2, 14]
+        excluded_user_ids = [1, 2, 14, 24]
 
         # Site.user_id にインデックスが必要（下でコマンド案を出します）
         subq = (
@@ -2495,7 +2495,9 @@ def api_rankings():
         )
         .join(GSCDailyTotal, GSCDailyTotal.site_id == Site.id)
         .join(User, User.id == Site.user_id)
-        .filter(~User.id.in_([1]))  # 例の除外
+        .filter(~User.id.in_([1, 14, 24]))  # 追加：ID14・24も除外
+        # ランキングから除外するサイト名
+        .filter(~Site.name.in_(["天草生うに本舗 丸健水産オンラインショップ"]))
         .filter(GSCDailyTotal.date >= start_date, GSCDailyTotal.date <= end_date)
         .group_by(Site.id, Site.name, Site.url, User.last_name, User.first_name, User.username)
         .order_by(func.coalesce(func.sum(metric_col), 0).desc())
