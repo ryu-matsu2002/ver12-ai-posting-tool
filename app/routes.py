@@ -5485,7 +5485,12 @@ def external_seo_status():
 def external_seo_start():
     token = try_acquire()
     if not token:
-        return jsonify({"ok": False, "reason": "busy", "message": "外部SEO実行が混雑中です"}), 429
+        flash("外部SEOの同時実行は最大3件までです。しばらく待ってから再度お試しください。", "error")
+        return jsonify({
+            "ok": False,
+            "reason": "busy",
+            "message": "外部SEO実行が混雑中です"
+        }), 429
 
     # ★ セマフォ用トークンをセッションに保存（captcha_tokenとは分離）
     session["extseo_token"] = token
