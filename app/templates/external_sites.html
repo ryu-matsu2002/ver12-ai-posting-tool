@@ -470,7 +470,7 @@
                             {% if can_start_extseo %}
                               <button type="button" class="btn btn-green w-full"
                                 data-site-id="{{ s.id }}" data-account-id="{{ acc.id }}" data-platform="livedoor"
-                                onclick="handleCaptchaClick(this)">クリックで新規ブログ制作開始</button>
+                                onclick="startExtSeoIfAvailable(this)">クリックで新規ブログ制作開始</button>
                             {% else %}
                               <button type="button" class="btn btn-green w-full cursor-not-allowed" disabled
                                 title="WP記事が100記事以上">
@@ -605,7 +605,7 @@
                               {% if can_start_extseo %}
                                 <button type="button" class="btn btn-green w-full"
                                   data-site-id="{{ s.id }}" data-account-id="{{ acc.id }}" data-platform="livedoor"
-                                  onclick="handleCaptchaClick(this)">クリックで新規ブログ制作開始</button>
+                                  onclick="startExtSeoIfAvailable(this)">クリックで新規ブログ制作開始</button>
                               {% else %}
                                 <button type="button" class="btn btn-green w-full cursor-not-allowed" disabled
                                   title="WP記事が100件以上で開始できます">
@@ -984,7 +984,7 @@
       '<div class="mt-3" id="actionArea-acc-' + acc.id + '">' +
         '<button type="button" class="btn btn-green w-full" ' +
           'data-site-id="' + siteId + '" data-account-id="' + acc.id + '" data-platform="livedoor" ' +
-          'onclick="handleCaptchaClick(this)">新規ブログ制作開始</button>' +
+          'onclick="startExtSeoIfAvailable(this)">新規ブログ制作開始</button>' +
       '</div>';
     grid.prepend(card);
     ensureLdOpen(siteId);
@@ -1021,9 +1021,17 @@
         }else{
           alert(data && data.error ? data.error : "CAPTCHA画像の取得に失敗しました");
           restoreCaptchaButton(siteId, accountId, "❌ 再挑戦");
+          // 準備失敗時はセマフォ解放
+          releaseExtSeoToken();
         }
       })
-      .catch(err=>{ console.error(err); alert("CAPTCHA取得中にエラーが発生しました"); restoreCaptchaButton(siteId, accountId, "❌ 再挑戦"); });
+      .catch(err=>{
+        console.error(err);
+        alert("CAPTCHA取得中にエラーが発生しました");
+        restoreCaptchaButton(siteId, accountId, "❌ 再挑戦");
+        // 通信エラー時も解放
+        releaseExtSeoToken();
+      });
   }
 
   function closeCaptcha(){
@@ -1036,6 +1044,8 @@
       btn.classList.add("bg-blue-600"); btn.innerText="送信";
     }
     setAccProgress(0,true); captchaSubmitLocked=false;
+    // ユーザーが途中で閉じた場合もセマフォは解放しておく
+    releaseExtSeoToken();
   }
 
   function submitCaptcha(event){
@@ -1058,19 +1068,47 @@
     const payload=new URLSearchParams({"captcha_text":fd.get("captcha_text"),"site_id":siteId,"account_id":accountId,"blog":platform});
     fetch("/submit_captcha",{method:"POST",body:payload})
       .then(r=>r.json())
-      .then(data=>{
-        if(data.status==="captcha_failed"){ showToast("CAPTCHA突破に失敗しました。再度お試しください。","error"); restoreCaptchaButton(siteId, accountId, "❌ 再挑戦"); updateCaptchaStatusUI(data); closeCaptcha(); return; }
+      .then(async data=>{
+        if(data.status==="captcha_failed"){ 
+          showToast("CAPTCHA突破に失敗しました。再度お試しください。","error"); 
+          restoreCaptchaButton(siteId, accountId, "❌ 再挑戦"); 
+          updateCaptchaStatusUI(data);
+          await releaseExtSeoToken();  // 失敗時は即解放
+          closeCaptcha(); 
+          return;
+        }
         if(data.status==="captcha_success" && data.api_key_received){
           const sid=data.site_id||siteId, aid=data.account_id||accountId;
           setAccProgress(100,true); switchToPostCTA(sid,aid);
           if(progressInterval){ clearInterval(progressInterval); progressInterval=null; }
+          await releaseExtSeoToken();  // 完了時は解放
           closeCaptcha(); /* 完了トーストは表示しない */ ensureLdOpen(sid); return;
         }
-        if(data.status==="recreate_required"){ showToast("ブログ制作に失敗。『↻ ブログを再制作』からやり直してください。","error"); restoreCaptchaButton(siteId, accountId, "↻ ブログを再制作"); closeCaptcha(); return; }
-        if(data.status==="captcha_success"){ setCaptchaDoneUI(siteId, accountId); startProgressPolling(); return; }
-        showToast("予期しない応答が返されました","error"); restoreCaptchaButton(siteId, accountId, "⚠ 不明な応答"); closeCaptcha();
+        if(data.status==="recreate_required"){ 
+          showToast("ブログ制作に失敗。『↻ ブログを再制作』からやり直してください。","error"); 
+          restoreCaptchaButton(siteId, accountId, "↻ ブログを再制作"); 
+          await releaseExtSeoToken();   // 作り直し要求＝今回の実行は終了
+          closeCaptcha(); 
+          return; 
+        }
+        if(data.status==="captcha_success"){ 
+          // ここではメール認証〜API取得を待つので未解放のままポーリング継続
+          setCaptchaDoneUI(siteId, accountId); 
+          startProgressPolling(); 
+          return; 
+        }
+        showToast("予期しない応答が返されました","error");
+        restoreCaptchaButton(siteId, accountId, "⚠ 不明な応答");
+        await releaseExtSeoToken();   // 未知レスポンス時も解放
+        closeCaptcha();
       })
-      .catch(err=>{ console.error(err); showToast("CAPTCHA送信中にエラーが発生しました","error"); restoreCaptchaButton(siteId, accountId, "❌ 再挑戦"); closeCaptcha(); });
+      .catch(async err=>{
+        console.error(err);
+        showToast("CAPTCHA送信中にエラーが発生しました","error");
+        restoreCaptchaButton(siteId, accountId, "❌ 再挑戦");
+        await releaseExtSeoToken();   // 送信エラーも解放
+        closeCaptcha();
+      });
   }
 
   function startProgressPolling(){
@@ -1090,7 +1128,8 @@
             const sid=data.site_id||siteId, aid=data.account_id||accountId;
             if(sid && aid) switchToPostCTA(sid,aid);
             setAccProgress(100); clearInterval(progressInterval); progressInterval=null;
-            closeCaptcha(); /* 完了トーストは表示しない */
+            // ポーリングが「完了」を検知 → 解放してから閉じる
+            releaseExtSeoToken().finally(()=>{ closeCaptcha(); });
             ensureLdOpen(sid);
           }
         })
@@ -1135,6 +1174,32 @@
     fitSiteScrollHeight();
     fitAccountScrollHeight(document);
     initSorting();
+    // タブ閉じ/遷移時に握りっぱなし解放
+    window.addEventListener('beforeunload', ()=>{ navigator.sendBeacon && navigator.sendBeacon('/external-seo/end'); });
   });
+
+// 外部SEO同時実行制御
+async function startExtSeoIfAvailable(btn){
+  try {
+    const r = await fetch("/external-seo/start",{method:"POST",credentials:"same-origin"});
+    if(r.status===429){ showToast("現在混雑中です","error"); return; }
+    const js = await r.json();
+    if(!js.ok){ showToast(js.message||"外部SEOは実行できません","error"); return; }
+    sessionStorage.setItem("extseoToken", js.token);
+    handleCaptchaClick(btn); // 元の処理へ
+  } catch(e){
+    showToast("通信エラーにより実行できません","error");
+  }
+}
+
+async function releaseExtSeoToken(){
+  // サーバ側はセッションの extseo_token を pop するため JSON ボディ不要
+  if(!sessionStorage.getItem("extseoToken")) return;
+  try{
+    await fetch("/external-seo/end",{ method:"POST", credentials:"same-origin" });
+  }catch(e){ console.warn("release失敗", e); }
+  sessionStorage.removeItem("extseoToken");
+}
 </script>
 {% endblock %}
+

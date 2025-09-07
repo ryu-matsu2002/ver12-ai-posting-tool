@@ -4922,6 +4922,8 @@ def submit_captcha():
         for key in list(session.keys()):
             if key.startswith("captcha_") and key != "captcha_status":
                 session.pop(key)
+        if token:
+            release(token)   # ← ここを追加！        
 
 
 
@@ -5462,3 +5464,37 @@ def external_seo_new_account():
         db.session.rollback()
         logger.exception("[external_seo_new_account] error")
         return jsonify({"ok": False, "error": f"サーバエラー: {str(e)}"}), 200
+    
+
+# ────────── 外部SEO並列制御API ──────────
+from app.utils.semaphore import current_active, try_acquire, release, LIMIT
+
+@bp.route("/external-seo/status", methods=["GET"])
+@login_required
+def external_seo_status():
+    return jsonify({
+        "active": current_active(),
+        "limit": LIMIT,
+        "available": max(LIMIT - current_active(), 0)
+    })
+
+@bp.route("/external-seo/start", methods=["POST"])
+@login_required
+def external_seo_start():
+    token = try_acquire()
+    if not token:
+        return jsonify({"ok": False, "reason": "busy", "message": "外部SEO実行が混雑中です"}), 429
+
+    # ★ セマフォ用トークンをセッションに保存（captcha_tokenとは分離）
+    session["extseo_token"] = token
+    return jsonify({"ok": True, "token": token})
+
+@bp.route("/external-seo/end", methods=["POST"])
+@login_required
+def external_seo_end():
+    # ★ JSON bodyからではなくセッションに保存したextseo_tokenを解放する
+    token = session.pop("extseo_token", None)
+    if not token:
+        return jsonify({"ok": False, "error": "no active external-seo token"}), 400
+    release(token)
+    return jsonify({"ok": True})
