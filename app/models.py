@@ -144,6 +144,8 @@ class Article(db.Model):
     status      = db.Column(db.String(20),  default="pending")   # pending/gen/done/error
     progress    = db.Column(db.Integer,     default=0)           # 0-100
     posted_url = db.Column(db.String(512), nullable=True)  # ✅ ←追加部分
+    # ✅ NEW: WordPress上のpost ID（公開後に確定）。無ければURLから解決も可能
+    wp_post_id  = db.Column(db.Integer, nullable=True, index=True)
 
     source = db.Column(db.String(50), default="manual")  # "manual", "gsc", "other"
 
@@ -458,3 +460,121 @@ class GSCDailyTotal(db.Model):
     # 参照（必要に応じて利用）
     site = db.relationship("Site", backref=db.backref("gsc_daily_totals", lazy="dynamic"))
     user = db.relationship("User", backref=db.backref("gsc_daily_totals", lazy="dynamic"))
+
+# >>> INTERNAL SEO: モデル追加（設定 / インデックス / グラフ / 監査ログ）
+
+class InternalSeoConfig(db.Model):
+    __tablename__ = "internal_seo_configs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("site.id"), nullable=False, unique=True, index=True)
+
+    # 実装仕様に合わせたデフォルト（本文リンクは最小2/最大5を厳守）
+    min_links_per_post = db.Column(db.Integer, nullable=False, default=2)
+    max_links_per_post = db.Column(db.Integer, nullable=False, default=5)
+    insert_related_block = db.Column(db.Boolean, nullable=False, default=True)
+    related_block_size = db.Column(db.Integer, nullable=False, default=4)
+    min_paragraph_len = db.Column(db.Integer, nullable=False, default=80)
+
+    # モード: auto（自動適用）/ assist（レビュー経由）/ off（無効）
+    mode = db.Column(db.String(10), nullable=False, default="assist")
+
+    # アンカー多様化のクールダウン（日数）
+    avoid_exact_anchor_repeat_days = db.Column(db.Integer, nullable=False, default=30)
+
+    # 対象記事フィルタ
+    exclude_topic_in_url = db.Column(db.Boolean, nullable=False, default=True)
+    link_to_status = db.Column(db.String(20), nullable=False, default="publish")  # 例: publish のみ
+
+    # レート制限
+    rate_limit_per_minute = db.Column(db.Integer, nullable=False, default=10)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    site = db.relationship("Site", backref=db.backref("internal_seo_config", uselist=False))
+
+
+class ContentIndex(db.Model):
+    """
+    WP公開記事のインデックスキャッシュ（検索・類似度計算のため）
+    """
+    __tablename__ = "content_index"
+    id = db.Column(db.Integer, primary_key=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("site.id"), nullable=False, index=True)
+    wp_post_id = db.Column(db.Integer, nullable=True, index=True)
+
+    title = db.Column(db.String(255), nullable=False)
+    url = db.Column(db.String(512), nullable=False, index=True)
+    slug = db.Column(db.String(255), nullable=True)
+    status = db.Column(db.String(20), nullable=False, default="publish")
+    published_at = db.Column(db.DateTime, nullable=True, index=True)
+    updated_at = db.Column(db.DateTime, nullable=True, index=True)
+
+    # 解析用（HTML除去済の本文）
+    raw_text = db.Column(db.Text, nullable=True)
+    keywords = db.Column(db.Text, nullable=True)  # CSVの軽い保存（将来は正規化/別テーブルも可）
+
+    # ベクトル埋め込みは後で拡張（別テーブル or JSON等）。ここではプレースホルダ
+    embedding = db.Column(db.LargeBinary, nullable=True)
+
+    last_indexed_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    site = db.relationship("Site", backref=db.backref("content_index", lazy="dynamic"))
+
+    __table_args__ = (
+        db.Index("ix_content_index_site_url", "site_id", "url"),
+    )
+
+
+class InternalLinkGraph(db.Model):
+    """
+    記事間の類似度と候補リンク（source -> target）
+    """
+    __tablename__ = "internal_link_graph"
+    id = db.Column(db.Integer, primary_key=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("site.id"), nullable=False, index=True)
+    source_post_id = db.Column(db.Integer, nullable=False, index=True)  # 対象: ContentIndex.wp_post_id or Article.wp_post_id
+    target_post_id = db.Column(db.Integer, nullable=False, index=True)
+
+    score = db.Column(db.Float, nullable=False, default=0.0)  # 0-1
+    reason = db.Column(db.String(50), nullable=True)  # "topic_cluster", "keyword_match", "embedding" など
+    last_evaluated_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        db.UniqueConstraint("site_id", "source_post_id", "target_post_id", name="uq_ilg_site_src_tgt"),
+        db.Index("ix_ilg_site_src_score", "site_id", "source_post_id", "score"),
+    )
+
+
+class InternalLinkAction(db.Model):
+    """
+    適用/差し戻しなどの監査ログ（本文内/関連記事ブロック/置換も含む）
+    """
+    __tablename__ = "internal_link_actions"
+    id = db.Column(db.Integer, primary_key=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("site.id"), nullable=False, index=True)
+
+    post_id = db.Column(db.Integer, nullable=False, index=True)         # ソースのWP post id
+    target_post_id = db.Column(db.Integer, nullable=False, index=True)  # ターゲットのWP post id
+
+    anchor_text = db.Column(db.String(255), nullable=False)
+    position = db.Column(db.String(50), nullable=False)  # 'p:3'（段落3）/ 'related_block' など
+    status = db.Column(db.String(20), nullable=False, default="pending")  # pending/applied/reverted/skipped
+
+    applied_at = db.Column(db.DateTime, nullable=True, index=True)
+    reverted_at = db.Column(db.DateTime, nullable=True, index=True)
+
+    # 監査用の短い抜粋
+    diff_before_excerpt = db.Column(db.Text, nullable=True)
+    diff_after_excerpt = db.Column(db.Text, nullable=True)
+
+    job_id = db.Column(db.String(64), nullable=True, index=True)
+    reason = db.Column(db.String(50), nullable=True)  # 'auto_apply', 'review_approved', 'swap' など
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        db.Index("ix_ila_site_post_status", "site_id", "post_id", "status"),
+    )
