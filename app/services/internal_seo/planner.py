@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 # ---------- テキスト/段落分割系 ----------
 
 _P_CLOSE = re.compile(r"</p\s*>", re.IGNORECASE)
+_BR_SPLIT = re.compile(r"<br\s*/?>", re.IGNORECASE)
 _A_TAG = re.compile(r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a\s*>', re.IGNORECASE | re.DOTALL)
 _TAG_STRIP = re.compile(r"<[^>]+>")
 
@@ -31,8 +32,11 @@ JP_TOKEN = re.compile(r"[一-龥ぁ-んァ-ンーA-Za-z0-9]{2,}")
 def _split_paragraphs_from_html(html: str) -> List[str]:
     if not html:
         return []
-    parts = _P_CLOSE.split(html)
-    cleaned = [p.strip() for p in parts if p.strip()]
+    # まず </p> で分割。なければ <br> でも分割して最低限の段落を作る
+    parts = [p for p in _P_CLOSE.split(html) if p is not None]
+    if len(parts) <= 1:
+        parts = [p for p in _BR_SPLIT.split(html) if p is not None]
+    cleaned = [p.strip() for p in parts if (p and p.strip())]
     return cleaned
 
 def _html_to_text(s: str) -> str:
@@ -70,9 +74,13 @@ def _pick_paragraph_slots(paragraphs: List[str], need: int, min_len: int) -> Lis
     序盤・中盤・終盤に分散するように段落indexを選ぶ。
     短すぎる段落は除外。
     """
+    # 短い記事にも対応するため、閾値未満でも最終的にフォールバックで拾う
     eligible = [i for i, p in enumerate(paragraphs) if _html_to_text(p) and len(_html_to_text(p)) >= min_len]
     if not eligible:
-        return []
+        # 1文でもある段落を対象にフォールバック（安全に末尾挿入）
+        eligible = [i for i, p in enumerate(paragraphs) if _html_to_text(p)]
+        if not eligible:
+            return []
     # 3ゾーンで均等抽出（必要数に応じて）
     zones = []
     n = len(eligible)
@@ -137,10 +145,16 @@ def _top_targets_for_source(site_id: int, src_post_id: int, topk: int, min_score
         .limit(topk * 3)  # 後でフィルタする余裕を持たせる
         .all()
     )
-    return [(int(t), float(s)) for (t, s) in rows if s is not None and s >= min_score]
+    return [(int(t), float(s)) for (t, s) in rows if s is not None and float(s) >= float(min_score)]
 
 
-def plan_links_for_post(site_id: int, src_post_id: int, mode_swap_check: bool = True) -> PlanStats:
+def plan_links_for_post(
+    site_id: int,
+    src_post_id: int,
+    mode_swap_check: bool = True,
+    min_score: float = 0.05,        # ← デフォルトを 0.05 に（link_graph と揃える）
+    max_candidates: int = 60        # ← 余裕を持って拾う
+) -> PlanStats:
     """
     単一記事に対して本文内リンク 2-5本の計画を作成し、InternalLinkAction(pending) で保存。
     swapチェックONの場合は既存リンクと比較して置換候補も生成（pending, reason='swap_candidate'）。
@@ -174,7 +188,7 @@ def plan_links_for_post(site_id: int, src_post_id: int, mode_swap_check: bool = 
     # 3) 候補ターゲットの収集（スコア順）
     #    - 既存リンク先は優先度下げ（まずは新顔を入れたい）
     #    - 自身は除外
-    raw_candidates = _top_targets_for_source(site_id, src_post_id, topk=20, min_score=0.10)
+    raw_candidates = _top_targets_for_source(site_id, src_post_id, topk=max_candidates, min_score=min_score)
     candidates: List[int] = []
     for t, s in raw_candidates:
         if t == src_post_id:
@@ -186,12 +200,16 @@ def plan_links_for_post(site_id: int, src_post_id: int, mode_swap_check: bool = 
         logger.info("[Planner] src=%s no fresh candidates", src_post_id)
 
     # 4) 2〜5本の本数決定（Config固定仕様に従う）
-    need_min = max(2, int(cfg.min_links_per_post or 2))
-    need_max = min(5, int(cfg.max_links_per_post or 5))
+    # 段落が短めの記事を救うため閾値を少し緩く（サイト設定があればそれを尊重）
+    need_min = max(2, int(getattr(cfg, "min_links_per_post", 2) or 2))
+    need_max = min(5, int(getattr(cfg, "max_links_per_post", 5) or 5))
     need = min(max(need_min, 2), need_max)
 
     # 5) 段落スロット選定
-    slots = _pick_paragraph_slots(paragraphs, need=need, min_len=int(cfg.min_paragraph_len or 80))
+    # 段落長の閾値を緩和（最低 50 文字に下げる）
+    min_len = int(getattr(cfg, "min_paragraph_len", 80) or 80)
+    min_len = max(50, min_len)
+    slots = _pick_paragraph_slots(paragraphs, need=need, min_len=min_len)
     if not slots:
         logger.info("[Planner] src=%s no suitable paragraphs", src_post_id)
         return stats
@@ -307,6 +325,8 @@ def plan_links_for_site(
     site_id: int,
     limit_sources: Optional[int] = None,
     mode_swap_check: bool = True,
+    min_score: float = 0.05,
+    max_candidates: int = 60,
 ) -> Dict[str, int]:
     """
     サイト全体の計画を作る（pending行を蓄積）。大量サイト向けに limit_sources で刻み実行。
@@ -334,7 +354,13 @@ def plan_links_for_site(
     processed = 0
 
     for src_post_id in src_ids:
-        st = plan_links_for_post(site_id, src_post_id, mode_swap_check=mode_swap_check)
+        st = plan_links_for_post(
+            site_id,
+            src_post_id,
+            mode_swap_check=mode_swap_check,
+            min_score=min_score,
+            max_candidates=max_candidates,
+        )
         planned += st.planned_actions
         swaps += st.swap_candidates
         processed += st.posts_processed
