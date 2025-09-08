@@ -58,6 +58,7 @@ def register_cli(app):
         res = apply_actions_for_site(site_id, limit_posts=limit_posts, dry_run=False)
         click.echo(f"  -> {res}")
 
+    @with_db_retry(max_retries=4, backoff=1.6)
     def run_pipeline_with_log(site_id, pages, per_page, min_score, max_k, limit_sources, limit_posts, incremental, job_kind):
         """
         1ラン全体を InternalSeoRun に記録するラッパ。
@@ -73,6 +74,7 @@ def register_cli(app):
         )
         db.session.add(run)
         db.session.commit()  # id を確定させる
+        click.echo(f"[Run] started id={run.id} site={site_id} kind={job_kind}")
 
         t0 = time.perf_counter()
         try:
@@ -116,6 +118,7 @@ def register_cli(app):
                 },
             }
             db.session.commit()
+            click.echo(f"[Run] success id={run.id} duration_ms={duration_ms}")
         except Exception as e:
             # ❹ 失敗時のロギング
             duration_ms = int((time.perf_counter() - t0) * 1000)
@@ -128,6 +131,6 @@ def register_cli(app):
             run.stats["error"] = {"type": e.__class__.__name__, "message": str(e)}
             db.session.add(run)
             db.session.commit()
-            click.echo(f"[ERROR] internal-seo-run failed: {e}")
+            click.echo(f"[Run] error id={run.id} duration_ms={duration_ms} err={e}")
             # エラーでも CLI 自体は終了させず戻る（cron運用を想定）
             return    
