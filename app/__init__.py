@@ -51,7 +51,10 @@ def create_app() -> Flask:
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["STRIPE_WEBHOOK_SECRET"] = os.getenv("STRIPE_WEBHOOK_SECRET")
 
-    # ─── SQLAlchemy 接続プール設定 ──────────────
+    # ─── SQLAlchemy 接続プール設定（切断に強くする） ──────────────
+    #  - pool_pre_ping: 事前に接続をヘルスチェックして自動再接続
+    #  - pool_recycle: 使い回し時間の上限（DB側のidle timeoutより短めに）
+    #  - connect_args: PostgreSQL/psycopg2 の TCP keepalive
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
         "pool_size": int(os.getenv("POOL_SIZE", 50)),
         "max_overflow": int(os.getenv("MAX_OVERFLOW", 100)),
@@ -119,7 +122,18 @@ def create_app() -> Flask:
                 db.session.rollback()
         finally:
             # 正常/異常に関わらず remove して接続とスコープを解放
-            db.session.remove()    
+            db.session.remove()   
+
+    # --- 追加: CLI / バックグラウンド（スケジューラ）でも確実に解放 ---
+    # Flaskリクエスト外（flask shell / CLI / バッチ）では teardown_request が走らないため、
+    # アプリコンテキスト終了時にも必ずクリーンアップして接続を健全に保つ。
+    @app.teardown_appcontext
+    def _cleanup_session_appcontext(exception):
+        try:
+            if exception is not None:
+                db.session.rollback()
+        finally:
+            db.session.remove()         
 
     # ✅ スケジューラー起動（jobsロールのプロセスだけ）
     #    systemd から JOBS_ROLE=jobs を与えたときのみ起動する
