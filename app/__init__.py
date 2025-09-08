@@ -180,6 +180,11 @@ def create_app() -> Flask:
         app.logger.info("ℹ️ PWController: disabled on role=%s", role)
 
 
+     # --- CLIコマンド登録（内部SEOパイプライン実行） ---
+    # ここでインポートするのは循環参照を避けるため（関数内インポート）
+    from app.cli_internal_seo import register_cli
+    register_cli(app)
+    
     login_manager.login_view = "main.login"
     return app
 
