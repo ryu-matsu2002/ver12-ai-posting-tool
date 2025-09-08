@@ -280,6 +280,10 @@ def apply_actions_for_post(site_id: int, src_post_id: int, dry_run: bool = False
     # 差分作成
     new_html, res = _apply_plan_to_html(site, src_post_id, wp_post.content_html, actions, cfg, url_map)
 
+    if dry_run:
+        # ドライランではDBを一切変更しない
+        return res
+
     # 監査用の抜粋
     before_excerpt = _html_to_text(wp_post.content_html)[:280]
     after_excerpt = _html_to_text(new_html)[:280]
@@ -294,9 +298,6 @@ def apply_actions_for_post(site_id: int, src_post_id: int, dry_run: bool = False
             a.status = a.status if a.status == "applied" else "skipped"
             a.updated_at = datetime.utcnow()
     db.session.commit()
-
-    if dry_run:
-        return res
 
     # WPへ反映
     ok = update_post_content(site, src_post_id, new_html)
