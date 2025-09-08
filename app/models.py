@@ -5,6 +5,12 @@ from flask_login import UserMixin
 from sqlalchemy import DateTime
 from . import db
 from app import db
+from sqlalchemy import Text
+try:
+    # Postgres なら JSONB に自動マッピングされます（SQLAlchemy の JSON 型）
+    from sqlalchemy import JSON as SA_JSON
+except Exception:
+    SA_JSON = db.JSON
 
 # ──── ユーザ ────
 class User(db.Model, UserMixin):
@@ -578,3 +584,38 @@ class InternalLinkAction(db.Model):
     __table_args__ = (
         db.Index("ix_ila_site_post_status", "site_id", "post_id", "status"),
     )
+
+class InternalSeoRun(db.Model):
+    """
+    内部SEOの 1 回の実行ログ（インデックス→グラフ→計画→適用までのサマリー）
+    ダッシュボードでの可視化・失敗時の原因追跡・再実行トリガに利用。
+    """
+    __tablename__ = "internal_seo_runs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("site.id"), nullable=False, index=True)
+
+    # 実行メタ
+    job_kind = db.Column(db.String(20), nullable=False, default="manual")  # manual / regular / daily_sweep など
+    status = db.Column(db.String(20), nullable=False, default="running")   # running / success / error
+    message = db.Column(Text, nullable=True)                               # 失敗時の要約や注意
+
+    started_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    ended_at   = db.Column(db.DateTime, nullable=True, index=True)
+    duration_ms = db.Column(db.Integer, nullable=True)                     # 便利な所要時間(ms)
+
+    # 各フェーズの統計を JSON で保存（例：
+    # {"indexer":{"processed":930,"created_or_updated":930,"pages":9},
+    #  "graph":{"sources":930,"edges_upserted":5736},
+    #  "planner":{"planned":304,"swap_candidates":0,"processed":200},
+    #  "applier":{"applied":88,"swapped":0,"skipped":0,"processed_posts":50}}
+    stats = db.Column(SA_JSON, nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    site = db.relationship("Site", backref=db.backref("internal_seo_runs", lazy="dynamic"))
+
+    __table_args__ = (
+        db.Index("ix_internal_seo_runs_site_status_started", "site_id", "status", "started_at"),
+    )    
