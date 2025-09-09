@@ -575,17 +575,18 @@ def generate_and_schedule_external_articles(
     site = Site.query.get(site_id)
     assert site, "Site not found"
 
-    # === 最終ガード：通常記事が50件未満なら中断 ==========================
+    # === 最終ガード：WPに「投稿済み」の通常記事が100件未満なら中断 ========
     # external/generator を直接叩かれても UI/ルートをすり抜けられないようにサーバ側でブロック
-    normal_count = (
+    # 対象：source が external 以外 かつ status が posted/published のみ（done は含めない）
+    wp_posted_count = (
         Article.query
         .filter(Article.site_id == site_id)
         .filter(or_(Article.source.is_(None), Article.source != "external"))
-        .filter(Article.status.in_(["done", "published", "posted"]))
+        .filter(Article.status.in_(["posted", "published"]))
         .count()
     )
-    if normal_count < 50:
-        raise RuntimeError(f"[external_seo] 通常記事が50件未満のため中断しました（現在:{normal_count}件）。")
+    if wp_posted_count < 100:
+        raise RuntimeError(f"[external_seo] WP投稿済みの通常記事が100件未満のため中断しました（現在:{wp_posted_count}件）。")
     # ================================================================
 
     # === キーワード上位40件（impressions降順） ===
