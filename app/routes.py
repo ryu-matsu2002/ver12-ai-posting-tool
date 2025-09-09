@@ -1896,9 +1896,9 @@ def admin_captcha_dataset():
 import os
 import threading
 from datetime import datetime
-from flask import render_template, request, redirect, url_for, flash, current_app, abort
+from flask import render_template, request, redirect, url_for, flash, current_app, abort, jsonify, make_response
 from flask_login import login_required, current_user
-from sqlalchemy import desc
+from sqlalchemy import desc, and_, or_
 from sqlalchemy.orm import load_only, defer
 
 from app import db
@@ -1922,8 +1922,7 @@ def _enqueue_internal_seo_run(app, *, site_id: int, pages: int, per_page: int,
             incremental=incremental,
             job_kind=job_kind,
         )
-# 追加のインポート
-from flask import jsonify, make_response
+
 
 # ---- JSON: 1ラン分の stats をオンデマンドで返す ----
 @admin_bp.route("/admin/internal-seo/run/<int:run_id>/stats", methods=["GET"])
@@ -1932,29 +1931,54 @@ def admin_internal_seo_run_stats(run_id: int):
     if not getattr(current_user, "is_admin", False):
         abort(403)
 
-    # その行だけ読み込む（一覧ではdeferしているが、ここではstatsが必要）
     run = InternalSeoRun.query.get_or_404(run_id)
     payload = {"ok": True, "stats": run.stats or {}}
 
-    # 軽いブラウザキャッシュ（再表示を速く）
     resp = make_response(jsonify(payload))
     resp.headers["Cache-Control"] = "public, max-age=30"
     return resp
 
 
+# ---- 画面本体（超軽量：runs はここで取得しない） ----
 @admin_bp.route("/admin/internal-seo", methods=["GET"])
 @login_required
 def admin_internal_seo_index():
-    # 管理者限定
     if not getattr(current_user, "is_admin", False):
         abort(403)
 
-    # ---- クエリパラメータ（ページング）----
     selected_site_id = request.args.get("site_id", type=int)
-    page = request.args.get("page", default=1, type=int)
-    per_page = request.args.get("per_page", default=50, type=int)  # 旧:200 → 50
+    per_page = request.args.get("per_page", default=50, type=int)
 
-    # ---- ラン履歴：必要な列のみ＋statsはdefer（遅延）----
+    # サイト一覧のみ（軽量）
+    sites = Site.query.options(load_only(Site.id, Site.name)) \
+                      .order_by(Site.id.asc()).all()
+
+    return render_template(
+        "admin/internal_seo.html",
+        sites=sites,
+        runs=[],  # 初期は空。JS が /list を叩いて埋める
+        selected_site_id=selected_site_id,
+        per_page=per_page,
+        # キーセット用に最初のカーソルは未指定
+        initial_cursor_ts=None,
+        initial_cursor_id=None,
+    )
+
+
+# ---- JSON: 実行履歴（キーセットページネーション） ----
+@admin_bp.route("/admin/internal-seo/list", methods=["GET"])
+@login_required
+def admin_internal_seo_list():
+    if not getattr(current_user, "is_admin", False):
+        abort(403)
+
+    site_id = request.args.get("site_id", type=int)
+    limit = min(max(request.args.get("limit", type=int, default=50), 1), 200)
+
+    # キーセットカーソル（前回の最後の1件の started_at / id）
+    cursor_ts_str = request.args.get("cursor_ts")   # ISO文字列 or None
+    cursor_id = request.args.get("cursor_id", type=int)
+
     q = InternalSeoRun.query.options(
         load_only(
             InternalSeoRun.id,
@@ -1965,28 +1989,63 @@ def admin_internal_seo_index():
             InternalSeoRun.ended_at,
             InternalSeoRun.duration_ms,
         ),
-        defer(InternalSeoRun.stats),  # 重いJSON列は最初は読まない
-    )
-    if selected_site_id:
-        q = q.filter(InternalSeoRun.site_id == selected_site_id)
-
-    runs_paginated = q.order_by(desc(InternalSeoRun.started_at)) \
-                      .paginate(page=page, per_page=per_page, error_out=False)
-
-    # ---- サイト一覧：ドロップダウン用に最小列だけ ----
-    sites = Site.query.options(load_only(Site.id, Site.name)) \
-                      .order_by(Site.id.asc()).all()
-
-    return render_template(
-        "admin/internal_seo.html",
-        sites=sites,
-        runs=runs_paginated.items,
-        pagination=runs_paginated,
-        selected_site_id=selected_site_id,
-        per_page=per_page,
+        defer(InternalSeoRun.stats),
     )
 
+    if site_id:
+        q = q.filter(InternalSeoRun.site_id == site_id)
 
+    # 並び順は started_at DESC, id DESC
+    q = q.order_by(desc(InternalSeoRun.started_at), desc(InternalSeoRun.id))
+
+    # カーソル指定があれば “それよりも前（desc 的に小さい）”
+    if cursor_ts_str:
+        try:
+            # 文字列→datetime（ISO 8601）。タイムゾーン付ならそのまま、無ければ naive として扱う
+            cursor_ts = datetime.fromisoformat(cursor_ts_str.replace("Z", "+00:00"))
+        except Exception:
+            cursor_ts = None
+
+        if cursor_ts is not None and cursor_id is not None:
+            q = q.filter(
+                or_(
+                    InternalSeoRun.started_at < cursor_ts,
+                    and_(
+                        InternalSeoRun.started_at == cursor_ts,
+                        InternalSeoRun.id < cursor_id,
+                    ),
+                )
+            )
+
+    items = q.limit(limit).all()
+
+    # 次ページ用カーソル
+    next_cursor_ts = items[-1].started_at.isoformat() if items else None
+    next_cursor_id = items[-1].id if items else None
+    has_more = bool(items) and (len(items) == limit)
+
+    # JSON を薄く返す（テンプレでフォーマットする）
+    def _row(r):
+        return dict(
+            id=r.id,
+            site_id=r.site_id,
+            status=r.status,
+            job_kind=r.job_kind,
+            started_at=r.started_at.isoformat() if r.started_at else None,
+            ended_at=r.ended_at.isoformat() if r.ended_at else None,
+            duration_ms=r.duration_ms,
+        )
+
+    return jsonify(dict(
+        ok=True,
+        rows=[_row(r) for r in items],
+        next_cursor_ts=next_cursor_ts,
+        next_cursor_id=next_cursor_id,
+        has_more=has_more,
+    ))
+
+
+# ---- 手動実行（非同期トリガ） ----
 @admin_bp.route("/admin/internal-seo/run", methods=["POST"])
 @login_required
 def admin_internal_seo_run():
@@ -1998,7 +2057,6 @@ def admin_internal_seo_run():
         flash("site_id は必須です", "warning")
         return redirect(url_for("admin.admin_internal_seo_index"))
 
-    # フォーム → 環境変数 → 既定値
     def _env_int(key: str, default: int) -> int:
         return int(os.getenv(key, default))
 
@@ -2033,9 +2091,7 @@ def admin_internal_seo_run():
     ).start()
 
     flash(f"Site {site_id} の内部SEOをキューに投入しました。1～数分後に一覧へ反映されます。", "success")
-    # 303 See Other に相当（リロードで二重POST防止）
     return redirect(url_for("admin.admin_internal_seo_index", site_id=site_id), code=303)
-
 
 
 # ────────────── キーワード ──────────────

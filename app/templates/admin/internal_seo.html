@@ -9,7 +9,7 @@
   <form class="row gy-2 gx-2 align-items-end mb-3" method="get" action="{{ url_for('admin.admin_internal_seo_index') }}">
     <div class="col-auto">
       <label class="form-label">Site</label>
-      <select name="site_id" class="form-select">
+      <select name="site_id" class="form-select" id="siteSelect">
         <option value="">すべて</option>
         {% for s in sites %}
           <option value="{{ s.id }}" {% if selected_site_id==s.id %}selected{% endif %}>
@@ -22,7 +22,7 @@
     <div class="col-auto">
       <label class="form-label">表示件数</label>
       {% set pp = per_page or 50 %}
-      <select name="per_page" class="form-select">
+      <select name="per_page" class="form-select" id="perPageSelect">
         {% for n in [25,50,100,200] %}
           <option value="{{ n }}" {% if pp==n %}selected{% endif %}>{{ n }}</option>
         {% endfor %}
@@ -31,7 +31,7 @@
 
     <div class="col-auto">
       <button class="btn btn-primary">絞り込み</button>
-      {% if selected_site_id or (pagination and pagination.page>1) %}
+      {% if selected_site_id %}
         <a class="btn btn-outline-secondary" href="{{ url_for('admin.admin_internal_seo_index') }}">解除</a>
       {% endif %}
     </div>
@@ -86,7 +86,7 @@
     </div>
   </form>
 
-  <!-- 実行履歴（軽量） -->
+  <!-- 実行履歴（JS で非同期ロード） -->
   <div class="table-responsive">
     <table class="table table-sm table-striped align-middle">
       <thead>
@@ -101,63 +101,15 @@
           <th style="width:90px">詳細</th>
         </tr>
       </thead>
-      <tbody>
-        {% for r in runs %}
-        <tr>
-          <td>{{ r.id }}</td>
-          <td>{{ r.site_id }}</td>
-          <td>
-            {% if r.status == 'success' %}
-              <span class="badge bg-success">success</span>
-            {% elif r.status == 'running' %}
-              <span class="badge bg-info text-dark">running</span>
-            {% elif r.status == 'error' %}
-              <span class="badge bg-danger">error</span>
-            {% else %}
-              <span class="badge bg-secondary">{{ r.status }}</span>
-            {% endif %}
-          </td>
-          <td class="text-muted">{{ r.job_kind }}</td>
-          <td>
-            <time class="dt" data-iso="{{ r.started_at.isoformat() if r.started_at }}">{{ r.started_at or '-' }}</time>
-          </td>
-          <td>
-            <time class="dt" data-iso="{{ r.ended_at.isoformat() if r.ended_at }}">{{ r.ended_at or '-' }}</time>
-          </td>
-          <td>{{ r.duration_ms or '-' }}</td>
-          <td>
-            <button class="btn btn-sm btn-outline-primary"
-                    data-run-id="{{ r.id }}"
-                    onclick="openStatsModal(this)">
-              詳細
-            </button>
-          </td>
-        </tr>
-        {% endfor %}
+      <tbody id="runsBody">
+        <tr id="placeholderRow"><td colspan="8" class="text-muted">読み込み中…</td></tr>
       </tbody>
     </table>
   </div>
 
-  <!-- ページング -->
-  {% if pagination %}
-  <nav class="mt-3 d-flex align-items-center gap-2">
-    {% if pagination.has_prev %}
-      <a class="btn btn-sm btn-outline-secondary"
-         href="{{ url_for('admin.admin_internal_seo_index', site_id=selected_site_id, page=pagination.prev_num, per_page=per_page) }}">← Prev</a>
-    {% else %}
-      <span class="btn btn-sm btn-outline-secondary disabled">← Prev</span>
-    {% endif %}
-
-    <span>Page {{ pagination.page }} / {{ pagination.pages or 1 }}</span>
-
-    {% if pagination.has_next %}
-      <a class="btn btn-sm btn-outline-secondary"
-         href="{{ url_for('admin.admin_internal_seo_index', site_id=selected_site_id, page=pagination.next_num, per_page=per_page) }}">Next →</a>
-    {% else %}
-      <span class="btn btn-sm btn-outline-secondary disabled">Next →</span>
-    {% endif %}
-  </nav>
-  {% endif %}
+  <div class="d-flex">
+    <button id="loadMoreBtn" class="btn btn-outline-secondary ms-auto d-none" type="button">もっと見る</button>
+  </div>
 </div>
 
 <!-- 詳細モーダル -->
@@ -179,83 +131,135 @@
     </div>
   </div>
 </div>
-
 {% endblock %}
 
 {% block scripts %}
 {{ super() }}
 <script>
 // 軽量なローカル時刻表示
-(() => {
-  const nodes = document.querySelectorAll('time.dt[data-iso]');
-  for (const n of nodes) {
-    const iso = n.getAttribute('data-iso');
-    if (!iso) continue;
-    try {
-      const d = new Date(iso);
-      // YYYY-MM-DD HH:mm:ss (local)
-      const pad = (x)=> String(x).padStart(2,'0');
-      const s = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} `
-              + `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-      n.textContent = s;
-      n.title = iso;
-    } catch(e) {}
+function fmtLocal(iso) {
+  if (!iso) return '-';
+  try {
+    const d = new Date(iso);
+    const pad = (x)=> String(x).padStart(2,'0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} `
+         + `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  } catch(e) {
+    return iso;
   }
-})();
+}
+
+function statusBadge(st) {
+  if (st === 'success') return '<span class="badge bg-success">success</span>';
+  if (st === 'running') return '<span class="badge bg-info text-dark">running</span>';
+  if (st === 'error')   return '<span class="badge bg-danger">error</span>';
+  return `<span class="badge bg-secondary">${st || '-'}</span>`;
+}
 
 // 詳細モーダル（必要時のみ stats を取得）
 async function openStatsModal(btn) {
   const runId = btn.getAttribute('data-run-id');
   const body = document.getElementById('statsBody');
   body.innerHTML = '<div class="text-muted">読み込み中…</div>';
-
-  // 推奨エンドポイント: GET /admin/internal-seo/run/<run_id>/stats → JSON
-  // 例）{ ok:true, stats:{ indexer:{...}, link_graph:{...}, planner:{...}, applier:{...}, params:{...} } }
   const url = `/admin/internal-seo/run/${runId}/stats`;
   try {
     const res = await fetch(url, {headers: {'Accept': 'application/json'}});
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-
-    if (!data || !data.ok) {
-      body.innerHTML = `<div class="text-danger">読み込み失敗: ${data && data.error || 'unknown'}</div>`;
-    } else {
-      const s = data.stats || {};
-      // 表示最適化：存在するブロックだけを出す
-      const rows = [];
-      if (s.indexer) rows.push(renderRow('Indexer', s.indexer));
-      if (s.link_graph) rows.push(renderRow('LinkGraph', s.link_graph));
-      if (s.planner) rows.push(renderRow('Planner', s.planner));
-      if (s.applier) rows.push(renderRow('Applier', s.applier));
-      if (s.params) rows.push(renderRow('Params', s.params));
-
-      body.innerHTML = rows.length
-        ? `<table class="table table-sm">
-             <tbody>${rows.join('')}</tbody>
-           </table>`
-        : '<div class="text-muted">詳細データなし</div>';
-    }
+    const s = (data && data.stats) || {};
+    const rows = [];
+    if (s.indexer)   rows.push(renderRow('Indexer',   s.indexer));
+    if (s.link_graph)rows.push(renderRow('LinkGraph', s.link_graph));
+    if (s.planner)   rows.push(renderRow('Planner',   s.planner));
+    if (s.applier)   rows.push(renderRow('Applier',   s.applier));
+    if (s.params)    rows.push(renderRow('Params',    s.params));
+    document.getElementById('statsBody').innerHTML = rows.length
+      ? `<table class="table table-sm"><tbody>${rows.join('')}</tbody></table>`
+      : '<div class="text-muted">詳細データなし</div>';
   } catch (e) {
     body.innerHTML = `<div class="text-danger">エラー: ${e.message}</div>`;
   }
-
-  // Bootstrap モーダルを開く
   const modal = new bootstrap.Modal(document.getElementById('statsModal'));
   modal.show();
 }
 
 function renderRow(title, obj) {
-  // キー=値の簡易テーブル化
-  const esc = (v) => {
-    if (v === null || v === undefined) return '';
-    return String(v)
-      .replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
-  };
+  const esc = (v) => (v===null||v===undefined)? '' : String(v).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
   const kv = Object.entries(obj).map(([k,v]) => {
     if (typeof v === 'object' && v !== null) v = JSON.stringify(v);
     return `<tr><th class="w-25">${esc(k)}</th><td>${esc(v)}</td></tr>`;
   }).join('');
   return `<tr class="table-active"><th colspan="2">${esc(title)}</th></tr>${kv}`;
 }
+
+// 非同期ロード（キーセット）
+let nextCursorTs = null;
+let nextCursorId = null;
+let loading = false;
+let reachedEnd = false;
+
+async function loadRuns(initial=false) {
+  if (loading || reachedEnd) return;
+  loading = true;
+
+  const tbody = document.getElementById('runsBody');
+  const ph = document.getElementById('placeholderRow');
+  if (ph) ph.remove();
+
+  const params = new URLSearchParams();
+  const siteId = document.getElementById('siteSelect')?.value || '';
+  const perPage = document.getElementById('perPageSelect')?.value || '50';
+  if (siteId) params.set('site_id', siteId);
+  params.set('limit', perPage);
+  if (!initial && nextCursorTs && nextCursorId) {
+    params.set('cursor_ts', nextCursorTs);
+    params.set('cursor_id', nextCursorId);
+  }
+
+  try {
+    const res = await fetch(`/admin/internal-seo/list?${params.toString()}`, {headers: {'Accept':'application/json'}});
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const rows = data.rows || [];
+    const frag = document.createDocumentFragment();
+
+    for (const r of rows) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${r.id}</td>
+        <td>${r.site_id}</td>
+        <td>${statusBadge(r.status)}</td>
+        <td class="text-muted">${r.job_kind || ''}</td>
+        <td>${fmtLocal(r.started_at)}</td>
+        <td>${fmtLocal(r.ended_at)}</td>
+        <td>${r.duration_ms ?? '-'}</td>
+        <td>
+          <button class="btn btn-sm btn-outline-primary" data-run-id="${r.id}" onclick="openStatsModal(this)">詳細</button>
+        </td>`;
+      frag.appendChild(tr);
+    }
+    tbody.appendChild(frag);
+
+    // 次ページ用情報
+    nextCursorTs = data.next_cursor_ts || null;
+    nextCursorId = data.next_cursor_id || null;
+    reachedEnd = !data.has_more;
+
+    document.getElementById('loadMoreBtn').classList.toggle('d-none', reachedEnd);
+  } catch (e) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td colspan="8" class="text-danger">読み込み失敗: ${e.message}</td>`;
+    tbody.appendChild(tr);
+    reachedEnd = true;
+  } finally {
+    loading = false;
+  }
+}
+
+// 初回ロード
+document.addEventListener('DOMContentLoaded', () => {
+  loadRuns(true);
+  document.getElementById('loadMoreBtn').addEventListener('click', () => loadRuns(false));
+});
 </script>
 {% endblock %}
