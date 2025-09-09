@@ -1899,14 +1899,10 @@ from datetime import datetime
 from flask import render_template, request, redirect, url_for, flash, current_app, abort
 from flask_login import login_required, current_user
 from sqlalchemy import desc
+from sqlalchemy.orm import load_only, defer
 
 from app import db
 from app.models import Site, InternalSeoRun
-
-# 既存の admin_bp を再利用（app/__init__.py で登録済み）
-from app.routes import admin_bp
-
-# 内部SEO 1ラン実行（既に shell から使っていた関数）
 from app.tasks import _internal_seo_run_one
 
 
@@ -1926,32 +1922,68 @@ def _enqueue_internal_seo_run(app, *, site_id: int, pages: int, per_page: int,
             incremental=incremental,
             job_kind=job_kind,
         )
+# 追加のインポート
+from flask import jsonify, make_response
+
+# ---- JSON: 1ラン分の stats をオンデマンドで返す ----
+@admin_bp.route("/admin/internal-seo/run/<int:run_id>/stats", methods=["GET"])
+@login_required
+def admin_internal_seo_run_stats(run_id: int):
+    if not getattr(current_user, "is_admin", False):
+        abort(403)
+
+    # その行だけ読み込む（一覧ではdeferしているが、ここではstatsが必要）
+    run = InternalSeoRun.query.get_or_404(run_id)
+    payload = {"ok": True, "stats": run.stats or {}}
+
+    # 軽いブラウザキャッシュ（再表示を速く）
+    resp = make_response(jsonify(payload))
+    resp.headers["Cache-Control"] = "public, max-age=30"
+    return resp
 
 
 @admin_bp.route("/admin/internal-seo", methods=["GET"])
 @login_required
 def admin_internal_seo_index():
-    # 管理者限定にする場合
+    # 管理者限定
     if not getattr(current_user, "is_admin", False):
         abort(403)
 
+    # ---- クエリパラメータ（ページング）----
     selected_site_id = request.args.get("site_id", type=int)
-    q = InternalSeoRun.query
+    page = request.args.get("page", default=1, type=int)
+    per_page = request.args.get("per_page", default=50, type=int)  # 旧:200 → 50
+
+    # ---- ラン履歴：必要な列のみ＋statsはdefer（遅延）----
+    q = InternalSeoRun.query.options(
+        load_only(
+            InternalSeoRun.id,
+            InternalSeoRun.site_id,
+            InternalSeoRun.status,
+            InternalSeoRun.job_kind,
+            InternalSeoRun.started_at,
+            InternalSeoRun.ended_at,
+            InternalSeoRun.duration_ms,
+        ),
+        defer(InternalSeoRun.stats),  # 重いJSON列は最初は読まない
+    )
     if selected_site_id:
         q = q.filter(InternalSeoRun.site_id == selected_site_id)
 
-    runs = (
-        q.order_by(desc(InternalSeoRun.started_at))
-         .limit(200)
-         .all()
-    )
-    sites = Site.query.order_by(Site.id.asc()).all()
+    runs_paginated = q.order_by(desc(InternalSeoRun.started_at)) \
+                      .paginate(page=page, per_page=per_page, error_out=False)
+
+    # ---- サイト一覧：ドロップダウン用に最小列だけ ----
+    sites = Site.query.options(load_only(Site.id, Site.name)) \
+                      .order_by(Site.id.asc()).all()
 
     return render_template(
         "admin/internal_seo.html",
         sites=sites,
-        runs=runs,
+        runs=runs_paginated.items,
+        pagination=runs_paginated,
         selected_site_id=selected_site_id,
+        per_page=per_page,
     )
 
 
@@ -1961,13 +1993,12 @@ def admin_internal_seo_run():
     if not getattr(current_user, "is_admin", False):
         abort(403)
 
-    # 必須：site_id
     site_id = request.form.get("site_id", type=int)
     if not site_id:
         flash("site_id は必須です", "warning")
         return redirect(url_for("admin.admin_internal_seo_index"))
 
-    # フォーム → 無ければ環境変数 → 既定値
+    # フォーム → 環境変数 → 既定値
     def _env_int(key: str, default: int) -> int:
         return int(os.getenv(key, default))
 
@@ -1983,7 +2014,7 @@ def admin_internal_seo_run():
     incremental   = request.form.get("incremental", default="true").lower() != "false"
 
     app = current_app._get_current_object()
-    th = threading.Thread(
+    threading.Thread(
         target=_enqueue_internal_seo_run,
         kwargs=dict(
             app=app,
@@ -1999,11 +2030,11 @@ def admin_internal_seo_run():
         ),
         daemon=True,
         name=f"internal-seo-admin-ui-{site_id}",
-    )
-    th.start()
+    ).start()
 
     flash(f"Site {site_id} の内部SEOをキューに投入しました。1～数分後に一覧へ反映されます。", "success")
-    return redirect(url_for("admin.admin_internal_seo_index", site_id=site_id))
+    # 303 See Other に相当（リロードで二重POST防止）
+    return redirect(url_for("admin.admin_internal_seo_index", site_id=site_id), code=303)
 
 
 
