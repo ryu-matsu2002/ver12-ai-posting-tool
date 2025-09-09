@@ -25,7 +25,14 @@ from app.services.blog_signup.livedoor_signup import signup as livedoor_signup
 # 既存 import 群の下に追加
 from app.external_seo_generator import generate_and_schedule_external_articles
 
-
+# === 内部SEO 自動化 で使う import ===
+from app.models import InternalSeoRun
+from app.utils.db_retry import with_db_retry
+from app.services.internal_seo.indexer import sync_site_content_index
+from app.services.internal_seo.link_graph import build_link_graph_for_site
+from app.services.internal_seo.planner import plan_links_for_site
+from app.services.internal_seo.applier import apply_actions_for_site
+import os
 
 # ────────────────────────────────────────────────
 # APScheduler ＋ スレッドプール
@@ -522,9 +529,161 @@ def init_scheduler(app):
         max_instances=1
     )
 
+    # ✅ 内部SEO ナイトリー実行（環境変数でON/OFF可能）
+    #   - デフォルト: 毎日 18:15 UTC = JST 03:15
+    if os.getenv("INTERNAL_SEO_ENABLED", "1") == "1":
+        utc_hour = int(os.getenv("INTERNAL_SEO_UTC_HOUR", "18"))
+        utc_min  = int(os.getenv("INTERNAL_SEO_UTC_MIN",  "15"))
+        scheduler.add_job(
+            func=_internal_seo_nightly_job,
+            trigger="cron",
+            hour=utc_hour,
+            minute=utc_min,
+            args=[app],
+            id="internal_seo_job",
+            replace_existing=True,
+            max_instances=1,
+        )
+        app.logger.info(f"Scheduler started: internal_seo_job daily at {utc_hour:02d}:{utc_min:02d} UTC")
+    else:
+        app.logger.info("Scheduler skipped: internal_seo_job (INTERNAL_SEO_ENABLED!=1)")
+ 
+
 
     scheduler.start()
     app.logger.info("Scheduler started: auto_post_job every 3 minutes")
     app.logger.info("Scheduler started: gsc_metrics_job daily at 0:00")
     app.logger.info("Scheduler started: gsc_generation_job every 20 minutes")
     app.logger.info("Scheduler started: external_post_job every 10 minutes")
+
+# ────────────────────────────────────────────────
+# 内部SEO 自動化ジョブ
+# ────────────────────────────────────────────────
+@with_db_retry(max_retries=3, backoff=1.8)
+def _internal_seo_run_one(site_id: int,
+                          pages: int,
+                          per_page: int,
+                          min_score: float,
+                          max_k: int,
+                          limit_sources: int,
+                          limit_posts: int,
+                          incremental: bool,
+                          job_kind: str = "scheduler"):
+    """
+    1サイト分の内部SEOパイプラインを実行し、InternalSeoRun に記録する。
+    CLIの実装と同じステップ/同じ統計キーで保存する。
+    """
+    # ランレコードを作成（running）
+    run = InternalSeoRun(
+        site_id=site_id,
+        job_kind=job_kind,
+        status="running",
+        started_at=datetime.utcnow(),
+        stats={},
+    )
+    db.session.add(run)
+    db.session.commit()
+
+    t0 = time.perf_counter()
+    try:
+        # Indexer
+        current_app.logger.info(f"[Indexer] site={site_id} incremental={incremental} pages={pages} per_page={per_page}")
+        stats_idx = sync_site_content_index(site_id, per_page=per_page, max_pages=pages, incremental=incremental)
+        current_app.logger.info(f"[Indexer] -> {stats_idx}")
+
+        # LinkGraph
+        current_app.logger.info(f"[LinkGraph] site={site_id} max_k={max_k} min_score={min_score}")
+        stats_graph = build_link_graph_for_site(site_id, max_targets_per_source=max_k, min_score=min_score)
+        current_app.logger.info(f"[LinkGraph] -> {stats_graph}")
+
+        # Planner
+        current_app.logger.info(f"[Planner] site={site_id} limit_sources={limit_sources} max_candidates={max_k} min_score={min_score}")
+        stats_plan = plan_links_for_site(site_id, limit_sources=limit_sources, mode_swap_check=True,
+                                         min_score=min_score, max_candidates=max_k)
+        current_app.logger.info(f"[Planner] -> {stats_plan}")
+
+        # Applier
+        current_app.logger.info(f"[Applier] site={site_id} limit_posts={limit_posts}")
+        res_apply = apply_actions_for_site(site_id, limit_posts=limit_posts, dry_run=False)
+        current_app.logger.info(f"[Applier] -> {res_apply}")
+
+        # 成功で確定
+        run.status = "success"
+        run.ended_at = datetime.utcnow()
+        run.duration_ms = int((time.perf_counter() - t0) * 1000)
+        run.stats = {
+            "indexer": stats_idx,
+            "link_graph": stats_graph,
+            "planner": stats_plan,
+            "applier": res_apply,
+            "params": {
+                "incremental": incremental,
+                "pages": pages,
+                "per_page": per_page,
+                "min_score": min_score,
+                "max_k": max_k,
+                "limit_sources": limit_sources,
+                "limit_posts": limit_posts,
+                "job_kind": job_kind,
+            },
+        }
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        run.status = "error"
+        run.ended_at = datetime.utcnow()
+        run.duration_ms = int((time.perf_counter() - t0) * 1000)
+        run.stats = (run.stats or {})
+        run.stats["error"] = {"type": e.__class__.__name__, "message": str(e)}
+        db.session.add(run)
+        db.session.commit()
+        current_app.logger.exception(f"[internal-seo] failed for site {site_id}: {e}")
+
+
+def _internal_seo_nightly_job(app):
+    """
+    すべてのサイト（または環境変数で指定したサイト群）に対して内部SEOを実行。
+    スケジューラから1日1回呼ばれる想定。
+    """
+    with app.app_context():
+        # パラメータは環境変数で調整可能（CLIデフォルトと同値を初期値に）
+        pages          = int(os.getenv("INTERNAL_SEO_PAGES", "10"))
+        per_page       = int(os.getenv("INTERNAL_SEO_PER_PAGE", "100"))
+        min_score      = float(os.getenv("INTERNAL_SEO_MIN_SCORE", "0.05"))
+        max_k          = int(os.getenv("INTERNAL_SEO_MAX_K", "80"))
+        limit_sources  = int(os.getenv("INTERNAL_SEO_LIMIT_SOURCES", "200"))
+        limit_posts    = int(os.getenv("INTERNAL_SEO_LIMIT_POSTS", "50"))
+        incremental    = os.getenv("INTERNAL_SEO_INCREMENTAL", "1") == "1"
+        job_kind       = os.getenv("INTERNAL_SEO_JOB_KIND", "scheduler")
+
+        # 対象サイトの決定：ENVにカンマ区切りで指定があればそれに限定
+        only_ids = os.getenv("INTERNAL_SEO_SITE_IDS")
+        if only_ids:
+            ids = [int(x) for x in only_ids.split(",") if x.strip().isdigit()]
+            sites = Site.query.filter(Site.id.in_(ids)).all()
+        else:
+            sites = Site.query.order_by(Site.id.asc()).all()
+
+        current_app.logger.info(f"[internal-seo] nightly start (sites={len(sites)}) "
+                                f"params={{pages:{pages}, per_page:{per_page}, min_score:{min_score}, "
+                                f"max_k:{max_k}, limit_sources:{limit_sources}, limit_posts:{limit_posts}, "
+                                f"incremental:{incremental}}}")
+
+        for s in sites:
+            try:
+                current_app.logger.info(f"[internal-seo] run for site_id={s.id}")
+                _internal_seo_run_one(
+                    site_id=s.id,
+                    pages=pages,
+                    per_page=per_page,
+                    min_score=min_score,
+                    max_k=max_k,
+                    limit_sources=limit_sources,
+                    limit_posts=limit_posts,
+                    incremental=incremental,
+                    job_kind=job_kind,
+                )
+            except Exception as e:
+                # ここではサイト単位で握りつぶして継続（全体ジョブを止めない）
+                current_app.logger.exception(f"[internal-seo] site {s.id} unexpected error: {e}")
+    
