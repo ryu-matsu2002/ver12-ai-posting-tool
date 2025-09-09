@@ -1891,7 +1891,7 @@ def admin_captcha_dataset():
 
     return render_template("admin/captcha_dataset.html", entries=entries)
 
-from __future__ import annotations
+
 
 import os
 import threading
