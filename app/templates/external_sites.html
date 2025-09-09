@@ -423,7 +423,7 @@
             {# 注意ボックス（条件未達） #}
             {% if not can_start_extseo %}
               <div class="note-box mb-3">
-                外部SEOの開始には、<b>WP記事が100記事以上</b>必要です。（現在: <b>{{ s.normal_post_count | default(0) }}</b> 件）。
+                外部SEOの開始には、<b>WP記事投稿数100件以上</b>必要です。（現在: <b>{{ s.normal_post_count | default(0) }}</b> 件）。
                 条件を満たすと、ブログの制作・生成ボタンが有効になります。
               </div>
             {% endif %}
@@ -558,7 +558,7 @@
             <div class="right-body">
               {% if not can_start_extseo %}
                 <div class="note-box mb-3">
-                  外部SEOの開始には、<b>WP記事が100件以上</b>必要です（現在: <b>{{ s.normal_post_count | default(0) }}</b> 件）。
+                  外部SEOの開始には、<b>WP記事投稿数100件以上</b>必要です（現在: <b>{{ s.normal_post_count | default(0) }}</b> 件）。
                   条件を満たすと、ブログの追加・生成ボタンが有効になります。
                 </div>
               {% endif %}
