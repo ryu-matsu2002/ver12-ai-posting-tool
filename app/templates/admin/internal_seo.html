@@ -1,9 +1,9 @@
-{% extends "admin/base.html" %}
+{% extends "base_admin.html" %}
 {% block title %}内部SEO 管理{% endblock %}
 
 {% block content %}
 <div class="container-fluid py-3">
-  <h3 class="mb-3">内部SEO 管理</h3>
+  <h3 class="mb-3">内部SEO管理ページ</h3>
 
   <!-- 絞り込み -->
   <form class="row gy-2 gx-2 align-items-end mb-3" method="get" action="{{ url_for('admin.admin_internal_seo_index') }}">
