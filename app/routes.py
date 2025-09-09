@@ -1903,25 +1903,7 @@ from sqlalchemy.orm import load_only, defer
 
 from app import db
 from app.models import Site, InternalSeoRun
-from app.tasks import _internal_seo_run_one
-
-
-def _enqueue_internal_seo_run(app, *, site_id: int, pages: int, per_page: int,
-                              min_score: float, max_k: int, limit_sources: int,
-                              limit_posts: int, incremental: bool, job_kind: str) -> None:
-    """UI からの実行を別スレッドで非同期に回す（app_context 付与）。"""
-    with app.app_context():
-        _internal_seo_run_one(
-            site_id=site_id,
-            pages=pages,
-            per_page=per_page,
-            min_score=min_score,
-            max_k=max_k,
-            limit_sources=limit_sources,
-            limit_posts=limit_posts,
-            incremental=incremental,
-            job_kind=job_kind,
-        )
+from sqlalchemy import text
 
 
 # ---- JSON: 1ラン分の stats をオンデマンドで返す ----
@@ -2071,26 +2053,27 @@ def admin_internal_seo_run():
     limit_posts   = request.form.get("limit_posts",   type=int,   default=_env_int("INTERNAL_SEO_LIMIT_POSTS", 50))
     incremental   = request.form.get("incremental", default="true").lower() != "false"
 
-    app = current_app._get_current_object()
-    threading.Thread(
-        target=_enqueue_internal_seo_run,
-        kwargs=dict(
-            app=app,
-            site_id=site_id,
-            pages=pages,
-            per_page=per_page,
-            min_score=min_score,
-            max_k=max_k,
-            limit_sources=limit_sources,
-            limit_posts=limit_posts,
-            incremental=incremental,
-            job_kind="admin-ui",
-        ),
-        daemon=True,
-        name=f"internal-seo-admin-ui-{site_id}",
-    ).start()
+    # internal_seo_job_queue に投入
+    db.session.execute(text("""
+        INSERT INTO internal_seo_job_queue
+          (site_id, pages, per_page, min_score, max_k, limit_sources, limit_posts,
+           incremental, job_kind, status, created_at)
+        VALUES
+          (:site_id, :pages, :per_page, :min_score, :max_k, :limit_sources, :limit_posts,
+           :incremental, 'admin-ui', 'queued', now())
+    """), dict(
+        site_id=site_id,
+        pages=pages,
+        per_page=per_page,
+        min_score=min_score,
+        max_k=max_k,
+        limit_sources=limit_sources,
+        limit_posts=limit_posts,
+        incremental=incremental,
+    ))
+    db.session.commit()
 
-    flash(f"Site {site_id} の内部SEOをキューに投入しました。1～数分後に一覧へ反映されます。", "success")
+    flash(f"Site {site_id} の内部SEOをジョブキューに登録しました。ワーカーが順次実行します。", "success")
     return redirect(url_for("admin.admin_internal_seo_index", site_id=site_id), code=303)
 
 
