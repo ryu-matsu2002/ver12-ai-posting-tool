@@ -1891,6 +1891,119 @@ def admin_captcha_dataset():
 
     return render_template("admin/captcha_dataset.html", entries=entries)
 
+from __future__ import annotations
+
+import os
+import threading
+from datetime import datetime
+from flask import render_template, request, redirect, url_for, flash, current_app, abort
+from flask_login import login_required, current_user
+from sqlalchemy import desc
+
+from app import db
+from app.models import Site, InternalSeoRun
+
+# 既存の admin_bp を再利用（app/__init__.py で登録済み）
+from app.routes import admin_bp
+
+# 内部SEO 1ラン実行（既に shell から使っていた関数）
+from app.tasks import _internal_seo_run_one
+
+
+def _enqueue_internal_seo_run(app, *, site_id: int, pages: int, per_page: int,
+                              min_score: float, max_k: int, limit_sources: int,
+                              limit_posts: int, incremental: bool, job_kind: str) -> None:
+    """UI からの実行を別スレッドで非同期に回す（app_context 付与）。"""
+    with app.app_context():
+        _internal_seo_run_one(
+            site_id=site_id,
+            pages=pages,
+            per_page=per_page,
+            min_score=min_score,
+            max_k=max_k,
+            limit_sources=limit_sources,
+            limit_posts=limit_posts,
+            incremental=incremental,
+            job_kind=job_kind,
+        )
+
+
+@admin_bp.route("/admin/internal-seo", methods=["GET"])
+@login_required
+def admin_internal_seo_index():
+    # 管理者限定にする場合
+    if not getattr(current_user, "is_admin", False):
+        abort(403)
+
+    selected_site_id = request.args.get("site_id", type=int)
+    q = InternalSeoRun.query
+    if selected_site_id:
+        q = q.filter(InternalSeoRun.site_id == selected_site_id)
+
+    runs = (
+        q.order_by(desc(InternalSeoRun.started_at))
+         .limit(200)
+         .all()
+    )
+    sites = Site.query.order_by(Site.id.asc()).all()
+
+    return render_template(
+        "admin/internal_seo.html",
+        sites=sites,
+        runs=runs,
+        selected_site_id=selected_site_id,
+    )
+
+
+@admin_bp.route("/admin/internal-seo/run", methods=["POST"])
+@login_required
+def admin_internal_seo_run():
+    if not getattr(current_user, "is_admin", False):
+        abort(403)
+
+    # 必須：site_id
+    site_id = request.form.get("site_id", type=int)
+    if not site_id:
+        flash("site_id は必須です", "warning")
+        return redirect(url_for("admin.admin_internal_seo_index"))
+
+    # フォーム → 無ければ環境変数 → 既定値
+    def _env_int(key: str, default: int) -> int:
+        return int(os.getenv(key, default))
+
+    def _env_float(key: str, default: float) -> float:
+        return float(os.getenv(key, default))
+
+    pages         = request.form.get("pages",         type=int,   default=_env_int("INTERNAL_SEO_PAGES", 10))
+    per_page      = request.form.get("per_page",      type=int,   default=_env_int("INTERNAL_SEO_PER_PAGE", 100))
+    min_score     = request.form.get("min_score",     type=float, default=_env_float("INTERNAL_SEO_MIN_SCORE", 0.05))
+    max_k         = request.form.get("max_k",         type=int,   default=_env_int("INTERNAL_SEO_MAX_K", 80))
+    limit_sources = request.form.get("limit_sources", type=int,   default=_env_int("INTERNAL_SEO_LIMIT_SOURCES", 200))
+    limit_posts   = request.form.get("limit_posts",   type=int,   default=_env_int("INTERNAL_SEO_LIMIT_POSTS", 50))
+    incremental   = request.form.get("incremental", default="true").lower() != "false"
+
+    app = current_app._get_current_object()
+    th = threading.Thread(
+        target=_enqueue_internal_seo_run,
+        kwargs=dict(
+            app=app,
+            site_id=site_id,
+            pages=pages,
+            per_page=per_page,
+            min_score=min_score,
+            max_k=max_k,
+            limit_sources=limit_sources,
+            limit_posts=limit_posts,
+            incremental=incremental,
+            job_kind="admin-ui",
+        ),
+        daemon=True,
+        name=f"internal-seo-admin-ui-{site_id}",
+    )
+    th.start()
+
+    flash(f"Site {site_id} の内部SEOをキューに投入しました。1～数分後に一覧へ反映されます。", "success")
+    return redirect(url_for("admin.admin_internal_seo_index", site_id=site_id))
 
 
 
