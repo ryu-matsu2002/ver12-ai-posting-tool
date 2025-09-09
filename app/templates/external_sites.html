@@ -407,7 +407,7 @@
         {% set tab_cnt = s.ld_count | default(_all_accounts|length) %}
         {% set livedoor_count = _all_accounts | length %}
         {# === ここで can_start_extseo を定義（アクティブ側） === #}
-        {% set can_start_extseo = (s.normal_post_count | default(0) >= 50) %}
+        {% set can_start_extseo = (s.normal_post_count | default(0) >= 100) %}
         {% set can_add_livedoor = ((current_user.id in ALLOW_MULTI_BLOG_USER_IDS) or (livedoor_count == 0)) and can_start_extseo %}
 
         {% if loop.first %}
@@ -543,7 +543,7 @@
         {% set tab_cnt = s.ld_count | default(_all_accounts|length) %}
         {% set livedoor_count = _all_accounts | length %}
         {# === ここでも can_start_extseo を定義（template側） === #}
-        {% set can_start_extseo = (s.normal_post_count | default(0) >= 50) %}
+        {% set can_start_extseo = (s.normal_post_count | default(0) >= 100) %}
         {% set can_add_livedoor = ((current_user.id in ALLOW_MULTI_BLOG_USER_IDS) or (livedoor_count == 0)) and can_start_extseo %}
 
         <template id="tpl-site-{{ s.id }}">

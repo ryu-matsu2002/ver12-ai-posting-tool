@@ -4086,7 +4086,7 @@ def external_seo_sites():
             db.session.query(Article.site_id, func.count(Article.id))
             .filter(Article.site_id.in_(site_ids))
             .filter(or_(Article.source.is_(None), Article.source != "external"))
-            .filter(Article.status.in_(["done", "published", "posted"]))
+            .filter(Article.status.in_(["posted", "published"]))  # ← done を除外（WP投稿済みのみ）
             .group_by(Article.site_id)
             .all()
         )
@@ -5455,10 +5455,10 @@ def external_seo_generate_and_schedule():
         Article.query
         .filter(Article.site_id == site_id)
         .filter(or_(Article.source.is_(None), Article.source != "external"))
-        .filter(Article.status.in_(["done", "published", "posted"]))
+        .filter(Article.status.in_(["posted", "published"]))  # ← done を含めない
         .count()
     )
-    if normal_count < 50:
+    if normal_count < 100:
         return jsonify({
             "ok": False,
             "error": "外部SEO開始の条件を満たしてません",
@@ -5584,15 +5584,15 @@ def external_seo_new_account():
         if (not current_user.is_admin) and (site.user_id != current_user.id):
             return jsonify({"ok": False, "error": "権限がありません"}), 200
         
-        # ▼ 通常記事（外部SEO以外で投稿済み）が 50 本未満ならブロック
+        # ▼ 通常記事（外部SEO以外で WPに投稿済み）が 100 本未満ならブロック
         normal_count = (
             Article.query
             .filter(Article.site_id == site_id)
             .filter(or_(Article.source.is_(None), Article.source != "external"))
-            .filter(Article.status.in_(["done", "published", "posted"]))
+            .filter(Article.status.in_(["posted", "published"]))  # ← done を含めない
             .count()
         )
-        if normal_count < 50:
+        if normal_count < 100:
             return jsonify({
                 "ok": False,
                 "error": "外部SEO開始の条件を満たしてません",
