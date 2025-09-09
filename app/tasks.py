@@ -6,6 +6,7 @@ import pytz
 import time 
 from flask import current_app
 from apscheduler.schedulers.background import BackgroundScheduler
+from sqlalchemy import text  # ★ 追加
 
 from . import db
 from .models import Article
@@ -39,7 +40,7 @@ import os
 # ────────────────────────────────────────────────
 # グローバルな APScheduler インスタンス（__init__.py で start されています）
 scheduler = BackgroundScheduler(timezone="UTC")
-executor = ThreadPoolExecutor(max_workers=1)  # ✅ 外部SEOでは同時1件まで
+executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="extseo")
 
 # --------------------------------------------------------------------------- #
 # 1) WordPress 自動投稿ジョブ
@@ -642,11 +643,10 @@ def _internal_seo_run_one(site_id: int,
 
 def _internal_seo_nightly_job(app):
     """
-    すべてのサイト（または環境変数で指定したサイト群）に対して内部SEOを実行。
-    スケジューラから1日1回呼ばれる想定。
+    すべてのサイト（または ENV 指定のサイト群）について、
+    “実行本体” はワーカーに任せるため、ここではキューに積むだけ。
     """
     with app.app_context():
-        # パラメータは環境変数で調整可能（CLIデフォルトと同値を初期値に）
         pages          = int(os.getenv("INTERNAL_SEO_PAGES", "10"))
         per_page       = int(os.getenv("INTERNAL_SEO_PER_PAGE", "100"))
         min_score      = float(os.getenv("INTERNAL_SEO_MIN_SCORE", "0.05"))
@@ -654,9 +654,8 @@ def _internal_seo_nightly_job(app):
         limit_sources  = int(os.getenv("INTERNAL_SEO_LIMIT_SOURCES", "200"))
         limit_posts    = int(os.getenv("INTERNAL_SEO_LIMIT_POSTS", "50"))
         incremental    = os.getenv("INTERNAL_SEO_INCREMENTAL", "1") == "1"
-        job_kind       = os.getenv("INTERNAL_SEO_JOB_KIND", "scheduler")
+        job_kind       = os.getenv("INTERNAL_SEO_JOB_KIND", "nightly-enqueue")
 
-        # 対象サイトの決定：ENVにカンマ区切りで指定があればそれに限定
         only_ids = os.getenv("INTERNAL_SEO_SITE_IDS")
         if only_ids:
             ids = [int(x) for x in only_ids.split(",") if x.strip().isdigit()]
@@ -664,26 +663,31 @@ def _internal_seo_nightly_job(app):
         else:
             sites = Site.query.order_by(Site.id.asc()).all()
 
-        current_app.logger.info(f"[internal-seo] nightly start (sites={len(sites)}) "
-                                f"params={{pages:{pages}, per_page:{per_page}, min_score:{min_score}, "
-                                f"max_k:{max_k}, limit_sources:{limit_sources}, limit_posts:{limit_posts}, "
-                                f"incremental:{incremental}}}")
+        enq = text("""
+            INSERT INTO internal_seo_job_queue
+              (site_id, pages, per_page, min_score, max_k, limit_sources, limit_posts,
+               incremental, job_kind, status, created_at)
+            VALUES
+              (:site_id, :pages, :per_page, :min_score, :max_k, :limit_sources, :limit_posts,
+               :incremental, :job_kind, 'queued', now())
+        """)
 
+        enqueued = 0
         for s in sites:
             try:
-                current_app.logger.info(f"[internal-seo] run for site_id={s.id}")
-                _internal_seo_run_one(
-                    site_id=s.id,
-                    pages=pages,
-                    per_page=per_page,
-                    min_score=min_score,
-                    max_k=max_k,
-                    limit_sources=limit_sources,
-                    limit_posts=limit_posts,
-                    incremental=incremental,
-                    job_kind=job_kind,
-                )
+                db.session.execute(enq, dict(
+                    site_id=s.id, pages=pages, per_page=per_page, min_score=min_score,
+                    max_k=max_k, limit_sources=limit_sources, limit_posts=limit_posts,
+                    incremental=incremental, job_kind=job_kind,
+                ))
+                enqueued += 1
             except Exception as e:
-                # ここではサイト単位で握りつぶして継続（全体ジョブを止めない）
-                current_app.logger.exception(f"[internal-seo] site {s.id} unexpected error: {e}")
-    
+                current_app.logger.exception(f"[internal-seo nightly] enqueue failed site={s.id}: {e}")
+
+        db.session.commit()
+        current_app.logger.info(
+            f"[internal-seo nightly] enqueued {enqueued}/{len(sites)} jobs "
+            f"params={{pages:{pages}, per_page:{per_page}, min_score:{min_score}, "
+            f"max_k:{max_k}, limit_sources:{limit_sources}, limit_posts:{limit_posts}, "
+            f"incremental:{incremental}, job_kind:{job_kind}}}"
+        )
