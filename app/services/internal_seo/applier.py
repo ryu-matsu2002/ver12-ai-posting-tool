@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 _P_CLOSE = re.compile(r"</p\s*>", re.IGNORECASE)
 _A_TAG = re.compile(r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a\s*>', re.IGNORECASE | re.DOTALL)
 _TAG_STRIP = re.compile(r"<[^>]+>")
+_SEO_CLASS = "internal-seo-link"
 
 def _split_paragraphs(html: str) -> List[str]:
     if not html:
@@ -51,7 +52,50 @@ def _extract_links(html: str) -> List[Tuple[str, str]]:
 def _wrap_link(html_fragment: str, anchor_text: str, href: str) -> str:
     # シンプルにアンカーを置く（applierでは前計画に従うのみ。精緻化は将来改良）
     anchor_escaped = anchor_text
-    return f'{html_fragment}<a href="{href}">{anchor_escaped}</a>'
+    # 内部SEOが付与したリンクだけ下線＆識別クラスを付与する
+    return (
+        f'{html_fragment}<a href="{href}" '
+        f'class="{_SEO_CLASS}" '
+        f'style="text-decoration:underline;">{anchor_escaped}</a>'
+    )
+
+def _add_attrs_to_first_anchor_with_href(html: str, href: str) -> str:
+    """
+    swap などで href を差し替えた最初の <a ... href="href"> に
+    class="internal-seo-link" と text-decoration:underline を注入する。
+    既に class/style があれば追記する。
+    """
+    if not html or not href:
+        return html
+    pat = re.compile(
+        rf'(<a\b[^>]*href=["\']{re.escape(href)}["\'][^>]*)(>)',
+        re.IGNORECASE
+    )
+    def _repl(m):
+        start, end = m.group(1), m.group(2)
+        # class 付与/追記
+        if re.search(r'\bclass=["\']', start, re.IGNORECASE):
+            start = re.sub(
+                r'\bclass=["\']([^"\']*)',
+                rf'class="\1 {_SEO_CLASS}"',
+                start,
+                flags=re.IGNORECASE
+            )
+        else:
+            start += f' class="{_SEO_CLASS}"'
+        # style 付与/追記
+        if re.search(r'\bstyle=["\']', start, re.IGNORECASE):
+            start = re.sub(
+                r'\bstyle=["\']([^"\']*)',
+                r'style="\1 text-decoration:underline;"',
+                start,
+                flags=re.IGNORECASE
+            )
+        else:
+            start += ' style="text-decoration:underline;"'
+        return start + end
+    # 最初の1件だけ注入
+    return pat.sub(_repl, html, count=1)
 
 # ---- データ取得 ----
 
@@ -237,6 +281,8 @@ def _apply_plan_to_html(
 
                 whole_html = _replace_first(worst_url, new_href, whole_html)
                 if replaced:
+                    # 差し替えた1本に識別クラス＆下線を注入（内部SEOリンクだけ視覚化）
+                    whole_html = _add_attrs_to_first_anchor_with_href(whole_html, new_href)
                     paragraphs = [whole_html]  # 再分割は不要。まとまりで返す
                     s_act.status = "applied"
                     s_act.reason = "swap"  # 採用された置換
