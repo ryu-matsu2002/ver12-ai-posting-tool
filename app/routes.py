@@ -1898,11 +1898,11 @@ import threading
 from datetime import datetime
 from flask import render_template, request, redirect, url_for, flash, current_app, abort, jsonify, make_response
 from flask_login import login_required, current_user
-from sqlalchemy import desc, and_, or_
+from sqlalchemy import desc, and_, or_, func
 from sqlalchemy.orm import load_only, defer
 
 from app import db
-from app.models import Site, InternalSeoRun
+from app.models import Site, InternalSeoRun, InternalLinkAction, ContentIndex
 from sqlalchemy import text
 
 
@@ -2075,6 +2075,226 @@ def admin_internal_seo_run():
 
     flash(f"Site {site_id} の内部SEOをジョブキューに登録しました。ワーカーが順次実行します。", "success")
     return redirect(url_for("admin.admin_internal_seo_index", site_id=site_id), code=303)
+
+# ==== 追加: まとめ実行 API =========================================
+# POST /admin/internal-seo/run-batch
+@admin_bp.route("/admin/internal-seo/run-batch", methods=["POST"])
+@login_required
+def admin_internal_seo_run_batch():
+    if not getattr(current_user, "is_admin", False):
+        abort(403)
+
+    # site_ids は form-data でも JSON でも受け付ける
+    site_ids = []
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+        site_ids = payload.get("site_ids") or payload.get("site_ids[]") or []
+        params = payload
+    else:
+        site_ids = request.form.getlist("site_ids[]") or request.form.getlist("site_ids") or []
+        params = request.form
+    try:
+        site_ids = [int(s) for s in site_ids if str(s).strip()]
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid site_ids"}), 400
+    if not site_ids:
+        return jsonify({"ok": False, "error": "site_ids required"}), 400
+
+    def _env_int(key: str, default: int) -> int:
+        return int(os.getenv(key, default))
+
+    def _env_float(key: str, default: float) -> float:
+        return float(os.getenv(key, default))
+
+    pages         = int(params.get("pages",         _env_int("INTERNAL_SEO_PAGES", 10)))
+    per_page      = int(params.get("per_page",      _env_int("INTERNAL_SEO_PER_PAGE", 100)))
+    min_score     = float(params.get("min_score",   _env_float("INTERNAL_SEO_MIN_SCORE", 0.05)))
+    max_k         = int(params.get("max_k",         _env_int("INTERNAL_SEO_MAX_K", 80)))
+    limit_sources = int(params.get("limit_sources", _env_int("INTERNAL_SEO_LIMIT_SOURCES", 200)))
+    limit_posts   = int(params.get("limit_posts",   _env_int("INTERNAL_SEO_LIMIT_POSTS", 50)))
+    incremental   = str(params.get("incremental", "true")).lower() != "false"
+
+    enqueued = 0
+    skipped = []
+    errors = []
+
+    # 存在する site のみに限定（打鍵ミス対策）
+    existing_site_ids = {s.id for s in Site.query.with_entities(Site.id).filter(Site.id.in_(site_ids)).all()}
+
+    for sid in site_ids:
+        if sid not in existing_site_ids:
+            skipped.append({"site_id": sid, "reason": "site-not-found"})
+            continue
+        try:
+            db.session.execute(text("""
+                INSERT INTO internal_seo_job_queue
+                  (site_id, pages, per_page, min_score, max_k, limit_sources, limit_posts,
+                   incremental, job_kind, status, created_at)
+                VALUES
+                  (:site_id, :pages, :per_page, :min_score, :max_k, :limit_sources, :limit_posts,
+                   :incremental, 'admin-ui-batch', 'queued', now())
+            """), dict(
+                site_id=sid,
+                pages=pages,
+                per_page=per_page,
+                min_score=min_score,
+                max_k=max_k,
+                limit_sources=limit_sources,
+                limit_posts=limit_posts,
+                incremental=incremental,
+            ))
+            enqueued += 1
+        except Exception as e:
+            errors.append({"site_id": sid, "error": str(e)})
+    db.session.commit()
+
+    return jsonify({"ok": True, "enqueued": enqueued, "skipped": skipped, "errors": errors})
+
+
+# ==== 追加: 容量メーター API ======================================
+# GET /admin/internal-seo/capacity
+@admin_bp.route("/admin/internal-seo/capacity", methods=["GET"])
+@login_required
+def admin_internal_seo_capacity():
+    if not getattr(current_user, "is_admin", False):
+        abort(403)
+
+    # 並列上限（環境変数になければ 3）
+    max_parallel = int(os.getenv("INTERNAL_SEO_WORKER_PARALLELISM", 3))
+
+    # 実行中（runs）
+    running = db.session.execute(text("""
+        SELECT COUNT(*) FROM internal_seo_runs WHERE status='running'
+    """)).scalar() or 0
+
+    # キュー（queued/running）
+    queued = db.session.execute(text("""
+        SELECT COUNT(*) FROM internal_seo_job_queue WHERE status IN ('queued','running')
+    """)).scalar() or 0
+
+    available = max(0, max_parallel - int(running))
+    suggest_batch_size = min(available, 5)
+
+    payload = {
+        "ok": True,
+        "max_parallel": int(max_parallel),
+        "running": int(running),
+        "queued": int(queued),
+        "available": int(available),
+        "suggest_batch_size": int(suggest_batch_size),
+    }
+    resp = make_response(jsonify(payload))
+    resp.headers["Cache-Control"] = "no-cache, no-store"
+    return resp
+
+
+# ==== 追加: 詳細ログ API ==========================================
+# GET /admin/internal-seo/actions
+@admin_bp.route("/admin/internal-seo/actions", methods=["GET"])
+@login_required
+def admin_internal_seo_actions():
+    if not getattr(current_user, "is_admin", False):
+        abort(403)
+
+    site_id = request.args.get("site_id", type=int)
+    post_id = request.args.get("post_id", type=int)
+    status  = request.args.get("status")  # applied / pending / skipped / None
+    limit   = min(max(request.args.get("limit", type=int, default=50), 1), 100)
+
+    # キーセット（applied_at DESC, id DESC）
+    cursor = request.args.get("cursor")  # 形式: "{ts_iso}.{id}" or None
+    cursor_ts = None
+    cursor_id = None
+    if cursor:
+        try:
+            ts_str, id_str = cursor.rsplit(".", 1)
+            cursor_ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            cursor_id = int(id_str)
+        except Exception:
+            cursor_ts = None
+            cursor_id = None
+
+    q = InternalLinkAction.query.options(
+        load_only(
+            InternalLinkAction.id,
+            InternalLinkAction.site_id,
+            InternalLinkAction.post_id,
+            InternalLinkAction.target_post_id,
+            InternalLinkAction.anchor_text,
+            InternalLinkAction.position,
+            InternalLinkAction.status,
+            InternalLinkAction.applied_at,
+            InternalLinkAction.diff_before_excerpt,
+            InternalLinkAction.diff_after_excerpt,
+        )
+    )
+
+    if site_id:
+        q = q.filter(InternalLinkAction.site_id == site_id)
+    if post_id:
+        q = q.filter(InternalLinkAction.post_id == post_id)
+    if status:
+        q = q.filter(InternalLinkAction.status == status)
+
+    # 並び順（applied_at NULL は最後）
+    q = q.order_by(desc(InternalLinkAction.applied_at), desc(InternalLinkAction.id))
+
+    if cursor_ts is not None and cursor_id is not None:
+        q = q.filter(
+            or_(
+                InternalLinkAction.applied_at < cursor_ts,
+                and_(
+                    InternalLinkAction.applied_at == cursor_ts,
+                    InternalLinkAction.id < cursor_id,
+                ),
+            )
+        )
+
+    rows = q.limit(limit).all()
+
+    # URL 解決（post_url / target_url）を IN で一括解決
+    post_ids   = {r.post_id for r in rows if r.post_id}
+    target_ids = {r.target_post_id for r in rows if r.target_post_id}
+    all_ids = list(post_ids | target_ids)
+    url_map = {}
+    if all_ids:
+        cu = (
+            ContentIndex.query
+            .with_entities(ContentIndex.wp_post_id, ContentIndex.url)
+            .filter(ContentIndex.wp_post_id.in_(all_ids))
+            .all()
+        )
+        url_map = {int(pid): (url or "") for (pid, url) in cu}
+
+    def _row(r: InternalLinkAction):
+        return dict(
+            id=r.id,
+            site_id=r.site_id,
+            post_id=r.post_id,
+            post_url=url_map.get(r.post_id, ""),
+            target_post_id=r.target_post_id,
+            target_url=url_map.get(r.target_post_id, ""),
+            anchor_text=r.anchor_text,
+            position=r.position,
+            status=r.status,
+            applied_at=r.applied_at.isoformat() if r.applied_at else None,
+            diff_before_excerpt=(r.diff_before_excerpt or "")[:280],
+            diff_after_excerpt=(r.diff_after_excerpt or "")[:280],
+        )
+
+    next_cursor = None
+    has_more = bool(rows) and (len(rows) == limit)
+    if rows:
+        last = rows[-1]
+        ts = last.applied_at.isoformat() if last.applied_at else "1970-01-01T00:00:00+00:00"
+        next_cursor = f"{ts}.{last.id}"
+
+    return jsonify(dict(
+        ok=True,
+        rows=[_row(r) for r in rows],
+        next_cursor=next_cursor,
+        has_more=has_more,
+    ))
 
 
 # ────────────── キーワード ──────────────

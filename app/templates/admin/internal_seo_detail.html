@@ -1,0 +1,245 @@
+{% extends "base_admin.html" %}
+{% block title %}内部SEO 詳細ログ{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+  <h3 class="mb-3">内部SEO 詳細ログ</h3>
+
+  <!-- フィルタ -->
+  <form id="filterForm" class="row gy-2 gx-2 align-items-end mb-3" onsubmit="event.preventDefault(); resetAndLoad();">
+    <div class="col-auto">
+      <label class="form-label">Site ID</label>
+      <input type="number" class="form-control" id="fSiteId" value="{{ request.args.get('site_id','') }}">
+    </div>
+    <div class="col-auto">
+      <label class="form-label">Post ID</label>
+      <input type="number" class="form-control" id="fPostId" value="{{ request.args.get('post_id','') }}">
+    </div>
+    <div class="col-auto">
+      <label class="form-label">Status</label>
+      <select class="form-select" id="fStatus">
+        {% set st = request.args.get('status','') %}
+        <option value=""  {% if st=='' %}selected{% endif %}>すべて</option>
+        <option value="applied" {% if st=='applied' %}selected{% endif %}>applied</option>
+        <option value="pending" {% if st=='pending' %}selected{% endif %}>pending</option>
+        <option value="skipped" {% if st=='skipped' %}selected{% endif %}>skipped</option>
+      </select>
+    </div>
+    <div class="col-auto">
+      <label class="form-label">件数</label>
+      <select class="form-select" id="fLimit">
+        {% set lim = request.args.get('limit', 50) | int %}
+        {% for n in [25,50,100] %}
+          <option value="{{ n }}" {% if lim==n %}selected{% endif %}>{{ n }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-auto">
+      <button class="btn btn-primary">再読み込み</button>
+      <a class="btn btn-outline-secondary" href="/admin/internal-seo/detail">リセット</a>
+    </div>
+  </form>
+
+  <!-- 実行統計（任意：run_id指定時） -->
+  <div class="card mb-4">
+    <div class="card-body">
+      <div class="d-flex align-items-center mb-2">
+        <div class="fw-bold me-2">RUN 統計</div>
+        <div class="text-muted small">run_id を指定すると詳細を取得</div>
+      </div>
+      <div class="row gy-2 gx-2 align-items-end">
+        <div class="col-auto">
+          <label class="form-label">run_id</label>
+          <input type="number" id="fRunId" class="form-control" value="{{ request.args.get('run_id','') }}">
+        </div>
+        <div class="col-auto">
+          <button id="btnLoadRun" class="btn btn-outline-primary">読み込み</button>
+        </div>
+      </div>
+      <div id="runStatsBox" class="small text-monospace mt-3 text-muted">未取得</div>
+    </div>
+  </div>
+
+  <!-- 詳細テーブル -->
+  <div class="table-responsive">
+    <table class="table table-sm table-striped align-middle">
+      <thead>
+        <tr>
+          <th style="width:72px">ID</th>
+          <th style="width:72px">Site</th>
+          <th style="width:90px">Post</th>
+          <th>Post URL</th>
+          <th style="width:90px">Target</th>
+          <th>Target URL</th>
+          <th>Anchor</th>
+          <th style="width:80px">Pos</th>
+          <th style="width:110px">Status</th>
+          <th>Applied</th>
+        </tr>
+      </thead>
+      <tbody id="actionsBody">
+        <tr id="placeholderRow"><td colspan="10" class="text-muted">読み込み中…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="row">
+    <div class="col-md-6">
+      <div class="card mt-3">
+        <div class="card-header">Diff Before (抜粋)</div>
+        <div class="card-body"><pre id="diffBefore" class="mb-0 small text-monospace text-wrap"></pre></div>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="card mt-3">
+        <div class="card-header">Diff After (抜粋)</div>
+        <div class="card-body"><pre id="diffAfter" class="mb-0 small text-monospace text-wrap"></pre></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="d-flex mt-3">
+    <button id="loadMoreBtn" class="btn btn-outline-secondary ms-auto d-none" type="button">もっと見る</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+function fmtLocal(iso) {
+  if (!iso) return '-';
+  try {
+    const d = new Date(iso);
+    const pad = (x)=> String(x).padStart(2,'0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} `
+         + `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  } catch(e) { return iso; }
+}
+function esc(v) {
+  if (v===null||v===undefined) return '';
+  return String(v).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+}
+function statusBadge(st) {
+  if (st === 'applied') return '<span class="badge bg-success">applied</span>';
+  if (st === 'pending') return '<span class="badge bg-info text-dark">pending</span>';
+  if (st === 'skipped') return '<span class="badge bg-secondary">skipped</span>';
+  return `<span class="badge bg-light text-dark">${esc(st || '-')}</span>`;
+}
+
+let nextCursor = null;
+let loading = false;
+let reachedEnd = false;
+let lastRows = [];  // diffプレビュー用
+
+function currentQuery(limitOverride) {
+  const p = new URLSearchParams();
+  const s = document.getElementById('fSiteId').value.trim();
+  const pid = document.getElementById('fPostId').value.trim();
+  const st = document.getElementById('fStatus').value;
+  const rawLim = limitOverride ?? document.getElementById('fLimit').value;
+  const lim = (rawLim && String(rawLim).trim()) ? rawLim : '50';
+  if (s)   p.set('site_id', s);
+  if (pid) p.set('post_id', pid);
+  if (st)  p.set('status', st);
+  if (lim) p.set('limit', lim);
+  if (nextCursor) p.set('cursor', nextCursor);
+  return p.toString();
+}
+
+async function loadActions(initial=false) {
+  if (loading || reachedEnd) return;
+  loading = true;
+
+  const tbody = document.getElementById('actionsBody');
+  const ph = document.getElementById('placeholderRow');
+  if (ph) ph.remove();
+
+  try {
+    const res = await fetch(`/admin/internal-seo/actions?${currentQuery()}`, {headers:{'Accept':'application/json'}});
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const rows = data.rows || [];
+    const frag = document.createDocumentFragment();
+
+    for (const r of rows) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${r.id}</td>
+        <td>${r.site_id}</td>
+        <td>${r.post_id ?? '-'}</td>
+        <td class="text-truncate" style="max-width:360px;"><a href="${esc(r.post_url)}" target="_blank">${esc(r.post_url)}</a></td>
+        <td>${r.target_post_id ?? '-'}</td>
+        <td class="text-truncate" style="max-width:360px;"><a href="${esc(r.target_url)}" target="_blank">${esc(r.target_url)}</a></td>
+        <td>${esc(r.anchor_text)}</td>
+        <td>${esc(r.position)}</td>
+        <td>${statusBadge(r.status)}</td>
+        <td>${fmtLocal(r.applied_at)}</td>`;
+      tr.addEventListener('click', () => showDiff(r));
+      frag.appendChild(tr);
+    }
+    tbody.appendChild(frag);
+
+    // diff用に保存（最後の行の抜粋を表示）
+    if (rows.length) showDiff(rows[0]);
+
+    nextCursor = data.next_cursor || null;
+    reachedEnd = !data.has_more;
+    document.getElementById('loadMoreBtn').classList.toggle('d-none', reachedEnd);
+  } catch (e) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td colspan="10" class="text-danger">読み込み失敗: ${e.message}</td>`;
+    tbody.appendChild(tr);
+    reachedEnd = true;
+  } finally {
+    loading = false;
+  }
+}
+
+function showDiff(r) {
+  document.getElementById('diffBefore').textContent = r.diff_before_excerpt || '';
+  document.getElementById('diffAfter').textContent  = r.diff_after_excerpt || '';
+}
+
+function resetAndLoad() {
+  nextCursor = null; reachedEnd = false;
+  document.getElementById('actionsBody').innerHTML = '<tr id="placeholderRow"><td colspan="10" class="text-muted">読み込み中…</td></tr>';
+  loadActions(true);
+}
+
+// RUN 統計（任意）
+async function loadRunStats() {
+  const runId = document.getElementById('fRunId').value.trim();
+  const box = document.getElementById('runStatsBox');
+  if (!runId) { box.textContent = 'run_id を入力してください。'; return; }
+  box.textContent = '読み込み中…';
+  try {
+    const res = await fetch(`/admin/internal-seo/run/${encodeURIComponent(runId)}/stats`, {headers:{'Accept':'application/json'}});
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const s = (data && data.stats) || {};
+    const segs = [];
+    const add = (name, o)=> {
+      if (!o) return;
+      const kv = Object.entries(o).map(([k,v]) => `${esc(k)}: ${esc(typeof v==='object'? JSON.stringify(v): v)}`).join('\n');
+      segs.push(`--- ${name} ---\n${kv}`);
+    };
+    add('Indexer', s.indexer);
+    add('LinkGraph', s.link_graph);
+    add('Planner', s.planner);
+    add('Applier', s.applier);
+    add('Params', s.params);
+    box.textContent = segs.length ? segs.join('\n\n') : 'データなし';
+  } catch (e) {
+    box.textContent = 'エラー: ' + e.message;
+  }
+}
+
+// 初期化
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('btnLoadRun').addEventListener('click', loadRunStats);
+  resetAndLoad();
+  document.getElementById('loadMoreBtn').addEventListener('click', ()=> loadActions(false));
+});
+</script>
+{% endblock %}

@@ -46,27 +46,25 @@ def _html_to_text(s: str) -> str:
 
 def _candidate_anchor_from(title: str, para_text: str) -> Optional[str]:
     """
-    ターゲット記事のタイトルを主軸に、段落テキストとのトークン重なりから自然なアンカーを作る。
-    足りなければタイトル短縮版を返す。
+    段落テキスト内に**実在する**語句のみをアンカーとして採用する。
+    - タイトルのトークン群を長い順に並べ、段落内に出現する最初のものを返す
+    - 見つからなければ None（＝このスロットは作らない）
     """
     title_txt = _html_to_text(title)[:80]
-    if not para_text:
-        return title_txt or None
+    para_norm = (para_text or "").strip()
+    if not title_txt or not para_norm:
+        return None
 
-    para_tokens = JP_TOKEN.findall(para_text.lower())
-    title_tokens = JP_TOKEN.findall(title_txt.lower())
+    # タイトルのトークンを長い順に
+    tokens = JP_TOKEN.findall(title_txt)
+    tokens = sorted(set(tokens), key=lambda t: (-len(t), t))
 
-    # タイトルトークンのうち段落にも出る語を優先
-    overlap = [t for t in title_tokens if t in para_tokens]
-    # 2〜5語で作る
-    if overlap:
-        anchor = "".join(overlap[:5])
-        if 2 <= len(anchor) <= 40:
-            return anchor
-
-    # それでも無理ならタイトル先頭 ~ 28文字
-    if title_txt:
-        return title_txt[:28]
+    for tk in tokens:
+        if len(tk) < 2:
+            continue
+        if tk in para_norm:
+            # 過度に長いのは避ける
+            return tk[:40]
     return None
 
 def _pick_paragraph_slots(paragraphs: List[str], need: int, min_len: int) -> List[int]:

@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 _P_CLOSE = re.compile(r"</p\s*>", re.IGNORECASE)
 _A_TAG = re.compile(r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a\s*>', re.IGNORECASE | re.DOTALL)
 _TAG_STRIP = re.compile(r"<[^>]+>")
-_SEO_CLASS = "internal-seo-link"
+_SEO_CLASS = "ai-ilink"
 
 def _split_paragraphs(html: str) -> List[str]:
     if not html:
@@ -49,15 +49,60 @@ def _is_internal_url(site_url: str, href: str) -> bool:
 def _extract_links(html: str) -> List[Tuple[str, str]]:
     return [(m.group(1) or "", _html_to_text(m.group(2) or "")) for m in _A_TAG.finditer(html or "")]
 
-def _wrap_link(html_fragment: str, anchor_text: str, href: str) -> str:
-    # シンプルにアンカーを置く（applierでは前計画に従うのみ。精緻化は将来改良）
-    anchor_escaped = anchor_text
-    # 内部SEOが付与したリンクだけ下線＆識別クラスを付与する
-    return (
-        f'{html_fragment}<a href="{href}" '
-        f'class="{_SEO_CLASS}" '
-        f'style="text-decoration:underline;">{anchor_escaped}</a>'
+_A_OPEN = re.compile(r"<a\b[^>]*>", re.IGNORECASE)
+_A_CLOSE = re.compile(r"</a\s*>", re.IGNORECASE)
+
+def _mask_existing_anchors(html: str) -> Tuple[str, Dict[str, str]]:
+    """
+    既存<a> ... </a> をプレースホルダに置き換えて保護する。
+    置換後テキストで生の語句置換を行っても既存リンクを壊さないため。
+    """
+    placeholders: Dict[str, str] = {}
+    out = []
+    i = 0
+    while i < len(html):
+        m = _A_OPEN.search(html, i)
+        if not m:
+            out.append(html[i:])
+            break
+        # 直前までを追加
+        out.append(html[i:m.start()])
+        # 対応する </a> を探す
+        mclose = _A_CLOSE.search(html, m.end())
+        if not mclose:
+            # 異常系。以後はそのまま
+            out.append(html[m.start():])
+            break
+        seg = html[m.start(): mclose.end()]
+        key = f"__A_PLACEHOLDER_{len(placeholders)}__"
+        placeholders[key] = seg
+        out.append(key)
+        i = mclose.end()
+    return "".join(out), placeholders
+
+def _unmask_existing_anchors(html: str, placeholders: Dict[str, str]) -> str:
+    for k, v in placeholders.items():
+        html = html.replace(k, v)
+    return html
+
+def _linkify_first_occurrence(para_html: str, anchor_text: str, href: str) -> Optional[str]:
+    """
+    段落内の**未リンク領域**にある anchor_text の最初の出現を
+    <a href="... " class="ai-ilink" style="text-decoration:underline;">anchor_text</a>
+    に置換する。見つからなければ None。
+    """
+    if not (para_html and anchor_text and href):
+        return None
+    masked, ph = _mask_existing_anchors(para_html)
+    # 生テキストで最初の一致を探す（HTMLタグは残るが <a> はマスク済み）
+    idx = masked.find(anchor_text)
+    if idx == -1:
+        return None
+    linked = (
+        f'<a href="{href}" class="{_SEO_CLASS}" style="text-decoration:underline;">{anchor_text}</a>'
     )
+    masked = masked.replace(anchor_text, linked, 1)
+    return _unmask_existing_anchors(masked, ph)
 
 def _add_attrs_to_first_anchor_with_href(html: str, href: str) -> str:
     """
@@ -188,13 +233,18 @@ def _apply_plan_to_html(
         if not href:
             res.skipped += 1
             continue
-        # 段落末尾に自然に1本だけ追加（過密回避：既に内部リンク多い段落は避けても良いが簡易化）
+        
         para_html = paragraphs[idx]
         # 同じURLが段落内に既にあるならスキップ
         if href in [h for (h, _) in _extract_links(para_html)]:
             res.skipped += 1
             continue
-        new_para = _wrap_link(para_html, act.anchor_text, href)
+        # 段落内の最初の未リンク出現をリンク化（Wikipedia風）
+        new_para = _linkify_first_occurrence(para_html, act.anchor_text, href)
+        if not new_para:
+            # 見つからなければスキップ（このスロットの語句が無い）
+            res.skipped += 1
+            continue
         paragraphs[idx] = new_para
         act.status = "applied"
         act.applied_at = datetime.utcnow()

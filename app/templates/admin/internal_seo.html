@@ -5,7 +5,19 @@
 <div class="container-fluid py-3">
   <h3 class="mb-3">内部SEO管理ページ</h3>
 
-  <!-- 絞り込み -->
+  <!-- 容量ゲージ -->
+  <div class="mb-4">
+    <div class="d-flex align-items-center mb-2">
+      <div class="me-2 fw-bold">容量（並列実行の余力）</div>
+      <div id="capacityText" class="text-muted small">計測中…</div>
+      <button id="capacityRefresh" class="btn btn-sm btn-outline-secondary ms-auto" type="button">更新</button>
+    </div>
+    <div class="progress" style="height: 18px;">
+      <div id="capacityBar" class="progress-bar bg-secondary" role="progressbar" style="width:0%">0%</div>
+    </div>
+  </div>
+
+  <!-- 絞り込み（履歴用） -->
   <form class="row gy-2 gx-2 align-items-end mb-3" method="get" action="{{ url_for('admin.admin_internal_seo_index') }}">
     <div class="col-auto">
       <label class="form-label">Site</label>
@@ -37,7 +49,96 @@
     </div>
   </form>
 
-  <!-- 手動実行 -->
+  <!-- まとめ実行（バッチ） -->
+  <div class="card mb-4">
+    <div class="card-body">
+      <div class="d-flex align-items-center mb-3">
+        <div class="fw-bold me-2">選択サイトをまとめて実行</div>
+        <div class="text-muted small">（提案バッチサイズは容量ゲージの値を初期値に反映）</div>
+      </div>
+
+      <!-- パラメータ -->
+      <div class="row gy-2 gx-2 align-items-end mb-3">
+        <div class="col-auto">
+          <label class="form-label">pages</label>
+          <input type="number" id="batchPages" class="form-control" value="{{ request.args.get('pages', 10) }}">
+        </div>
+        <div class="col-auto">
+          <label class="form-label">per_page</label>
+          <input type="number" id="batchPerPage" class="form-control" value="{{ request.args.get('per_page', 100) }}">
+        </div>
+        <div class="col-auto">
+          <label class="form-label">min_score</label>
+          <input type="number" step="0.01" id="batchMinScore" class="form-control" value="{{ request.args.get('min_score', 0.05) }}">
+        </div>
+        <div class="col-auto">
+          <label class="form-label">max_k</label>
+          <input type="number" id="batchMaxK" class="form-control" value="{{ request.args.get('max_k', 80) }}">
+        </div>
+        <div class="col-auto">
+          <label class="form-label">limit_sources</label>
+          <input type="number" id="batchLimitSources" class="form-control" value="{{ request.args.get('limit_sources', 200) }}">
+        </div>
+        <div class="col-auto">
+          <label class="form-label">limit_posts</label>
+          <input type="number" id="batchLimitPosts" class="form-control" value="{{ request.args.get('limit_posts', 50) }}">
+        </div>
+        <div class="col-auto">
+          <label class="form-label">incremental</label>
+          <select id="batchIncremental" class="form-select">
+            <option value="true" selected>true</option>
+            <option value="false">false</option>
+          </select>
+        </div>
+        <div class="col-auto">
+          <button id="runBatchBtn" class="btn btn-success">選択サイトを実行</button>
+        </div>
+      </div>
+
+      <!-- サイト一覧（チェックボックス） -->
+      <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle">
+          <thead>
+            <tr>
+              <th style="width:36px">
+                <input type="checkbox" id="checkAllSites" />
+              </th>
+              <th style="width:80px">Site ID</th>
+              <th>Site 名称</th>
+              <th style="width:160px">単独実行</th>
+            </tr>
+          </thead>
+          <tbody id="sitesBody">
+            {% for s in sites %}
+            <tr>
+              <td><input type="checkbox" class="site-check" value="{{ s.id }}"></td>
+              <td class="fw-bold">{{ s.id }}</td>
+              <td>{{ s.name }}</td>
+              <td>
+                <form method="post" action="{{ url_for('admin.admin_internal_seo_run') }}" class="d-inline">
+                  {{ csrf_token() if csrf_token is defined }}
+                  <input type="hidden" name="site_id" value="{{ s.id }}">
+                  <input type="hidden" name="pages" value="{{ request.args.get('pages', 10) }}">
+                  <input type="hidden" name="per_page" value="{{ request.args.get('per_page', 100) }}">
+                  <input type="hidden" name="min_score" value="{{ request.args.get('min_score', 0.05) }}">
+                  <input type="hidden" name="max_k" value="{{ request.args.get('max_k', 80) }}">
+                  <input type="hidden" name="limit_sources" value="{{ request.args.get('limit_sources', 200) }}">
+                  <input type="hidden" name="limit_posts" value="{{ request.args.get('limit_posts', 50) }}">
+                  <input type="hidden" name="incremental" value="true">
+                  <button class="btn btn-outline-primary btn-sm">このサイトだけ実行</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <div id="batchResult" class="small mt-2 text-muted"></div>
+    </div>
+  </div>
+
+  <!-- 既存：手動実行（単発） -->
   <form class="row gy-2 gx-2 align-items-end mb-4" method="post" action="{{ url_for('admin.admin_internal_seo_run') }}">
     {{ csrf_token() if csrf_token is defined }}
     <div class="col-auto">
@@ -98,7 +199,7 @@
           <th>Started</th>
           <th>Ended</th>
           <th style="width:120px">Duration(ms)</th>
-          <th style="width:90px">詳細</th>
+          <th style="width:140px">詳細</th>
         </tr>
       </thead>
       <tbody id="runsBody">
@@ -112,7 +213,7 @@
   </div>
 </div>
 
-<!-- 詳細モーダル -->
+<!-- 詳細モーダル（RUN統計表示） -->
 <div class="modal fade" id="statsModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content">
@@ -126,6 +227,7 @@
         </div>
       </div>
       <div class="modal-footer">
+        <a class="btn btn-outline-primary" id="goDetailLink" href="#" target="_blank">詳細ログページを開く</a>
         <button class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
       </div>
     </div>
@@ -136,7 +238,7 @@
 {% block scripts %}
 {{ super() }}
 <script>
-// 軽量なローカル時刻表示
+// ----------- ユーティリティ -----------
 function fmtLocal(iso) {
   if (!iso) return '-';
   try {
@@ -148,51 +250,56 @@ function fmtLocal(iso) {
     return iso;
   }
 }
-
+function esc(v) {
+  if (v===null||v===undefined) return '';
+  return String(v).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+}
 function statusBadge(st) {
   if (st === 'success') return '<span class="badge bg-success">success</span>';
   if (st === 'running') return '<span class="badge bg-info text-dark">running</span>';
   if (st === 'error')   return '<span class="badge bg-danger">error</span>';
-  return `<span class="badge bg-secondary">${st || '-'}</span>`;
+  return `<span class="badge bg-secondary">${esc(st || '-')}</span>`;
 }
 
-// 詳細モーダル（必要時のみ stats を取得）
-async function openStatsModal(btn) {
-  const runId = btn.getAttribute('data-run-id');
-  const body = document.getElementById('statsBody');
-  body.innerHTML = '<div class="text-muted">読み込み中…</div>';
-  const url = `/admin/internal-seo/run/${runId}/stats`;
+// ----------- 容量ゲージ -----------
+let lastCapacity = null;
+async function refreshCapacity() {
   try {
-    const res = await fetch(url, {headers: {'Accept': 'application/json'}});
+    const res = await fetch('/admin/internal-seo/capacity', {headers:{'Accept':'application/json'}});
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    const s = (data && data.stats) || {};
-    const rows = [];
-    if (s.indexer)   rows.push(renderRow('Indexer',   s.indexer));
-    if (s.link_graph)rows.push(renderRow('LinkGraph', s.link_graph));
-    if (s.planner)   rows.push(renderRow('Planner',   s.planner));
-    if (s.applier)   rows.push(renderRow('Applier',   s.applier));
-    if (s.params)    rows.push(renderRow('Params',    s.params));
-    document.getElementById('statsBody').innerHTML = rows.length
-      ? `<table class="table table-sm"><tbody>${rows.join('')}</tbody></table>`
-      : '<div class="text-muted">詳細データなし</div>';
+    const c = await res.json();
+    lastCapacity = c;
+    const run = c.running ?? 0;
+    const max = c.max_parallel ?? 1;
+    const q   = c.queued ?? 0;
+    const avail = c.available ?? Math.max(0, max-run);
+    const pct = Math.round(100 * (run / Math.max(1, max)));
+
+    const bar = document.getElementById('capacityBar');
+    bar.style.width = pct + '%';
+    bar.textContent = `${pct}%`;
+    bar.classList.remove('bg-success','bg-warning','bg-danger','bg-secondary');
+    if (pct <= 50) bar.classList.add('bg-success');
+    else if (pct <= 80) bar.classList.add('bg-warning');
+    else bar.classList.add('bg-danger');
+
+    const t = document.getElementById('capacityText');
+    t.textContent = `max:${max} / running:${run} / queued:${q} / available:${avail} / suggest:${c.suggest_batch_size}`;
+
+    // 提案をバッチ実行ボタンの data に反映
+    document.getElementById('runBatchBtn').dataset.suggest = (c.suggest_batch_size ?? 1);
   } catch (e) {
-    body.innerHTML = `<div class="text-danger">エラー: ${e.message}</div>`;
+    const bar = document.getElementById('capacityBar');
+    bar.style.width = '0%';
+    bar.textContent = 'N/A';
+    bar.classList.remove('bg-success','bg-warning','bg-danger');
+    bar.classList.add('bg-secondary');
+    document.getElementById('capacityText').textContent = `取得失敗: ${e.message}`;
   }
-  const modal = new bootstrap.Modal(document.getElementById('statsModal'));
-  modal.show();
 }
+setInterval(refreshCapacity, 10000);
 
-function renderRow(title, obj) {
-  const esc = (v) => (v===null||v===undefined)? '' : String(v).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
-  const kv = Object.entries(obj).map(([k,v]) => {
-    if (typeof v === 'object' && v !== null) v = JSON.stringify(v);
-    return `<tr><th class="w-25">${esc(k)}</th><td>${esc(v)}</td></tr>`;
-  }).join('');
-  return `<tr class="table-active"><th colspan="2">${esc(title)}</th></tr>${kv}`;
-}
-
-// 非同期ロード（キーセット）
+// ----------- Runs（キーセット） -----------
 let nextCursorTs = null;
 let nextCursorId = null;
 let loading = false;
@@ -229,12 +336,13 @@ async function loadRuns(initial=false) {
         <td>${r.id}</td>
         <td>${r.site_id}</td>
         <td>${statusBadge(r.status)}</td>
-        <td class="text-muted">${r.job_kind || ''}</td>
+        <td class="text-muted">${esc(r.job_kind || '')}</td>
         <td>${fmtLocal(r.started_at)}</td>
         <td>${fmtLocal(r.ended_at)}</td>
         <td>${r.duration_ms ?? '-'}</td>
         <td>
-          <button class="btn btn-sm btn-outline-primary" data-run-id="${r.id}" onclick="openStatsModal(this)">詳細</button>
+          <button class="btn btn-sm btn-outline-primary" data-run-id="${r.id}" data-site-id="${r.site_id}" onclick="openStatsModal(this)">詳細</button>
+          <a class="btn btn-sm btn-outline-secondary" href="/admin/internal-seo/detail?site_id=${encodeURIComponent(r.site_id)}" target="_blank">ログ一覧</a>
         </td>`;
       frag.appendChild(tr);
     }
@@ -256,10 +364,106 @@ async function loadRuns(initial=false) {
   }
 }
 
-// 初回ロード
+// ----------- RUN詳細モーダル -----------
+async function openStatsModal(btn) {
+  const runId = btn.getAttribute('data-run-id');
+  const siteId = btn.getAttribute('data-site-id');
+  const body = document.getElementById('statsBody');
+  body.innerHTML = '<div class="text-muted">読み込み中…</div>';
+  const url = `/admin/internal-seo/run/${runId}/stats`;
+  try {
+    const res = await fetch(url, {headers: {'Accept': 'application/json'}});
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const s = (data && data.stats) || {};
+    const rows = [];
+    if (s.indexer)   rows.push(renderRow('Indexer',   s.indexer));
+    if (s.link_graph)rows.push(renderRow('LinkGraph', s.link_graph));
+    if (s.planner)   rows.push(renderRow('Planner',   s.planner));
+    if (s.applier)   rows.push(renderRow('Applier',   s.applier));
+    if (s.params)    rows.push(renderRow('Params',    s.params));
+    body.innerHTML = rows.length
+      ? `<table class="table table-sm"><tbody>${rows.join('')}</tbody></table>`
+      : '<div class="text-muted">詳細データなし</div>';
+
+    // 詳細ログページへのリンク（サイトIDで一覧）
+    const a = document.getElementById('goDetailLink');
+    a.href = `/admin/internal-seo/detail?site_id=${encodeURIComponent(siteId)}&run_id=${encodeURIComponent(runId)}`;
+  } catch (e) {
+    body.innerHTML = `<div class="text-danger">エラー: ${e.message}</div>`;
+  }
+  // Bootstrap モーダル（読み込み済み想定）
+  const modal = new bootstrap.Modal(document.getElementById('statsModal'));
+  modal.show();
+}
+
+function renderRow(title, obj) {
+  const kv = Object.entries(obj || {}).map(([k,v]) => {
+    if (typeof v === 'object' && v !== null) v = JSON.stringify(v);
+    return `<tr><th class="w-25">${esc(k)}</th><td>${esc(v)}</td></tr>`;
+  }).join('');
+  return `<tr class="table-active"><th colspan="2">${esc(title)}</th></tr>${kv}`;
+}
+
+// ----------- バッチ実行 -----------
+document.getElementById('checkAllSites').addEventListener('change', (e) => {
+  document.querySelectorAll('.site-check').forEach(cb => cb.checked = e.target.checked);
+});
+
+async function runBatch() {
+  const ids = Array.from(document.querySelectorAll('.site-check:checked')).map(cb => parseInt(cb.value,10)).filter(Boolean);
+  if (!ids.length) {
+    document.getElementById('batchResult').textContent = 'サイトが選択されていません。';
+    return;
+  }
+  // 容量の提案に合わせて上位Nだけ実行（控えめに）
+  const suggest = parseInt(document.getElementById('runBatchBtn').dataset.suggest || '5', 10);
+  const picked = ids.slice(0, Math.max(1, suggest));
+
+  const payload = {
+    site_ids: picked,
+    pages: parseInt(document.getElementById('batchPages').value || '10',10),
+    per_page: parseInt(document.getElementById('batchPerPage').value || '100',10),
+    min_score: parseFloat(document.getElementById('batchMinScore').value || '0.05'),
+    max_k: parseInt(document.getElementById('batchMaxK').value || '80',10),
+    limit_sources: parseInt(document.getElementById('batchLimitSources').value || '200',10),
+    limit_posts: parseInt(document.getElementById('batchLimitPosts').value || '50',10),
+    incremental: String(document.getElementById('batchIncremental').value || 'true') !== 'false',
+  };
+
+  const btn = document.getElementById('runBatchBtn');
+  btn.disabled = true;
+  btn.textContent = '登録中…';
+  try {
+    const res = await fetch('/admin/internal-seo/run-batch', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','Accept':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    document.getElementById('batchResult').textContent =
+      `登録: ${data.enqueued} 件 / スキップ: ${data.skipped?.length||0} / エラー: ${data.errors?.length||0}`;
+    // 容量・履歴を軽く更新
+    refreshCapacity();
+    nextCursorTs = null; nextCursorId = null; reachedEnd = false;
+    document.getElementById('runsBody').innerHTML = '';
+    loadRuns(true);
+  } catch (e) {
+    document.getElementById('batchResult').textContent = '失敗: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '選択サイトを実行';
+  }
+}
+
+// ----------- 初期化 -----------
 document.addEventListener('DOMContentLoaded', () => {
+  refreshCapacity();
+  document.getElementById('capacityRefresh').addEventListener('click', refreshCapacity);
   loadRuns(true);
   document.getElementById('loadMoreBtn').addEventListener('click', () => loadRuns(false));
+  document.getElementById('runBatchBtn').addEventListener('click', (e) => { e.preventDefault(); runBatch(); });
 });
 </script>
 {% endblock %}

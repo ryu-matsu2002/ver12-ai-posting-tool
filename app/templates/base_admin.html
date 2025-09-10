@@ -9,6 +9,10 @@
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
   <!-- ✅ ファビコンの追加 -->
   <link rel="icon" href="{{ url_for('static', filename='images/favicon.png') }}" type="image/png">
+  <!-- ✅ 内部SEOで付けたリンクだけ下線（通常リンクは変更しない） -->
+  <style>
+    .ai-content a.ai-ilink { text-decoration: underline; }
+  </style>
 </head>
 <body class="bg-gray-100 h-screen text-gray-800 flex">
 

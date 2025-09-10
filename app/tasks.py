@@ -34,6 +34,7 @@ from app.services.internal_seo.link_graph import build_link_graph_for_site
 from app.services.internal_seo.planner import plan_links_for_site
 from app.services.internal_seo.applier import apply_actions_for_site
 import os
+from math import inf
 
 # ────────────────────────────────────────────────
 # APScheduler ＋ スレッドプール
@@ -548,6 +549,21 @@ def init_scheduler(app):
         app.logger.info(f"Scheduler started: internal_seo_job daily at {utc_hour:02d}:{utc_min:02d} UTC")
     else:
         app.logger.info("Scheduler skipped: internal_seo_job (INTERNAL_SEO_ENABLED!=1)")
+
+    # ✅ 内部SEO ワーカー（キュー消化）※毎分
+    if os.getenv("INTERNAL_SEO_WORKER_ENABLED", "1") == "1":
+        scheduler.add_job(
+            func=_internal_seo_worker_tick,
+            trigger="interval",
+            minutes=int(os.getenv("INTERNAL_SEO_WORKER_INTERVAL_MIN", "1")),
+            args=[app],
+            id="internal_seo_worker_tick",
+            replace_existing=True,
+            max_instances=1,
+        )
+        app.logger.info("Scheduler started: internal_seo_worker_tick every minute")
+    else:
+        app.logger.info("Scheduler skipped: internal_seo_worker_tick (INTERNAL_SEO_WORKER_ENABLED!=1)")    
  
 
 
@@ -640,6 +656,81 @@ def _internal_seo_run_one(site_id: int,
         db.session.commit()
         current_app.logger.exception(f"[internal-seo] failed for site {site_id}: {e}")
 
+@with_db_retry(max_retries=3, backoff=1.8)
+def _internal_seo_worker_tick(app):
+    """
+    internal_seo_job_queue から 'queued' を安全に取り出し、
+    同時実行上限を守りつつ _internal_seo_run_one を回す。
+    """
+    with app.app_context():
+        # 同時実行上限（ENV で調整）
+        max_parallel = int(os.getenv("INTERNAL_SEO_WORKER_PARALLELISM", "3"))
+        # いま走っている run 数
+        running_cnt = db.session.execute(text("""
+            SELECT COUNT(*) FROM internal_seo_runs WHERE status='running'
+        """)).scalar_one()
+        available = max(0, max_parallel - int(running_cnt or 0))
+        if available <= 0:
+            current_app.logger.info(f"[internal-seo worker] saturated: running={running_cnt} / max={max_parallel}")
+            return
+
+        # 取り出し件数は上限に控えめ（念のため 1 サイト=1 run 想定）
+        take = min(available, int(os.getenv("INTERNAL_SEO_WORKER_TAKE", "2")))
+
+        # queued をロックして running に更新（SKIP LOCKED で多重取得回避）
+        rows = db.session.execute(text(f"""
+            WITH picked AS (
+              SELECT id
+              FROM internal_seo_job_queue
+              WHERE status='queued'
+              ORDER BY created_at ASC, id ASC
+              FOR UPDATE SKIP LOCKED
+              LIMIT :take
+            )
+            UPDATE internal_seo_job_queue q
+               SET status='running', started_at=now()
+              FROM picked p
+             WHERE q.id = p.id
+          RETURNING q.id, q.site_id, q.pages, q.per_page, q.min_score, q.max_k,
+                    q.limit_sources, q.limit_posts, q.incremental, q.job_kind;
+        """), {"take": take}).mappings().all()
+        db.session.commit()
+
+        if not rows:
+            current_app.logger.info("[internal-seo worker] no queued jobs")
+            return
+
+        current_app.logger.info(f"[internal-seo worker] picked {len(rows)} job(s)")
+
+        # 1件ずつ実行（同プロセス内で逐次。必要なら ThreadPoolExecutor で並列化も可）
+        for r in rows:
+            j_id = r["id"]
+            try:
+                _internal_seo_run_one(
+                    site_id       = int(r["site_id"]),
+                    pages         = int(r["pages"] or os.getenv("INTERNAL_SEO_PAGES", 10)),
+                    per_page      = int(r["per_page"] or os.getenv("INTERNAL_SEO_PER_PAGE", 100)),
+                    min_score     = float(r["min_score"] or os.getenv("INTERNAL_SEO_MIN_SCORE", 0.05)),
+                    max_k         = int(r["max_k"] or os.getenv("INTERNAL_SEO_MAX_K", 80)),
+                    limit_sources = int(r["limit_sources"] or os.getenv("INTERNAL_SEO_LIMIT_SOURCES", 200)),
+                    limit_posts   = int(r["limit_posts"] or os.getenv("INTERNAL_SEO_LIMIT_POSTS", 50)),
+                    incremental   = bool(r["incremental"]),
+                    job_kind      = r["job_kind"] or "worker",
+                )
+                db.session.execute(text("""
+                    UPDATE internal_seo_job_queue
+                       SET status='done', ended_at=now()
+                     WHERE id=:id
+                """), {"id": j_id})
+                db.session.commit()
+            except Exception as e:
+                current_app.logger.exception(f"[internal-seo worker] job {j_id} failed: {e}")
+                db.session.execute(text("""
+                    UPDATE internal_seo_job_queue
+                       SET status='error', ended_at=now(), message=:msg
+                     WHERE id=:id
+                """), {"id": j_id, "msg": str(e)})
+                db.session.commit()
 
 def _internal_seo_nightly_job(app):
     """
