@@ -1891,7 +1891,7 @@ def admin_captcha_dataset():
 
     return render_template("admin/captcha_dataset.html", entries=entries)
 
-
+# 内部SEOルートコード
 
 import os
 import threading
@@ -1941,6 +1941,7 @@ def admin_internal_seo_index():
 
 # ---- JSON: サイト一覧（軽量ページング & 検索） ----------------------
 # GET /admin/internal-seo/sites?q=<str>&limit=<int>&cursor_id=<int>
+# === 追加: サイト一覧 API（カードUI用・超軽量） ==========================
 @admin_bp.route("/admin/internal-seo/sites", methods=["GET"])
 @login_required
 def admin_internal_seo_sites():
@@ -1954,24 +1955,30 @@ def admin_internal_seo_sites():
     query = Site.query.options(load_only(Site.id, Site.name)).order_by(Site.id.asc())
 
     if q:
-        # 部分一致（idも名前も）。Postgres/SQLite両対応の簡易実装
+        # 数字だけなら ID も見て、文字は name 部分一致
         if q.isdigit():
-            query = query.filter(or_(Site.id == int(q), Site.name.ilike(f"%{q}%")))
+            query = query.filter(
+                or_(
+                    Site.id == int(q),
+                    Site.name.ilike(f"%{q}%"),
+                )
+            )
         else:
             query = query.filter(Site.name.ilike(f"%{q}%"))
 
+    # 前回の続き（昇順IDのキーセット）
     if cursor_id:
         query = query.filter(Site.id > cursor_id)
 
-    items = query.limit(limit).all()
-    has_more = len(items) == limit
-    next_cursor_id = items[-1].id if items else None
+    rows = query.limit(limit).all()
+    next_cursor_id = rows[-1].id if rows else None
+    has_more = bool(rows) and (len(rows) == limit)
 
     return jsonify({
         "ok": True,
-        "rows": [{"id": s.id, "name": s.name or f"Site {s.id}"} for s in items],
-        "has_more": has_more,
+        "rows": [{"id": s.id, "name": s.name} for s in rows],
         "next_cursor_id": next_cursor_id,
+        "has_more": has_more,
     })
 
 

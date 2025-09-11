@@ -2,176 +2,158 @@
 {% block title %}内部SEO 管理{% endblock %}
 
 {% block content %}
-<div class="container-fluid py-4">
+<div class="container-fluid py-4 internal-seo">
 
-  <!-- CSRF（JS用） -->
+  <!-- CSRF（バッチ/単発で使用） -->
   <meta name="csrf-token" content="{{ csrf_token() if csrf_token is defined }}">
 
-  <!-- ===== ヘッダー／案内 ===== -->
+  <!-- GSC 風の軽量スタイル -->
+  <style>
+    .internal-seo .guide {
+      background: #f7fbff;
+      border: 1px solid #e3f0ff;
+      border-left: 4px solid #0d6efd;
+      border-radius: .5rem;
+      padding: .75rem .9rem;
+      color:#0b3d91;
+      font-size: .95rem;
+    }
+    .internal-seo .gsc-card {
+      border: 1px solid #e8eef5;
+      background: #fff;
+      border-radius: .75rem;
+      box-shadow: 0 2px 8px rgba(16,24,40,.06);
+      transition: box-shadow .15s ease, transform .12s ease;
+    }
+    .internal-seo .gsc-card:hover { box-shadow: 0 8px 20px rgba(13,110,253,.12); transform: translateY(-1px); }
+    .internal-seo .section-title { font-weight: 600; color:#0d6efd; }
+    .internal-seo .mini-label { font-size: .8rem; color:#6c757d; }
+    .internal-seo .pill { display:inline-block; padding:.2rem .5rem; border-radius:999px; font-size:.75rem; }
+    .internal-seo .pill-blue { background:#e7f1ff; color:#0d6efd; }
+    .internal-seo .pill-green{ background:#eaf7ea; color:#198754; }
+    .internal-seo .btn-ghost { border:1px solid #dee2e6; background:#fff; }
+    .internal-seo .kbd { background:#f1f3f5; border:1px solid #dee2e6; border-bottom-width:2px; padding:.05rem .35rem; border-radius:.35rem; font-size:.75rem;}
+  </style>
+
+  <!-- 見出し -->
   <div class="d-flex align-items-center mb-3">
-    <h1 class="h5 mb-0">🔧 内部SEO 管理</h1>
-    <button id="capacityRefresh" class="btn btn-sm btn-outline-primary ms-auto">再計測</button>
-  </div>
-
-  <div class="alert alert-light border d-flex align-items-center py-2 small mb-3" role="alert">
-    <span class="me-2">📘</span>
-    <div>下の<strong>サイト検索</strong>でカードを絞り込み、チェックで選択 → 右上の<strong>選択サイトを実行</strong>。詳細パラメータは「高度な設定」を開くと編集できます。</div>
-  </div>
-
-  <!-- ===== 上部：検索・履歴フィルタ・容量 ===== -->
-  <div class="row g-3 align-items-stretch mb-4">
-    <!-- 検索＆履歴フィルタ -->
-    <div class="col-12 col-lg-7">
-      <div class="card border-0 shadow-sm h-100">
-        <div class="card-body">
-          <div class="row g-3">
-            <div class="col-12">
-              <label class="form-label mb-1 small">🔎 サイト検索（カード一覧を即時フィルタ）</label>
-              <div class="d-flex gap-2">
-                <input id="siteSearchInput" type="text" class="form-control form-control-sm" placeholder="サイト名 または ID（部分一致）">
-                <button id="siteSearchBtn" class="btn btn-sm btn-primary">検索</button>
-              </div>
-            </div>
-            <div class="col-6 col-md-4">
-              <label class="form-label mb-1 small">📌 履歴の絞り込み Site ID</label>
-              <input type="number" id="siteIdInput" class="form-control form-control-sm" placeholder="例: 12" value="{{ selected_site_id or '' }}">
-            </div>
-            <div class="col-6 col-md-4">
-              <label class="form-label mb-1 small">📄 履歴の表示件数</label>
-              {% set pp = per_page or 50 %}
-              <select id="perPageSelect" class="form-select form-select-sm">
-                {% for n in [25,50,100,200] %}
-                  <option value="{{ n }}" {% if pp==n %}selected{% endif %}>{{ n }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div class="col-12 col-md-4 d-flex align-items-end gap-2">
-              <button id="applyFilterBtn" class="btn btn-sm btn-outline-primary w-100">履歴に適用</button>
-              <button id="clearFilterBtn" class="btn btn-sm btn-outline-secondary w-100">クリア</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 容量ゲージ -->
-    <div class="col-12 col-lg-5">
-      <div class="card border-0 shadow-sm h-100">
-        <div class="card-body">
-          <div class="d-flex align-items-center mb-2">
-            <h6 class="mb-0">⚡ 現在の処理余力</h6>
-            <span id="capacityText" class="badge bg-light text-muted ms-2">計測中…</span>
-          </div>
-          <div class="progress" style="height:14px">
-            <div id="capacityBar" class="progress-bar bg-secondary" style="width:0%">0%</div>
-          </div>
-        </div>
-      </div>
+    <h2 class="h4 mb-0">🔧 内部SEO 管理</h2>
+    <div class="ms-auto d-flex align-items-center gap-2">
+      <button id="capacityRefresh" class="btn btn-sm btn-ghost">再計測</button>
     </div>
   </div>
 
-  <!-- ===== まとめ実行（GSCカード風） ===== -->
+  <!-- ガイド -->
+  <div class="guide mb-3">
+    <strong class="me-2">ガイド</strong>
+    下の<strong>サイト検索</strong>でカードを絞り込み、チェックして
+    <strong>右上の「選択サイトを実行」</strong>を押します。
+    詳細パラメータは下の<strong>「高度な設定」</strong>で編集できます。
+  </div>
+
+  <!-- 上部フィルタ（履歴用） -->
+  <div class="mb-3 d-flex flex-wrap align-items-end gap-3">
+    <div>
+      <div class="mini-label">履歴の絞り込み Site ID</div>
+      <input type="number" id="siteIdInput" class="form-control form-control-sm" placeholder="例: 12" value="{{ selected_site_id or '' }}" style="width: 160px;">
+    </div>
+    <div>
+      <div class="mini-label">履歴の表示件数</div>
+      {% set pp = per_page or 50 %}
+      <select id="perPageSelect" class="form-select form-select-sm">
+        {% for n in [25,50,100,200] %}
+          <option value="{{ n }}" {% if pp==n %}selected{% endif %}>{{ n }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="ms-auto">
+      <button id="applyFilterBtn" class="btn btn-sm btn-primary">履歴に適用</button>
+      <button id="clearFilterBtn" class="btn btn-sm btn-ghost">クリア</button>
+    </div>
+  </div>
+
+  <!-- 容量ゲージ -->
   <div class="card border-0 shadow-sm mb-4">
     <div class="card-body">
-
-      <!-- アクションバー（sticky） -->
-      <div class="d-flex align-items-center mb-2 position-sticky top-0" style="z-index:1">
-        <div class="fw-semibold">✅ 選択サイトをまとめて実行</div>
-        <small class="text-muted ms-2">（提案バッチサイズは容量ゲージを反映）</small>
-        <button id="runBatchBtn" class="btn btn-success btn-sm ms-auto">選択サイトを実行</button>
-      </div>
-
-      <!-- 高度な設定（折りたたみ） -->
-      <details class="mb-3">
-        <summary class="small text-muted" style="cursor:pointer">⚙️ 高度な設定（クリックで開閉）</summary>
-        <div class="row g-2 align-items-end mt-2">
-          <div class="col-6 col-md-2">
-            <label class="form-label mb-1 small">pages</label>
-            <input type="number" id="batchPages" class="form-control form-control-sm" value="{{ request.args.get('pages', 10) }}">
-          </div>
-          <div class="col-6 col-md-2">
-            <label class="form-label mb-1 small">per_page</label>
-            <input type="number" id="batchPerPage" class="form-control form-control-sm" value="{{ request.args.get('per_page', 100) }}">
-          </div>
-          <div class="col-6 col-md-2">
-            <label class="form-label mb-1 small">min_score</label>
-            <input type="number" step="0.01" id="batchMinScore" class="form-control form-control-sm" value="{{ request.args.get('min_score', 0.05) }}">
-          </div>
-          <div class="col-6 col-md-2">
-            <label class="form-label mb-1 small">max_k</label>
-            <input type="number" id="batchMaxK" class="form-control form-control-sm" value="{{ request.args.get('max_k', 80) }}">
-          </div>
-          <div class="col-6 col-md-2">
-            <label class="form-label mb-1 small">limit_sources</label>
-            <input type="number" id="batchLimitSources" class="form-control form-control-sm" value="{{ request.args.get('limit_sources', 200) }}">
-          </div>
-          <div class="col-6 col-md-2">
-            <label class="form-label mb-1 small">limit_posts</label>
-            <input type="number" id="batchLimitPosts" class="form-control form-control-sm" value="{{ request.args.get('limit_posts', 50) }}">
-          </div>
-          <div class="col-6 col-md-2">
-            <label class="form-label mb-1 small">incremental</label>
-            <select id="batchIncremental" class="form-select form-select-sm">
-              <option value="true" selected>true</option>
-              <option value="false">false</option>
-            </select>
-          </div>
-        </div>
-      </details>
-
-      <!-- チェックヘッダ -->
       <div class="d-flex align-items-center mb-2">
-        <div class="form-check">
-          <input type="checkbox" class="form-check-input" id="checkAllSites">
-          <label for="checkAllSites" class="form-check-label small">すべて選択／解除</label>
-        </div>
-        <div class="small text-muted ms-auto">
-          <span id="visibleCount">0</span> 件表示（全 <span id="totalCount">{{ sites|length }}</span> 件）
-        </div>
+        <div class="section-title mb-0">⚡ 現在の処理余力</div>
+        <span id="capacityText" class="pill pill-blue ms-2">計測中…</span>
       </div>
-
-      <!-- サイト一覧（カード） -->
-      <div id="sitesBody" class="d-grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));">
-        {% for s in sites %}
-          <div class="site-card p-3 bg-white rounded border shadow-sm d-flex justify-content-between align-items-start"
-               data-id="{{ s.id }}" data-name="{{ (s.name or '')|lower }}">
-            <div class="me-3">
-              <div class="d-flex align-items-center gap-2 mb-1">
-                <input class="form-check-input site-check" type="checkbox" value="{{ s.id }}" id="site-{{ s.id }}">
-                <label class="form-check-label fw-semibold" for="site-{{ s.id }}" style="cursor:pointer;">
-                  {{ s.name }}
-                </label>
-              </div>
-              <div class="text-muted small">ID: <span class="fw-semibold">{{ s.id }}</span></div>
-            </div>
-            <div class="text-end">
-              <form method="post" action="{{ url_for('admin.admin_internal_seo_run') }}" class="d-inline">
-                {{ csrf_token() if csrf_token is defined }}
-                <input type="hidden" name="site_id" value="{{ s.id }}">
-                <input type="hidden" name="pages" value="{{ request.args.get('pages', 10) }}">
-                <input type="hidden" name="per_page" value="{{ request.args.get('per_page', 100) }}">
-                <input type="hidden" name="min_score" value="{{ request.args.get('min_score', 0.05) }}">
-                <input type="hidden" name="max_k" value="{{ request.args.get('max_k', 80) }}">
-                <input type="hidden" name="limit_sources" value="{{ request.args.get('limit_sources', 200) }}">
-                <input type="hidden" name="limit_posts" value="{{ request.args.get('limit_posts', 50) }}">
-                <input type="hidden" name="incremental" value="true">
-                <button class="btn btn-outline-primary btn-sm" type="submit">▶ このサイトだけ実行</button>
-              </form>
-            </div>
-          </div>
-        {% endfor %}
+      <div class="progress" style="height: 14px;">
+        <div id="capacityBar" class="progress-bar bg-secondary" role="progressbar" style="width:0%">0%</div>
       </div>
-
-      <div id="batchResult" class="small text-muted mt-2"></div>
     </div>
   </div>
 
-  <!-- ===== 実行履歴 ===== -->
+  <!-- まとめ実行 -->
+  <div class="card border-0 shadow-sm mb-4">
+    <div class="card-body">
+      <div class="d-flex flex-wrap align-items-center mb-3">
+        <div class="section-title me-2">✅ 選択サイトをまとめて実行</div>
+        <div class="mini-label">（提案バッチサイズは余力メーターの値を反映）</div>
+        <div class="ms-auto">
+          <button id="runBatchBtn" class="btn btn-success btn-sm">選択サイトを実行</button>
+        </div>
+      </div>
+
+      <!-- パラメータ -->
+      <div class="row g-2 align-items-end mb-3">
+        <div class="col-6 col-md-2"><div class="mini-label">pages</div>
+          <input type="number" id="batchPages" class="form-control form-control-sm" value="{{ request.args.get('pages', 10) }}">
+        </div>
+        <div class="col-6 col-md-2"><div class="mini-label">per_page</div>
+          <input type="number" id="batchPerPage" class="form-control form-control-sm" value="{{ request.args.get('per_page', 100) }}">
+        </div>
+        <div class="col-6 col-md-2"><div class="mini-label">min_score</div>
+          <input type="number" step="0.01" id="batchMinScore" class="form-control form-control-sm" value="{{ request.args.get('min_score', 0.05) }}">
+        </div>
+        <div class="col-6 col-md-2"><div class="mini-label">max_k</div>
+          <input type="number" id="batchMaxK" class="form-control form-control-sm" value="{{ request.args.get('max_k', 80) }}">
+        </div>
+        <div class="col-6 col-md-2"><div class="mini-label">limit_sources</div>
+          <input type="number" id="batchLimitSources" class="form-control form-control-sm" value="{{ request.args.get('limit_sources', 200) }}">
+        </div>
+        <div class="col-6 col-md-2"><div class="mini-label">limit_posts</div>
+          <input type="number" id="batchLimitPosts" class="form-control form-control-sm" value="{{ request.args.get('limit_posts', 50) }}">
+        </div>
+        <div class="col-6 col-md-2"><div class="mini-label">incremental</div>
+          <select id="batchIncremental" class="form-select form-select-sm">
+            <option value="true" selected>true</option>
+            <option value="false">false</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- サイト検索 -->
+      <div class="d-flex flex-wrap align-items-end gap-2 mb-2">
+        <div>
+          <div class="mini-label">サイト検索</div>
+          <input type="text" id="siteSearchInput" class="form-control form-control-sm" placeholder="名前 or ID 部分一致" style="width: 260px;">
+        </div>
+        <button id="siteSearchBtn" class="btn btn-sm btn-ghost">検索</button>
+        <div class="ms-auto form-check">
+          <input type="checkbox" class="form-check-input" id="checkAllSites">
+          <label for="checkAllSites" class="form-check-label mini-label">すべて選択／解除</label>
+        </div>
+      </div>
+
+      <!-- サイト一覧（カードUI） -->
+      <div id="sitesBody" class="d-grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));"></div>
+
+      <div class="d-flex mt-2">
+        <button id="loadMoreSitesBtn" class="btn btn-sm btn-ghost ms-auto d-none" type="button">もっと見る</button>
+      </div>
+
+      <div id="batchResult" class="mini-label mt-2"></div>
+    </div>
+  </div>
+
+  <!-- 実行履歴 -->
   <div class="card border-0 shadow-sm">
     <div class="card-body">
       <div class="d-flex align-items-center mb-2">
-        <h6 class="mb-0">📜 実行履歴</h6>
-        <a class="btn btn-sm btn-outline-secondary ms-auto" href="/admin/internal-seo/detail" target="_blank">詳細ログページを開く</a>
+        <div class="section-title">📜 実行履歴</div>
+        <a class="btn btn-sm btn-ghost ms-auto" href="/admin/internal-seo/detail" target="_blank">詳細ログページを開く</a>
       </div>
       <div class="table-responsive">
         <table class="table table-sm align-middle mb-0">
@@ -193,13 +175,13 @@
         </table>
       </div>
       <div class="d-flex mt-2">
-        <button id="loadMoreBtn" class="btn btn-sm btn-outline-secondary ms-auto d-none" type="button">もっと見る</button>
+        <button id="loadMoreBtn" class="btn btn-sm btn-ghost ms-auto d-none" type="button">もっと見る</button>
       </div>
     </div>
   </div>
 </div>
 
-<!-- 実行詳細モーダル -->
+<!-- 詳細モーダル -->
 <div class="modal fade" id="statsModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content">
@@ -208,12 +190,10 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
       </div>
       <div class="modal-body">
-        <div id="statsBody" class="small text-monospace">
-          <div class="text-muted">読み込み中…</div>
-        </div>
+        <div id="statsBody" class="small text-monospace"><div class="text-muted">読み込み中…</div></div>
       </div>
       <div class="modal-footer">
-        <a class="btn btn-outline-primary" id="goDetailLink" href="#" target="_blank">詳細ログページを開く</a>
+        <a class="btn btn-ghost" id="goDetailLink" href="#" target="_blank">詳細ログページを開く</a>
         <button class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
       </div>
     </div>
@@ -224,85 +204,147 @@
 {% block scripts %}
 {{ super() }}
 <script>
-// ===== ちょいCSS（カードの雰囲気をGSC寄りに） =====
-document.head.insertAdjacentHTML('beforeend', `
-  <style>
-    .site-card { border-left: 4px solid #e5e7eb; transition: box-shadow .15s, border-color .15s, transform .05s;}
-    .site-card:hover { border-left-color:#3b82f6; box-shadow: 0 6px 18px rgba(59,130,246,.14); }
-    .badge.bg-light { border: 1px solid #e5e7eb; }
-  </style>
-`);
+// ====== Utils ======
+function fmtLocal(iso){ if(!iso) return '-'; try{const d=new Date(iso);const p=x=>String(x).padStart(2,'0');return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`}catch(e){return iso}}
+function esc(v){ if(v===null||v===undefined) return ''; return String(v).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }
+function statusBadge(st){ if(st==='success') return '<span class="badge bg-success">success</span>'; if(st==='running') return '<span class="badge bg-info text-dark">running</span>'; if(st==='error') return '<span class="badge bg-danger">error</span>'; return `<span class="badge bg-secondary">${esc(st||'-')}</span>` }
+function getCsrfToken(){ return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '' }
 
-// ===== Util =====
-function fmtLocal(iso){ if(!iso) return '-'; try{const d=new Date(iso);const p=x=>String(x).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;}catch(e){return iso;}}
-function esc(v){ if(v===null||v===undefined) return ''; return String(v).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');}
-function statusBadge(st){ if(st==='success')return'<span class="badge bg-success">success</span>'; if(st==='running')return'<span class="badge bg-info text-dark">running</span>'; if(st==='error')return'<span class="badge bg-danger">error</span>'; return `<span class="badge bg-secondary">${esc(st||'-')}</span>`;}
-
-// ===== 容量 =====
+// ====== Capacity ======
+let lastCapacity=null;
 async function refreshCapacity(){
   try{
-    const r=await fetch('/admin/internal-seo/capacity',{headers:{'Accept':'application/json'}});
-    if(!r.ok) throw new Error(`HTTP ${r.status}`);
-    const c=await r.json();
-    const run=c.running??0, max=c.max_parallel??1, q=c.queued??0;
+    const res=await fetch('/admin/internal-seo/capacity',{headers:{'Accept':'application/json'}});
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const c=await res.json(); lastCapacity=c;
+    const run=c.running??0, max=c.max_parallel??1, q=c.queued??0, avail=c.available??Math.max(0,max-run);
     const pct=Math.round(100*(run/Math.max(1,max)));
     const bar=document.getElementById('capacityBar');
-    bar.style.width=pct+'%'; bar.textContent=`${pct}%`; bar.className='progress-bar';
+    bar.style.width=pct+'%'; bar.textContent=`${pct}%`;
+    bar.classList.remove('bg-success','bg-warning','bg-danger','bg-secondary');
     if(pct<=50) bar.classList.add('bg-success'); else if(pct<=80) bar.classList.add('bg-warning'); else bar.classList.add('bg-danger');
-    document.getElementById('capacityText').textContent=`max:${max} / running:${run} / queued:${q} / available:${Math.max(0,max-run)} / suggest:${c.suggest_batch_size}`;
-    document.getElementById('runBatchBtn').dataset.suggest=c.suggest_batch_size??1;
+    document.getElementById('capacityText').textContent=`max:${max} / running:${run} / queued:${q} / available:${avail} / suggest:${c.suggest_batch_size}`;
+    document.getElementById('runBatchBtn').dataset.suggest=(c.suggest_batch_size??1);
   }catch(e){
-    const bar=document.getElementById('capacityBar'); bar.style.width='0%'; bar.textContent='N/A'; bar.className='progress-bar bg-secondary';
+    const bar=document.getElementById('capacityBar');
+    bar.style.width='0%'; bar.textContent='N/A';
+    bar.classList.remove('bg-success','bg-warning','bg-danger'); bar.classList.add('bg-secondary');
     document.getElementById('capacityText').textContent='取得失敗: '+e.message;
   }
 }
-setInterval(refreshCapacity,15000);
+setInterval(refreshCapacity, 15000);
 
-// ===== サイト検索（クライアントフィルタ） =====
-function updateVisibleCount(){
-  const cards=[...document.querySelectorAll('#sitesBody .site-card')];
-  const visible=cards.filter(c=>c.style.display!=='none').length;
-  document.getElementById('visibleCount').textContent=visible;
+// ====== Runs (history) ======
+let nextCursorTs=null, nextCursorId=null, runsLoading=false, runsReachedEnd=false;
+async function loadRuns(initial=false){
+  if(runsLoading||runsReachedEnd) return; runsLoading=true;
+  const tbody=document.getElementById('runsBody'); const ph=document.getElementById('placeholderRow'); if(ph) ph.remove();
+  const params=new URLSearchParams(); const siteId=document.getElementById('siteIdInput')?.value||''; const perPage=document.getElementById('perPageSelect')?.value||'50';
+  if(siteId) params.set('site_id', siteId); params.set('limit', perPage);
+  if(!initial && nextCursorTs && nextCursorId){ params.set('cursor_ts', nextCursorTs); params.set('cursor_id', nextCursorId); }
+  try{
+    const res=await fetch(`/admin/internal-seo/list?${params.toString()}`,{headers:{'Accept':'application/json'}});
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data=await res.json(); const rows=data.rows||[]; const frag=document.createDocumentFragment();
+    for(const r of rows){
+      const tr=document.createElement('tr');
+      tr.innerHTML=`
+        <td>${r.id}</td>
+        <td>${r.site_id}</td>
+        <td>${statusBadge(r.status)}</td>
+        <td class="text-muted">${esc(r.job_kind||'')}</td>
+        <td>${fmtLocal(r.started_at)}</td>
+        <td>${fmtLocal(r.ended_at)}</td>
+        <td>${r.duration_ms??'-'}</td>
+        <td>
+          <button class="btn btn-sm btn-outline-primary" data-run-id="${r.id}" data-site-id="${r.site_id}" onclick="openStatsModal(this)">詳細</button>
+          <a class="btn btn-sm btn-ghost" href="/admin/internal-seo/detail?site_id=${encodeURIComponent(r.site_id)}" target="_blank">ログ一覧</a>
+        </td>`;
+      frag.appendChild(tr);
+    }
+    tbody.appendChild(frag);
+    nextCursorTs=data.next_cursor_ts||null; nextCursorId=data.next_cursor_id||null; runsReachedEnd=!data.has_more;
+    document.getElementById('loadMoreBtn').classList.toggle('d-none', runsReachedEnd);
+  }catch(e){
+    const tr=document.createElement('tr'); tr.innerHTML=`<td colspan="8" class="text-danger">読み込み失敗: ${e.message}</td>`; tbody.appendChild(tr); runsReachedEnd=true;
+  }finally{ runsLoading=false; }
 }
-function applySiteFilter(){
-  const q=(document.getElementById('siteSearchInput').value||'').toLowerCase().trim();
-  document.querySelectorAll('#sitesBody .site-card').forEach(card=>{
-    const name=(card.dataset.name||'').toLowerCase();
-    const idStr=String(card.dataset.id||'');
-    const ok=!q || name.includes(q) || idStr.includes(q);
-    card.style.display= ok ? '' : 'none';
-  });
-  document.getElementById('checkAllSites').checked=false;
-  updateVisibleCount();
+
+// ====== Stats modal ======
+async function openStatsModal(btn){
+  const runId=btn.getAttribute('data-run-id'); const siteId=btn.getAttribute('data-site-id');
+  const body=document.getElementById('statsBody'); body.innerHTML='<div class="text-muted">読み込み中…</div>';
+  try{
+    const res=await fetch(`/admin/internal-seo/run/${runId}/stats`,{headers:{'Accept':'application/json'}});
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data=await res.json(); const s=(data&&data.stats)||{}; const rows=[];
+    const render=(t,o)=>{ const kv=Object.entries(o||{}).map(([k,v])=>`<tr><th class="w-25">${esc(k)}</th><td>${esc(typeof v==='object'?JSON.stringify(v):v)}</td></tr>`).join(''); return `<tr class="table-active"><th colspan="2">${esc(t)}</th></tr>${kv}`; }
+    if(s.indexer) rows.push(render('Indexer',s.indexer));
+    if(s.link_graph) rows.push(render('LinkGraph',s.link_graph));
+    if(s.planner) rows.push(render('Planner',s.planner));
+    if(s.applier) rows.push(render('Applier',s.applier));
+    if(s.params) rows.push(render('Params',s.params));
+    body.innerHTML = rows.length ? `<table class="table table-sm mb-0"><tbody>${rows.join('')}</tbody></table>` : '<div class="text-muted">詳細データなし</div>';
+    document.getElementById('goDetailLink').href=`/admin/internal-seo/detail?site_id=${encodeURIComponent(siteId)}&run_id=${encodeURIComponent(runId)}`;
+  }catch(e){ body.innerHTML=`<div class="text-danger">エラー: ${e.message}</div>`; }
+  new bootstrap.Modal(document.getElementById('statsModal')).show();
 }
-// カード自体のクリックでチェック切り替え（フォーム操作は除外）
-document.addEventListener('click', (ev)=>{
-  const card=ev.target.closest('.site-card'); if(!card) return;
-  if(ev.target.closest('form')||['BUTTON','A','INPUT','LABEL','SELECT'].includes(ev.target.tagName)) return;
-  const cb=card.querySelector('.site-check'); cb.checked=!cb.checked;
-});
 
-// 全選択（表示中のみ）
-document.getElementById('checkAllSites').addEventListener('change', (e)=>{
-  const checked=e.target.checked;
-  document.querySelectorAll('#sitesBody .site-card').forEach(card=>{
-    if(card.style.display==='none') return;
-    const cb=card.querySelector('.site-check'); cb.checked=checked;
-  });
-});
+// ====== Sites (cards) ======
+let sitesQuery='', sitesCursorId=null, sitesLoading=false, sitesHasMore=true;
+function siteCardHTML(s){
+  const csrf=getCsrfToken();
+  return `
+    <div class="gsc-card p-3 d-flex justify-content-between align-items-start">
+      <div class="me-3">
+        <div class="form-check mb-2">
+          <input class="form-check-input site-check" type="checkbox" value="${s.id}" id="site-${s.id}">
+          <label class="form-check-label fw-semibold" for="site-${s.id}">${esc(s.name)}</label>
+        </div>
+        <div class="mini-label">Site ID: <span class="fw-semibold">${s.id}</span></div>
+      </div>
+      <div class="text-end">
+        <form method="post" action="/admin/internal-seo/run" class="d-inline">
+          <input type="hidden" name="csrf_token" value="${esc(csrf)}">
+          <input type="hidden" name="site_id" value="${s.id}">
+          <input type="hidden" name="pages" value="${document.getElementById('batchPages').value || 10}">
+          <input type="hidden" name="per_page" value="${document.getElementById('batchPerPage').value || 100}">
+          <input type="hidden" name="min_score" value="${document.getElementById('batchMinScore').value || 0.05}">
+          <input type="hidden" name="max_k" value="${document.getElementById('batchMaxK').value || 80}">
+          <input type="hidden" name="limit_sources" value="${document.getElementById('batchLimitSources').value || 200}">
+          <input type="hidden" name="limit_posts" value="${document.getElementById('batchLimitPosts').value || 50}">
+          <input type="hidden" name="incremental" value="${document.getElementById('batchIncremental').value || 'true'}">
+          <button class="btn btn-sm btn-outline-primary" type="submit">▶ このサイトだけ実行</button>
+        </form>
+      </div>
+    </div>`;
+}
+async function fetchSites(reset=false){
+  if(sitesLoading) return;
+  if(reset){ sitesCursorId=null; sitesHasMore=true; document.getElementById('sitesBody').innerHTML=''; }
+  if(!sitesHasMore) return;
+  sitesLoading=true;
+  const params=new URLSearchParams(); if(sitesQuery) params.set('q', sitesQuery); params.set('limit','30'); if(sitesCursorId) params.set('cursor_id', String(sitesCursorId));
+  try{
+    const res=await fetch(`/admin/internal-seo/sites?${params.toString()}`,{headers:{'Accept':'application/json'}});
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data=await res.json(); const list=data.rows||[]; const frag=document.createDocumentFragment(); const tmp=document.createElement('div');
+    for(const s of list){ tmp.innerHTML=siteCardHTML(s); frag.appendChild(tmp.firstElementChild); }
+    document.getElementById('sitesBody').appendChild(frag);
+    sitesCursorId=data.next_cursor_id||null; sitesHasMore=!!data.has_more;
+    document.getElementById('loadMoreSitesBtn').classList.toggle('d-none', !sitesHasMore);
+  }catch(e){
+    document.getElementById('batchResult').textContent='サイト取得失敗: '+e.message; sitesHasMore=false;
+  }finally{ sitesLoading=false; }
+}
+document.addEventListener('change',(e)=>{ if(e.target && e.target.id==='checkAllSites'){ document.querySelectorAll('.site-check').forEach(cb=>cb.checked=e.target.checked); } });
 
-// ===== 一括実行 =====
+// ====== Batch run ======
 async function runBatch(){
-  const ids=[...document.querySelectorAll('#sitesBody .site-card')]
-    .filter(c=>c.style.display!=='none')
-    .map(c=>c.querySelector('.site-check'))
-    .filter(cb=>cb && cb.checked)
-    .map(cb=>parseInt(cb.value,10))
-    .filter(Boolean);
+  const ids=Array.from(document.querySelectorAll('.site-check:checked')).map(cb=>parseInt(cb.value,10)).filter(Boolean);
   if(!ids.length){ document.getElementById('batchResult').textContent='サイトが選択されていません。'; return; }
-
   const suggest=parseInt(document.getElementById('runBatchBtn').dataset.suggest||'5',10);
-  const picked=ids.slice(0,Math.max(1,suggest));
+  const picked=ids.slice(0, Math.max(1, suggest));
   const payload={
     site_ids:picked,
     pages:parseInt(document.getElementById('batchPages').value||'10',10),
@@ -313,87 +355,27 @@ async function runBatch(){
     limit_posts:parseInt(document.getElementById('batchLimitPosts').value||'50',10),
     incremental:String(document.getElementById('batchIncremental').value||'true')!=='false',
   };
-
-  const btn=document.getElementById('runBatchBtn');
-  btn.disabled=true; btn.textContent='登録中…';
+  const btn=document.getElementById('runBatchBtn'); btn.disabled=true; btn.textContent='登録中…';
   try{
     const res=await fetch('/admin/internal-seo/run-batch',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(payload)});
-    const data=await res.json();
-    if(!res.ok || !data.ok) throw new Error(data.error||`HTTP ${res.status}`);
+    const data=await res.json(); if(!res.ok||!data.ok) throw new Error(data.error||`HTTP ${res.status}`);
     document.getElementById('batchResult').textContent=`登録: ${data.enqueued} 件 / スキップ: ${data.skipped?.length||0} / エラー: ${data.errors?.length||0}`;
     refreshCapacity();
-  }catch(e){
-    document.getElementById('batchResult').textContent='失敗: '+e.message;
-  }finally{
-    btn.disabled=false; btn.textContent='選択サイトを実行';
-  }
+  }catch(e){ document.getElementById('batchResult').textContent='失敗: '+e.message; }
+  finally{ btn.disabled=false; btn.textContent='選択サイトを実行'; }
 }
 
-// ===== 実行履歴（AJAX） =====
-let nextCursorTs=null, nextCursorId=null, runsLoading=false, runsReachedEnd=false;
-function escHtml(s){return s==null?'':String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');}
-async function loadRuns(initial=false){
-  if(runsLoading||runsReachedEnd) return; runsLoading=true;
-  const tbody=document.getElementById('runsBody'); document.getElementById('placeholderRow')?.remove();
-
-  const p=new URLSearchParams();
-  const siteId=document.getElementById('siteIdInput')?.value||''; const perPage=document.getElementById('perPageSelect')?.value||'50';
-  if(siteId) p.set('site_id',siteId); p.set('limit',perPage);
-  if(!initial && nextCursorTs && nextCursorId){ p.set('cursor_ts',nextCursorTs); p.set('cursor_id',nextCursorId); }
-
-  try{
-    const r=await fetch(`/admin/internal-seo/list?${p.toString()}`,{headers:{'Accept':'application/json'}});
-    if(!r.ok) throw new Error(`HTTP ${r.status}`); const data=await r.json();
-    const frag=document.createDocumentFragment();
-    (data.rows||[]).forEach(row=>{
-      const tr=document.createElement('tr');
-      tr.innerHTML=`
-        <td>${row.id}</td>
-        <td>${row.site_id}</td>
-        <td>${statusBadge(row.status)}</td>
-        <td class="text-muted">${escHtml(row.job_kind||'')}</td>
-        <td>${fmtLocal(row.started_at)}</td>
-        <td>${fmtLocal(row.ended_at)}</td>
-        <td>${row.duration_ms ?? '-'}</td>
-        <td>
-          <button class="btn btn-sm btn-outline-primary" data-run-id="${row.id}" data-site-id="${row.site_id}" onclick="openStatsModal(this)">詳細</button>
-          <a class="btn btn-sm btn-outline-secondary" href="/admin/internal-seo/detail?site_id=${encodeURIComponent(row.site_id)}" target="_blank">ログ一覧</a>
-        </td>`;
-      frag.appendChild(tr);
-    });
-    tbody.appendChild(frag);
-    nextCursorTs=data.next_cursor_ts||null; nextCursorId=data.next_cursor_id||null; runsReachedEnd=!data.has_more;
-    document.getElementById('loadMoreBtn').classList.toggle('d-none',runsReachedEnd);
-  }catch(e){
-    const tr=document.createElement('tr'); tr.innerHTML=`<td colspan="8" class="text-danger">読み込み失敗: ${e.message}</td>`; tbody.appendChild(tr); runsReachedEnd=true;
-  }finally{ runsLoading=false; }
-}
-
-// 詳細モーダル
-async function openStatsModal(btn){
-  const runId=btn.getAttribute('data-run-id'); const siteId=btn.getAttribute('data-site-id');
-  const body=document.getElementById('statsBody'); body.innerHTML='<div class="text-muted">読み込み中…</div>';
-  try{
-    const r=await fetch(`/admin/internal-seo/run/${runId}/stats`,{headers:{'Accept':'application/json'}}); if(!r.ok) throw new Error(`HTTP ${r.status}`);
-    const data=await r.json(); const s=(data&&data.stats)||{}; const seg=[];
-    function segRows(title,obj){ if(!obj) return ''; const kv=Object.entries(obj).map(([k,v])=>`<tr><th class="w-25">${escHtml(k)}</th><td>${escHtml(typeof v==='object'?JSON.stringify(v):v)}</td></tr>`).join(''); return `<tr class="table-active"><th colspan="2">${escHtml(title)}</th></tr>${kv}`;}
-    if(s.indexer) seg.push(segRows('Indexer',s.indexer)); if(s.link_graph) seg.push(segRows('LinkGraph',s.link_graph)); if(s.planner) seg.push(segRows('Planner',s.planner)); if(s.applier) seg.push(segRows('Applier',s.applier)); if(s.params) seg.push(segRows('Params',s.params));
-    body.innerHTML= seg.length ? `<table class="table table-sm"><tbody>${seg.join('')}</tbody></table>` : '<div class="text-muted">詳細データなし</div>';
-    document.getElementById('goDetailLink').href=`/admin/internal-seo/detail?site_id=${encodeURIComponent(siteId)}&run_id=${encodeURIComponent(runId)}`;
-  }catch(e){ body.innerHTML=`<div class="text-danger">エラー: ${e.message}</div>`; }
-  new bootstrap.Modal(document.getElementById('statsModal')).show();
-}
-
-// ===== 初期化 =====
+// ====== Init ======
 document.addEventListener('DOMContentLoaded', ()=>{
+  // 容量
   refreshCapacity();
   document.getElementById('capacityRefresh').addEventListener('click', refreshCapacity);
 
-  // 検索
-  const apply=()=>applySiteFilter();
-  document.getElementById('siteSearchBtn').addEventListener('click', apply);
-  document.getElementById('siteSearchInput').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); apply(); } });
-  applySiteFilter(); // 初回
+  // サイト一覧
+  fetchSites(true);
+  document.getElementById('loadMoreSitesBtn').addEventListener('click', ()=>fetchSites(false));
+  document.getElementById('siteSearchBtn').addEventListener('click', ()=>{ sitesQuery=document.getElementById('siteSearchInput').value.trim(); fetchSites(true); });
+  document.getElementById('siteSearchInput').addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); sitesQuery=e.target.value.trim(); fetchSites(true);} });
 
   // 履歴
   loadRuns(true);
@@ -404,16 +386,14 @@ document.addEventListener('DOMContentLoaded', ()=>{
     loadRuns(true);
   });
   document.getElementById('clearFilterBtn').addEventListener('click', ()=>{
-    document.getElementById('siteIdInput').value=''; nextCursorTs=null; nextCursorId=null; runsReachedEnd=false;
+    document.getElementById('siteIdInput').value='';
+    nextCursorTs=null; nextCursorId=null; runsReachedEnd=false;
     document.getElementById('runsBody').innerHTML='<tr id="placeholderRow"><td colspan="8" class="text-muted">読み込み中…</td></tr>';
     loadRuns(true);
   });
 
-  // 一括実行
-  document.getElementById('runBatchBtn').addEventListener('click', e=>{ e.preventDefault(); runBatch(); });
-
-  // 件数表示
-  updateVisibleCount();
+  // バッチ
+  document.getElementById('runBatchBtn').addEventListener('click', (e)=>{ e.preventDefault(); runBatch(); });
 });
 </script>
 {% endblock %}
