@@ -1900,10 +1900,12 @@ from flask import render_template, request, redirect, url_for, flash, abort, jso
 from flask_login import login_required, current_user
 from sqlalchemy import desc, and_, or_, func
 from sqlalchemy.orm import load_only, defer
+from sqlalchemy import text
 
 from app import db
 from app.models import Site, InternalSeoRun, InternalLinkAction, ContentIndex
-from sqlalchemy import text
+# User モデル名が不明な環境があるため、ユーザー名は join せず安全にフォールバック表示にします。
+
 
 # ---- stats: 1ラン分の詳細 ----
 @admin_bp.route("/admin/internal-seo/run/<int:run_id>/stats", methods=["GET"])
@@ -1916,6 +1918,7 @@ def admin_internal_seo_run_stats(run_id: int):
     resp = make_response(jsonify(payload))
     resp.headers["Cache-Control"] = "public, max-age=30"
     return resp
+
 
 # ---- 画面本体 ----
 @admin_bp.route("/admin/internal-seo", methods=["GET"])
@@ -1930,6 +1933,7 @@ def admin_internal_seo_index():
         selected_site_id=selected_site_id,
         per_page=per_page,
     )
+
 
 # ---- NEW: オーナー一覧（ユーザー別セクション） ----
 @admin_bp.route("/admin/internal-seo/owners", methods=["GET"])
@@ -1989,6 +1993,7 @@ def admin_internal_seo_owners():
     resp.headers["Cache-Control"] = "public, max-age=30"
     return resp
 
+
 # ---- サイト一覧（owner_id / 検索 / カーソル / メトリクス付き） ----
 # GET /admin/internal-seo/sites?q=&owner_id=&limit=&cursor_id=
 @admin_bp.route("/admin/internal-seo/sites", methods=["GET"])
@@ -2021,11 +2026,10 @@ def admin_internal_seo_sites():
     if cursor_id:
         base_q = base_q.filter(Site.id > cursor_id)
 
-    # 軽量フィールドのみロード（安全のため name が無い環境は少ない想定）
+    # 軽量フィールドのみロード
     try:
         base_q = base_q.options(load_only(Site.id, Site.name))
     except Exception:
-        # nameが無いモデルでも落ちないよう保険（idだけ）
         base_q = base_q.options(load_only(Site.id))
 
     base_q = base_q.order_by(Site.id.asc())
@@ -2060,8 +2064,7 @@ def admin_internal_seo_sites():
             elif st == "skipped":
                 metrics_map[sid]["skipped"] = int(cnt or 0)
 
-        # 最新Run（started_at最大）と実行中
-        # 実行中
+        # 実行中サイト
         running_sites = {
             x[0] for x in db.session.query(InternalSeoRun.site_id)
             .filter(InternalSeoRun.site_id.in_(site_ids), InternalSeoRun.status == "running")
@@ -2133,6 +2136,7 @@ def admin_internal_seo_sites():
         "has_more": has_more,
     })
 
+
 # ---- 実行履歴（キーセット） ----
 @admin_bp.route("/admin/internal-seo/list", methods=["GET"])
 @login_required
@@ -2203,6 +2207,7 @@ def admin_internal_seo_list():
         has_more=has_more,
     ))
 
+
 # ---- 手動実行（非同期トリガ） ----
 @admin_bp.route("/admin/internal-seo/run", methods=["POST"])
 @login_required
@@ -2241,6 +2246,7 @@ def admin_internal_seo_run():
 
     flash(f"Site {site_id} の内部SEOをジョブキューに登録しました。ワーカーが順次実行します。", "success")
     return redirect(url_for("admin.admin_internal_seo_index", site_id=site_id), code=303)
+
 
 # ---- まとめ実行 ----
 @admin_bp.route("/admin/internal-seo/run-batch", methods=["POST"])
@@ -2300,6 +2306,7 @@ def admin_internal_seo_run_batch():
 
     return jsonify({"ok": True, "enqueued": enqueued, "skipped": skipped, "errors": errors})
 
+
 # ---- 容量メーター ----
 @admin_bp.route("/admin/internal-seo/capacity", methods=["GET"])
 @login_required
@@ -2308,7 +2315,6 @@ def admin_internal_seo_capacity():
         abort(403)
 
     max_parallel = int(os.getenv("INTERNAL_SEO_WORKER_PARALLELISM", 3))
-
     running = db.session.execute(text("SELECT COUNT(*) FROM internal_seo_runs WHERE status='running'")).scalar() or 0
     queued = db.session.execute(text("SELECT COUNT(*) FROM internal_seo_job_queue WHERE status IN ('queued','running')")).scalar() or 0
 
@@ -2326,6 +2332,7 @@ def admin_internal_seo_capacity():
     resp = make_response(jsonify(payload))
     resp.headers["Cache-Control"] = "no-cache, no-store"
     return resp
+
 
 # ---- 詳細ログ（アクション） ----
 @admin_bp.route("/admin/internal-seo/actions", methods=["GET"])
@@ -2430,8 +2437,6 @@ def admin_internal_seo_actions():
         next_cursor=next_cursor,
         has_more=has_more,
     ))
-
-
 
 # ────────────── キーワード ──────────────
 
