@@ -4,7 +4,7 @@
 {% block content %}
 <div class="container-fluid py-4">
 
-  <!-- CSRF をJSから使うために埋め込み -->
+  <!-- CSRF（JS用） -->
   <meta name="csrf-token" content="{{ csrf_token() if csrf_token is defined }}">
 
   <!-- 見出し -->
@@ -15,16 +15,30 @@
     </div>
   </div>
 
-  <!-- 軽量フィルタ（サーバで全サイトを描画しない） -->
-  <div class="mb-3 d-flex flex-wrap align-items-end gap-3">
+  <!-- タブ風フィルタ（見た目重視） -->
+  <div class="mb-3 d-flex flex-wrap align-items-center gap-2">
+    <span class="px-3 py-2 rounded border bg-primary text-white small">📂 すべて</span>
+    <span class="px-3 py-2 rounded border bg-white text-secondary small">ガイド: 下の検索でサイトを絞り込み、右のチェックで選択 → 「選択サイトを実行」</span>
+  </div>
+
+  <!-- 検索行（サイト一覧用・GSC風） -->
+  <div class="mb-4 d-flex flex-wrap align-items-end gap-3">
     <div>
-      <label class="form-label mb-1 small">Site ID（数値）</label>
-      <input type="number" id="siteIdInput" class="form-control form-control-sm" placeholder="例: 12" value="{{ selected_site_id or '' }}" style="width: 160px;">
-      <small class="text-muted">※ 下のサイト一覧は遅延ロード。ここにIDを入れて履歴を絞れます</small>
+      <label class="form-label mb-1 small">🔎 サイト検索</label>
+      <div class="d-flex gap-2">
+        <input id="siteSearchInput" type="text" class="form-control form-control-sm" placeholder="サイト名 または ID（部分一致可）" style="width: 320px;">
+        <button id="siteSearchBtn" class="btn btn-sm btn-primary">検索</button>
+      </div>
+      <div class="form-text">検索結果は下のカード一覧に表示されます</div>
     </div>
 
     <div>
-      <label class="form-label mb-1 small">表示件数（履歴）</label>
+      <label class="form-label mb-1 small">📌 履歴を対象サイトIDで絞り込む</label>
+      <input type="number" id="siteIdInput" class="form-control form-control-sm" placeholder="例: 12" value="{{ selected_site_id or '' }}" style="width: 160px;">
+    </div>
+
+    <div>
+      <label class="form-label mb-1 small">📄 履歴の表示件数</label>
       {% set pp = per_page or 50 %}
       <select id="perPageSelect" class="form-select form-select-sm">
         {% for n in [25,50,100,200] %}
@@ -33,13 +47,13 @@
       </select>
     </div>
 
-    <div class="ms-auto">
-      <button id="applyFilterBtn" class="btn btn-sm btn-primary">履歴に適用</button>
+    <div class="ms-auto d-flex gap-2">
+      <button id="applyFilterBtn" class="btn btn-sm btn-outline-primary">履歴に適用</button>
       <button id="clearFilterBtn" class="btn btn-sm btn-outline-secondary">クリア</button>
     </div>
   </div>
 
-  <!-- 容量ゲージ -->
+  <!-- 容量ゲージ（コンパクト） -->
   <div class="card border-0 shadow-sm mb-4">
     <div class="card-body">
       <div class="d-flex align-items-center mb-2">
@@ -52,12 +66,12 @@
     </div>
   </div>
 
-  <!-- まとめ実行：サイト一覧はAJAXで段階表示 -->
+  <!-- まとめ実行（GSCカード風UI） -->
   <div class="card border-0 shadow-sm mb-4">
     <div class="card-body">
       <div class="d-flex flex-wrap align-items-center mb-3">
         <h6 class="mb-2 mb-md-0 me-2">✅ 選択サイトをまとめて実行</h6>
-        <div class="text-muted small">（提案バッチサイズは容量ゲージの値を初期値に反映）</div>
+        <div class="text-muted small">（提案バッチサイズは容量ゲージを反映）</div>
         <div class="ms-auto">
           <button id="runBatchBtn" class="btn btn-success btn-sm">選択サイトを実行</button>
         </div>
@@ -98,21 +112,19 @@
         </div>
       </div>
 
-      <!-- サイト検索（軽量） -->
-      <div class="d-flex flex-wrap align-items-end gap-2 mb-2">
-        <div>
-          <label class="form-label mb-1 small">サイト検索</label>
-          <input type="text" id="siteSearchInput" class="form-control form-control-sm" placeholder="名前 or ID 部分一致" style="width: 260px;">
-        </div>
-        <button id="siteSearchBtn" class="btn btn-sm btn-outline-primary">検索</button>
-        <div class="ms-auto form-check">
+      <!-- 一覧ヘッダ -->
+      <div class="d-flex align-items-center mb-2">
+        <div class="form-check">
           <input type="checkbox" class="form-check-input" id="checkAllSites">
           <label for="checkAllSites" class="form-check-label small">すべて選択／解除</label>
         </div>
+        <div class="small text-muted ms-auto">カードをクリックして選択／解除もできます</div>
       </div>
 
-      <!-- サイト一覧（AJAX挿入） -->
-      <div id="sitesBody" class="d-grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));"></div>
+      <!-- サイト一覧（カード｜GSC風） -->
+      <div id="sitesBody" class="d-grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));">
+        <!-- JSで挿入 -->
+      </div>
 
       <!-- もっと見る -->
       <div class="d-flex mt-2">
@@ -123,7 +135,7 @@
     </div>
   </div>
 
-  <!-- 実行履歴（JSで遅延ロード） -->
+  <!-- 実行履歴 -->
   <div class="card border-0 shadow-sm">
     <div class="card-body">
       <div class="d-flex align-items-center mb-2">
@@ -205,13 +217,11 @@ function getCsrfToken() {
 }
 
 // ========= 容量ゲージ =========
-let lastCapacity = null;
 async function refreshCapacity() {
   try {
     const res = await fetch('/admin/internal-seo/capacity', {headers:{'Accept':'application/json'}});
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const c = await res.json();
-    lastCapacity = c;
     const run = c.running ?? 0;
     const max = c.max_parallel ?? 1;
     const q   = c.queued ?? 0;
@@ -221,7 +231,7 @@ async function refreshCapacity() {
     const bar = document.getElementById('capacityBar');
     bar.style.width = pct + '%';
     bar.textContent = `${pct}%`;
-    bar.classList.remove('bg-success','bg-warning','bg-danger','bg-secondary');
+    bar.className = 'progress-bar'; // reset
     if (pct <= 50) bar.classList.add('bg-success');
     else if (pct <= 80) bar.classList.add('bg-warning');
     else bar.classList.add('bg-danger');
@@ -234,14 +244,13 @@ async function refreshCapacity() {
     const bar = document.getElementById('capacityBar');
     bar.style.width = '0%';
     bar.textContent = 'N/A';
-    bar.classList.remove('bg-success','bg-warning','bg-danger');
-    bar.classList.add('bg-secondary');
+    bar.className = 'progress-bar bg-secondary';
     document.getElementById('capacityText').textContent = `取得失敗: ${e.message}`;
   }
 }
-setInterval(refreshCapacity, 15000); // 少し間隔を長めに
+setInterval(refreshCapacity, 15000);
 
-// ========= 履歴（遅延ロード） =========
+// ========= 実行履歴 =========
 let nextCursorTs = null;
 let nextCursorId = null;
 let runsLoading = false;
@@ -252,8 +261,7 @@ async function loadRuns(initial=false) {
   runsLoading = true;
 
   const tbody = document.getElementById('runsBody');
-  const ph = document.getElementById('placeholderRow');
-  if (ph) ph.remove();
+  document.getElementById('placeholderRow')?.remove();
 
   const params = new URLSearchParams();
   const siteId = document.getElementById('siteIdInput')?.value || '';
@@ -311,9 +319,8 @@ async function openStatsModal(btn) {
   const siteId = btn.getAttribute('data-site-id');
   const body = document.getElementById('statsBody');
   body.innerHTML = '<div class="text-muted">読み込み中…</div>';
-  const url = `/admin/internal-seo/run/${runId}/stats`;
   try {
-    const res = await fetch(url, {headers: {'Accept': 'application/json'}});
+    const res = await fetch(`/admin/internal-seo/run/${runId}/stats`, {headers: {'Accept': 'application/json'}});
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const s = (data && data.stats) || {};
@@ -323,19 +330,16 @@ async function openStatsModal(btn) {
     if (s.planner)   rows.push(renderRow('Planner',   s.planner));
     if (s.applier)   rows.push(renderRow('Applier',   s.applier));
     if (s.params)    rows.push(renderRow('Params',    s.params));
-    body.innerHTML = rows.length
-      ? `<table class="table table-sm"><tbody>${rows.join('')}</tbody></table>`
-      : '<div class="text-muted">詳細データなし</div>';
+    body.innerHTML = rows.length ? `<table class="table table-sm"><tbody>${rows.join('')}</tbody></table>`
+                                 : '<div class="text-muted">詳細データなし</div>';
 
-    const a = document.getElementById('goDetailLink');
-    a.href = `/admin/internal-seo/detail?site_id=${encodeURIComponent(siteId)}&run_id=${encodeURIComponent(runId)}`;
+    document.getElementById('goDetailLink').href =
+      `/admin/internal-seo/detail?site_id=${encodeURIComponent(siteId)}&run_id=${encodeURIComponent(runId)}`;
   } catch (e) {
     body.innerHTML = `<div class="text-danger">エラー: ${e.message}</div>`;
   }
-  const modal = new bootstrap.Modal(document.getElementById('statsModal'));
-  modal.show();
+  new bootstrap.Modal(document.getElementById('statsModal')).show();
 }
-
 function renderRow(title, obj) {
   const kv = Object.entries(obj || {}).map(([k,v]) => {
     if (typeof v === 'object' && v !== null) v = JSON.stringify(v);
@@ -344,7 +348,7 @@ function renderRow(title, obj) {
   return `<tr class="table-active"><th colspan="2">${esc(title)}</th></tr>${kv}`;
 }
 
-// ========= サイト一覧（超軽量ページング & 検索） =========
+// ========= サイト一覧 =========
 let sitesQuery = '';
 let sitesCursorId = null;
 let sitesLoading = false;
@@ -352,16 +356,17 @@ let sitesHasMore = true;
 
 function siteCardHTML(s) {
   const csrf = getCsrfToken();
+  // チェックボックスに加えて、カード全体クリックでもトグル
   return `
-    <div class="p-3 border rounded bg-white shadow-sm d-flex justify-content-between align-items-start">
+    <div class="p-3 bg-white rounded border shadow-sm d-flex justify-content-between align-items-start site-card" data-id="${s.id}">
       <div class="me-3">
-        <div class="form-check mb-2">
+        <div class="d-flex align-items-center gap-2 mb-1">
           <input class="form-check-input site-check" type="checkbox" value="${s.id}" id="site-${s.id}">
-          <label class="form-check-label fw-semibold" for="site-${s.id}">
+          <label class="form-check-label fw-semibold" for="site-${s.id}" style="cursor:pointer;">
             ${esc(s.name)}
           </label>
         </div>
-        <div class="small text-muted">Site ID: <span class="fw-semibold">${s.id}</span></div>
+        <div class="text-muted small">ID: <span class="fw-semibold">${s.id}</span></div>
       </div>
       <div class="text-end">
         <form method="post" action="/admin/internal-seo/run" class="d-inline">
@@ -402,9 +407,19 @@ async function fetchSites(reset=false) {
     const list = data.rows || [];
     const frag = document.createDocumentFragment();
     const tmp = document.createElement('div');
+
     for (const s of list) {
       tmp.innerHTML = siteCardHTML(s);
-      frag.appendChild(tmp.firstElementChild);
+      const el = tmp.firstElementChild;
+      // カード全体クリックでチェック切替
+      el.addEventListener('click', (ev) => {
+        // ボタンやa, inputクリックは除外
+        const tag = ev.target.tagName.toLowerCase();
+        if (tag === 'button' || tag === 'a' || tag === 'input' || ev.target.closest('form')) return;
+        const cb = el.querySelector('.site-check');
+        cb.checked = !cb.checked;
+      });
+      frag.appendChild(el);
     }
     document.getElementById('sitesBody').appendChild(frag);
 
@@ -419,7 +434,7 @@ async function fetchSites(reset=false) {
   }
 }
 
-// チェック全選択
+// 全選択
 document.addEventListener('change', (e) => {
   if (e.target && e.target.id === 'checkAllSites') {
     document.querySelectorAll('.site-check').forEach(cb => cb.checked = e.target.checked);
@@ -477,7 +492,7 @@ document.addEventListener('DOMContentLoaded', () => {
   refreshCapacity();
   document.getElementById('capacityRefresh').addEventListener('click', refreshCapacity);
 
-  // サイト一覧（初回）
+  // サイト一覧
   fetchSites(true);
   document.getElementById('loadMoreSitesBtn').addEventListener('click', () => fetchSites(false));
   document.getElementById('siteSearchBtn').addEventListener('click', () => {
