@@ -3990,7 +3990,7 @@ def post_article(id):
 
     try:
         url = post_to_wp(art.site, art)
-        art.posted_at = datetime.datetime.utcnow()
+        art.posted_at = datetime.utcnow()
         art.status = "posted"
         db.session.commit()
         flash(f"WordPress へ投稿しました: {url}", "success")
