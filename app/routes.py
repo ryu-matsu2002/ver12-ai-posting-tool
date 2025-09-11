@@ -1893,7 +1893,7 @@ def admin_captcha_dataset():
 
 # 内部SEOルートコード
 
-# 内部SEOルートコード（admin_bp配下）
+# 内部SEOルートコード（admin_bp 配下）
 import os
 from datetime import datetime
 from flask import render_template, request, redirect, url_for, flash, abort, jsonify, make_response
@@ -1904,8 +1904,6 @@ from sqlalchemy import text
 
 from app import db
 from app.models import Site, InternalSeoRun, InternalLinkAction, ContentIndex
-# User モデル名が不明な環境があるため、ユーザー名は join せず安全にフォールバック表示にします。
-
 
 # ---- stats: 1ラン分の詳細 ----
 @admin_bp.route("/admin/internal-seo/run/<int:run_id>/stats", methods=["GET"])
@@ -1918,7 +1916,6 @@ def admin_internal_seo_run_stats(run_id: int):
     resp = make_response(jsonify(payload))
     resp.headers["Cache-Control"] = "public, max-age=30"
     return resp
-
 
 # ---- 画面本体 ----
 @admin_bp.route("/admin/internal-seo", methods=["GET"])
@@ -1934,7 +1931,6 @@ def admin_internal_seo_index():
         per_page=per_page,
     )
 
-
 # ---- NEW: オーナー一覧（ユーザー別セクション） ----
 @admin_bp.route("/admin/internal-seo/owners", methods=["GET"])
 @login_required
@@ -1942,11 +1938,10 @@ def admin_internal_seo_owners():
     if not getattr(current_user, "is_admin", False):
         abort(403)
 
-    # Site.owner_id または Site.user_id がある場合はそれでグルーピング
+    # Site.owner_id または Site.user_id を優先採用
     owner_col = getattr(Site, "owner_id", None) or getattr(Site, "user_id", None)
 
     if owner_col is None:
-        # フォールバック：全サイト1グループ
         total_sites = db.session.query(func.count(Site.id)).scalar() or 0
         running_count = (
             db.session.query(func.count(func.distinct(InternalSeoRun.site_id)))
@@ -1960,13 +1955,11 @@ def admin_internal_seo_owners():
         resp.headers["Cache-Control"] = "public, max-age=30"
         return resp
 
-    # オーナー毎のサイト数
     site_counts = (
         db.session.query(owner_col.label("owner_id"), func.count(Site.id).label("cnt"))
         .group_by(owner_col)
         .all()
     )
-    # オーナー毎の実行中サイト数
     running_counts = {
         owner_id: cnt
         for owner_id, cnt in (
@@ -1993,7 +1986,6 @@ def admin_internal_seo_owners():
     resp.headers["Cache-Control"] = "public, max-age=30"
     return resp
 
-
 # ---- サイト一覧（owner_id / 検索 / カーソル / メトリクス付き） ----
 # GET /admin/internal-seo/sites?q=&owner_id=&limit=&cursor_id=
 @admin_bp.route("/admin/internal-seo/sites", methods=["GET"])
@@ -2007,26 +1999,20 @@ def admin_internal_seo_sites():
     limit = min(max(request.args.get("limit", type=int, default=24), 1), 200)
     cursor_id = request.args.get("cursor_id", type=int)
 
-    # ベースクエリ
     base_q = Site.query
-
-    # owner列が存在するならフィルタ可能
     owner_col = getattr(Site, "owner_id", None) or getattr(Site, "user_id", None)
     if owner_col is not None and owner_id is not None:
         base_q = base_q.filter(owner_col == owner_id)
 
-    # 検索（ID/名前 部分一致）
     if q:
         if q.isdigit():
             base_q = base_q.filter(or_(Site.id == int(q), Site.name.ilike(f"%{q}%")))
         else:
             base_q = base_q.filter(Site.name.ilike(f"%{q}%"))
 
-    # 昇順IDのキーセット
     if cursor_id:
         base_q = base_q.filter(Site.id > cursor_id)
 
-    # 軽量フィールドのみロード
     try:
         base_q = base_q.options(load_only(Site.id, Site.name))
     except Exception:
@@ -2051,7 +2037,6 @@ def admin_internal_seo_sites():
             .group_by(InternalLinkAction.site_id, InternalLinkAction.status)
             .all()
         )
-        # 初期化
         for sid in site_ids:
             metrics_map[sid] = dict(applied=0, pending=0, skipped=0, last_applied_at=None)
 
@@ -2071,7 +2056,7 @@ def admin_internal_seo_sites():
             .group_by(InternalSeoRun.site_id).all()
         }
 
-        # 最新Run（サイト毎に最大 started_at）
+        # サイト毎の最新Run
         sub = (
             db.session.query(
                 InternalSeoRun.site_id.label("sid"),
@@ -2089,10 +2074,7 @@ def admin_internal_seo_sites():
                 InternalSeoRun.ended_at,
                 InternalSeoRun.duration_ms,
             )
-            .join(sub, and_(
-                InternalSeoRun.site_id == sub.c.sid,
-                InternalSeoRun.started_at == sub.c.mx
-            ))
+            .join(sub, and_(InternalSeoRun.site_id == sub.c.sid, InternalSeoRun.started_at == sub.c.mx))
             .all()
         )
 
@@ -2136,7 +2118,6 @@ def admin_internal_seo_sites():
         "has_more": has_more,
     })
 
-
 # ---- 実行履歴（キーセット） ----
 @admin_bp.route("/admin/internal-seo/list", methods=["GET"])
 @login_required
@@ -2176,10 +2157,7 @@ def admin_internal_seo_list():
             q = q.filter(
                 or_(
                     InternalSeoRun.started_at < cursor_ts,
-                    and_(
-                        InternalSeoRun.started_at == cursor_ts,
-                        InternalSeoRun.id < cursor_id,
-                    ),
+                    and_(InternalSeoRun.started_at == cursor_ts, InternalSeoRun.id < cursor_id),
                 )
             )
 
@@ -2206,7 +2184,6 @@ def admin_internal_seo_list():
         next_cursor_id=next_cursor_id,
         has_more=has_more,
     ))
-
 
 # ---- 手動実行（非同期トリガ） ----
 @admin_bp.route("/admin/internal-seo/run", methods=["POST"])
@@ -2247,8 +2224,7 @@ def admin_internal_seo_run():
     flash(f"Site {site_id} の内部SEOをジョブキューに登録しました。ワーカーが順次実行します。", "success")
     return redirect(url_for("admin.admin_internal_seo_index", site_id=site_id), code=303)
 
-
-# ---- まとめ実行 ----
+# ---- まとめ実行（※このUIでは個別実行を推し、APIは互換維持） ----
 @admin_bp.route("/admin/internal-seo/run-batch", methods=["POST"])
 @login_required
 def admin_internal_seo_run_batch():
@@ -2306,7 +2282,6 @@ def admin_internal_seo_run_batch():
 
     return jsonify({"ok": True, "enqueued": enqueued, "skipped": skipped, "errors": errors})
 
-
 # ---- 容量メーター ----
 @admin_bp.route("/admin/internal-seo/capacity", methods=["GET"])
 @login_required
@@ -2315,6 +2290,7 @@ def admin_internal_seo_capacity():
         abort(403)
 
     max_parallel = int(os.getenv("INTERNAL_SEO_WORKER_PARALLELISM", 3))
+
     running = db.session.execute(text("SELECT COUNT(*) FROM internal_seo_runs WHERE status='running'")).scalar() or 0
     queued = db.session.execute(text("SELECT COUNT(*) FROM internal_seo_job_queue WHERE status IN ('queued','running')")).scalar() or 0
 
@@ -2332,7 +2308,6 @@ def admin_internal_seo_capacity():
     resp = make_response(jsonify(payload))
     resp.headers["Cache-Control"] = "no-cache, no-store"
     return resp
-
 
 # ---- 詳細ログ（アクション） ----
 @admin_bp.route("/admin/internal-seo/actions", methods=["GET"])
@@ -2386,10 +2361,7 @@ def admin_internal_seo_actions():
         q = q.filter(
             or_(
                 InternalLinkAction.applied_at < cursor_ts,
-                and_(
-                    InternalLinkAction.applied_at == cursor_ts,
-                    InternalLinkAction.id < cursor_id,
-                ),
+                and_(InternalLinkAction.applied_at == cursor_ts, InternalLinkAction.id < cursor_id),
             )
         )
 
@@ -2437,6 +2409,7 @@ def admin_internal_seo_actions():
         next_cursor=next_cursor,
         has_more=has_more,
     ))
+
 
 
 # ────────────── キーワード ──────────────
