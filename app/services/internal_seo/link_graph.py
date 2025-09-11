@@ -113,7 +113,7 @@ def _cosine_sim(
 def build_link_graph_for_site(
     site_id: int,
     max_targets_per_source: int = 20,
-    min_score: float = 0.15,
+    min_score: float = 0.05,
     limit_posts: Optional[int] = None,
     batch_commit: int = 500,
 ) -> Dict[str, int]:
