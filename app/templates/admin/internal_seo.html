@@ -4,6 +4,9 @@
 {% block content %}
 <div class="container-fluid py-4">
 
+  <!-- CSRF をJSから使うために埋め込み -->
+  <meta name="csrf-token" content="{{ csrf_token() if csrf_token is defined }}">
+
   <!-- 見出し -->
   <div class="d-flex align-items-center mb-3">
     <h2 class="h4 mb-0">🔧 内部SEO 管理</h2>
@@ -12,46 +15,31 @@
     </div>
   </div>
 
-  <!-- ステータス（GSC風：タブと検索） -->
-  <div class="mb-3 d-flex flex-wrap align-items-center gap-2">
-    <!-- 疑似タブ（見た目だけ。機能は既存のフィルタを使用） -->
-    <a class="btn btn-sm {% if not selected_site_id %}btn-primary text-white{% else %}btn-outline-secondary{% endif %}"
-       href="{{ url_for('admin.admin_internal_seo_index', per_page=per_page) }}">
-      📂 すべて
-    </a>
+  <!-- 軽量フィルタ（サーバで全サイトを描画しない） -->
+  <div class="mb-3 d-flex flex-wrap align-items-end gap-3">
+    <div>
+      <label class="form-label mb-1 small">Site ID（数値）</label>
+      <input type="number" id="siteIdInput" class="form-control form-control-sm" placeholder="例: 12" value="{{ selected_site_id or '' }}" style="width: 160px;">
+      <small class="text-muted">※ 下のサイト一覧は遅延ロード。ここにIDを入れて履歴を絞れます</small>
+    </div>
 
-    <!-- サイト選択（そのまま） -->
-    <form method="get" action="{{ url_for('admin.admin_internal_seo_index') }}" class="d-flex align-items-end gap-2 flex-wrap ms-2">
-      <div>
-        <label class="form-label mb-1 small">サイト</label>
-        <select name="site_id" class="form-select form-select-sm" id="siteSelect" style="min-width: 260px;">
-          <option value="">すべて</option>
-          {% for s in sites %}
-            <option value="{{ s.id }}" {% if selected_site_id==s.id %}selected{% endif %}>
-              {{ s.name }}（ID: {{ s.id }}）
-            </option>
-          {% endfor %}
-        </select>
-      </div>
-      <div>
-        <label class="form-label mb-1 small">表示件数</label>
-        {% set pp = per_page or 50 %}
-        <select name="per_page" class="form-select form-select-sm" id="perPageSelect">
-          {% for n in [25,50,100,200] %}
-            <option value="{{ n }}" {% if pp==n %}selected{% endif %}>{{ n }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="d-flex align-items-end gap-2">
-        <button class="btn btn-sm btn-primary">絞り込み</button>
-        {% if selected_site_id %}
-          <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.admin_internal_seo_index') }}">解除</a>
-        {% endif %}
-      </div>
-    </form>
+    <div>
+      <label class="form-label mb-1 small">表示件数（履歴）</label>
+      {% set pp = per_page or 50 %}
+      <select id="perPageSelect" class="form-select form-select-sm">
+        {% for n in [25,50,100,200] %}
+          <option value="{{ n }}" {% if pp==n %}selected{% endif %}>{{ n }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="ms-auto">
+      <button id="applyFilterBtn" class="btn btn-sm btn-primary">履歴に適用</button>
+      <button id="clearFilterBtn" class="btn btn-sm btn-outline-secondary">クリア</button>
+    </div>
   </div>
 
-  <!-- 容量ゲージ（カード化） -->
+  <!-- 容量ゲージ -->
   <div class="card border-0 shadow-sm mb-4">
     <div class="card-body">
       <div class="d-flex align-items-center mb-2">
@@ -64,7 +52,7 @@
     </div>
   </div>
 
-  <!-- バッチ実行（GSCカード風UI） -->
+  <!-- まとめ実行：サイト一覧はAJAXで段階表示 -->
   <div class="card border-0 shadow-sm mb-4">
     <div class="card-body">
       <div class="d-flex flex-wrap align-items-center mb-3">
@@ -75,7 +63,7 @@
         </div>
       </div>
 
-      <!-- パラメータ（横スクロール抑止のため小型入力） -->
+      <!-- パラメータ -->
       <div class="row g-2 align-items-end mb-3">
         <div class="col-6 col-md-2">
           <label class="form-label mb-1 small">pages</label>
@@ -110,100 +98,32 @@
         </div>
       </div>
 
-      <!-- サイト一覧（カード表示／チェック可能） -->
-      <div id="sitesBody" class="d-grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));">
-        {% for s in sites %}
-          <div class="p-3 border rounded bg-white shadow-sm d-flex justify-content-between align-items-start">
-            <div class="me-3">
-              <div class="form-check mb-2">
-                <input class="form-check-input site-check" type="checkbox" value="{{ s.id }}" id="site-{{ s.id }}">
-                <label class="form-check-label fw-semibold" for="site-{{ s.id }}">
-                  {{ s.name }}
-                </label>
-              </div>
-              <div class="small text-muted">Site ID: <span class="fw-semibold">{{ s.id }}</span></div>
-            </div>
-            <div class="text-end">
-              <form method="post" action="{{ url_for('admin.admin_internal_seo_run') }}" class="d-inline">
-                {{ csrf_token() if csrf_token is defined }}
-                <input type="hidden" name="site_id" value="{{ s.id }}">
-                <input type="hidden" name="pages" value="{{ request.args.get('pages', 10) }}">
-                <input type="hidden" name="per_page" value="{{ request.args.get('per_page', 100) }}">
-                <input type="hidden" name="min_score" value="{{ request.args.get('min_score', 0.05) }}">
-                <input type="hidden" name="max_k" value="{{ request.args.get('max_k', 80) }}">
-                <input type="hidden" name="limit_sources" value="{{ request.args.get('limit_sources', 200) }}">
-                <input type="hidden" name="limit_posts" value="{{ request.args.get('limit_posts', 50) }}">
-                <input type="hidden" name="incremental" value="true">
-                <button class="btn btn-outline-primary btn-sm">▶ このサイトだけ実行</button>
-              </form>
-            </div>
-          </div>
-        {% endfor %}
-      </div>
-
-      <div class="d-flex align-items-center mt-2">
-        <div class="form-check">
+      <!-- サイト検索（軽量） -->
+      <div class="d-flex flex-wrap align-items-end gap-2 mb-2">
+        <div>
+          <label class="form-label mb-1 small">サイト検索</label>
+          <input type="text" id="siteSearchInput" class="form-control form-control-sm" placeholder="名前 or ID 部分一致" style="width: 260px;">
+        </div>
+        <button id="siteSearchBtn" class="btn btn-sm btn-outline-primary">検索</button>
+        <div class="ms-auto form-check">
           <input type="checkbox" class="form-check-input" id="checkAllSites">
           <label for="checkAllSites" class="form-check-label small">すべて選択／解除</label>
         </div>
-        <div id="batchResult" class="small text-muted ms-auto"></div>
       </div>
+
+      <!-- サイト一覧（AJAX挿入） -->
+      <div id="sitesBody" class="d-grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));"></div>
+
+      <!-- もっと見る -->
+      <div class="d-flex mt-2">
+        <button id="loadMoreSitesBtn" class="btn btn-sm btn-outline-secondary ms-auto d-none" type="button">もっと見る</button>
+      </div>
+
+      <div id="batchResult" class="small text-muted mt-2"></div>
     </div>
   </div>
 
-  <!-- 単発実行（そのまま / トグルで開閉） -->
-  <details class="mb-4">
-    <summary class="mb-2 fw-semibold cursor-pointer">⚙️ 手動実行（詳細パラメータを指定）</summary>
-    <form class="row g-2 align-items-end mt-2" method="post" action="{{ url_for('admin.admin_internal_seo_run') }}">
-      {{ csrf_token() if csrf_token is defined }}
-      <div class="col-12 col-md-3">
-        <label class="form-label mb-1 small">実行 Site</label>
-        <select name="site_id" class="form-select form-select-sm" required>
-          {% for s in sites %}
-            <option value="{{ s.id }}" {% if selected_site_id==s.id %}selected{% endif %}>
-              {{ s.name }}（ID: {{ s.id }}）
-            </option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="col-6 col-md-1">
-        <label class="form-label mb-1 small">pages</label>
-        <input type="number" name="pages" class="form-control form-control-sm" value="{{ request.args.get('pages', 10) }}">
-      </div>
-      <div class="col-6 col-md-1">
-        <label class="form-label mb-1 small">per_page</label>
-        <input type="number" name="per_page" class="form-control form-control-sm" value="{{ request.args.get('per_page', 100) }}">
-      </div>
-      <div class="col-6 col-md-2">
-        <label class="form-label mb-1 small">min_score</label>
-        <input type="number" step="0.01" name="min_score" class="form-control form-control-sm" value="{{ request.args.get('min_score', 0.05) }}">
-      </div>
-      <div class="col-6 col-md-1">
-        <label class="form-label mb-1 small">max_k</label>
-        <input type="number" name="max_k" class="form-control form-control-sm" value="{{ request.args.get('max_k', 80) }}">
-      </div>
-      <div class="col-6 col-md-2">
-        <label class="form-label mb-1 small">limit_sources</label>
-        <input type="number" name="limit_sources" class="form-control form-control-sm" value="{{ request.args.get('limit_sources', 200) }}">
-      </div>
-      <div class="col-6 col-md-2">
-        <label class="form-label mb-1 small">limit_posts</label>
-        <input type="number" name="limit_posts" class="form-control form-control-sm" value="{{ request.args.get('limit_posts', 50) }}">
-      </div>
-      <div class="col-6 col-md-2">
-        <label class="form-label mb-1 small">incremental</label>
-        <select name="incremental" class="form-select form-select-sm">
-          <option value="true" selected>true</option>
-          <option value="false">false</option>
-        </select>
-      </div>
-      <div class="col-12 col-md-auto">
-        <button class="btn btn-success btn-sm">手動実行（非同期）</button>
-      </div>
-    </form>
-  </details>
-
-  <!-- 実行履歴（カード上にテーブル、読み込み高速化のため最小装飾） -->
+  <!-- 実行履歴（JSで遅延ロード） -->
   <div class="card border-0 shadow-sm">
     <div class="card-body">
       <div class="d-flex align-items-center mb-2">
@@ -261,7 +181,7 @@
 {% block scripts %}
 {{ super() }}
 <script>
-// ----------- ユーティリティ -----------
+// ========= 共通ユーティリティ =========
 function fmtLocal(iso) {
   if (!iso) return '-';
   try {
@@ -280,8 +200,11 @@ function statusBadge(st) {
   if (st === 'error')   return '<span class="badge bg-danger">error</span>';
   return `<span class="badge bg-secondary">${esc(st || '-')}</span>`;
 }
+function getCsrfToken() {
+  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+}
 
-// ----------- 容量ゲージ -----------
+// ========= 容量ゲージ =========
 let lastCapacity = null;
 async function refreshCapacity() {
   try {
@@ -316,24 +239,24 @@ async function refreshCapacity() {
     document.getElementById('capacityText').textContent = `取得失敗: ${e.message}`;
   }
 }
-setInterval(refreshCapacity, 10000);
+setInterval(refreshCapacity, 15000); // 少し間隔を長めに
 
-// ----------- Runs（キーセット） -----------
+// ========= 履歴（遅延ロード） =========
 let nextCursorTs = null;
 let nextCursorId = null;
-let loading = false;
-let reachedEnd = false;
+let runsLoading = false;
+let runsReachedEnd = false;
 
 async function loadRuns(initial=false) {
-  if (loading || reachedEnd) return;
-  loading = true;
+  if (runsLoading || runsReachedEnd) return;
+  runsLoading = true;
 
   const tbody = document.getElementById('runsBody');
   const ph = document.getElementById('placeholderRow');
   if (ph) ph.remove();
 
   const params = new URLSearchParams();
-  const siteId = document.getElementById('siteSelect')?.value || '';
+  const siteId = document.getElementById('siteIdInput')?.value || '';
   const perPage = document.getElementById('perPageSelect')?.value || '50';
   if (siteId) params.set('site_id', siteId);
   params.set('limit', perPage);
@@ -369,20 +292,20 @@ async function loadRuns(initial=false) {
 
     nextCursorTs = data.next_cursor_ts || null;
     nextCursorId = data.next_cursor_id || null;
-    reachedEnd = !data.has_more;
+    runsReachedEnd = !data.has_more;
 
-    document.getElementById('loadMoreBtn').classList.toggle('d-none', reachedEnd);
+    document.getElementById('loadMoreBtn').classList.toggle('d-none', runsReachedEnd);
   } catch (e) {
     const tr = document.createElement('tr');
     tr.innerHTML = `<td colspan="8" class="text-danger">読み込み失敗: ${e.message}</td>`;
     tbody.appendChild(tr);
-    reachedEnd = true;
+    runsReachedEnd = true;
   } finally {
-    loading = false;
+    runsLoading = false;
   }
 }
 
-// ----------- RUN詳細モーダル -----------
+// ========= RUN詳細モーダル =========
 async function openStatsModal(btn) {
   const runId = btn.getAttribute('data-run-id');
   const siteId = btn.getAttribute('data-site-id');
@@ -421,13 +344,93 @@ function renderRow(title, obj) {
   return `<tr class="table-active"><th colspan="2">${esc(title)}</th></tr>${kv}`;
 }
 
-// ----------- バッチ実行 -----------
-document.getElementById('checkAllSites').addEventListener('change', (e) => {
-  document.querySelectorAll('.site-check').forEach(cb => cb.checked = e.target.checked);
+// ========= サイト一覧（超軽量ページング & 検索） =========
+let sitesQuery = '';
+let sitesCursorId = null;
+let sitesLoading = false;
+let sitesHasMore = true;
+
+function siteCardHTML(s) {
+  const csrf = getCsrfToken();
+  return `
+    <div class="p-3 border rounded bg-white shadow-sm d-flex justify-content-between align-items-start">
+      <div class="me-3">
+        <div class="form-check mb-2">
+          <input class="form-check-input site-check" type="checkbox" value="${s.id}" id="site-${s.id}">
+          <label class="form-check-label fw-semibold" for="site-${s.id}">
+            ${esc(s.name)}
+          </label>
+        </div>
+        <div class="small text-muted">Site ID: <span class="fw-semibold">${s.id}</span></div>
+      </div>
+      <div class="text-end">
+        <form method="post" action="/admin/internal-seo/run" class="d-inline">
+          <input type="hidden" name="csrf_token" value="${esc(csrf)}">
+          <input type="hidden" name="site_id" value="${s.id}">
+          <input type="hidden" name="pages" value="${document.getElementById('batchPages').value || 10}">
+          <input type="hidden" name="per_page" value="${document.getElementById('batchPerPage').value || 100}">
+          <input type="hidden" name="min_score" value="${document.getElementById('batchMinScore').value || 0.05}">
+          <input type="hidden" name="max_k" value="${document.getElementById('batchMaxK').value || 80}">
+          <input type="hidden" name="limit_sources" value="${document.getElementById('batchLimitSources').value || 200}">
+          <input type="hidden" name="limit_posts" value="${document.getElementById('batchLimitPosts').value || 50}">
+          <input type="hidden" name="incremental" value="${document.getElementById('batchIncremental').value || 'true'}">
+          <button class="btn btn-outline-primary btn-sm" type="submit">▶ このサイトだけ実行</button>
+        </form>
+      </div>
+    </div>`;
+}
+
+async function fetchSites(reset=false) {
+  if (sitesLoading) return;
+  if (reset) {
+    sitesCursorId = null;
+    sitesHasMore = true;
+    document.getElementById('sitesBody').innerHTML = '';
+  }
+  if (!sitesHasMore) return;
+
+  sitesLoading = true;
+  const params = new URLSearchParams();
+  if (sitesQuery) params.set('q', sitesQuery);
+  params.set('limit', '30');
+  if (sitesCursorId) params.set('cursor_id', String(sitesCursorId));
+
+  try {
+    const res = await fetch(`/admin/internal-seo/sites?${params.toString()}`, {headers:{'Accept':'application/json'}});
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const list = data.rows || [];
+    const frag = document.createDocumentFragment();
+    const tmp = document.createElement('div');
+    for (const s of list) {
+      tmp.innerHTML = siteCardHTML(s);
+      frag.appendChild(tmp.firstElementChild);
+    }
+    document.getElementById('sitesBody').appendChild(frag);
+
+    sitesCursorId = data.next_cursor_id || null;
+    sitesHasMore = !!data.has_more;
+    document.getElementById('loadMoreSitesBtn').classList.toggle('d-none', !sitesHasMore);
+  } catch (e) {
+    document.getElementById('batchResult').textContent = 'サイト取得失敗: ' + e.message;
+    sitesHasMore = false;
+  } finally {
+    sitesLoading = false;
+  }
+}
+
+// チェック全選択
+document.addEventListener('change', (e) => {
+  if (e.target && e.target.id === 'checkAllSites') {
+    document.querySelectorAll('.site-check').forEach(cb => cb.checked = e.target.checked);
+  }
 });
 
+// ========= バッチ実行 =========
 async function runBatch() {
-  const ids = Array.from(document.querySelectorAll('.site-check:checked')).map(cb => parseInt(cb.value,10)).filter(Boolean);
+  const ids = Array.from(document.querySelectorAll('.site-check:checked'))
+    .map(cb => parseInt(cb.value,10))
+    .filter(Boolean);
   if (!ids.length) {
     document.getElementById('batchResult').textContent = 'サイトが選択されていません。';
     return;
@@ -460,9 +463,6 @@ async function runBatch() {
     document.getElementById('batchResult').textContent =
       `登録: ${data.enqueued} 件 / スキップ: ${data.skipped?.length||0} / エラー: ${data.errors?.length||0}`;
     refreshCapacity();
-    nextCursorTs = null; nextCursorId = null; reachedEnd = false;
-    document.getElementById('runsBody').innerHTML = '';
-    loadRuns(true);
   } catch (e) {
     document.getElementById('batchResult').textContent = '失敗: ' + e.message;
   } finally {
@@ -471,12 +471,36 @@ async function runBatch() {
   }
 }
 
-// ----------- 初期化 -----------
+// ========= 初期化 =========
 document.addEventListener('DOMContentLoaded', () => {
+  // 容量
   refreshCapacity();
   document.getElementById('capacityRefresh').addEventListener('click', refreshCapacity);
+
+  // サイト一覧（初回）
+  fetchSites(true);
+  document.getElementById('loadMoreSitesBtn').addEventListener('click', () => fetchSites(false));
+  document.getElementById('siteSearchBtn').addEventListener('click', () => {
+    sitesQuery = document.getElementById('siteSearchInput').value.trim();
+    fetchSites(true);
+  });
+
+  // 履歴
   loadRuns(true);
   document.getElementById('loadMoreBtn').addEventListener('click', () => loadRuns(false));
+  document.getElementById('applyFilterBtn').addEventListener('click', () => {
+    nextCursorTs = null; nextCursorId = null; runsReachedEnd = false;
+    document.getElementById('runsBody').innerHTML = '<tr id="placeholderRow"><td colspan="8" class="text-muted">読み込み中…</td></tr>';
+    loadRuns(true);
+  });
+  document.getElementById('clearFilterBtn').addEventListener('click', () => {
+    document.getElementById('siteIdInput').value = '';
+    nextCursorTs = null; nextCursorId = null; runsReachedEnd = false;
+    document.getElementById('runsBody').innerHTML = '<tr id="placeholderRow"><td colspan="8" class="text-muted">読み込み中…</td></tr>';
+    loadRuns(true);
+  });
+
+  // バッチ
   document.getElementById('runBatchBtn').addEventListener('click', (e) => { e.preventDefault(); runBatch(); });
 });
 </script>

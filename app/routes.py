@@ -1921,7 +1921,7 @@ def admin_internal_seo_run_stats(run_id: int):
     return resp
 
 
-# ---- 画面本体（超軽量：runs はここで取得しない） ----
+# ---- 画面本体（超軽量：サイト一覧も runs もサーバでは取得しない） ----
 @admin_bp.route("/admin/internal-seo", methods=["GET"])
 @login_required
 def admin_internal_seo_index():
@@ -1931,20 +1931,48 @@ def admin_internal_seo_index():
     selected_site_id = request.args.get("site_id", type=int)
     per_page = request.args.get("per_page", default=50, type=int)
 
-    # サイト一覧のみ（軽量）
-    sites = Site.query.options(load_only(Site.id, Site.name)) \
-                      .order_by(Site.id.asc()).all()
-
+    # 重い一覧はテンプレでは描画しない。JSが /sites と /list を叩いて段階表示する。
     return render_template(
         "admin/internal_seo.html",
-        sites=sites,
-        runs=[],  # 初期は空。JS が /list を叩いて埋める
         selected_site_id=selected_site_id,
         per_page=per_page,
-        # キーセット用に最初のカーソルは未指定
-        initial_cursor_ts=None,
-        initial_cursor_id=None,
     )
+
+
+# ---- JSON: サイト一覧（軽量ページング & 検索） ----------------------
+# GET /admin/internal-seo/sites?q=<str>&limit=<int>&cursor_id=<int>
+@admin_bp.route("/admin/internal-seo/sites", methods=["GET"])
+@login_required
+def admin_internal_seo_sites():
+    if not getattr(current_user, "is_admin", False):
+        abort(403)
+
+    q = (request.args.get("q") or "").strip()
+    limit = min(max(request.args.get("limit", type=int, default=30), 1), 200)
+    cursor_id = request.args.get("cursor_id", type=int)
+
+    query = Site.query.options(load_only(Site.id, Site.name)).order_by(Site.id.asc())
+
+    if q:
+        # 部分一致（idも名前も）。Postgres/SQLite両対応の簡易実装
+        if q.isdigit():
+            query = query.filter(or_(Site.id == int(q), Site.name.ilike(f"%{q}%")))
+        else:
+            query = query.filter(Site.name.ilike(f"%{q}%"))
+
+    if cursor_id:
+        query = query.filter(Site.id > cursor_id)
+
+    items = query.limit(limit).all()
+    has_more = len(items) == limit
+    next_cursor_id = items[-1].id if items else None
+
+    return jsonify({
+        "ok": True,
+        "rows": [{"id": s.id, "name": s.name or f"Site {s.id}"} for s in items],
+        "has_more": has_more,
+        "next_cursor_id": next_cursor_id,
+    })
 
 
 # ---- JSON: 実行履歴（キーセットページネーション） ----
@@ -1983,7 +2011,6 @@ def admin_internal_seo_list():
     # カーソル指定があれば “それよりも前（desc 的に小さい）”
     if cursor_ts_str:
         try:
-            # 文字列→datetime（ISO 8601）。タイムゾーン付ならそのまま、無ければ naive として扱う
             cursor_ts = datetime.fromisoformat(cursor_ts_str.replace("Z", "+00:00"))
         except Exception:
             cursor_ts = None
@@ -2006,7 +2033,6 @@ def admin_internal_seo_list():
     next_cursor_id = items[-1].id if items else None
     has_more = bool(items) and (len(items) == limit)
 
-    # JSON を薄く返す（テンプレでフォーマットする）
     def _row(r):
         return dict(
             id=r.id,
@@ -2053,7 +2079,6 @@ def admin_internal_seo_run():
     limit_posts   = request.form.get("limit_posts",   type=int,   default=_env_int("INTERNAL_SEO_LIMIT_POSTS", 50))
     incremental   = request.form.get("incremental", default="true").lower() != "false"
 
-    # internal_seo_job_queue に投入
     db.session.execute(text("""
         INSERT INTO internal_seo_job_queue
           (site_id, pages, per_page, min_score, max_k, limit_sources, limit_posts,
@@ -2076,15 +2101,14 @@ def admin_internal_seo_run():
     flash(f"Site {site_id} の内部SEOをジョブキューに登録しました。ワーカーが順次実行します。", "success")
     return redirect(url_for("admin.admin_internal_seo_index", site_id=site_id), code=303)
 
-# ==== 追加: まとめ実行 API =========================================
-# POST /admin/internal-seo/run-batch
+
+# ---- まとめ実行 API ----
 @admin_bp.route("/admin/internal-seo/run-batch", methods=["POST"])
 @login_required
 def admin_internal_seo_run_batch():
     if not getattr(current_user, "is_admin", False):
         abort(403)
 
-    # site_ids は form-data でも JSON でも受け付ける
     site_ids = []
     if request.is_json:
         payload = request.get_json(silent=True) or {}
@@ -2118,7 +2142,6 @@ def admin_internal_seo_run_batch():
     skipped = []
     errors = []
 
-    # 存在する site のみに限定（打鍵ミス対策）
     existing_site_ids = {s.id for s in Site.query.with_entities(Site.id).filter(Site.id.in_(site_ids)).all()}
 
     for sid in site_ids:
@@ -2151,23 +2174,19 @@ def admin_internal_seo_run_batch():
     return jsonify({"ok": True, "enqueued": enqueued, "skipped": skipped, "errors": errors})
 
 
-# ==== 追加: 容量メーター API ======================================
-# GET /admin/internal-seo/capacity
+# ---- 容量メーター API ----
 @admin_bp.route("/admin/internal-seo/capacity", methods=["GET"])
 @login_required
 def admin_internal_seo_capacity():
     if not getattr(current_user, "is_admin", False):
         abort(403)
 
-    # 並列上限（環境変数になければ 3）
     max_parallel = int(os.getenv("INTERNAL_SEO_WORKER_PARALLELISM", 3))
 
-    # 実行中（runs）
     running = db.session.execute(text("""
         SELECT COUNT(*) FROM internal_seo_runs WHERE status='running'
     """)).scalar() or 0
 
-    # キュー（queued/running）
     queued = db.session.execute(text("""
         SELECT COUNT(*) FROM internal_seo_job_queue WHERE status IN ('queued','running')
     """)).scalar() or 0
@@ -2188,8 +2207,7 @@ def admin_internal_seo_capacity():
     return resp
 
 
-# ==== 追加: 詳細ログ API ==========================================
-# GET /admin/internal-seo/actions
+# ---- 詳細ログ API ----
 @admin_bp.route("/admin/internal-seo/actions", methods=["GET"])
 @login_required
 def admin_internal_seo_actions():
@@ -2198,11 +2216,10 @@ def admin_internal_seo_actions():
 
     site_id = request.args.get("site_id", type=int)
     post_id = request.args.get("post_id", type=int)
-    status  = request.args.get("status")  # applied / pending / skipped / None
+    status  = request.args.get("status")
     limit   = min(max(request.args.get("limit", type=int, default=50), 1), 100)
 
-    # キーセット（applied_at DESC, id DESC）
-    cursor = request.args.get("cursor")  # 形式: "{ts_iso}.{id}" or None
+    cursor = request.args.get("cursor")
     cursor_ts = None
     cursor_id = None
     if cursor:
@@ -2236,7 +2253,6 @@ def admin_internal_seo_actions():
     if status:
         q = q.filter(InternalLinkAction.status == status)
 
-    # 並び順（applied_at NULL は最後）
     q = q.order_by(desc(InternalLinkAction.applied_at), desc(InternalLinkAction.id))
 
     if cursor_ts is not None and cursor_id is not None:
@@ -2252,7 +2268,6 @@ def admin_internal_seo_actions():
 
     rows = q.limit(limit).all()
 
-    # URL 解決（post_url / target_url）を IN で一括解決
     post_ids   = {r.post_id for r in rows if r.post_id}
     target_ids = {r.target_post_id for r in rows if r.target_post_id}
     all_ids = list(post_ids | target_ids)
@@ -2295,7 +2310,6 @@ def admin_internal_seo_actions():
         next_cursor=next_cursor,
         has_more=has_more,
     ))
-
 
 # ────────────── キーワード ──────────────
 
