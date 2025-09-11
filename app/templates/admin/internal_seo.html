@@ -2,113 +2,129 @@
 {% block title %}内部SEO 管理{% endblock %}
 
 {% block content %}
-<div class="container-fluid py-3">
-  <h3 class="mb-3">内部SEO 管理</h3>
+<div class="container-fluid py-4">
 
-  <!-- 容量ゲージ -->
-  <div class="mb-4">
-    <div class="d-flex align-items-center mb-2">
-      <div class="me-2 fw-bold">現在の処理余力</div>
-      <div id="capacityText" class="text-muted small">計測中…</div>
-      <button id="capacityRefresh" class="btn btn-sm btn-outline-secondary ms-auto" type="button">更新</button>
-    </div>
-    <div class="progress" style="height:18px;">
-      <div id="capacityBar" class="progress-bar bg-secondary" style="width:0%">0%</div>
+  <!-- 見出し -->
+  <div class="d-flex align-items-center mb-3">
+    <h2 class="h4 mb-0">🔧 内部SEO 管理</h2>
+    <div class="ms-auto d-flex align-items-center gap-2">
+      <button id="capacityRefresh" class="btn btn-sm btn-outline-primary">再計測</button>
     </div>
   </div>
 
-  <!-- まとめ実行（バッチ） -->
-  <div class="card mb-4">
+  <!-- ステータス（GSC風：タブと検索） -->
+  <div class="mb-3 d-flex flex-wrap align-items-center gap-2">
+    <!-- 疑似タブ（見た目だけ。機能は既存のフィルタを使用） -->
+    <a class="btn btn-sm {% if not selected_site_id %}btn-primary text-white{% else %}btn-outline-secondary{% endif %}"
+       href="{{ url_for('admin.admin_internal_seo_index', per_page=per_page) }}">
+      📂 すべて
+    </a>
+
+    <!-- サイト選択（そのまま） -->
+    <form method="get" action="{{ url_for('admin.admin_internal_seo_index') }}" class="d-flex align-items-end gap-2 flex-wrap ms-2">
+      <div>
+        <label class="form-label mb-1 small">サイト</label>
+        <select name="site_id" class="form-select form-select-sm" id="siteSelect" style="min-width: 260px;">
+          <option value="">すべて</option>
+          {% for s in sites %}
+            <option value="{{ s.id }}" {% if selected_site_id==s.id %}selected{% endif %}>
+              {{ s.name }}（ID: {{ s.id }}）
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="form-label mb-1 small">表示件数</label>
+        {% set pp = per_page or 50 %}
+        <select name="per_page" class="form-select form-select-sm" id="perPageSelect">
+          {% for n in [25,50,100,200] %}
+            <option value="{{ n }}" {% if pp==n %}selected{% endif %}>{{ n }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="d-flex align-items-end gap-2">
+        <button class="btn btn-sm btn-primary">絞り込み</button>
+        {% if selected_site_id %}
+          <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.admin_internal_seo_index') }}">解除</a>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+
+  <!-- 容量ゲージ（カード化） -->
+  <div class="card border-0 shadow-sm mb-4">
     <div class="card-body">
       <div class="d-flex align-items-center mb-2">
-        <div class="fw-bold">選択サイトをまとめて実行</div>
-        <div class="ms-2 small text-muted">提案サイズは上の余力ゲージから算出（安全値）</div>
+        <h6 class="mb-0">⚡ 現在の処理余力</h6>
+        <span id="capacityText" class="badge bg-light text-muted ms-2">計測中…</span>
+      </div>
+      <div class="progress" style="height: 14px;">
+        <div id="capacityBar" class="progress-bar bg-secondary" role="progressbar" style="width:0%">0%</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- バッチ実行（GSCカード風UI） -->
+  <div class="card border-0 shadow-sm mb-4">
+    <div class="card-body">
+      <div class="d-flex flex-wrap align-items-center mb-3">
+        <h6 class="mb-2 mb-md-0 me-2">✅ 選択サイトをまとめて実行</h6>
+        <div class="text-muted small">（提案バッチサイズは容量ゲージの値を初期値に反映）</div>
         <div class="ms-auto">
           <button id="runBatchBtn" class="btn btn-success btn-sm">選択サイトを実行</button>
         </div>
       </div>
 
-      <!-- クイック設定（最小） -->
-      <div class="row gy-2 gx-2">
-        <div class="col-auto">
-          <label class="form-label mb-0">incremental</label>
+      <!-- パラメータ（横スクロール抑止のため小型入力） -->
+      <div class="row g-2 align-items-end mb-3">
+        <div class="col-6 col-md-2">
+          <label class="form-label mb-1 small">pages</label>
+          <input type="number" id="batchPages" class="form-control form-control-sm" value="{{ request.args.get('pages', 10) }}">
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label mb-1 small">per_page</label>
+          <input type="number" id="batchPerPage" class="form-control form-control-sm" value="{{ request.args.get('per_page', 100) }}">
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label mb-1 small">min_score</label>
+          <input type="number" step="0.01" id="batchMinScore" class="form-control form-control-sm" value="{{ request.args.get('min_score', 0.05) }}">
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label mb-1 small">max_k</label>
+          <input type="number" id="batchMaxK" class="form-control form-control-sm" value="{{ request.args.get('max_k', 80) }}">
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label mb-1 small">limit_sources</label>
+          <input type="number" id="batchLimitSources" class="form-control form-control-sm" value="{{ request.args.get('limit_sources', 200) }}">
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label mb-1 small">limit_posts</label>
+          <input type="number" id="batchLimitPosts" class="form-control form-control-sm" value="{{ request.args.get('limit_posts', 50) }}">
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label mb-1 small">incremental</label>
           <select id="batchIncremental" class="form-select form-select-sm">
             <option value="true" selected>true</option>
             <option value="false">false</option>
           </select>
-          <div class="form-text">true: 変更差分のみ巡回</div>
-        </div>
-        <div class="col-auto">
-          <a class="small" data-bs-toggle="collapse" href="#advParams" role="button" aria-expanded="false" aria-controls="advParams">
-            詳細設定を開く
-          </a>
         </div>
       </div>
 
-      <!-- 詳細設定（折りたたみ） -->
-      <div class="collapse mt-2" id="advParams">
-        <div class="row gy-2 gx-3">
-          <div class="col-6 col-md-2">
-            <label class="form-label">pages</label>
-            <input type="number" id="batchPages" class="form-control form-control-sm" value="{{ request.args.get('pages', 10) }}">
-            <div class="form-text">インデックス同期の巡回ページ数</div>
-          </div>
-          <div class="col-6 col-md-2">
-            <label class="form-label">per_page</label>
-            <input type="number" id="batchPerPage" class="form-control form-control-sm" value="{{ request.args.get('per_page', 100) }}">
-            <div class="form-text">1ページの取得件数</div>
-          </div>
-          <div class="col-6 col-md-2">
-            <label class="form-label">min_score</label>
-            <input type="number" step="0.01" id="batchMinScore" class="form-control form-control-sm" value="{{ request.args.get('min_score', 0.05) }}">
-            <div class="form-text">関連度スコアの下限</div>
-          </div>
-          <div class="col-6 col-md-2">
-            <label class="form-label">max_k</label>
-            <input type="number" id="batchMaxK" class="form-control form-control-sm" value="{{ request.args.get('max_k', 80) }}">
-            <div class="form-text">候補リンクの上限/記事</div>
-          </div>
-          <div class="col-6 col-md-2">
-            <label class="form-label">limit_sources</label>
-            <input type="number" id="batchLimitSources" class="form-control form-control-sm" value="{{ request.args.get('limit_sources', 200) }}">
-            <div class="form-text">計画対象の記事数</div>
-          </div>
-          <div class="col-6 col-md-2">
-            <label class="form-label">limit_posts</label>
-            <input type="number" id="batchLimitPosts" class="form-control form-control-sm" value="{{ request.args.get('limit_posts', 50) }}">
-            <div class="form-text">適用対象の記事数</div>
-          </div>
-        </div>
-      </div>
-
-      <div id="batchResult" class="small mt-2 text-muted"></div>
-    </div>
-  </div>
-
-  <!-- サイトカード一覧（高速） -->
-  <div class="mb-2 d-flex align-items-center">
-    <div class="fw-bold me-2">サイト一覧</div>
-    <div class="small text-muted">チェックして「選択サイトを実行」を押す</div>
-    <div class="ms-auto">
-      <label class="me-2 small"><input type="checkbox" id="checkAllSites"> すべて選択</label>
-    </div>
-  </div>
-
-  <div class="row g-3" id="siteCards">
-    {% for s in sites %}
-    <div class="col-12 col-md-6 col-xl-4">
-      <div class="card h-100 shadow-sm">
-        <div class="card-body">
-          <div class="d-flex">
-            <div class="form-check me-2">
-              <input class="form-check-input site-check" type="checkbox" value="{{ s.id }}" id="site-{{ s.id }}">
+      <!-- サイト一覧（カード表示／チェック可能） -->
+      <div id="sitesBody" class="d-grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));">
+        {% for s in sites %}
+          <div class="p-3 border rounded bg-white shadow-sm d-flex justify-content-between align-items-start">
+            <div class="me-3">
+              <div class="form-check mb-2">
+                <input class="form-check-input site-check" type="checkbox" value="{{ s.id }}" id="site-{{ s.id }}">
+                <label class="form-check-label fw-semibold" for="site-{{ s.id }}">
+                  {{ s.name }}
+                </label>
+              </div>
+              <div class="small text-muted">Site ID: <span class="fw-semibold">{{ s.id }}</span></div>
             </div>
-            <div class="flex-grow-1">
-              <div class="fw-bold">{{ s.name }}</div>
-              <div class="text-muted small">Site ID: {{ s.id }}</div>
-            </div>
-            <div>
-              <form method="post" action="{{ url_for('admin.admin_internal_seo_run') }}">
+            <div class="text-end">
+              <form method="post" action="{{ url_for('admin.admin_internal_seo_run') }}" class="d-inline">
                 {{ csrf_token() if csrf_token is defined }}
                 <input type="hidden" name="site_id" value="{{ s.id }}">
                 <input type="hidden" name="pages" value="{{ request.args.get('pages', 10) }}">
@@ -118,46 +134,109 @@
                 <input type="hidden" name="limit_sources" value="{{ request.args.get('limit_sources', 200) }}">
                 <input type="hidden" name="limit_posts" value="{{ request.args.get('limit_posts', 50) }}">
                 <input type="hidden" name="incremental" value="true">
-                <button class="btn btn-outline-primary btn-sm">このサイトだけ実行</button>
+                <button class="btn btn-outline-primary btn-sm">▶ このサイトだけ実行</button>
               </form>
             </div>
           </div>
+        {% endfor %}
+      </div>
+
+      <div class="d-flex align-items-center mt-2">
+        <div class="form-check">
+          <input type="checkbox" class="form-check-input" id="checkAllSites">
+          <label for="checkAllSites" class="form-check-label small">すべて選択／解除</label>
         </div>
+        <div id="batchResult" class="small text-muted ms-auto"></div>
       </div>
     </div>
-    {% endfor %}
   </div>
 
-  <!-- 実行履歴（遅延ロード） -->
-  <div class="mt-4 d-flex align-items-center">
-    <h5 class="mb-0">実行履歴</h5>
-    <div class="ms-3 small text-muted">最新から / クリックで詳細</div>
-  </div>
-  <div class="table-responsive mt-2">
-    <table class="table table-sm table-striped align-middle">
-      <thead>
-        <tr>
-          <th style="width:72px">ID</th>
-          <th style="width:72px">Site</th>
-          <th style="width:110px">Status</th>
-          <th style="width:120px">Kind</th>
-          <th>Started</th>
-          <th>Ended</th>
-          <th style="width:120px">Duration(ms)</th>
-          <th style="width:140px">詳細</th>
-        </tr>
-      </thead>
-      <tbody id="runsBody">
-        <tr id="placeholderRow"><td colspan="8" class="text-muted">読み込み中…</td></tr>
-      </tbody>
-    </table>
-  </div>
-  <div class="d-flex">
-    <button id="loadMoreBtn" class="btn btn-outline-secondary ms-auto d-none" type="button">もっと見る</button>
+  <!-- 単発実行（そのまま / トグルで開閉） -->
+  <details class="mb-4">
+    <summary class="mb-2 fw-semibold cursor-pointer">⚙️ 手動実行（詳細パラメータを指定）</summary>
+    <form class="row g-2 align-items-end mt-2" method="post" action="{{ url_for('admin.admin_internal_seo_run') }}">
+      {{ csrf_token() if csrf_token is defined }}
+      <div class="col-12 col-md-3">
+        <label class="form-label mb-1 small">実行 Site</label>
+        <select name="site_id" class="form-select form-select-sm" required>
+          {% for s in sites %}
+            <option value="{{ s.id }}" {% if selected_site_id==s.id %}selected{% endif %}>
+              {{ s.name }}（ID: {{ s.id }}）
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-1">
+        <label class="form-label mb-1 small">pages</label>
+        <input type="number" name="pages" class="form-control form-control-sm" value="{{ request.args.get('pages', 10) }}">
+      </div>
+      <div class="col-6 col-md-1">
+        <label class="form-label mb-1 small">per_page</label>
+        <input type="number" name="per_page" class="form-control form-control-sm" value="{{ request.args.get('per_page', 100) }}">
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label mb-1 small">min_score</label>
+        <input type="number" step="0.01" name="min_score" class="form-control form-control-sm" value="{{ request.args.get('min_score', 0.05) }}">
+      </div>
+      <div class="col-6 col-md-1">
+        <label class="form-label mb-1 small">max_k</label>
+        <input type="number" name="max_k" class="form-control form-control-sm" value="{{ request.args.get('max_k', 80) }}">
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label mb-1 small">limit_sources</label>
+        <input type="number" name="limit_sources" class="form-control form-control-sm" value="{{ request.args.get('limit_sources', 200) }}">
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label mb-1 small">limit_posts</label>
+        <input type="number" name="limit_posts" class="form-control form-control-sm" value="{{ request.args.get('limit_posts', 50) }}">
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label mb-1 small">incremental</label>
+        <select name="incremental" class="form-select form-select-sm">
+          <option value="true" selected>true</option>
+          <option value="false">false</option>
+        </select>
+      </div>
+      <div class="col-12 col-md-auto">
+        <button class="btn btn-success btn-sm">手動実行（非同期）</button>
+      </div>
+    </form>
+  </details>
+
+  <!-- 実行履歴（カード上にテーブル、読み込み高速化のため最小装飾） -->
+  <div class="card border-0 shadow-sm">
+    <div class="card-body">
+      <div class="d-flex align-items-center mb-2">
+        <h6 class="mb-0">📜 実行履歴</h6>
+        <a class="btn btn-sm btn-outline-secondary ms-auto" href="{{ url_for('admin.admin_internal_seo_detail') }}" target="_blank">詳細ログページを開く</a>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th style="width:72px">ID</th>
+              <th style="width:72px">Site</th>
+              <th style="width:110px">Status</th>
+              <th style="width:120px">Kind</th>
+              <th>Started</th>
+              <th>Ended</th>
+              <th style="width:120px">Duration(ms)</th>
+              <th style="width:140px">詳細</th>
+            </tr>
+          </thead>
+          <tbody id="runsBody">
+            <tr id="placeholderRow"><td colspan="8" class="text-muted">読み込み中…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="d-flex mt-2">
+        <button id="loadMoreBtn" class="btn btn-sm btn-outline-secondary ms-auto d-none" type="button">もっと見る</button>
+      </div>
+    </div>
   </div>
 </div>
 
-<!-- 詳細モーダル -->
+<!-- 実行詳細モーダル -->
 <div class="modal fade" id="statsModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content">
@@ -166,7 +245,9 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
       </div>
       <div class="modal-body">
-        <div id="statsBody" class="small text-monospace"><div class="text-muted">読み込み中…</div></div>
+        <div id="statsBody" class="small text-monospace">
+          <div class="text-muted">読み込み中…</div>
+        </div>
       </div>
       <div class="modal-footer">
         <a class="btn btn-outline-primary" id="goDetailLink" href="#" target="_blank">詳細ログページを開く</a>
@@ -180,52 +261,104 @@
 {% block scripts %}
 {{ super() }}
 <script>
-/* === 軽量ユーティリティ === */
-function fmtLocal(iso){ if(!iso) return '-'; try{const d=new Date(iso); const p=x=>String(x).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;}catch(e){return iso;}}
-function esc(v){ if(v===null||v===undefined) return ''; return String(v).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
-function statusBadge(st){ if(st==='success')return'<span class="badge bg-success">success</span>'; if(st==='running')return'<span class="badge bg-info text-dark">running</span>'; if(st==='error')return'<span class="badge bg-danger">error</span>'; return `<span class="badge bg-secondary">${esc(st||'-')}</span>`; }
+// ----------- ユーティリティ -----------
+function fmtLocal(iso) {
+  if (!iso) return '-';
+  try {
+    const d = new Date(iso);
+    const pad = (x)=> String(x).padStart(2,'0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  } catch(e) { return iso; }
+}
+function esc(v) {
+  if (v===null||v===undefined) return '';
+  return String(v).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+}
+function statusBadge(st) {
+  if (st === 'success') return '<span class="badge bg-success">success</span>';
+  if (st === 'running') return '<span class="badge bg-info text-dark">running</span>';
+  if (st === 'error')   return '<span class="badge bg-danger">error</span>';
+  return `<span class="badge bg-secondary">${esc(st || '-')}</span>`;
+}
 
-/* === 容量ゲージ === */
-let lastCapacity=null;
-async function refreshCapacity(){
-  try{
-    const res=await fetch('/admin/internal-seo/capacity',{headers:{'Accept':'application/json'}});
-    if(!res.ok) throw new Error(`HTTP ${res.status}`);
-    const c=await res.json(); lastCapacity=c;
-    const run=c.running??0, max=c.max_parallel??1, q=c.queued??0, avail=c.available??Math.max(0,max-run);
-    const pct=Math.round(100*(run/Math.max(1,max)));
-    const bar=document.getElementById('capacityBar');
-    bar.style.width=pct+'%'; bar.textContent=pct+'%';
+// ----------- 容量ゲージ -----------
+let lastCapacity = null;
+async function refreshCapacity() {
+  try {
+    const res = await fetch('/admin/internal-seo/capacity', {headers:{'Accept':'application/json'}});
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const c = await res.json();
+    lastCapacity = c;
+    const run = c.running ?? 0;
+    const max = c.max_parallel ?? 1;
+    const q   = c.queued ?? 0;
+    const avail = c.available ?? Math.max(0, max-run);
+    const pct = Math.round(100 * (run / Math.max(1, max)));
+
+    const bar = document.getElementById('capacityBar');
+    bar.style.width = pct + '%';
+    bar.textContent = `${pct}%`;
     bar.classList.remove('bg-success','bg-warning','bg-danger','bg-secondary');
-    bar.classList.add(pct<=50?'bg-success':(pct<=80?'bg-warning':'bg-danger'));
-    document.getElementById('capacityText').textContent=`max:${max} / running:${run} / queued:${q} / available:${avail} / suggest:${c.suggest_batch_size}`;
-    document.getElementById('runBatchBtn').dataset.suggest=c.suggest_batch_size??1;
-  }catch(e){
-    const bar=document.getElementById('capacityBar');
-    bar.style.width='0%'; bar.textContent='N/A';
-    bar.classList.remove('bg-success','bg-warning','bg-danger'); bar.classList.add('bg-secondary');
-    document.getElementById('capacityText').textContent='取得失敗: '+e.message;
+    if (pct <= 50) bar.classList.add('bg-success');
+    else if (pct <= 80) bar.classList.add('bg-warning');
+    else bar.classList.add('bg-danger');
+
+    const t = document.getElementById('capacityText');
+    t.textContent = `max:${max} / running:${run} / queued:${q} / available:${avail} / suggest:${c.suggest_batch_size}`;
+
+    document.getElementById('runBatchBtn').dataset.suggest = (c.suggest_batch_size ?? 1);
+  } catch (e) {
+    const bar = document.getElementById('capacityBar');
+    bar.style.width = '0%';
+    bar.textContent = 'N/A';
+    bar.classList.remove('bg-success','bg-warning','bg-danger');
+    bar.classList.add('bg-secondary');
+    document.getElementById('capacityText').textContent = `取得失敗: ${e.message}`;
   }
 }
 setInterval(refreshCapacity, 10000);
 
-/* === 実行履歴（キーセット） === */
-let nextCursorTs=null, nextCursorId=null, loading=false, reachedEnd=false;
-async function loadRuns(initial=false){
-  if(loading||reachedEnd) return; loading=true;
-  const tbody=document.getElementById('runsBody'); const ph=document.getElementById('placeholderRow'); if(ph) ph.remove();
-  const params=new URLSearchParams({limit:(document.getElementById('perPageSelect')?.value||'50')});
-  if(!initial && nextCursorTs && nextCursorId){ params.set('cursor_ts',nextCursorTs); params.set('cursor_id',nextCursorId); }
-  try{
-    const res=await fetch(`/admin/internal-seo/list?${params.toString()}`,{headers:{'Accept':'application/json'}});
-    if(!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data=await res.json(); const rows=data.rows||[]; const frag=document.createDocumentFragment();
-    for(const r of rows){
-      const tr=document.createElement('tr');
-      tr.innerHTML=`<td>${r.id}</td><td>${r.site_id}</td><td>${statusBadge(r.status)}</td>
-        <td class="text-muted">${esc(r.job_kind||'')}</td>
-        <td>${fmtLocal(r.started_at)}</td><td>${fmtLocal(r.ended_at)}</td>
-        <td>${r.duration_ms??'-'}</td>
+// ----------- Runs（キーセット） -----------
+let nextCursorTs = null;
+let nextCursorId = null;
+let loading = false;
+let reachedEnd = false;
+
+async function loadRuns(initial=false) {
+  if (loading || reachedEnd) return;
+  loading = true;
+
+  const tbody = document.getElementById('runsBody');
+  const ph = document.getElementById('placeholderRow');
+  if (ph) ph.remove();
+
+  const params = new URLSearchParams();
+  const siteId = document.getElementById('siteSelect')?.value || '';
+  const perPage = document.getElementById('perPageSelect')?.value || '50';
+  if (siteId) params.set('site_id', siteId);
+  params.set('limit', perPage);
+  if (!initial && nextCursorTs && nextCursorId) {
+    params.set('cursor_ts', nextCursorTs);
+    params.set('cursor_id', nextCursorId);
+  }
+
+  try {
+    const res = await fetch(`/admin/internal-seo/list?${params.toString()}`, {headers: {'Accept':'application/json'}});
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const rows = data.rows || [];
+    const frag = document.createDocumentFragment();
+
+    for (const r of rows) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${r.id}</td>
+        <td>${r.site_id}</td>
+        <td>${statusBadge(r.status)}</td>
+        <td class="text-muted">${esc(r.job_kind || '')}</td>
+        <td>${fmtLocal(r.started_at)}</td>
+        <td>${fmtLocal(r.ended_at)}</td>
+        <td>${r.duration_ms ?? '-'}</td>
         <td>
           <button class="btn btn-sm btn-outline-primary" data-run-id="${r.id}" data-site-id="${r.site_id}" onclick="openStatsModal(this)">詳細</button>
           <a class="btn btn-sm btn-outline-secondary" href="/admin/internal-seo/detail?site_id=${encodeURIComponent(r.site_id)}" target="_blank">ログ一覧</a>
@@ -233,63 +366,118 @@ async function loadRuns(initial=false){
       frag.appendChild(tr);
     }
     tbody.appendChild(frag);
-    nextCursorTs=data.next_cursor_ts||null; nextCursorId=data.next_cursor_id||null; reachedEnd=!data.has_more;
+
+    nextCursorTs = data.next_cursor_ts || null;
+    nextCursorId = data.next_cursor_id || null;
+    reachedEnd = !data.has_more;
+
     document.getElementById('loadMoreBtn').classList.toggle('d-none', reachedEnd);
-  }catch(e){
-    const tr=document.createElement('tr'); tr.innerHTML=`<td colspan="8" class="text-danger">読み込み失敗: ${e.message}</td>`; tbody.appendChild(tr); reachedEnd=true;
-  }finally{ loading=false; }
+  } catch (e) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td colspan="8" class="text-danger">読み込み失敗: ${e.message}</td>`;
+    tbody.appendChild(tr);
+    reachedEnd = true;
+  } finally {
+    loading = false;
+  }
 }
 
-/* === RUN詳細モーダル === */
-async function openStatsModal(btn){
-  const runId=btn.getAttribute('data-run-id'); const siteId=btn.getAttribute('data-site-id');
-  const body=document.getElementById('statsBody'); body.innerHTML='<div class="text-muted">読み込み中…</div>';
-  try{
-    const res=await fetch(`/admin/internal-seo/run/${runId}/stats`,{headers:{'Accept':'application/json'}});
-    if(!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data=await res.json(); const s=(data&&data.stats)||{}; const seg=[];
-    const render=(t,o)=>{ if(!o) return ''; const kv=Object.entries(o).map(([k,v])=>`<tr><th class="w-25">${esc(k)}</th><td>${esc(typeof v==='object'?JSON.stringify(v):v)}</td></tr>`).join(''); return `<tr class="table-active"><th colspan="2">${t}</th></tr>${kv}`; };
-    if(s.indexer) seg.push(render('Indexer',s.indexer)); if(s.link_graph) seg.push(render('LinkGraph',s.link_graph)); if(s.planner) seg.push(render('Planner',s.planner)); if(s.applier) seg.push(render('Applier',s.applier)); if(s.params) seg.push(render('Params',s.params));
-    body.innerHTML=seg.length?`<table class="table table-sm"><tbody>${seg.join('')}</tbody></table>`:'<div class="text-muted">詳細データなし</div>';
-    document.getElementById('goDetailLink').href=`/admin/internal-seo/detail?site_id=${encodeURIComponent(siteId)}&run_id=${encodeURIComponent(runId)}`;
-  }catch(e){ body.innerHTML=`<div class="text-danger">エラー: ${e.message}</div>`; }
-  new bootstrap.Modal(document.getElementById('statsModal')).show();
+// ----------- RUN詳細モーダル -----------
+async function openStatsModal(btn) {
+  const runId = btn.getAttribute('data-run-id');
+  const siteId = btn.getAttribute('data-site-id');
+  const body = document.getElementById('statsBody');
+  body.innerHTML = '<div class="text-muted">読み込み中…</div>';
+  const url = `/admin/internal-seo/run/${runId}/stats`;
+  try {
+    const res = await fetch(url, {headers: {'Accept': 'application/json'}});
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const s = (data && data.stats) || {};
+    const rows = [];
+    if (s.indexer)   rows.push(renderRow('Indexer',   s.indexer));
+    if (s.link_graph)rows.push(renderRow('LinkGraph', s.link_graph));
+    if (s.planner)   rows.push(renderRow('Planner',   s.planner));
+    if (s.applier)   rows.push(renderRow('Applier',   s.applier));
+    if (s.params)    rows.push(renderRow('Params',    s.params));
+    body.innerHTML = rows.length
+      ? `<table class="table table-sm"><tbody>${rows.join('')}</tbody></table>`
+      : '<div class="text-muted">詳細データなし</div>';
+
+    const a = document.getElementById('goDetailLink');
+    a.href = `/admin/internal-seo/detail?site_id=${encodeURIComponent(siteId)}&run_id=${encodeURIComponent(runId)}`;
+  } catch (e) {
+    body.innerHTML = `<div class="text-danger">エラー: ${e.message}</div>`;
+  }
+  const modal = new bootstrap.Modal(document.getElementById('statsModal'));
+  modal.show();
 }
 
-/* === バッチ実行 === */
-document.getElementById('checkAllSites').addEventListener('change',e=>{ document.querySelectorAll('.site-check').forEach(cb=>cb.checked=e.target.checked); });
-async function runBatch(){
-  const ids=Array.from(document.querySelectorAll('.site-check:checked')).map(cb=>parseInt(cb.value,10)).filter(Boolean);
-  if(!ids.length){ document.getElementById('batchResult').textContent='サイトが選択されていません。'; return; }
-  const suggest=parseInt(document.getElementById('runBatchBtn').dataset.suggest||'5',10);
-  const picked=ids.slice(0,Math.max(1,suggest));
-  const payload={
-    site_ids:picked,
-    pages:parseInt(document.getElementById('batchPages')?.value||'10',10),
-    per_page:parseInt(document.getElementById('batchPerPage')?.value||'100',10),
-    min_score:parseFloat(document.getElementById('batchMinScore')?.value||'0.05'),
-    max_k:parseInt(document.getElementById('batchMaxK')?.value||'80',10),
-    limit_sources:parseInt(document.getElementById('batchLimitSources')?.value||'200',10),
-    limit_posts:parseInt(document.getElementById('batchLimitPosts')?.value||'50',10),
-    incremental:String(document.getElementById('batchIncremental').value||'true')!=='false',
+function renderRow(title, obj) {
+  const kv = Object.entries(obj || {}).map(([k,v]) => {
+    if (typeof v === 'object' && v !== null) v = JSON.stringify(v);
+    return `<tr><th class="w-25">${esc(k)}</th><td>${esc(v)}</td></tr>`;
+  }).join('');
+  return `<tr class="table-active"><th colspan="2">${esc(title)}</th></tr>${kv}`;
+}
+
+// ----------- バッチ実行 -----------
+document.getElementById('checkAllSites').addEventListener('change', (e) => {
+  document.querySelectorAll('.site-check').forEach(cb => cb.checked = e.target.checked);
+});
+
+async function runBatch() {
+  const ids = Array.from(document.querySelectorAll('.site-check:checked')).map(cb => parseInt(cb.value,10)).filter(Boolean);
+  if (!ids.length) {
+    document.getElementById('batchResult').textContent = 'サイトが選択されていません。';
+    return;
+  }
+  const suggest = parseInt(document.getElementById('runBatchBtn').dataset.suggest || '5', 10);
+  const picked = ids.slice(0, Math.max(1, suggest));
+
+  const payload = {
+    site_ids: picked,
+    pages: parseInt(document.getElementById('batchPages').value || '10',10),
+    per_page: parseInt(document.getElementById('batchPerPage').value || '100',10),
+    min_score: parseFloat(document.getElementById('batchMinScore').value || '0.05'),
+    max_k: parseInt(document.getElementById('batchMaxK').value || '80',10),
+    limit_sources: parseInt(document.getElementById('batchLimitSources').value || '200',10),
+    limit_posts: parseInt(document.getElementById('batchLimitPosts').value || '50',10),
+    incremental: String(document.getElementById('batchIncremental').value || 'true') !== 'false',
   };
-  const btn=document.getElementById('runBatchBtn'); btn.disabled=true; btn.textContent='登録中…';
-  try{
-    const res=await fetch('/admin/internal-seo/run-batch',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(payload)});
-    const data=await res.json(); if(!res.ok||!data.ok) throw new Error(data.error||`HTTP ${res.status}`);
-    document.getElementById('batchResult').textContent=`登録: ${data.enqueued} / スキップ: ${data.skipped?.length||0} / エラー: ${data.errors?.length||0}`;
-    refreshCapacity(); nextCursorTs=null; nextCursorId=null; reachedEnd=false; document.getElementById('runsBody').innerHTML=''; loadRuns(true);
-  }catch(e){ document.getElementById('batchResult').textContent='失敗: '+e.message; }
-  finally{ btn.disabled=false; btn.textContent='選択サイトを実行'; }
+
+  const btn = document.getElementById('runBatchBtn');
+  btn.disabled = true;
+  btn.textContent = '登録中…';
+  try {
+    const res = await fetch('/admin/internal-seo/run-batch', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','Accept':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    document.getElementById('batchResult').textContent =
+      `登録: ${data.enqueued} 件 / スキップ: ${data.skipped?.length||0} / エラー: ${data.errors?.length||0}`;
+    refreshCapacity();
+    nextCursorTs = null; nextCursorId = null; reachedEnd = false;
+    document.getElementById('runsBody').innerHTML = '';
+    loadRuns(true);
+  } catch (e) {
+    document.getElementById('batchResult').textContent = '失敗: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '選択サイトを実行';
+  }
 }
 
-/* === 初期化（描画→即時、重い処理は遅延） === */
-document.addEventListener('DOMContentLoaded',()=>{
+// ----------- 初期化 -----------
+document.addEventListener('DOMContentLoaded', () => {
   refreshCapacity();
-  document.getElementById('capacityRefresh').addEventListener('click',refreshCapacity);
+  document.getElementById('capacityRefresh').addEventListener('click', refreshCapacity);
   loadRuns(true);
-  document.getElementById('loadMoreBtn').addEventListener('click',()=>loadRuns(false));
-  document.getElementById('runBatchBtn').addEventListener('click',e=>{e.preventDefault(); runBatch();});
+  document.getElementById('loadMoreBtn').addEventListener('click', () => loadRuns(false));
+  document.getElementById('runBatchBtn').addEventListener('click', (e) => { e.preventDefault(); runBatch(); });
 });
 </script>
 {% endblock %}
