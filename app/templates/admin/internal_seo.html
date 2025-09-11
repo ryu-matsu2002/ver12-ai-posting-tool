@@ -9,32 +9,30 @@
 
   <!-- 見出し -->
   <div class="d-flex align-items-center mb-3">
-    <h2 class="h4 mb-0">🔧 内部SEO 管理</h2>
-    <div class="ms-auto d-flex align-items-center gap-2">
-      <button id="capacityRefresh" class="btn btn-sm btn-outline-primary">再計測</button>
-    </div>
+    <h2 class="h5 mb-0">🔧 内部SEO 管理</h2>
+    <button id="capacityRefresh" class="btn btn-sm btn-outline-primary ms-auto">再計測</button>
   </div>
 
-  <!-- タブ風フィルタ（見た目重視） -->
-  <div class="mb-3 d-flex flex-wrap align-items-center gap-2">
-    <span class="px-3 py-2 rounded border bg-primary text-white small">📂 すべて</span>
-    <span class="px-3 py-2 rounded border bg-white text-secondary small">ガイド: 下の検索でサイトを絞り込み、右のチェックで選択 → 「選択サイトを実行」</span>
+  <!-- ガイド（GSC風の帯） -->
+  <div class="alert alert-light border d-flex align-items-center py-2 small mb-3" role="alert">
+    <span class="me-2">📘</span>
+    <div>ガイド: 下の<strong>サイト検索</strong>でカードを絞り込み、チェックで選択 → 右上の<strong>選択サイトを実行</strong></div>
   </div>
 
-  <!-- 検索行（サイト一覧用・GSC風） -->
-  <div class="mb-4 d-flex flex-wrap align-items-end gap-3">
+  <!-- 検索＆履歴フィルタ（GSC風サイズ/色） -->
+  <div class="d-flex flex-wrap align-items-end gap-3 mb-4">
     <div>
       <label class="form-label mb-1 small">🔎 サイト検索</label>
       <div class="d-flex gap-2">
-        <input id="siteSearchInput" type="text" class="form-control form-control-sm" placeholder="サイト名 または ID（部分一致可）" style="width: 320px;">
+        <input id="siteSearchInput" type="text" class="form-control form-control-sm" placeholder="サイト名 または ID（部分一致）" style="width: 320px;">
         <button id="siteSearchBtn" class="btn btn-sm btn-primary">検索</button>
       </div>
-      <div class="form-text">検索結果は下のカード一覧に表示されます</div>
+      <div class="form-text">検索は下のカード一覧に即時反映されます</div>
     </div>
 
     <div>
-      <label class="form-label mb-1 small">📌 履歴を対象サイトIDで絞り込む</label>
-      <input type="number" id="siteIdInput" class="form-control form-control-sm" placeholder="例: 12" value="{{ selected_site_id or '' }}" style="width: 160px;">
+      <label class="form-label mb-1 small">📌 履歴の絞り込み Site ID</label>
+      <input type="number" id="siteIdInput" class="form-control form-control-sm" placeholder="例: 12" value="{{ selected_site_id or '' }}" style="width: 140px;">
     </div>
 
     <div>
@@ -72,9 +70,7 @@
       <div class="d-flex flex-wrap align-items-center mb-3">
         <h6 class="mb-2 mb-md-0 me-2">✅ 選択サイトをまとめて実行</h6>
         <div class="text-muted small">（提案バッチサイズは容量ゲージを反映）</div>
-        <div class="ms-auto">
-          <button id="runBatchBtn" class="btn btn-success btn-sm">選択サイトを実行</button>
-        </div>
+        <button id="runBatchBtn" class="btn btn-success btn-sm ms-auto">選択サイトを実行</button>
       </div>
 
       <!-- パラメータ -->
@@ -118,17 +114,39 @@
           <input type="checkbox" class="form-check-input" id="checkAllSites">
           <label for="checkAllSites" class="form-check-label small">すべて選択／解除</label>
         </div>
-        <div class="small text-muted ms-auto">カードをクリックして選択／解除もできます</div>
+        <div class="small text-muted ms-auto">カードをクリックしても選択/解除できます</div>
       </div>
 
-      <!-- サイト一覧（カード｜GSC風） -->
+      <!-- サイト一覧（サーバ側レンダリング：高速） -->
       <div id="sitesBody" class="d-grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));">
-        <!-- JSで挿入 -->
-      </div>
-
-      <!-- もっと見る -->
-      <div class="d-flex mt-2">
-        <button id="loadMoreSitesBtn" class="btn btn-sm btn-outline-secondary ms-auto d-none" type="button">もっと見る</button>
+        {% for s in sites %}
+          <div class="p-3 bg-white rounded border shadow-sm d-flex justify-content-between align-items-start site-card"
+               data-id="{{ s.id }}" data-name="{{ (s.name or '')|lower }}">
+            <div class="me-3">
+              <div class="d-flex align-items-center gap-2 mb-1">
+                <input class="form-check-input site-check" type="checkbox" value="{{ s.id }}" id="site-{{ s.id }}">
+                <label class="form-check-label fw-semibold" for="site-{{ s.id }}" style="cursor:pointer;">
+                  {{ s.name }}
+                </label>
+              </div>
+              <div class="text-muted small">ID: <span class="fw-semibold">{{ s.id }}</span></div>
+            </div>
+            <div class="text-end">
+              <form method="post" action="{{ url_for('admin.admin_internal_seo_run') }}" class="d-inline">
+                {{ csrf_token() if csrf_token is defined }}
+                <input type="hidden" name="site_id" value="{{ s.id }}">
+                <input type="hidden" name="pages" value="{{ request.args.get('pages', 10) }}">
+                <input type="hidden" name="per_page" value="{{ request.args.get('per_page', 100) }}">
+                <input type="hidden" name="min_score" value="{{ request.args.get('min_score', 0.05) }}">
+                <input type="hidden" name="max_k" value="{{ request.args.get('max_k', 80) }}">
+                <input type="hidden" name="limit_sources" value="{{ request.args.get('limit_sources', 200) }}">
+                <input type="hidden" name="limit_posts" value="{{ request.args.get('limit_posts', 50) }}">
+                <input type="hidden" name="incremental" value="true">
+                <button class="btn btn-outline-primary btn-sm" type="submit">▶ このサイトだけ実行</button>
+              </form>
+            </div>
+          </div>
+        {% endfor %}
       </div>
 
       <div id="batchResult" class="small text-muted mt-2"></div>
@@ -193,7 +211,16 @@
 {% block scripts %}
 {{ super() }}
 <script>
-// ========= 共通ユーティリティ =========
+// ========== 小さな見た目調整 ==========
+document.head.insertAdjacentHTML('beforeend', `
+  <style>
+    .site-card { transition: box-shadow .15s, border-color .15s; }
+    .site-card:hover { border-color: #c7d2fe; box-shadow: 0 4px 14px rgba(59,130,246,.12); }
+    .badge.bg-light { border: 1px solid #e5e7eb; }
+  </style>
+`);
+
+// ========== ユーティリティ ==========
 function fmtLocal(iso) {
   if (!iso) return '-';
   try {
@@ -212,11 +239,8 @@ function statusBadge(st) {
   if (st === 'error')   return '<span class="badge bg-danger">error</span>';
   return `<span class="badge bg-secondary">${esc(st || '-')}</span>`;
 }
-function getCsrfToken() {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
-}
 
-// ========= 容量ゲージ =========
+// ========== 容量ゲージ ==========
 async function refreshCapacity() {
   try {
     const res = await fetch('/admin/internal-seo/capacity', {headers:{'Accept':'application/json'}});
@@ -231,13 +255,13 @@ async function refreshCapacity() {
     const bar = document.getElementById('capacityBar');
     bar.style.width = pct + '%';
     bar.textContent = `${pct}%`;
-    bar.className = 'progress-bar'; // reset
+    bar.className = 'progress-bar';
     if (pct <= 50) bar.classList.add('bg-success');
     else if (pct <= 80) bar.classList.add('bg-warning');
     else bar.classList.add('bg-danger');
 
-    const t = document.getElementById('capacityText');
-    t.textContent = `max:${max} / running:${run} / queued:${q} / available:${avail} / suggest:${c.suggest_batch_size}`;
+    document.getElementById('capacityText').textContent =
+      `max:${max} / running:${run} / queued:${q} / available:${avail} / suggest:${c.suggest_batch_size}`;
 
     document.getElementById('runBatchBtn').dataset.suggest = (c.suggest_batch_size ?? 1);
   } catch (e) {
@@ -250,7 +274,94 @@ async function refreshCapacity() {
 }
 setInterval(refreshCapacity, 15000);
 
-// ========= 実行履歴 =========
+// ========== サイト検索（クライアント側フィルタ） ==========
+function applySiteFilter() {
+  const q = (document.getElementById('siteSearchInput').value || '').toLowerCase().trim();
+  const cards = document.querySelectorAll('#sitesBody .site-card');
+  let shown = 0;
+  cards.forEach(card => {
+    const name = (card.dataset.name || '').toLowerCase();
+    const idStr = String(card.dataset.id || '');
+    const ok = !q || name.includes(q) || idStr.includes(q);
+    card.style.display = ok ? '' : 'none';
+    if (ok) shown++;
+  });
+  // 全選択チェックは「表示中のカード」に対して作用
+  document.getElementById('checkAllSites').checked = false;
+  document.getElementById('batchResult').textContent = shown ? '' : '該当するサイトがありません。';
+}
+
+// カードクリックでチェック切替（ボタン・入力は除外）
+document.querySelectorAll('#sitesBody .site-card').forEach(card => {
+  card.addEventListener('click', (ev) => {
+    const t = ev.target;
+    if (t.closest('form') || t.tagName === 'BUTTON' || t.tagName === 'A' || t.tagName === 'INPUT' || t.tagName === 'LABEL') return;
+    const cb = card.querySelector('.site-check');
+    cb.checked = !cb.checked;
+  });
+});
+
+// 全選択／解除（表示中のみ対象）
+document.getElementById('checkAllSites').addEventListener('change', (e) => {
+  const checked = e.target.checked;
+  document.querySelectorAll('#sitesBody .site-card').forEach(card => {
+    if (card.style.display === 'none') return;
+    const cb = card.querySelector('.site-check');
+    cb.checked = checked;
+  });
+});
+
+// ========== バッチ実行 ==========
+async function runBatch() {
+  const ids = Array.from(document.querySelectorAll('#sitesBody .site-card'))
+    .filter(card => card.style.display !== 'none')
+    .map(card => card.querySelector('.site-check'))
+    .filter(cb => cb && cb.checked)
+    .map(cb => parseInt(cb.value,10))
+    .filter(Boolean);
+
+  if (!ids.length) {
+    document.getElementById('batchResult').textContent = 'サイトが選択されていません。';
+    return;
+  }
+
+  const suggest = parseInt(document.getElementById('runBatchBtn').dataset.suggest || '5', 10);
+  const picked = ids.slice(0, Math.max(1, suggest));
+
+  const payload = {
+    site_ids: picked,
+    pages: parseInt(document.getElementById('batchPages').value || '10',10),
+    per_page: parseInt(document.getElementById('batchPerPage').value || '100',10),
+    min_score: parseFloat(document.getElementById('batchMinScore').value || '0.05'),
+    max_k: parseInt(document.getElementById('batchMaxK').value || '80',10),
+    limit_sources: parseInt(document.getElementById('batchLimitSources').value || '200',10),
+    limit_posts: parseInt(document.getElementById('batchLimitPosts').value || '50',10),
+    incremental: String(document.getElementById('batchIncremental').value || 'true') !== 'false',
+  };
+
+  const btn = document.getElementById('runBatchBtn');
+  btn.disabled = true;
+  btn.textContent = '登録中…';
+  try {
+    const res = await fetch('/admin/internal-seo/run-batch', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','Accept':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    document.getElementById('batchResult').textContent =
+      `登録: ${data.enqueued} 件 / スキップ: ${data.skipped?.length||0} / エラー: ${data.errors?.length||0}`;
+    refreshCapacity();
+  } catch (e) {
+    document.getElementById('batchResult').textContent = '失敗: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '選択サイトを実行';
+  }
+}
+
+// ========== 実行履歴（AJAX） ==========
 let nextCursorTs = null;
 let nextCursorId = null;
 let runsLoading = false;
@@ -313,7 +424,7 @@ async function loadRuns(initial=false) {
   }
 }
 
-// ========= RUN詳細モーダル =========
+// 実行詳細モーダル
 async function openStatsModal(btn) {
   const runId = btn.getAttribute('data-run-id');
   const siteId = btn.getAttribute('data-site-id');
@@ -332,7 +443,6 @@ async function openStatsModal(btn) {
     if (s.params)    rows.push(renderRow('Params',    s.params));
     body.innerHTML = rows.length ? `<table class="table table-sm"><tbody>${rows.join('')}</tbody></table>`
                                  : '<div class="text-muted">詳細データなし</div>';
-
     document.getElementById('goDetailLink').href =
       `/admin/internal-seo/detail?site_id=${encodeURIComponent(siteId)}&run_id=${encodeURIComponent(runId)}`;
   } catch (e) {
@@ -348,159 +458,16 @@ function renderRow(title, obj) {
   return `<tr class="table-active"><th colspan="2">${esc(title)}</th></tr>${kv}`;
 }
 
-// ========= サイト一覧 =========
-let sitesQuery = '';
-let sitesCursorId = null;
-let sitesLoading = false;
-let sitesHasMore = true;
-
-function siteCardHTML(s) {
-  const csrf = getCsrfToken();
-  // チェックボックスに加えて、カード全体クリックでもトグル
-  return `
-    <div class="p-3 bg-white rounded border shadow-sm d-flex justify-content-between align-items-start site-card" data-id="${s.id}">
-      <div class="me-3">
-        <div class="d-flex align-items-center gap-2 mb-1">
-          <input class="form-check-input site-check" type="checkbox" value="${s.id}" id="site-${s.id}">
-          <label class="form-check-label fw-semibold" for="site-${s.id}" style="cursor:pointer;">
-            ${esc(s.name)}
-          </label>
-        </div>
-        <div class="text-muted small">ID: <span class="fw-semibold">${s.id}</span></div>
-      </div>
-      <div class="text-end">
-        <form method="post" action="/admin/internal-seo/run" class="d-inline">
-          <input type="hidden" name="csrf_token" value="${esc(csrf)}">
-          <input type="hidden" name="site_id" value="${s.id}">
-          <input type="hidden" name="pages" value="${document.getElementById('batchPages').value || 10}">
-          <input type="hidden" name="per_page" value="${document.getElementById('batchPerPage').value || 100}">
-          <input type="hidden" name="min_score" value="${document.getElementById('batchMinScore').value || 0.05}">
-          <input type="hidden" name="max_k" value="${document.getElementById('batchMaxK').value || 80}">
-          <input type="hidden" name="limit_sources" value="${document.getElementById('batchLimitSources').value || 200}">
-          <input type="hidden" name="limit_posts" value="${document.getElementById('batchLimitPosts').value || 50}">
-          <input type="hidden" name="incremental" value="${document.getElementById('batchIncremental').value || 'true'}">
-          <button class="btn btn-outline-primary btn-sm" type="submit">▶ このサイトだけ実行</button>
-        </form>
-      </div>
-    </div>`;
-}
-
-async function fetchSites(reset=false) {
-  if (sitesLoading) return;
-  if (reset) {
-    sitesCursorId = null;
-    sitesHasMore = true;
-    document.getElementById('sitesBody').innerHTML = '';
-  }
-  if (!sitesHasMore) return;
-
-  sitesLoading = true;
-  const params = new URLSearchParams();
-  if (sitesQuery) params.set('q', sitesQuery);
-  params.set('limit', '30');
-  if (sitesCursorId) params.set('cursor_id', String(sitesCursorId));
-
-  try {
-    const res = await fetch(`/admin/internal-seo/sites?${params.toString()}`, {headers:{'Accept':'application/json'}});
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    const list = data.rows || [];
-    const frag = document.createDocumentFragment();
-    const tmp = document.createElement('div');
-
-    for (const s of list) {
-      tmp.innerHTML = siteCardHTML(s);
-      const el = tmp.firstElementChild;
-      // カード全体クリックでチェック切替
-      el.addEventListener('click', (ev) => {
-        // ボタンやa, inputクリックは除外
-        const tag = ev.target.tagName.toLowerCase();
-        if (tag === 'button' || tag === 'a' || tag === 'input' || ev.target.closest('form')) return;
-        const cb = el.querySelector('.site-check');
-        cb.checked = !cb.checked;
-      });
-      frag.appendChild(el);
-    }
-    document.getElementById('sitesBody').appendChild(frag);
-
-    sitesCursorId = data.next_cursor_id || null;
-    sitesHasMore = !!data.has_more;
-    document.getElementById('loadMoreSitesBtn').classList.toggle('d-none', !sitesHasMore);
-  } catch (e) {
-    document.getElementById('batchResult').textContent = 'サイト取得失敗: ' + e.message;
-    sitesHasMore = false;
-  } finally {
-    sitesLoading = false;
-  }
-}
-
-// 全選択
-document.addEventListener('change', (e) => {
-  if (e.target && e.target.id === 'checkAllSites') {
-    document.querySelectorAll('.site-check').forEach(cb => cb.checked = e.target.checked);
-  }
-});
-
-// ========= バッチ実行 =========
-async function runBatch() {
-  const ids = Array.from(document.querySelectorAll('.site-check:checked'))
-    .map(cb => parseInt(cb.value,10))
-    .filter(Boolean);
-  if (!ids.length) {
-    document.getElementById('batchResult').textContent = 'サイトが選択されていません。';
-    return;
-  }
-  const suggest = parseInt(document.getElementById('runBatchBtn').dataset.suggest || '5', 10);
-  const picked = ids.slice(0, Math.max(1, suggest));
-
-  const payload = {
-    site_ids: picked,
-    pages: parseInt(document.getElementById('batchPages').value || '10',10),
-    per_page: parseInt(document.getElementById('batchPerPage').value || '100',10),
-    min_score: parseFloat(document.getElementById('batchMinScore').value || '0.05'),
-    max_k: parseInt(document.getElementById('batchMaxK').value || '80',10),
-    limit_sources: parseInt(document.getElementById('batchLimitSources').value || '200',10),
-    limit_posts: parseInt(document.getElementById('batchLimitPosts').value || '50',10),
-    incremental: String(document.getElementById('batchIncremental').value || 'true') !== 'false',
-  };
-
-  const btn = document.getElementById('runBatchBtn');
-  btn.disabled = true;
-  btn.textContent = '登録中…';
-  try {
-    const res = await fetch('/admin/internal-seo/run-batch', {
-      method:'POST',
-      headers:{'Content-Type':'application/json','Accept':'application/json'},
-      body: JSON.stringify(payload)
-    });
-    const data = await res.json();
-    if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
-    document.getElementById('batchResult').textContent =
-      `登録: ${data.enqueued} 件 / スキップ: ${data.skipped?.length||0} / エラー: ${data.errors?.length||0}`;
-    refreshCapacity();
-  } catch (e) {
-    document.getElementById('batchResult').textContent = '失敗: ' + e.message;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '選択サイトを実行';
-  }
-}
-
-// ========= 初期化 =========
+// ========== 初期化 ==========
 document.addEventListener('DOMContentLoaded', () => {
-  // 容量
   refreshCapacity();
   document.getElementById('capacityRefresh').addEventListener('click', refreshCapacity);
 
-  // サイト一覧
-  fetchSites(true);
-  document.getElementById('loadMoreSitesBtn').addEventListener('click', () => fetchSites(false));
-  document.getElementById('siteSearchBtn').addEventListener('click', () => {
-    sitesQuery = document.getElementById('siteSearchInput').value.trim();
-    fetchSites(true);
-  });
+  // 検索
+  document.getElementById('siteSearchBtn').addEventListener('click', applySiteFilter);
+  document.getElementById('siteSearchInput').addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); applySiteFilter(); } });
 
-  // 履歴
+  // 履歴初回
   loadRuns(true);
   document.getElementById('loadMoreBtn').addEventListener('click', () => loadRuns(false));
   document.getElementById('applyFilterBtn').addEventListener('click', () => {
@@ -517,6 +484,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // バッチ
   document.getElementById('runBatchBtn').addEventListener('click', (e) => { e.preventDefault(); runBatch(); });
+
+  // 初回フィルタ適用（空クエリ=全表示）
+  applySiteFilter();
 });
 </script>
 {% endblock %}
