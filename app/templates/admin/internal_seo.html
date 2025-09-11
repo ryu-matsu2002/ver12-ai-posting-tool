@@ -4,43 +4,35 @@
 {% block content %}
 <div class="container-fluid py-4 internal-seo">
 
-  <!-- CSRF（バッチ/単発で使用） -->
+  <!-- CSRF（POSTで使用） -->
   <meta name="csrf-token" content="{{ csrf_token() if csrf_token is defined }}">
 
-  <!-- GSC 風の軽量スタイル -->
+  <!-- 軽量スタイル（GSC風） -->
   <style>
     .internal-seo .guide {
-      background: #f7fbff;
-      border: 1px solid #e3f0ff;
-      border-left: 4px solid #0d6efd;
-      border-radius: .5rem;
-      padding: .75rem .9rem;
-      color:#0b3d91;
-      font-size: .95rem;
+      background:#f7fbff;border:1px solid #e3f0ff;border-left:4px solid #0d6efd;border-radius:.5rem;
+      padding:.75rem .9rem;color:#0b3d91;font-size:.95rem
     }
-    .internal-seo .gsc-card {
-      border: 1px solid #e8eef5;
-      background: #fff;
-      border-radius: .75rem;
-      box-shadow: 0 2px 8px rgba(16,24,40,.06);
-      transition: box-shadow .15s ease, transform .12s ease;
+    .internal-seo .gsc-card{
+      border:1px solid #e8eef5;background:#fff;border-radius:.75rem;
+      box-shadow:0 2px 8px rgba(16,24,40,.06);transition:box-shadow .15s ease, transform .12s ease
     }
-    .internal-seo .gsc-card:hover { box-shadow: 0 8px 20px rgba(13,110,253,.12); transform: translateY(-1px); }
-    .internal-seo .section-title { font-weight: 600; color:#0d6efd; }
-    .internal-seo .mini-label { font-size: .8rem; color:#6c757d; }
-    .internal-seo .pill { display:inline-block; padding:.2rem .5rem; border-radius:999px; font-size:.75rem; }
-    .internal-seo .pill-blue { background:#e7f1ff; color:#0d6efd; }
-    .internal-seo .pill-green{ background:#eaf7ea; color:#198754; }
-    .internal-seo .btn-ghost { border:1px solid #dee2e6; background:#fff; }
-    .internal-seo .kbd { background:#f1f3f5; border:1px solid #dee2e6; border-bottom-width:2px; padding:.05rem .35rem; border-radius:.35rem; font-size:.75rem;}
-    .internal-seo .site-url { color:#0d6efd; word-break: break-all; }
-    .internal-seo .owner-header:hover{ background:#f8fbff; cursor:pointer;}
+    .internal-seo .gsc-card:hover{ box-shadow:0 8px 20px rgba(13,110,253,.12); transform:translateY(-1px) }
+    .internal-seo .section-title{ font-weight:600; color:#0d6efd }
+    .internal-seo .mini-label{ font-size:.8rem; color:#6c757d }
+    .internal-seo .btn-ghost{ border:1px solid #dee2e6; background:#fff }
+    .internal-seo .pill{ display:inline-block; padding:.2rem .5rem; border-radius:999px; font-size:.75rem }
+    .internal-seo .pill-blue{ background:#e7f1ff; color:#0d6efd }
+    .internal-seo .pill-green{ background:#eaf7ea; color:#198754 }
+    .internal-seo .owner-header .badge{ font-weight:600 }
+    .internal-seo .progress.small{ height:10px }
   </style>
 
   <!-- 見出し -->
   <div class="d-flex align-items-center mb-3">
     <h2 class="h4 mb-0">🔧 内部SEO 管理</h2>
     <div class="ms-auto d-flex align-items-center gap-2">
+      <input id="globalSiteSearch" type="text" class="form-control form-control-sm" placeholder="全体検索（名前 or ID）" style="width:240px">
       <button id="capacityRefresh" class="btn btn-sm btn-ghost">再計測</button>
     </div>
   </div>
@@ -48,27 +40,27 @@
   <!-- ガイド -->
   <div class="guide mb-3">
     <strong class="me-2">ガイド</strong>
-    <span>ユーザーごとのセクションを開く → サイトカードの「内部SEO開始」を押すだけ。</span>
-    <span class="ms-2">詳細パラメータは<strong>高度な設定</strong>を開くと編集できます。</span>
+    左側のユーザー（オーナー）セクションを開く → 表示された<strong>サイトカードの「内部SEO開始」</strong>を押すだけ。
+    詳細パラメータは下の<strong>高度な設定</strong>を開くと編集できます。
   </div>
 
-  <!-- 容量ゲージ -->
+  <!-- 現在の処理余力 -->
   <div class="card border-0 shadow-sm mb-4">
     <div class="card-body">
       <div class="d-flex align-items-center mb-2">
         <div class="section-title mb-0">⚡ 現在の処理余力</div>
         <span id="capacityText" class="pill pill-blue ms-2">計測中…</span>
       </div>
-      <div class="progress" style="height: 14px;">
+      <div class="progress" style="height:14px">
         <div id="capacityBar" class="progress-bar bg-secondary" role="progressbar" style="width:0%">0%</div>
       </div>
     </div>
   </div>
 
-  <!-- 高度な設定（デフォルト非表示） -->
-  <details class="mb-4">
-    <summary class="section-title" style="cursor:pointer;">⚙️ 高度な設定（開くと編集できます）</summary>
-    <div class="card border-0 shadow-sm mt-3">
+  <!-- 高度な設定（まとめ実行パラメータ） -->
+  <details class="mb-3">
+    <summary class="mb-2 section-title" style="cursor:pointer">🔧 高度な設定（開くと編集できます）</summary>
+    <div class="card border-0 shadow-sm">
       <div class="card-body">
         <div class="row g-2 align-items-end">
           <div class="col-6 col-md-2"><div class="mini-label">pages</div>
@@ -96,52 +88,41 @@
             </select>
           </div>
         </div>
-
-        <hr class="my-3">
-
-        <div class="d-flex align-items-center gap-2">
-          <button id="runBatchBtn" class="btn btn-success btn-sm">✅ チェックしたサイトをまとめて実行</button>
-          <span class="mini-label">（推奨バッチサイズは余力メーターを自動反映）</span>
-          <div id="batchResult" class="mini-label ms-auto"></div>
+        <div class="d-flex align-items-center gap-2 mt-3">
+          <div class="form-check">
+            <input type="checkbox" class="form-check-input" id="checkAllVisible">
+            <label for="checkAllVisible" class="form-check-label mini-label">表示中のカードを全選択</label>
+          </div>
+          <button id="runBatchBtn" class="btn btn-success btn-sm ms-auto">選択サイトを実行</button>
         </div>
+        <div id="batchResult" class="mini-label mt-2"></div>
       </div>
     </div>
   </details>
 
-  <!-- 検索 -->
-  <div class="card border-0 shadow-sm mb-3">
-    <div class="card-body d-flex flex-wrap align-items-end gap-3">
-      <div>
-        <div class="mini-label">サイト検索（名前 / URL / ID 部分一致）</div>
-        <input type="text" id="globalSearch" class="form-control form-control-sm" placeholder="例: pilates / https:// / 12" style="width: 260px;">
-      </div>
-      <button id="globalSearchBtn" class="btn btn-sm btn-ghost">検索</button>
-      <div class="ms-auto form-check">
-        <input type="checkbox" class="form-check-input" id="checkAllSites">
-        <label for="checkAllSites" class="form-check-label mini-label">ページ内のサイトをすべて選択／解除</label>
-      </div>
-    </div>
-  </div>
-
-  <!-- ユーザーごとのアコーディオン -->
+  <!-- ユーザー（オーナー）ごとのサイト一覧（アコーディオン） -->
   <div class="accordion" id="ownersAccordion">
-    <!-- JS で owner セクションを差し込み -->
+    <!-- JSで挿入 -->
   </div>
 
-  <!-- 実行履歴（シンプル） -->
+  <!-- 実行履歴 -->
   <div class="card border-0 shadow-sm mt-4">
     <div class="card-body">
       <div class="d-flex align-items-center mb-2">
         <div class="section-title">📜 実行履歴</div>
-        <div class="ms-3 mini-label">Site IDで絞り込み</div>
-        <input type="number" id="siteIdInput" class="form-control form-control-sm ms-2" placeholder="例: 12" style="width:120px;">
-        {% set pp = per_page or 50 %}
-        <select id="perPageSelect" class="form-select form-select-sm ms-2" style="width:120px;">
-          {% for n in [25,50,100,200] %}
-            <option value="{{ n }}" {% if pp==n %}selected{% endif %}>{{ n }}</option>
-          {% endfor %}
-        </select>
-        <a class="btn btn-sm btn-ghost ms-auto" href="/admin/internal-seo/detail" target="_blank">詳細ログページを開く</a>
+        <div class="ms-auto d-flex align-items-center gap-2">
+          <div class="mini-label">Site ID</div>
+          <input id="siteIdInput" type="number" class="form-control form-control-sm" style="width:120px" value="{{ selected_site_id or '' }}">
+          <div class="mini-label">件数</div>
+          {% set pp = per_page or 50 %}
+          <select id="perPageSelect" class="form-select form-select-sm" style="width:100px">
+            {% for n in [25,50,100,200] %}
+              <option value="{{ n }}" {% if pp==n %}selected{% endif %}>{{ n }}</option>
+            {% endfor %}
+          </select>
+          <button id="applyFilterBtn" class="btn btn-sm btn-primary">適用</button>
+          <button id="clearFilterBtn" class="btn btn-sm btn-ghost">クリア</button>
+        </div>
       </div>
       <div class="table-responsive">
         <table class="table table-sm align-middle mb-0">
@@ -169,7 +150,7 @@
   </div>
 </div>
 
-<!-- 詳細モーダル -->
+<!-- 実行詳細モーダル -->
 <div class="modal fade" id="statsModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content">
@@ -192,19 +173,18 @@
 {% block scripts %}
 {{ super() }}
 <script>
-// ====== Utils ======
+// ===== Utils =====
 function fmtLocal(iso){ if(!iso) return '-'; try{const d=new Date(iso);const p=x=>String(x).padStart(2,'0');return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`}catch(e){return iso}}
 function esc(v){ if(v===null||v===undefined) return ''; return String(v).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }
 function statusBadge(st){ if(st==='success') return '<span class="badge bg-success">success</span>'; if(st==='running') return '<span class="badge bg-info text-dark">running</span>'; if(st==='error') return '<span class="badge bg-danger">error</span>'; return `<span class="badge bg-secondary">${esc(st||'-')}</span>` }
 function getCsrfToken(){ return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '' }
 
-// ====== Capacity ======
-let lastCapacity=null;
+// ===== Capacity =====
 async function refreshCapacity(){
   try{
     const res=await fetch('/admin/internal-seo/capacity',{headers:{'Accept':'application/json'}});
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
-    const c=await res.json(); lastCapacity=c;
+    const c=await res.json();
     const run=c.running??0, max=c.max_parallel??1, q=c.queued??0, avail=c.available??Math.max(0,max-run);
     const pct=Math.round(100*(run/Math.max(1,max)));
     const bar=document.getElementById('capacityBar');
@@ -222,19 +202,21 @@ async function refreshCapacity(){
 }
 setInterval(refreshCapacity, 15000);
 
-// ====== Runs (history) ======
+// ===== History =====
 let nextCursorTs=null, nextCursorId=null, runsLoading=false, runsReachedEnd=false;
 async function loadRuns(initial=false){
   if(runsLoading||runsReachedEnd) return; runsLoading=true;
   const tbody=document.getElementById('runsBody'); const ph=document.getElementById('placeholderRow'); if(ph) ph.remove();
-  const params=new URLSearchParams(); const siteId=document.getElementById('siteIdInput')?.value||''; const perPage=document.getElementById('perPageSelect')?.value||'50';
+  const params=new URLSearchParams();
+  const siteId=document.getElementById('siteIdInput')?.value||'';
+  const perPage=document.getElementById('perPageSelect')?.value||'50';
   if(siteId) params.set('site_id', siteId); params.set('limit', perPage);
   if(!initial && nextCursorTs && nextCursorId){ params.set('cursor_ts', nextCursorTs); params.set('cursor_id', nextCursorId); }
   try{
     const res=await fetch(`/admin/internal-seo/list?${params.toString()}`,{headers:{'Accept':'application/json'}});
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const data=await res.json(); const rows=data.rows||[]; const frag=document.createDocumentFragment();
-    for(const r of rows){
+    rows.forEach(r=>{
       const tr=document.createElement('tr');
       tr.innerHTML=`
         <td>${r.id}</td>
@@ -249,7 +231,7 @@ async function loadRuns(initial=false){
           <a class="btn btn-sm btn-ghost" href="/admin/internal-seo/detail?site_id=${encodeURIComponent(r.site_id)}" target="_blank">ログ一覧</a>
         </td>`;
       frag.appendChild(tr);
-    }
+    });
     tbody.appendChild(frag);
     nextCursorTs=data.next_cursor_ts||null; nextCursorId=data.next_cursor_id||null; runsReachedEnd=!data.has_more;
     document.getElementById('loadMoreBtn').classList.toggle('d-none', runsReachedEnd);
@@ -258,7 +240,7 @@ async function loadRuns(initial=false){
   }finally{ runsLoading=false; }
 }
 
-// ====== Stats modal ======
+// ===== Stats modal =====
 async function openStatsModal(btn){
   const runId=btn.getAttribute('data-run-id'); const siteId=btn.getAttribute('data-site-id');
   const body=document.getElementById('statsBody'); body.innerHTML='<div class="text-muted">読み込み中…</div>';
@@ -278,87 +260,95 @@ async function openStatsModal(btn){
   new bootstrap.Modal(document.getElementById('statsModal')).show();
 }
 
-// ====== Owners (accordion) & Sites (cards) ======
-const ownerStates = {}; // ownerId -> {q:'', cursorId:null, loading:false, hasMore:true}
+// ===== Owners & Sites =====
+let ownerStates = {};            // key: owner id ('all'含む) -> {q, cursorId, loading, hasMore}
+window.__global_q = '';
+
 function siteCardHTML(s){
+  const m = s.metrics || {};
+  const applied = m.applied || 0, pending = m.pending || 0, skipped = m.skipped || 0;
+  const running = !!m.running;
+  const totalActions = applied + pending + skipped;
+  const pct = totalActions ? Math.round(100 * applied / totalActions) : 0;
   const csrf=getCsrfToken();
-  const pct = Number.isFinite(s.progress_pct) ? s.progress_pct : 0;
-  const runningBadge = s.running ? `<span class="badge bg-info text-dark ms-2">実行中</span>` : '';
-  const urlLine = s.url ? `<div class="site-url small">${esc(s.url)}</div>` : '';
+
   return `
-    <div class="gsc-card p-3">
-      <div class="d-flex justify-content-between align-items-start">
-        <div class="me-3">
-          <div class="fw-semibold">${esc(s.name)} ${runningBadge}</div>
-          ${urlLine}
-          <div class="mini-label mt-1">Site ID: <span class="fw-semibold">${s.id}</span></div>
-        </div>
-        <div class="text-end">
-          <form method="post" action="/admin/internal-seo/run" class="d-inline">
-            <input type="hidden" name="csrf_token" value="${esc(csrf)}">
-            <input type="hidden" name="site_id" value="${s.id}">
-            <input type="hidden" name="pages" value="${document.getElementById('batchPages')?.value || 10}">
-            <input type="hidden" name="per_page" value="${document.getElementById('batchPerPage')?.value || 100}">
-            <input type="hidden" name="min_score" value="${document.getElementById('batchMinScore')?.value || 0.05}">
-            <input type="hidden" name="max_k" value="${document.getElementById('batchMaxK')?.value || 80}">
-            <input type="hidden" name="limit_sources" value="${document.getElementById('batchLimitSources')?.value || 200}">
-            <input type="hidden" name="limit_posts" value="${document.getElementById('batchLimitPosts')?.value || 50}">
-            <input type="hidden" name="incremental" value="${document.getElementById('batchIncremental')?.value || 'true'}">
-            <button class="btn btn-sm btn-primary" type="submit">内部SEO開始</button>
-          </form>
-          <a class="btn btn-sm btn-ghost ms-1" href="/admin/internal-seo/detail?site_id=${encodeURIComponent(s.id)}" target="_blank">詳細ログ</a>
+  <div class="gsc-card p-3">
+    <div class="d-flex justify-content-between align-items-start">
+      <div>
+        <div class="fw-semibold">${esc(s.name)}</div>
+        <div class="mini-label">Site ID: <span class="fw-semibold">${s.id}</span></div>
+      </div>
+      <div class="text-end">
+        <form method="post" action="/admin/internal-seo/run" class="d-inline">
+          <input type="hidden" name="csrf_token" value="${esc(csrf)}">
+          <input type="hidden" name="site_id" value="${s.id}">
+          <input type="hidden" name="pages" value="${document.getElementById('batchPages').value || 10}">
+          <input type="hidden" name="per_page" value="${document.getElementById('batchPerPage').value || 100}">
+          <input type="hidden" name="min_score" value="${document.getElementById('batchMinScore').value || 0.05}">
+          <input type="hidden" name="max_k" value="${document.getElementById('batchMaxK').value || 80}">
+          <input type="hidden" name="limit_sources" value="${document.getElementById('batchLimitSources').value || 200}">
+          <input type="hidden" name="limit_posts" value="${document.getElementById('batchLimitPosts').value || 50}">
+          <input type="hidden" name="incremental" value="${document.getElementById('batchIncremental').value || 'true'}">
+          <button class="btn btn-sm ${running ? 'btn-secondary' : 'btn-primary'}" type="submit" ${running?'disabled':''}>
+            ${running ? '実行中…' : '内部SEO開始'}
+          </button>
+        </form>
+        <div class="form-check mt-2">
+          <input class="form-check-input site-check" type="checkbox" value="${s.id}" id="chk-${s.id}">
+          <label class="form-check-label mini-label" for="chk-${s.id}">一括対象</label>
         </div>
       </div>
+    </div>
 
-      <div class="mt-2">
-        <div class="d-flex justify-content-between mini-label">
-          <div>進捗</div><div>${s.processed_posts||0} / ${s.total_posts||0}</div>
-        </div>
-        <div class="progress" style="height: 10px;">
-          <div class="progress-bar" role="progressbar" style="width:${pct}%" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">${pct}%</div>
-        </div>
-        <div class="mini-label mt-2">
-          <span class="me-3">✅ 適用: <strong>${s.applied_links||0}</strong></span>
-          <span class="me-3">🕒 保留: <strong>${s.pending_links||0}</strong></span>
-          <span class="text-muted">最終実行: ${fmtLocal(s.last_run_started)||'-'}</span>
-        </div>
+    <div class="mt-2">
+      <div class="d-flex justify-content-between mini-label">
+        <div>リンク反映済み: <span class="fw-semibold">${applied}</span></div>
+        <div>保留: ${pending} / スキップ: ${skipped}</div>
       </div>
+      <div class="progress small mt-1">
+        <div class="progress-bar" role="progressbar" style="width:${pct}%" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">${pct}%</div>
+      </div>
+    </div>
 
-      <div class="form-check mt-2">
-        <input class="form-check-input site-check" type="checkbox" value="${s.id}" id="site-${s.id}">
-        <label class="form-check-label mini-label" for="site-${s.id}">バッチ実行に含める</label>
+    <div class="d-flex justify-content-between align-items-center mt-2 mini-label">
+      <div>
+        <span class="badge ${running ? 'bg-info text-dark' : 'bg-light text-dark'}">${running ? 'running' : (m.last_run_status || 'idle')}</span>
+        <span class="ms-2">最終: ${fmtLocal(m.last_run_started_at)} → ${fmtLocal(m.last_run_ended_at)}</span>
       </div>
-    </div>`;
+      <a class="btn btn-sm btn-ghost" href="/admin/internal-seo/detail?site_id=${s.id}" target="_blank">ログ</a>
+    </div>
+  </div>`;
 }
 
 function ownerSectionHTML(owner){
-  const ownerId = owner.id;
-  const headingId = `owner-h-${ownerId}`;
-  const bodyId = `owner-b-${ownerId}`;
+  const key = (owner.id === null || owner.id === undefined) ? 'all' : String(owner.id);
+  const headingId = `owner-h-${key}`;
+  const bodyId = `owner-b-${key}`;
   return `
     <div class="accordion-item">
       <h2 class="accordion-header" id="${headingId}">
         <button class="accordion-button collapsed owner-header" type="button" data-bs-toggle="collapse" data-bs-target="#${bodyId}" aria-expanded="false" aria-controls="${bodyId}">
           <div class="w-100 d-flex align-items-center">
-            <div class="fw-semibold">${esc(owner.name||('ユーザー '+ownerId))}</div>
-            <span class="badge bg-light text-dark ms-2">サイト ${owner.site_count}</span>
+            <div class="fw-semibold">${esc(owner.name||'全サイト')}</div>
+            <span class="badge bg-light text-dark ms-2">サイト ${owner.site_count||0}</span>
             ${owner.running_count ? `<span class="badge bg-info text-dark ms-2">実行中 ${owner.running_count}</span>` : ``}
           </div>
         </button>
       </h2>
-      <div id="${bodyId}" class="accordion-collapse collapse" aria-labelledby="${headingId}" data-owner-id="${ownerId}">
+      <div id="${bodyId}" class="accordion-collapse collapse" aria-labelledby="${headingId}" data-owner-id="${key}">
         <div class="accordion-body">
           <div class="d-flex align-items-end gap-2 mb-2">
-            <input type="text" class="form-control form-control-sm" placeholder="このユーザー内で検索" style="max-width:260px" id="owner-q-${ownerId}">
-            <button class="btn btn-sm btn-ghost" data-owner-search="${ownerId}">検索</button>
+            <input type="text" class="form-control form-control-sm" placeholder="このユーザー内で検索" style="max-width:260px" id="owner-q-${key}">
+            <button class="btn btn-sm btn-ghost" data-owner-search="${key}">検索</button>
             <div class="ms-auto form-check">
-              <input type="checkbox" class="form-check-input" id="check-owner-${ownerId}">
-              <label for="check-owner-${ownerId}" class="form-check-label mini-label">このユーザーのサイトを全選択</label>
+              <input type="checkbox" class="form-check-input" id="check-owner-${key}">
+              <label for="check-owner-${key}" class="form-check-label mini-label">このユーザーのサイトを全選択</label>
             </div>
           </div>
-          <div class="d-grid gap-3 owner-sites" id="sites-owner-${ownerId}" style="grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));"></div>
+          <div class="d-grid gap-3 owner-sites" id="sites-owner-${key}" style="grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));"></div>
           <div class="d-flex mt-2">
-            <button class="btn btn-sm btn-ghost ms-auto d-none" type="button" data-owner-more="${ownerId}">もっと見る</button>
+            <button class="btn btn-sm btn-ghost ms-auto d-none" type="button" data-owner-more="${key}">もっと見る</button>
           </div>
         </div>
       </div>
@@ -371,120 +361,109 @@ async function fetchOwners(){
   try{
     const res = await fetch('/admin/internal-seo/owners', {headers:{'Accept':'application/json'}});
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    const rows = data.rows || [];
+    let data = await res.json();
+    let rows = data.rows || [];
+    if(!rows.length){ rows = [{id:null, name:'全サイト', site_count:0, running_count:0}]; }
+
     const frag = document.createDocumentFragment();
     const tmp = document.createElement('div');
     rows.forEach(o=>{
-      ownerStates[o.id] = {q:'', cursorId:null, loading:false, hasMore:true};
+      const key = (o.id===null||o.id===undefined) ? 'all' : String(o.id);
+      ownerStates[key] = {q:'', cursorId:null, loading:false, hasMore:true};
       tmp.innerHTML = ownerSectionHTML(o);
       frag.appendChild(tmp.firstElementChild);
     });
     acc.innerHTML = '';
     acc.appendChild(frag);
 
-    // イベント: セクション開いたらロード
+    // イベント: 検索/もっと見る/全選択
     rows.forEach(o=>{
-      const body = document.getElementById(`owner-b-${o.id}`);
-      body.addEventListener('show.bs.collapse', ()=>fetchSitesForOwner(o.id, true));
-      // 検索
-      const btnSearch = body.querySelector(`[data-owner-search="${o.id}"]`);
-      btnSearch.addEventListener('click', ()=>{
-        ownerStates[o.id].q = document.getElementById(`owner-q-${o.id}`).value.trim();
-        fetchSitesForOwner(o.id, true);
+      const key = (o.id===null||o.id===undefined) ? 'all' : String(o.id);
+      const body = document.getElementById(`owner-b-${key}`);
+      body.addEventListener('show.bs.collapse', ()=>fetchSitesForOwner(key, true));
+      body.querySelector(`[data-owner-search="${key}"]`).addEventListener('click', ()=>{
+        ownerStates[key].q = document.getElementById(`owner-q-${key}`).value.trim();
+        fetchSitesForOwner(key, true);
       });
-      // もっと見る
-      const btnMore = body.querySelector(`[data-owner-more="${o.id}"]`);
-      btnMore.addEventListener('click', ()=>fetchSitesForOwner(o.id, false));
-      // チェック全選択
-      const chkAll = document.getElementById(`check-owner-${o.id}`);
-      chkAll.addEventListener('change', (e)=>{
+      body.querySelector(`[data-owner-more="${key}"]`).addEventListener('click', ()=>fetchSitesForOwner(key, false));
+      document.getElementById(`check-owner-${key}`).addEventListener('change', (e)=>{
         body.querySelectorAll('.site-check').forEach(cb => cb.checked = e.target.checked);
       });
     });
 
+    // 最初を自動で開く
+    const first = acc.querySelector('.accordion-button');
+    if(first){ first.click(); }
+
   }catch(e){
-    acc.innerHTML = `<div class="text-danger px-3 py-2">オーナー取得失敗: ${esc(e.message)}</div>`;
+    // フォールバック：全サイト
+    const key = 'all';
+    ownerStates[key] = {q:'', cursorId:null, loading:false, hasMore:true};
+    document.getElementById('ownersAccordion').innerHTML = ownerSectionHTML({id:null, name:'全サイト', site_count:0, running_count:0});
+    document.querySelector(`#owner-b-${key}`).addEventListener('show.bs.collapse', ()=>fetchSitesForOwner(key, true));
+    document.querySelector(`#owner-b-${key} [data-owner-more="${key}"]`).addEventListener('click', ()=>fetchSitesForOwner(key, false));
+    const first = document.querySelector('.accordion-button'); if(first) first.click();
+    fetchSitesForOwner(key, true);
+    console.error('owners fetch failed:', e);
   }
 }
 
-async function fetchSitesForOwner(ownerId, reset=false){
-  const st = ownerStates[ownerId];
+async function fetchSitesForOwner(ownerKey, reset=false){
+  const st = ownerStates[ownerKey];
   if(!st || st.loading) return;
   if(reset){ st.cursorId=null; st.hasMore=true; }
   if(!st.hasMore) return;
 
-  const body = document.getElementById(`owner-b-${ownerId}`);
-  const listEl = document.getElementById(`sites-owner-${ownerId}`);
-  const moreBtn = body.querySelector(`[data-owner-more="${ownerId}"]`);
+  const body = document.getElementById(`owner-b-${ownerKey}`);
+  const listEl = document.getElementById(`sites-owner-${ownerKey}`);
+  const moreBtn = body.querySelector(`[data-owner-more="${ownerKey}"]`);
 
   st.loading = true;
   if(reset) listEl.innerHTML = '<div class="text-muted">読み込み中…</div>';
 
   const params = new URLSearchParams();
-  params.set('owner_id', ownerId);
-  if(st.q) params.set('q', st.q);
-  if(window.__global_q) params.set('q', (st.q ? `${st.q} ${window.__global_q}` : window.__global_q));
-  params.set('limit', '24');
+  if(ownerKey !== 'all'){ params.set('owner_id', ownerKey); }
+  const oq = st.q || '';
+  const gq = window.__global_q || '';
+  const merged = [oq,gq].filter(Boolean).join(' ');
+  if(merged) params.set('q', merged);
+  params.set('limit','24');
   if(st.cursorId) params.set('cursor_id', String(st.cursorId));
 
   try{
-    const res = await fetch(`/admin/internal-seo/sites?${params.toString()}`, {headers:{'Accept':'application/json'}});
+    const res=await fetch(`/admin/internal-seo/sites?${params.toString()}`, {headers:{'Accept':'application/json'}});
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    const rows = data.rows || [];
+    const data=await res.json();
+    const rows=data.rows||[];
     if(reset) listEl.innerHTML = '';
-    const frag = document.createDocumentFragment();
-    const tmp = document.createElement('div');
-    rows.forEach(s=>{
-      tmp.innerHTML = siteCardHTML(s);
-      frag.appendChild(tmp.firstElementChild);
-    });
+    const frag=document.createDocumentFragment();
+    const tmp=document.createElement('div');
+    rows.forEach(s=>{ tmp.innerHTML=siteCardHTML(s); frag.appendChild(tmp.firstElementChild); });
     listEl.appendChild(frag);
-    st.cursorId = data.next_cursor_id || null;
-    st.hasMore = !!data.has_more;
+    st.cursorId=data.next_cursor_id||null; st.hasMore=!!data.has_more;
     moreBtn.classList.toggle('d-none', !st.hasMore);
   }catch(e){
     if(reset) listEl.innerHTML = '';
     listEl.insertAdjacentHTML('beforeend', `<div class="text-danger">サイト取得失敗: ${esc(e.message)}</div>`);
     st.hasMore=false;
-  }finally{
-    st.loading = false;
-  }
+  }finally{ st.loading=false; }
 }
 
-// グローバル検索
-document.getElementById('globalSearchBtn').addEventListener('click', ()=>{
-  window.__global_q = document.getElementById('globalSearch').value.trim();
-  // 開いている owner を再読込
-  Object.keys(ownerStates).forEach(id=>{
-    const el = document.getElementById(`owner-b-${id}`);
-    if(el?.classList.contains('show')) fetchSitesForOwner(Number(id), true);
-  });
-});
-document.getElementById('globalSearch').addEventListener('keydown', (e)=>{
-  if(e.key==='Enter'){ e.preventDefault(); document.getElementById('globalSearchBtn').click(); }
-});
-// 全体チェック
-document.getElementById('checkAllSites').addEventListener('change', (e)=>{
-  document.querySelectorAll('.site-check').forEach(cb => cb.checked = e.target.checked);
-});
-
-// ====== Batch run ======
+// ===== Batch run =====
 async function runBatch(){
-  const ids=Array.from(document.querySelectorAll('.site-check:checked')).map(cb=>parseInt(cb.value,10)).filter(Boolean);
+  const ids=[...document.querySelectorAll('.site-check:checked')].map(cb=>parseInt(cb.value,10)).filter(Boolean);
   if(!ids.length){ document.getElementById('batchResult').textContent='サイトが選択されていません。'; return; }
   const suggest=parseInt(document.getElementById('runBatchBtn').dataset.suggest||'5',10);
   const picked=ids.slice(0, Math.max(1, suggest));
   const payload={
     site_ids:picked,
-    pages:parseInt(document.getElementById('batchPages')?.value||'10',10),
-    per_page:parseInt(document.getElementById('batchPerPage')?.value||'100',10),
-    min_score:parseFloat(document.getElementById('batchMinScore')?.value||'0.05'),
-    max_k:parseInt(document.getElementById('batchMaxK')?.value||'80',10),
-    limit_sources:parseInt(document.getElementById('batchLimitSources')?.value||'200',10),
-    limit_posts:parseInt(document.getElementById('batchLimitPosts')?.value||'50',10),
-    incremental:String(document.getElementById('batchIncremental')?.value||'true')!=='false',
+    pages:parseInt(document.getElementById('batchPages').value||'10',10),
+    per_page:parseInt(document.getElementById('batchPerPage').value||'100',10),
+    min_score:parseFloat(document.getElementById('batchMinScore').value||'0.05'),
+    max_k:parseInt(document.getElementById('batchMaxK').value||'80',10),
+    limit_sources:parseInt(document.getElementById('batchLimitSources').value||'200',10),
+    limit_posts:parseInt(document.getElementById('batchLimitPosts').value||'50',10),
+    incremental:String(document.getElementById('batchIncremental').value||'true')!=='false',
   };
   const btn=document.getElementById('runBatchBtn'); btn.disabled=true; btn.textContent='登録中…';
   try{
@@ -493,24 +472,37 @@ async function runBatch(){
     document.getElementById('batchResult').textContent=`登録: ${data.enqueued} 件 / スキップ: ${data.skipped?.length||0} / エラー: ${data.errors?.length||0}`;
     refreshCapacity();
   }catch(e){ document.getElementById('batchResult').textContent='失敗: '+e.message; }
-  finally{ btn.disabled=false; btn.textContent='✅ チェックしたサイトをまとめて実行'; }
+  finally{ btn.disabled=false; btn.textContent='選択サイトを実行'; }
 }
 
-// ====== Init ======
+// ===== Init =====
 document.addEventListener('DOMContentLoaded', ()=>{
-  refreshCapacity();
-  document.getElementById('capacityRefresh').addEventListener('click', refreshCapacity);
+  refreshCapacity(); document.getElementById('capacityRefresh').addEventListener('click', refreshCapacity);
 
-  // オーナー（ユーザー）一覧を読み込む
+  // Owners & Sites
   fetchOwners();
+  document.getElementById('globalSiteSearch').addEventListener('keydown', e=>{
+    if(e.key==='Enter'){ e.preventDefault(); window.__global_q = e.target.value.trim(); ownerStates = {}; fetchOwners(); }
+  });
 
   // 履歴
   loadRuns(true);
   document.getElementById('loadMoreBtn').addEventListener('click', ()=>loadRuns(false));
-  document.getElementById('siteIdInput').addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); nextCursorTs=null; nextCursorId=null; runsReachedEnd=false; document.getElementById('runsBody').innerHTML='<tr id="placeholderRow"><td colspan="8" class="text-muted">読み込み中…</td></tr>'; loadRuns(true);} });
+  document.getElementById('applyFilterBtn').addEventListener('click', ()=>{
+    nextCursorTs=null; nextCursorId=null; runsReachedEnd=false;
+    document.getElementById('runsBody').innerHTML='<tr id="placeholderRow"><td colspan="8" class="text-muted">読み込み中…</td></tr>';
+    loadRuns(true);
+  });
+  document.getElementById('clearFilterBtn').addEventListener('click', ()=>{
+    document.getElementById('siteIdInput').value=''; nextCursorTs=null; nextCursorId=null; runsReachedEnd=false;
+    document.getElementById('runsBody').innerHTML='<tr id="placeholderRow"><td colspan="8" class="text-muted">読み込み中…</td></tr>'; loadRuns(true);
+  });
 
-  // バッチ
+  // 一括
   document.getElementById('runBatchBtn').addEventListener('click', (e)=>{ e.preventDefault(); runBatch(); });
+  document.getElementById('checkAllVisible').addEventListener('change', (e)=>{
+    document.querySelectorAll('.owner-sites .site-check').forEach(cb=>cb.checked=e.target.checked);
+  });
 });
 </script>
 {% endblock %}

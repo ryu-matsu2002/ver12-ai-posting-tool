@@ -1893,6 +1893,7 @@ def admin_captcha_dataset():
 
 # 内部SEOルートコード
 
+# 内部SEOルートコード（admin_bp配下）
 import os
 from datetime import datetime
 from flask import render_template, request, redirect, url_for, flash, abort, jsonify, make_response
@@ -1904,13 +1905,7 @@ from app import db
 from app.models import Site, InternalSeoRun, InternalLinkAction, ContentIndex
 from sqlalchemy import text
 
-# 可能ならユーザーモデルも使う（存在しない環境でも落ちないように）
-try:
-    from app.models import User  # noqa
-except Exception:  # pragma: no cover
-    User = None
-
-# ---- JSON: 1ラン分の stats ----
+# ---- stats: 1ラン分の詳細 ----
 @admin_bp.route("/admin/internal-seo/run/<int:run_id>/stats", methods=["GET"])
 @login_required
 def admin_internal_seo_run_stats(run_id: int):
@@ -1922,89 +1917,80 @@ def admin_internal_seo_run_stats(run_id: int):
     resp.headers["Cache-Control"] = "public, max-age=30"
     return resp
 
-
-# ---- 画面本体（HTMLは軽く返す） ----
+# ---- 画面本体 ----
 @admin_bp.route("/admin/internal-seo", methods=["GET"])
 @login_required
 def admin_internal_seo_index():
     if not getattr(current_user, "is_admin", False):
         abort(403)
-
     selected_site_id = request.args.get("site_id", type=int)
     per_page = request.args.get("per_page", default=50, type=int)
-
     return render_template(
         "admin/internal_seo.html",
         selected_site_id=selected_site_id,
         per_page=per_page,
     )
 
-
-# ---- JSON: オーナー（ユーザー）一覧 ----
-#  Site に owner_id か user_id がある前提。無い場合は仮想「全体」1グループにまとめる。
+# ---- NEW: オーナー一覧（ユーザー別セクション） ----
 @admin_bp.route("/admin/internal-seo/owners", methods=["GET"])
 @login_required
 def admin_internal_seo_owners():
     if not getattr(current_user, "is_admin", False):
         abort(403)
 
+    # Site.owner_id または Site.user_id がある場合はそれでグルーピング
     owner_col = getattr(Site, "owner_id", None) or getattr(Site, "user_id", None)
-    rows = []
+
     if owner_col is None:
-        # グループ化できない環境：全体を1グループとして返す
+        # フォールバック：全サイト1グループ
         total_sites = db.session.query(func.count(Site.id)).scalar() or 0
         running_count = (
             db.session.query(func.count(func.distinct(InternalSeoRun.site_id)))
             .filter(InternalSeoRun.status == "running")
-            .scalar()
-            or 0
+            .scalar() or 0
         )
-        rows = [dict(id=0, name="すべてのユーザー", site_count=int(total_sites), running_count=int(running_count))]
-    else:
-        site_counts = (
-            db.session.query(owner_col.label("owner_id"), func.count(Site.id).label("cnt"))
+        payload = {"ok": True, "rows": [
+            {"id": None, "name": "全サイト", "site_count": int(total_sites), "running_count": int(running_count)}
+        ]}
+        resp = make_response(jsonify(payload))
+        resp.headers["Cache-Control"] = "public, max-age=30"
+        return resp
+
+    # オーナー毎のサイト数
+    site_counts = (
+        db.session.query(owner_col.label("owner_id"), func.count(Site.id).label("cnt"))
+        .group_by(owner_col)
+        .all()
+    )
+    # オーナー毎の実行中サイト数
+    running_counts = {
+        owner_id: cnt
+        for owner_id, cnt in (
+            db.session.query(owner_col.label("owner_id"), func.count(func.distinct(InternalSeoRun.site_id)))
+            .join(Site, Site.id == InternalSeoRun.site_id)
+            .filter(InternalSeoRun.status == "running")
             .group_by(owner_col)
             .all()
         )
-        running_counts = {
-            owner_id: cnt
-            for owner_id, cnt in (
-                db.session.query(owner_col.label("owner_id"), func.count(func.distinct(InternalSeoRun.site_id)))
-                .join(Site, Site.id == InternalSeoRun.site_id)
-                .filter(InternalSeoRun.status == "running")
-                .group_by(owner_col)
-                .all()
-            )
-        }
-        # 名前解決（User があるなら）
-        name_map = {}
-        if User and hasattr(User, "id"):
-            owner_ids = [r.owner_id for r in site_counts if r.owner_id is not None]
-            if owner_ids:
-                try:
-                    q = db.session.query(User.id, getattr(User, "name", getattr(User, "username", None)))
-                    for uid, uname in q.filter(User.id.in_(owner_ids)).all():
-                        name_map[int(uid)] = str(uname) if uname is not None else f"ユーザー {uid}"
-                except Exception:
-                    pass
+    }
 
-        for r in site_counts:
-            oid = r.owner_id if r.owner_id is not None else -1
-            rows.append(dict(
-                id=int(oid),
-                name=name_map.get(int(oid), f"ユーザー {oid}"),
-                site_count=int(r.cnt or 0),
-                running_count=int(running_counts.get(oid, 0)),
-            ))
+    rows = []
+    for r in site_counts:
+        oid = r.owner_id
+        rows.append(dict(
+            id=(int(oid) if oid is not None else None),
+            name=f"ユーザー {oid}" if oid is not None else "全サイト",
+            site_count=int(r.cnt or 0),
+            running_count=int(running_counts.get(oid, 0)),
+        ))
 
     payload = {"ok": True, "rows": rows}
     resp = make_response(jsonify(payload))
     resp.headers["Cache-Control"] = "public, max-age=30"
     return resp
 
-
-# ---- JSON: サイト一覧（owner 単位 + サマリー集計） ----
-# GET /admin/internal-seo/sites?owner_id=&q=&limit=&cursor_id=
+# ---- サイト一覧（owner_id / 検索 / カーソル / メトリクス付き） ----
+# GET /admin/internal-seo/sites?q=&owner_id=&limit=&cursor_id=
 @admin_bp.route("/admin/internal-seo/sites", methods=["GET"])
 @login_required
 def admin_internal_seo_sites():
@@ -2012,150 +1998,142 @@ def admin_internal_seo_sites():
         abort(403)
 
     q = (request.args.get("q") or "").strip()
+    owner_id = request.args.get("owner_id", type=int)
     limit = min(max(request.args.get("limit", type=int, default=24), 1), 200)
     cursor_id = request.args.get("cursor_id", type=int)
-    owner_id = request.args.get("owner_id", type=int)
 
+    # ベースクエリ
+    base_q = Site.query
+
+    # owner列が存在するならフィルタ可能
     owner_col = getattr(Site, "owner_id", None) or getattr(Site, "user_id", None)
-
-    base = Site.query
-    # 軽量化：必要カラムのみ（url は無い環境も想定）
-    try:
-        base = base.options(load_only(Site.id, Site.name))
-    except Exception:
-        pass
-
     if owner_col is not None and owner_id is not None:
-        base = base.filter(owner_col == owner_id)
+        base_q = base_q.filter(owner_col == owner_id)
 
-    # 検索（ID / 名前 / URL）
+    # 検索（ID/名前 部分一致）
     if q:
-        conds = []
-        # ID
-        if any(ch.isdigit() for ch in q.split()):
-            try:
-                num = int(q)
-                conds.append(Site.id == num)
-            except Exception:
-                pass
-        # name
-        conds.append(Site.name.ilike(f"%{q}%"))
-        # url（存在時のみ）
-        if hasattr(Site, "url"):
-            conds.append(Site.url.ilike(f"%{q}%"))
-        base = base.filter(or_(*conds))
+        if q.isdigit():
+            base_q = base_q.filter(or_(Site.id == int(q), Site.name.ilike(f"%{q}%")))
+        else:
+            base_q = base_q.filter(Site.name.ilike(f"%{q}%"))
 
-    base = base.order_by(Site.id.asc())
+    # 昇順IDのキーセット
     if cursor_id:
-        base = base.filter(Site.id > cursor_id)
+        base_q = base_q.filter(Site.id > cursor_id)
 
-    sites = base.limit(limit).all()
+    # 軽量フィールドのみロード（安全のため name が無い環境は少ない想定）
+    try:
+        base_q = base_q.options(load_only(Site.id, Site.name))
+    except Exception:
+        # nameが無いモデルでも落ちないよう保険（idだけ）
+        base_q = base_q.options(load_only(Site.id))
+
+    base_q = base_q.order_by(Site.id.asc())
+    sites = base_q.limit(limit).all()
+
     site_ids = [s.id for s in sites]
-
-    # ---- まとめ集計 ----
-    total_posts_map = {}
-    processed_posts_map = {}
-    applied_links_map = {}
-    pending_links_map = {}
-    running_map = {}
-    last_started_map = {}
-    last_ended_map = {}
+    metrics_map = {}
 
     if site_ids:
-        # total_posts: ContentIndex から
-        try:
-            for sid, cnt in (
-                db.session.query(ContentIndex.site_id, func.count(ContentIndex.wp_post_id))
-                .filter(ContentIndex.site_id.in_(site_ids))
-                .group_by(ContentIndex.site_id)
-                .all()
-            ):
-                total_posts_map[int(sid)] = int(cnt or 0)
-        except Exception:
-            # site_id が無い等、環境差異に備えて 0
-            total_posts_map = {int(sid): 0 for sid in site_ids}
-
-        # processed_posts: InternalLinkAction の DISTINCT post_id
-        for sid, cnt in (
-            db.session.query(InternalLinkAction.site_id, func.count(func.distinct(InternalLinkAction.post_id)))
+        # InternalLinkAction のステータス別集計
+        status_counts = (
+            db.session.query(
+                InternalLinkAction.site_id,
+                InternalLinkAction.status,
+                func.count(InternalLinkAction.id),
+                func.max(InternalLinkAction.applied_at),
+            )
             .filter(InternalLinkAction.site_id.in_(site_ids))
-            .group_by(InternalLinkAction.site_id)
+            .group_by(InternalLinkAction.site_id, InternalLinkAction.status)
             .all()
-        ):
-            processed_posts_map[int(sid)] = int(cnt or 0)
+        )
+        # 初期化
+        for sid in site_ids:
+            metrics_map[sid] = dict(applied=0, pending=0, skipped=0, last_applied_at=None)
 
-        # applied / pending
-        for sid, cnt in (
-            db.session.query(InternalLinkAction.site_id, func.count(InternalLinkAction.id))
-            .filter(InternalLinkAction.site_id.in_(site_ids), InternalLinkAction.status == "applied")
-            .group_by(InternalLinkAction.site_id)
-            .all()
-        ):
-            applied_links_map[int(sid)] = int(cnt or 0)
+        for sid, st, cnt, max_applied in status_counts:
+            if st == "applied":
+                metrics_map[sid]["applied"] = int(cnt or 0)
+                metrics_map[sid]["last_applied_at"] = max_applied
+            elif st == "pending":
+                metrics_map[sid]["pending"] = int(cnt or 0)
+            elif st == "skipped":
+                metrics_map[sid]["skipped"] = int(cnt or 0)
 
-        for sid, cnt in (
-            db.session.query(InternalLinkAction.site_id, func.count(InternalLinkAction.id))
-            .filter(InternalLinkAction.site_id.in_(site_ids), InternalLinkAction.status == "pending")
-            .group_by(InternalLinkAction.site_id)
-            .all()
-        ):
-            pending_links_map[int(sid)] = int(cnt or 0)
+        # 最新Run（started_at最大）と実行中
+        # 実行中
+        running_sites = {
+            x[0] for x in db.session.query(InternalSeoRun.site_id)
+            .filter(InternalSeoRun.site_id.in_(site_ids), InternalSeoRun.status == "running")
+            .group_by(InternalSeoRun.site_id).all()
+        }
 
-        # last run / running
-        for sid, st, et in (
-            db.session.query(InternalSeoRun.site_id,
-                             func.max(InternalSeoRun.started_at),
-                             func.max(InternalSeoRun.ended_at))
+        # 最新Run（サイト毎に最大 started_at）
+        sub = (
+            db.session.query(
+                InternalSeoRun.site_id.label("sid"),
+                func.max(InternalSeoRun.started_at).label("mx")
+            )
             .filter(InternalSeoRun.site_id.in_(site_ids))
             .group_by(InternalSeoRun.site_id)
-            .all()
-        ):
-            last_started_map[int(sid)] = st
-            last_ended_map[int(sid)] = et
+        ).subquery()
 
-        running_ids = {
-            int(sid) for (sid,) in
-            db.session.query(InternalSeoRun.site_id)
-            .filter(InternalSeoRun.site_id.in_(site_ids), InternalSeoRun.status == "running")
-            .group_by(InternalSeoRun.site_id)
+        last_runs = (
+            db.session.query(
+                InternalSeoRun.site_id,
+                InternalSeoRun.status,
+                InternalSeoRun.started_at,
+                InternalSeoRun.ended_at,
+                InternalSeoRun.duration_ms,
+            )
+            .join(sub, and_(
+                InternalSeoRun.site_id == sub.c.sid,
+                InternalSeoRun.started_at == sub.c.mx
+            ))
             .all()
-        }
-        running_map = {sid: True for sid in running_ids}
+        )
 
-    def _row(s):
-        sid = int(s.id)
-        total = int(total_posts_map.get(sid, 0))
-        processed = int(processed_posts_map.get(sid, 0))
-        pct = int(round(100 * processed / max(1, total))) if total else 0
+        for sid in site_ids:
+            m = metrics_map.setdefault(sid, {})
+            m["running"] = sid in running_sites
+
+        for sid, st, st_at, ed_at, dur in last_runs:
+            m = metrics_map.setdefault(sid, {})
+            m.update(dict(
+                last_run_status=st,
+                last_run_started_at=st_at.isoformat() if st_at else None,
+                last_run_ended_at=ed_at.isoformat() if ed_at else None,
+                last_run_duration_ms=dur,
+            ))
+
+    def _row(site):
+        m = metrics_map.get(site.id, {})
         return dict(
-            id=sid,
-            name=getattr(s, "name", f"Site {sid}"),
-            url=getattr(s, "url", ""),
-            total_posts=total,
-            processed_posts=processed,
-            applied_links=int(applied_links_map.get(sid, 0)),
-            pending_links=int(pending_links_map.get(sid, 0)),
-            progress_pct=pct,
-            running=bool(running_map.get(sid, False)),
-            last_run_started=(last_started_map.get(sid).isoformat() if last_started_map.get(sid) else None),
-            last_run_ended=(last_ended_map.get(sid).isoformat() if last_ended_map.get(sid) else None),
+            id=site.id,
+            name=getattr(site, "name", f"Site {site.id}") or f"Site {site.id}",
+            metrics=dict(
+                applied=int(m.get("applied") or 0),
+                pending=int(m.get("pending") or 0),
+                skipped=int(m.get("skipped") or 0),
+                running=bool(m.get("running")),
+                last_run_status=m.get("last_run_status"),
+                last_run_started_at=m.get("last_run_started_at"),
+                last_run_ended_at=m.get("last_run_ended_at"),
+                last_run_duration_ms=m.get("last_run_duration_ms"),
+            )
         )
 
     next_cursor_id = sites[-1].id if sites else None
     has_more = bool(sites) and (len(sites) == limit)
 
-    payload = dict(
-        ok=True,
-        rows=[_row(s) for s in sites],
-        next_cursor_id=next_cursor_id,
-        has_more=has_more,
-    )
-    resp = make_response(jsonify(payload))
-    resp.headers["Cache-Control"] = "public, max-age=30"
-    return resp
+    return jsonify({
+        "ok": True,
+        "rows": [_row(s) for s in sites],
+        "next_cursor_id": next_cursor_id,
+        "has_more": has_more,
+    })
 
-
-# ---- JSON: 実行履歴（キーセットページネーション） ----
+# ---- 実行履歴（キーセット） ----
 @admin_bp.route("/admin/internal-seo/list", methods=["GET"])
 @login_required
 def admin_internal_seo_list():
@@ -2164,7 +2142,6 @@ def admin_internal_seo_list():
 
     site_id = request.args.get("site_id", type=int)
     limit = min(max(request.args.get("limit", type=int, default=50), 1), 200)
-
     cursor_ts_str = request.args.get("cursor_ts")
     cursor_id = request.args.get("cursor_id", type=int)
 
@@ -2191,7 +2168,6 @@ def admin_internal_seo_list():
             cursor_ts = datetime.fromisoformat(cursor_ts_str.replace("Z", "+00:00"))
         except Exception:
             cursor_ts = None
-
         if cursor_ts is not None and cursor_id is not None:
             q = q.filter(
                 or_(
@@ -2204,7 +2180,6 @@ def admin_internal_seo_list():
             )
 
     items = q.limit(limit).all()
-
     next_cursor_ts = items[-1].started_at.isoformat() if items else None
     next_cursor_id = items[-1].id if items else None
     has_more = bool(items) and (len(items) == limit)
@@ -2228,7 +2203,6 @@ def admin_internal_seo_list():
         has_more=has_more,
     ))
 
-
 # ---- 手動実行（非同期トリガ） ----
 @admin_bp.route("/admin/internal-seo/run", methods=["POST"])
 @login_required
@@ -2241,11 +2215,8 @@ def admin_internal_seo_run():
         flash("site_id は必須です", "warning")
         return redirect(url_for("admin.admin_internal_seo_index"))
 
-    def _env_int(key: str, default: int) -> int:
-        return int(os.getenv(key, default))
-
-    def _env_float(key: str, default: float) -> float:
-        return float(os.getenv(key, default))
+    def _env_int(key: str, default: int) -> int: return int(os.getenv(key, default))
+    def _env_float(key: str, default: float) -> float: return float(os.getenv(key, default))
 
     pages         = request.form.get("pages",         type=int,   default=_env_int("INTERNAL_SEO_PAGES", 10))
     per_page      = request.form.get("per_page",      type=int,   default=_env_int("INTERNAL_SEO_PER_PAGE", 100))
@@ -2263,29 +2234,21 @@ def admin_internal_seo_run():
           (:site_id, :pages, :per_page, :min_score, :max_k, :limit_sources, :limit_posts,
            :incremental, 'admin-ui', 'queued', now())
     """), dict(
-        site_id=site_id,
-        pages=pages,
-        per_page=per_page,
-        min_score=min_score,
-        max_k=max_k,
-        limit_sources=limit_sources,
-        limit_posts=limit_posts,
-        incremental=incremental,
+        site_id=site_id, pages=pages, per_page=per_page, min_score=min_score, max_k=max_k,
+        limit_sources=limit_sources, limit_posts=limit_posts, incremental=incremental,
     ))
     db.session.commit()
 
     flash(f"Site {site_id} の内部SEOをジョブキューに登録しました。ワーカーが順次実行します。", "success")
     return redirect(url_for("admin.admin_internal_seo_index", site_id=site_id), code=303)
 
-
-# ---- まとめ実行 API ----
+# ---- まとめ実行 ----
 @admin_bp.route("/admin/internal-seo/run-batch", methods=["POST"])
 @login_required
 def admin_internal_seo_run_batch():
     if not getattr(current_user, "is_admin", False):
         abort(403)
 
-    site_ids = []
     if request.is_json:
         payload = request.get_json(silent=True) or {}
         site_ids = payload.get("site_ids") or payload.get("site_ids[]") or []
@@ -2300,11 +2263,8 @@ def admin_internal_seo_run_batch():
     if not site_ids:
         return jsonify({"ok": False, "error": "site_ids required"}), 400
 
-    def _env_int(key: str, default: int) -> int:
-        return int(os.getenv(key, default))
-
-    def _env_float(key: str, default: float) -> float:
-        return float(os.getenv(key, default))
+    def _env_int(key: str, default: int) -> int: return int(os.getenv(key, default))
+    def _env_float(key: str, default: float) -> float: return float(os.getenv(key, default))
 
     pages         = int(params.get("pages",         _env_int("INTERNAL_SEO_PAGES", 10)))
     per_page      = int(params.get("per_page",      _env_int("INTERNAL_SEO_PER_PAGE", 100)))
@@ -2314,11 +2274,8 @@ def admin_internal_seo_run_batch():
     limit_posts   = int(params.get("limit_posts",   _env_int("INTERNAL_SEO_LIMIT_POSTS", 50)))
     incremental   = str(params.get("incremental", "true")).lower() != "false"
 
-    enqueued = 0
-    skipped = []
-    errors = []
-
     existing_site_ids = {s.id for s in Site.query.with_entities(Site.id).filter(Site.id.in_(site_ids)).all()}
+    enqueued, skipped, errors = 0, [], []
 
     for sid in site_ids:
         if sid not in existing_site_ids:
@@ -2333,14 +2290,8 @@ def admin_internal_seo_run_batch():
                   (:site_id, :pages, :per_page, :min_score, :max_k, :limit_sources, :limit_posts,
                    :incremental, 'admin-ui-batch', 'queued', now())
             """), dict(
-                site_id=sid,
-                pages=pages,
-                per_page=per_page,
-                min_score=min_score,
-                max_k=max_k,
-                limit_sources=limit_sources,
-                limit_posts=limit_posts,
-                incremental=incremental,
+                site_id=sid, pages=pages, per_page=per_page, min_score=min_score, max_k=max_k,
+                limit_sources=limit_sources, limit_posts=limit_posts, incremental=incremental,
             ))
             enqueued += 1
         except Exception as e:
@@ -2349,8 +2300,7 @@ def admin_internal_seo_run_batch():
 
     return jsonify({"ok": True, "enqueued": enqueued, "skipped": skipped, "errors": errors})
 
-
-# ---- 容量メーター API ----
+# ---- 容量メーター ----
 @admin_bp.route("/admin/internal-seo/capacity", methods=["GET"])
 @login_required
 def admin_internal_seo_capacity():
@@ -2377,8 +2327,7 @@ def admin_internal_seo_capacity():
     resp.headers["Cache-Control"] = "no-cache, no-store"
     return resp
 
-
-# ---- 詳細ログ API（変更なし） ----
+# ---- 詳細ログ（アクション） ----
 @admin_bp.route("/admin/internal-seo/actions", methods=["GET"])
 @login_required
 def admin_internal_seo_actions():
@@ -2481,6 +2430,7 @@ def admin_internal_seo_actions():
         next_cursor=next_cursor,
         has_more=has_more,
     ))
+
 
 
 # ────────────── キーワード ──────────────
