@@ -41,7 +41,7 @@ from math import inf
 # ────────────────────────────────────────────────
 # グローバルな APScheduler インスタンス（__init__.py で start されています）
 scheduler = BackgroundScheduler(timezone="UTC")
-executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="extseo")
+executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="extseo")
 
 # --------------------------------------------------------------------------- #
 # 1) WordPress 自動投稿ジョブ
