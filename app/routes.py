@@ -2438,6 +2438,7 @@ def admin_internal_seo_actions():
         has_more=has_more,
     ))
 
+
 # ────────────── キーワード ──────────────
 
 @bp.route("/<username>/keywords", methods=["GET", "POST"])
