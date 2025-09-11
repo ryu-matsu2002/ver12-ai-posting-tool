@@ -30,8 +30,15 @@ _SEO_CLASS = "ai-ilink"
 def _split_paragraphs(html: str) -> List[str]:
     if not html:
         return []
-    parts = _P_CLOSE.split(html)
-    return [p for p in parts]  # </p> を落として配列化（貼る時に追加）
+    # まず </p> で分割
+    parts = [p for p in _P_CLOSE.split(html) if p is not None]
+    # 段落が1つしか取れなかった場合は <br> でも分割
+    if len(parts) <= 1:
+        parts = re.split(r"<br\s*/?>", html, flags=re.IGNORECASE)
+    # 最終的に空要素を除去
+    parts = [p.strip() for p in parts if p and p.strip()]
+    # 全く分割できなければ本文全体を1段落として返す
+    return parts or [html]
 
 def _rejoin_paragraphs(paragraphs: List[str]) -> str:
     return "</p>".join(paragraphs)
