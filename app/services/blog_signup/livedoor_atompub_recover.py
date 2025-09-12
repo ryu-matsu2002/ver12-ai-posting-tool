@@ -1,5 +1,9 @@
+#app/services/blog_signup/livedoor_atompub_recover.py
+
 import asyncio
 import os
+import random
+import time
 from datetime import datetime
 from pathlib import Path
 import logging
@@ -33,19 +37,39 @@ try:
 except Exception:
     pwctl = None
 
+from app.utils.locks import pg_advisory_lock
+
 # ビルド識別（デプロイ反映チェック用）
-BUILD_TAG = "2025-08-29 livedoor-create-minimal(title+submit-only)"
+BUILD_TAG = "2025-09-12 livedoor-create-guarded"
 logger.info(f"[LD-Recover] loaded build {BUILD_TAG}")
+
+# 直列化・バックオフ・成功検知タイムアウト
+LD_CREATE_LOCK_KEY = "livedoor:create_blog:global"
+LD_CREATE_MAX_RETRIES = int(os.getenv("LD_CREATE_MAX_RETRIES", "3"))
+LD_CREATE_BACKOFF_MIN = int(os.getenv("LD_CREATE_BACKOFF_MIN", "300"))    # 5分
+LD_CREATE_BACKOFF_MAX = int(os.getenv("LD_CREATE_BACKOFF_MAX", "600"))    # 10分
+LD_CREATE_SUCCESS_TIMEOUT_MS = int(os.getenv("LD_CREATE_SUCCESS_TIMEOUT_MS", "30000"))  # 30秒
+
+def _rand_backoff() -> int:
+    return random.randint(LD_CREATE_BACKOFF_MIN, LD_CREATE_BACKOFF_MAX)
+
+def _human_sleep(a: float = 1.8, b: float = 3.2) -> None:
+    time.sleep(random.uniform(a, b))
 
 
 async def _save_shot(page, prefix: str) -> tuple[str, str]:
     """
-    現在ページを /tmp/{prefix}_{ts}.{png,html} で保存してパスを返す。
+    現在ページを /app/static/ld_dumps/{prefix}_{ts}.{png,html} で保存してパスを返す。
     失敗時は full_page=False にフォールバック。
     """
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    png = f"/tmp/{prefix}_{ts}.png"
-    html = f"/tmp/{prefix}_{ts}.html"
+    base_dir = os.getenv("LD_DUMP_DIR", "/var/www/ver12-ai-posting-tool/app/static/ld_dumps")
+    try:
+        Path(base_dir).mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    png = f"{base_dir}/{prefix}_{ts}.png"
+    html = f"{base_dir}/{prefix}_{ts}.html"
     try:
         await page.screenshot(path=png, full_page=True)
     except Exception:
@@ -940,7 +964,12 @@ async def _detect_create_captcha(page) -> tuple[bool, str | None]:
         if not (has_img and has_box):
             return False, None
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        path = f"/tmp/ld_create_captcha_{ts}.png"
+        base_dir = os.getenv("LD_DUMP_DIR", "/var/www/ver12-ai-posting-tool/app/static/ld_dumps")
+        try:
+            Path(base_dir).mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        path = f"{base_dir}/ld_create_captcha_{ts}.png"
         try:
             await page.locator(img_sel).first.screenshot(path=path)
         except Exception:
@@ -986,27 +1015,27 @@ async def _fill_captcha_and_submit(page, text: str) -> bool:
 async def _wait_success_after_submit(page) -> tuple[bool, str | None]:
     """/welcome 遷移 or 成功導線検出を待って成功可否と URL 由来 blog_id を返す。"""
     try:
-        await page.wait_for_url(_re.compile(r"/welcome($|[/?#])"), timeout=12000)
+        await page.wait_for_url(_re.compile(r"/welcome($|[/?#])"), timeout=LD_CREATE_SUCCESS_TIMEOUT_MS)
         return True, _extract_blog_id_from_url(page.url)
     except Exception:
         pass
 
     # 文言 or 導線
     try:
-        await page.wait_for_selector('text=ブログの作成が完了しました', timeout=6000)
+        await page.wait_for_selector('text=ブログの作成が完了しました', timeout=LD_CREATE_SUCCESS_TIMEOUT_MS)
         return True, _extract_blog_id_from_url(page.url)
     except Exception:
         pass
     try:
-        await page.wait_for_selector('text=ブログの作成が完了しました！', timeout=3000)
+        await page.wait_for_selector('text=ブログの作成が完了しました！', timeout=LD_CREATE_SUCCESS_TIMEOUT_MS)
         return True, _extract_blog_id_from_url(page.url)
     except Exception:
         pass
 
     fr, _ = await _find_in_any_frame(
         page,
-        ['a:has-text("最初のブログを書く")', 'a.button:has-text("はじめての投稿")', ':has-text("ブログが作成されました")'],
-        timeout_ms=6000
+        ['a:has-text("最初のブログを書く")', 'a.button:has-text("はじめての投稿")', ':has-text("ブログが作成されました")', 'a:has-text("投稿する")', 'a:has-text("ブログ設定")'],
+        timeout_ms=LD_CREATE_SUCCESS_TIMEOUT_MS
     )
     if fr:
         return True, _extract_blog_id_from_url(page.url)
@@ -1130,13 +1159,24 @@ async def recover_atompub_key(page, livedoor_id: str | None, nickname: str, emai
 
     async def _dump_error(prefix: str):
         html = await page.content()
-        error_html = f"/tmp/{prefix}_{timestamp}.html"
-        error_png = f"/tmp/{prefix}_{timestamp}.png"
-        Path(error_html).write_text(html, encoding="utf-8")
+        base_dir = os.getenv("LD_DUMP_DIR", "/var/www/ver12-ai-posting-tool/app/static/ld_dumps")
+        try:
+            Path(base_dir).mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        error_html = f"{base_dir}/{prefix}_{timestamp}.html"
+        error_png = f"{base_dir}/{prefix}_{timestamp}.png"
+        try:
+            Path(error_html).write_text(html, encoding="utf-8")
+        except Exception:
+            pass
         try:
             await page.screenshot(path=error_png, full_page=True)
         except Exception:
-            pass
+            try:
+                await page.screenshot(path=error_png)
+            except Exception:
+                pass
         return error_html, error_png
 
     try:
@@ -1150,26 +1190,77 @@ async def recover_atompub_key(page, livedoor_id: str | None, nickname: str, emai
         await _save_shot(page, "ld_create_landing")
         logger.info("[LD-Recover] create到達: url=%s title=%s", page.url, (await page.title()))
 
-        # 2) タイトル生成 → 送信（1回生成・10案から必ず選ぶ）
+        # 2) タイトル生成（10案から必ず1つ選ぶ）
         try:
             desired_title = await generate_blog_title(site)
         except Exception:
             desired_title = "こつこつブログ"  # 最終フォールバック
 
-        ok_submit = await _set_title_and_submit(page, desired_title)
-        if not ok_submit:
-            err_html, err_png = await _dump_error("ld_create_ui_notfound")
-            return {"success": False, "error": "タイトル/送信UIが見つからない", "html_path": err_html, "png_path": err_png}
+        # 2.5) blog_id 候補（ユニーク化フォールバック）
+        from_slug = _slugify_ascii((desired_blog_id or livedoor_id or "blog"))
+        blog_id_candidates = [
+            from_slug,
+            f"{from_slug}-{random.randint(100,999)}",
+            f"{from_slug}-{int(time.time())%100000}",
+        ]
 
-        # 3) 成功判定
-        success, blog_id_from_url = await _wait_success_after_submit(page)
-        if not success:
-            await _save_shot(page, "ld_create_after_submit_failed_minimal")
-            await _log_inline_errors(page)
-            err_html, err_png = await _dump_error("ld_atompub_create_fail_minimal")
-            logger.error("[LD-Recover] ブログ作成に失敗（createに留まる）")
-            return {"success": False, "error": "blog create failed", "html_path": err_html, "png_path": err_png}
+        # 3) 直列化＋バックオフ付きで「作成→成功判定」をリトライ
+        blog_id_from_url = None
+        with pg_advisory_lock(LD_CREATE_LOCK_KEY):
+            for attempt in range(1, LD_CREATE_MAX_RETRIES + 1):
+                current_id = blog_id_candidates[min(attempt-1, len(blog_id_candidates)-1)]
+                # blog_id 入力（あれば・失敗しても致命ではない）
+                try:
+                    await _try_set_desired_blog_id(page, current_id)
+                except Exception:
+                    pass
 
+                _human_sleep()
+                ok_submit = await _set_title_and_submit(page, desired_title)
+                if not ok_submit:
+                    err_html, err_png = await _dump_error("ld_create_ui_notfound")
+                    return {"success": False, "error": "タイトル/送信UIが見つからない", "html_path": err_html, "png_path": err_png}
+
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=LD_CREATE_SUCCESS_TIMEOUT_MS)
+                except Exception:
+                    pass
+
+                success, blog_id_from_url = await _wait_success_after_submit(page)
+                if success:
+                    break  # 成功
+
+                # 失敗：ダンプ＆エラーメッセージ検査（s497 判定）
+                await _save_shot(page, "ld_create_after_submit_failed_minimal")
+                await _log_inline_errors(page)
+                html = await page.content()
+                if "ブログの作成に失敗しました" in html and "s497" in html:
+                    logger.warning("[LD-Recover] s497 detected (attempt %d/%d)", attempt, LD_CREATE_MAX_RETRIES)
+                    if attempt < LD_CREATE_MAX_RETRIES:
+                        await asyncio.sleep(_rand_backoff())
+                        await page.goto("https://livedoor.blogcms.jp/member/blog/create", wait_until="load")
+                        try:
+                            await page.wait_for_load_state("networkidle", timeout=15000)
+                        except Exception:
+                            pass
+                        continue
+                    err_html, err_png = await _dump_error("ld_atompub_create_fail_s497")
+                    logger.error("[LD-Recover] ブログ作成に失敗（s497）")
+                    return {"success": False, "error": "blog create rejected (s497)", "html_path": err_html, "png_path": err_png}
+                else:
+                    if attempt < LD_CREATE_MAX_RETRIES:
+                        await asyncio.sleep(_rand_backoff())
+                        await page.goto("https://livedoor.blogcms.jp/member/blog/create", wait_until="load")
+                        try:
+                            await page.wait_for_load_state("networkidle", timeout=15000)
+                        except Exception:
+                            pass
+                        continue
+                    err_html, err_png = await _dump_error("ld_atompub_create_fail_minimal")
+                    logger.error("[LD-Recover] ブログ作成に失敗（createに留まる）")
+                    return {"success": False, "error": "blog create failed", "html_path": err_html, "png_path": err_png}
+ 
+        # ここまでで作成成功している想定（blog_id_from_url は None の可能性あり）
         # （以下は従来どおり：blog_id抽出→設定→APIキー取得）
         blog_id = blog_id_from_url
         if not blog_id:
@@ -1250,7 +1341,12 @@ async def recover_atompub_key(page, livedoor_id: str | None, nickname: str, emai
             err_html, err_png = await _dump_error("ld_atompub_redirect_fail")
             return {"success": False, "error": "redirected to member", "html_path": err_html, "png_path": err_png}
 
-        success_png = f"/tmp/ld_atompub_page_{timestamp}.png"
+        base_dir = os.getenv("LD_DUMP_DIR", "/var/www/ver12-ai-posting-tool/app/static/ld_dumps")
+        try:
+            Path(base_dir).mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        success_png = f"{base_dir}/ld_atompub_page_{timestamp}.png"
         try:
             await page.screenshot(path=success_png, full_page=True)
         except Exception:
