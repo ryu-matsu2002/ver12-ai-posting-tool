@@ -48,6 +48,7 @@ from app.forms import EditKeywordForm
 from .forms import KeywordForm
 from app.image_utils import _is_image_url
 
+
 JST = timezone("Asia/Tokyo")
 bp = Blueprint("main", __name__)
 
@@ -1931,6 +1932,47 @@ def admin_internal_seo_index():
         per_page=per_page,
     )
 
+# ---- 概要ダッシュボード（総数 / 適用済み / キュー / 直近ラン）----
+@admin_bp.route("/admin/internal-seo/overview", methods=["GET"])
+@login_required
+def admin_internal_seo_overview():
+    if not getattr(current_user, "is_admin", False):
+        abort(403)
+
+    # 総サイト数
+    total_sites = Site.query.count()
+
+    # 1件以上 "applied" の内部リンクがあるサイト数
+    applied_sites = (
+        db.session.query(InternalLinkAction.site_id)
+        .filter(InternalLinkAction.status == "applied")
+        .distinct()
+        .count()
+    )
+
+    # ジョブキュー状況
+    rows = db.session.execute(
+        text("SELECT status, COUNT(*) AS cnt FROM internal_seo_job_queue GROUP BY status")
+    ).mappings().all()
+    queue_summary = {r["status"]: int(r["cnt"]) for r in rows}
+
+    # 直近ラン（20件）
+    recent_runs = (
+        InternalSeoRun.query
+        .order_by(InternalSeoRun.id.desc())
+        .limit(20)
+        .all()
+    )
+
+    return render_template(
+        "admin/internal_seo_overview.html",
+        total_sites=total_sites,
+        applied_sites=applied_sites,
+        queue_summary=queue_summary,
+        recent_runs=recent_runs,
+    )
+
+
 # ---- NEW: オーナー一覧（ユーザー別セクション） ----
 @admin_bp.route("/admin/internal-seo/owners", methods=["GET"])
 @login_required
@@ -2126,6 +2168,7 @@ def admin_internal_seo_list():
         abort(403)
 
     site_id = request.args.get("site_id", type=int)
+    status  = request.args.get("status")  # e.g. 'error', 'success', 'running', 'queued'
     limit = min(max(request.args.get("limit", type=int, default=50), 1), 200)
     cursor_ts_str = request.args.get("cursor_ts")
     cursor_id = request.args.get("cursor_id", type=int)
@@ -2145,6 +2188,10 @@ def admin_internal_seo_list():
 
     if site_id:
         q = q.filter(InternalSeoRun.site_id == site_id)
+    # 例: /admin/internal-seo/list?status=error で失敗ランのみ取得
+    if status:
+        # InternalSeoRun 側のステータスでフィルタ（'running'|'success'|'error' など）
+        q = q.filter(InternalSeoRun.status == status)    
 
     q = q.order_by(desc(InternalSeoRun.started_at), desc(InternalSeoRun.id))
 
@@ -2184,6 +2231,45 @@ def admin_internal_seo_list():
         next_cursor_id=next_cursor_id,
         has_more=has_more,
     ))
+
+# ---- 失敗ジョブの一括リトライ（error -> queued）※任意API ----
+@admin_bp.route("/admin/internal-seo/retry-failed", methods=["POST"])
+@login_required
+def admin_internal_seo_retry_failed():
+    """
+    internal_seo_job_queue の status='error' を 'queued' に戻す。
+    - site_id を指定すれば、そのサイトだけを対象に再投入できる。
+    - running/queued のものは対象外。
+    返却: {"ok": true, "requeued": n}
+    """
+    if not getattr(current_user, "is_admin", False):
+        return jsonify({"ok": False, "error": "forbidden"}), 403
+
+    site_id = None
+    if request.is_json:
+        site_id = (request.get_json(silent=True) or {}).get("site_id")
+    if site_id is None:
+        # フォームからのPOSTも許容
+        site_id = request.form.get("site_id", type=int)
+    try:
+        if site_id is not None:
+            res = db.session.execute(text("""
+                UPDATE internal_seo_job_queue
+                   SET status='queued', updated_at=now(), message=NULL, started_at=NULL, ended_at=NULL
+                 WHERE status='error' AND site_id=:sid
+            """), {"sid": int(site_id)})
+        else:
+            res = db.session.execute(text("""
+                UPDATE internal_seo_job_queue
+                   SET status='queued', updated_at=now(), message=NULL, started_at=NULL, ended_at=NULL
+                 WHERE status='error'
+            """))
+        db.session.commit()
+        cnt = int(res.rowcount or 0)
+        return jsonify({"ok": True, "requeued": cnt})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 # ---- 手動実行（非同期トリガ） ----
 @admin_bp.route("/admin/internal-seo/run", methods=["POST"])
@@ -2409,6 +2495,60 @@ def admin_internal_seo_actions():
         next_cursor=next_cursor,
         has_more=has_more,
     ))
+
+# ---- 全サイト一括 enqueue（まだ queued/running でないサイトのみ投入）----
+@admin_bp.route("/admin/internal-seo/enqueue-all", methods=["POST"])
+@login_required
+def admin_internal_seo_enqueue_all():
+    if not getattr(current_user, "is_admin", False):
+        return jsonify({"ok": False, "error": "forbidden"}), 403
+
+    # 受け取りパラメータ（未指定なら .env / 環境変数 → 既定値 の順）
+    def _env_int(key: str, default: int) -> int:
+        try:
+            return int(os.getenv(key, default))
+        except Exception:
+            return default
+
+    def _env_float(key: str, default: float) -> float:
+        try:
+            return float(os.getenv(key, default))
+        except Exception:
+            return default
+
+    # フロント（fetch）から JSON で任意の既定値を上書き可能
+    params = request.get_json(silent=True) or {}
+    pages         = int(params.get("pages",         _env_int("INTERNAL_SEO_PAGES", 10)))
+    per_page      = int(params.get("per_page",      _env_int("INTERNAL_SEO_PER_PAGE", 100)))
+    min_score     = float(params.get("min_score",   _env_float("INTERNAL_SEO_MIN_SCORE", 0.05)))
+    max_k         = int(params.get("max_k",         _env_int("INTERNAL_SEO_MAX_K", 80)))
+    limit_sources = int(params.get("limit_sources", _env_int("INTERNAL_SEO_LIMIT_SOURCES", 200)))
+    limit_posts   = int(params.get("limit_posts",   _env_int("INTERNAL_SEO_LIMIT_POSTS", 50)))
+    incremental   = str(params.get("incremental", "true")).lower() != "false"
+
+    # すでに queued/running のサイトは除外して INSERT ... SELECT
+    # ※ internal_seo_job_queue の必須カラムに合わせて構成
+    sql = text("""
+        INSERT INTO internal_seo_job_queue
+          (site_id, pages, per_page, min_score, max_k, limit_sources, limit_posts,
+           incremental, job_kind, status, created_at)
+        SELECT
+          s.id, :pages, :per_page, :min_score, :max_k, :limit_sources, :limit_posts,
+          :incremental, 'admin-bulk', 'queued', NOW()
+        FROM site s
+        LEFT JOIN internal_seo_job_queue q
+               ON q.site_id = s.id
+              AND q.status IN ('queued','running')
+        WHERE q.site_id IS NULL
+    """)
+    res = db.session.execute(sql, dict(
+        pages=pages, per_page=per_page, min_score=min_score, max_k=max_k,
+        limit_sources=limit_sources, limit_posts=limit_posts, incremental=incremental,
+    ))
+    db.session.commit()
+
+    inserted = res.rowcount if res.rowcount is not None else 0
+    return jsonify({"ok": True, "inserted": int(inserted)})
 
 
 
@@ -3138,6 +3278,7 @@ def purchase_history():
 from os import getenv
 from app.forms import SiteForm
 from app.models import SiteQuotaLog
+from app.services.internal_seo.enqueue import enqueue_new_site
 
 @bp.route("/<username>/sites", methods=["GET", "POST"])
 @login_required
@@ -3192,18 +3333,27 @@ def sites(username):
             flash("プラン情報が見つかりません。", "danger")
             return redirect(url_for("main.sites", username=username))
 
-        db.session.add(Site(
+        # ① まず作成してIDを確定
+        new_site = Site(
             name       = form.name.data,
             url        = form.url.data.rstrip("/"),
             username   = form.username.data,
             app_pass   = form.app_pass.data,
             user_id    = user.id,
             plan_type  = selected_plan,
-            genre_id   = form.genre_id.data if form.genre_id.data != 0 else None  # ✅
-        ))
+            genre_id   = form.genre_id.data if form.genre_id.data != 0 else None,  # ✅
+        )
+        db.session.add(new_site)
+        db.session.commit()  # ← ここで new_site.id が確定
 
-        db.session.commit()
-        flash("サイトを登録しました", "success")
+        # ② 登録直後に内部SEOをenqueue（非同期ワーカーが拾う）
+        try:
+            enqueue_new_site(new_site.id)
+            flash("サイトを登録しました（内部SEOの初期処理を開始しました）", "success")
+        except Exception as e:
+            # enqueue に失敗してもサイト登録自体は成功として扱う（既存機能を壊さない）
+            current_app.logger.exception(f"[internal-seo] enqueue failed on site create: {e}")
+            flash("サイトを登録しました（内部SEO初期処理の登録に失敗しました。後からやり直せます）", "warning")
         return redirect(url_for("main.sites", username=username))
 
     # 🔹 Stripe履歴（参考表示用）

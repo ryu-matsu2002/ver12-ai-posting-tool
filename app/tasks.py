@@ -736,6 +736,7 @@ def _internal_seo_nightly_job(app):
     """
     すべてのサイト（または ENV 指定のサイト群）について、
     “実行本体” はワーカーに任せるため、ここではキューに積むだけ。
+    既に queued/running のサイトは除外して重複投入を防ぐ。
     """
     with app.app_context():
         pages          = int(os.getenv("INTERNAL_SEO_PAGES", "10"))
@@ -750,34 +751,45 @@ def _internal_seo_nightly_job(app):
         only_ids = os.getenv("INTERNAL_SEO_SITE_IDS")
         if only_ids:
             ids = [int(x) for x in only_ids.split(",") if x.strip().isdigit()]
-            sites = Site.query.filter(Site.id.in_(ids)).all()
+            site_predicate = "WHERE s.id = ANY(:ids)"
+            params = {
+                "ids": ids,
+                "pages": pages, "per_page": per_page, "min_score": min_score, "max_k": max_k,
+                "limit_sources": limit_sources, "limit_posts": limit_posts,
+                "incremental": incremental, "job_kind": job_kind,
+            }
         else:
-            sites = Site.query.order_by(Site.id.asc()).all()
+            site_predicate = ""
+            params = {
+                "pages": pages, "per_page": per_page, "min_score": min_score, "max_k": max_k,
+                "limit_sources": limit_sources, "limit_posts": limit_posts,
+                "incremental": incremental, "job_kind": job_kind,
+            }
 
-        enq = text("""
+        # 既に queued/running のサイトは除外したうえで一括INSERT
+        sql = text(f"""
             INSERT INTO internal_seo_job_queue
               (site_id, pages, per_page, min_score, max_k, limit_sources, limit_posts,
                incremental, job_kind, status, created_at)
-            VALUES
-              (:site_id, :pages, :per_page, :min_score, :max_k, :limit_sources, :limit_posts,
-               :incremental, :job_kind, 'queued', now())
+            SELECT
+              s.id, :pages, :per_page, :min_score, :max_k, :limit_sources, :limit_posts,
+              :incremental, :job_kind, 'queued', now()
+            FROM site s
+            LEFT JOIN internal_seo_job_queue q
+                   ON q.site_id = s.id
+                  AND q.status IN ('queued','running')
+            {site_predicate}
+            WHERE q.site_id IS NULL
         """)
 
-        enqueued = 0
-        for s in sites:
-            try:
-                db.session.execute(enq, dict(
-                    site_id=s.id, pages=pages, per_page=per_page, min_score=min_score,
-                    max_k=max_k, limit_sources=limit_sources, limit_posts=limit_posts,
-                    incremental=incremental, job_kind=job_kind,
-                ))
-                enqueued += 1
-            except Exception as e:
-                current_app.logger.exception(f"[internal-seo nightly] enqueue failed site={s.id}: {e}")
-
+        res = db.session.execute(sql, params)
         db.session.commit()
+        inserted = res.rowcount or 0
+        # 参考までの総サイト数（絞り込み時は ids の長さ）
+        total_sites = len(params["ids"]) if only_ids else (db.session.execute(text("SELECT COUNT(*) FROM site")).scalar() or 0)
+
         current_app.logger.info(
-            f"[internal-seo nightly] enqueued {enqueued}/{len(sites)} jobs "
+            f"[internal-seo nightly] enqueued {inserted}/{total_sites} "
             f"params={{pages:{pages}, per_page:{per_page}, min_score:{min_score}, "
             f"max_k:{max_k}, limit_sources:{limit_sources}, limit_posts:{limit_posts}, "
             f"incremental:{incremental}, job_kind:{job_kind}}}"

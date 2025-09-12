@@ -29,6 +29,9 @@
   <div class="d-flex align-items-center mb-3">
     <h2 class="h4 mb-0">🔧 内部SEO 管理</h2>
     <div class="ms-auto d-flex align-items-center gap-2">
+      <!-- ✅ 追加：全サイト一括 enqueue ボタン -->
+      <button id="enqueueAllBtn" class="btn btn-sm btn-primary">全サイトをキューに登録</button>
+      <span id="enqueueAllOut" class="mini-label text-muted"></span>
       <button id="capacityRefresh" class="btn btn-sm btn-ghost">再計測</button>
     </div>
   </div>
@@ -206,6 +209,51 @@ async function refreshCapacity(){
   }
 }
 setInterval(refreshCapacity,15000);
+
+// ====================== 全サイト一括 enqueue ======================
+async function enqueueAll(){
+  const btn = document.getElementById('enqueueAllBtn');
+  const out = document.getElementById('enqueueAllOut');
+
+  // 送信パラメータ（高度な設定から拾う）
+  const payload = {
+    pages:         Number(document.getElementById('batchPages')?.value || 10),
+    per_page:      Number(document.getElementById('batchPerPage')?.value || 100),
+    min_score:     Number(document.getElementById('batchMinScore')?.value || 0.05),
+    max_k:         Number(document.getElementById('batchMaxK')?.value || 80),
+    limit_sources: Number(document.getElementById('batchLimitSources')?.value || 200),
+    limit_posts:   Number(document.getElementById('batchLimitPosts')?.value || 50),
+    incremental:   String(document.getElementById('batchIncremental')?.value || 'true')
+  };
+
+  btn.disabled = true; out.textContent = '投入中…';
+  try{
+    const res = await fetch('/admin/internal-seo/enqueue-all', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        // Flask-WTF 互換のCSRFヘッダ（あなたの実装に合わせて片方/両方使用）
+        'X-CSRFToken': getCsrf(),
+        'X-CSRF-Token': getCsrf(),
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      body: JSON.stringify(payload)
+    });
+    const json = await res.json();
+    if(json.ok){
+      out.textContent = `登録数: ${json.inserted} 件`;
+      // 余力とキュー表示の刷新に備えて即時再計測
+      refreshCapacity();
+    }else{
+      out.textContent = `失敗: ${json.error || 'unknown error'}`;
+    }
+  }catch(e){
+    out.textContent = '通信エラー: ' + e.message;
+  }finally{
+    btn.disabled = false;
+  }
+}
 
 // ====================== Owners (accordion) ======================
 /**  ownerセクションのテンプレ    */
@@ -439,6 +487,9 @@ document.addEventListener('DOMContentLoaded', ()=>{
   // capacity
   refreshCapacity();
   document.getElementById('capacityRefresh').addEventListener('click', refreshCapacity);
+
+  // ✅ 全サイト一括 enqueue
+  document.getElementById('enqueueAllBtn').addEventListener('click', enqueueAll);
 
   // owners & sites
   loadOwners();

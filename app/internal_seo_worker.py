@@ -1,4 +1,4 @@
-# app/tasks/internal_seo_worker.py
+# app/internal_seo_worker.py
 import os
 import time
 import signal
@@ -87,7 +87,7 @@ def _mark_error(job_id: int, err: str):
     with db.session.begin():
         db.session.execute(text("""
             UPDATE internal_seo_job_queue
-               SET status='error', error=:err, ended_at=now()
+               SET status='error', message=:err, ended_at=now()
              WHERE id=:id
         """), {"id": job_id, "err": err})
 

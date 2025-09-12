@@ -1,0 +1,220 @@
+{% extends "base_admin.html" %}
+{% block title %}内部SEO 概要{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4 internal-seo-overview">
+
+  <!-- CSRF（任意：POSTで使用） -->
+  <meta name="csrf-token" content="{{ csrf_token() if csrf_token is defined }}">
+
+  <style>
+    .overview-card{border:1px solid #e8eef5;background:#fff;border-radius:.75rem;box-shadow:0 2px 8px rgba(16,24,40,.06)}
+    .kpi{font-weight:700;font-size:1.6rem}
+    .muted{color:#6c757d}
+    .pill{display:inline-block;padding:.2rem .55rem;border-radius:999px;font-size:.75rem;border:1px solid #e5e9ef;background:#f8fafc}
+    .table-fixed{table-layout:fixed}
+    .badge-cap{font-weight:500}
+    .mini{font-size:.85rem}
+  </style>
+
+  <!-- ヘッダー -->
+  <div class="d-flex align-items-center mb-3">
+    <h2 class="h4 mb-0">📊 内部SEO 概要</h2>
+    <div class="ms-auto d-flex gap-2">
+      <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin.admin_internal_seo_index') }}">内部SEO 管理へ</a>
+    </div>
+  </div>
+
+  <!-- KPI 行 -->
+  {% set qs = queue_summary or {} %}
+  <div class="row g-3 mb-3">
+    <div class="col-12 col-md-3">
+      <div class="overview-card p-3">
+        <div class="muted">登録サイト総数</div>
+        <div class="kpi" id="kpiTotal">{{ total_sites or 0 }}</div>
+      </div>
+    </div>
+    <div class="col-12 col-md-3">
+      <div class="overview-card p-3">
+        <div class="muted">内部リンク反映あり（1件以上）</div>
+        <div class="kpi" id="kpiApplied">{{ applied_sites or 0 }}</div>
+      </div>
+    </div>
+    <div class="col-12 col-md-3">
+      <div class="overview-card p-3">
+        <div class="muted">失敗ジョブ数</div>
+        <div class="d-flex align-items-center">
+          <div class="kpi me-2" id="kpiFailed">{{ qs.get('error', 0) }}</div>
+          <span class="text-muted">件</span>
+        </div>
+        <div class="mt-2 d-flex align-items-center gap-2">
+          <button id="retryFailedBtn" class="btn btn-sm btn-danger" {% if qs.get('error',0)==0 %}disabled{% endif %}>
+            失敗ジョブを再実行
+          </button>
+          <span id="retryFailedOut" class="mini text-muted"></span>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-3">
+      <div class="overview-card p-3">
+        <div class="muted mb-1">ジョブキュー内訳</div>
+        <div class="d-flex flex-wrap gap-2">
+          <span class="pill">queued: <strong id="qsQueued">{{ qs.get('queued', 0) }}</strong></span>
+          <span class="pill">running: <strong id="qsRunning">{{ qs.get('running', 0) }}</strong></span>
+          <span class="pill">done:   <strong id="qsDone">{{ qs.get('done', 0) }}</strong></span>
+          <span class="pill">error:  <strong id="qsError">{{ qs.get('error', 0) }}</strong></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 実行余力（APIで最新値を取得） -->
+  <div class="overview-card p-3 mb-4">
+    <div class="d-flex align-items-center mb-2">
+      <div class="fw-semibold">⚡ 現在の処理余力</div>
+      <span class="badge bg-secondary ms-2 badge-cap" id="capText">計測中…</span>
+      <button class="btn btn-sm btn-outline-secondary ms-auto" id="capRefresh">再計測</button>
+    </div>
+    <div class="progress" style="height:12px">
+      <div class="progress-bar" id="capBar" style="width:0%">0%</div>
+    </div>
+  </div>
+
+  <!-- 直近の実行履歴 -->
+  <div class="overview-card p-0">
+    <div class="p-3 d-flex align-items-center">
+      <div class="fw-semibold">🗒️ 直近の実行（20件）</div>
+      <a class="btn btn-sm btn-outline-primary ms-auto" href="{{ url_for('admin.admin_internal_seo_index') }}">詳細へ</a>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0 table-fixed">
+        <thead class="table-light">
+          <tr>
+            <th style="width:80px">Run ID</th>
+            <th style="width:80px">Site</th>
+            <th style="width:110px">Status</th>
+            <th style="width:140px">Kind</th>
+            <th>Started</th>
+            <th>Ended</th>
+            <th style="width:120px">Duration(ms)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if recent_runs %}
+            {% for r in recent_runs %}
+              <tr>
+                <td>{{ r.id }}</td>
+                <td>{{ r.site_id }}</td>
+                <td>
+                  {% if r.status == 'success' %}
+                    <span class="badge bg-success">success</span>
+                  {% elif r.status == 'running' %}
+                    <span class="badge bg-info text-dark">running</span>
+                  {% elif r.status == 'error' %}
+                    <span class="badge bg-danger">error</span>
+                  {% else %}
+                    <span class="badge bg-secondary">{{ r.status }}</span>
+                  {% endif %}
+                </td>
+                <td class="text-muted">{{ r.job_kind or '-' }}</td>
+                <td class="mini">{{ r.started_at.isoformat() if r.started_at else '-' }}</td>
+                <td class="mini">{{ r.ended_at.isoformat() if r.ended_at else '-' }}</td>
+                <td>{{ r.duration_ms or '-' }}</td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td colspan="7" class="text-muted">履歴はありません</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+function fmtPct(n){ return Math.max(0, Math.min(100, Math.round(n))) }
+function getCsrf(){ return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '' }
+
+async function refreshCapacity(){
+  const bar = document.getElementById('capBar');
+  const text = document.getElementById('capText');
+  try{
+    const res = await fetch('/admin/internal-seo/capacity', {headers:{'Accept':'application/json'}});
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const c = await res.json();
+    const max = (c.max_parallel ?? 1);
+    const run = (c.running ?? 0);
+    const q   = (c.queued ?? 0);
+    const avail = (c.available ?? Math.max(0, max-run));
+    const pct = fmtPct(100 * run / Math.max(1, max));
+    bar.style.width = pct + '%';
+    bar.textContent = pct + '%';
+    bar.classList.remove('bg-success','bg-warning','bg-danger','bg-secondary');
+    if (pct <= 50) bar.classList.add('bg-success');
+    else if (pct <= 80) bar.classList.add('bg-warning');
+    else bar.classList.add('bg-danger');
+    text.textContent = `max:${max} / running:${run} / queued:${q} / available:${avail} / suggest:${c.suggest_batch_size ?? '-'}`;
+    text.classList.remove('bg-secondary');
+    text.classList.add('bg-dark-subtle');
+  }catch(e){
+    bar.style.width = '0%';
+    bar.textContent = 'N/A';
+    bar.classList.remove('bg-success','bg-warning','bg-danger');
+    bar.classList.add('bg-secondary');
+    text.textContent = '取得失敗: ' + e.message;
+    text.classList.remove('bg-dark-subtle');
+    text.classList.add('bg-secondary');
+  }
+}
+
+async function retryFailedJobs(){
+  const btn = document.getElementById('retryFailedBtn');
+  const out = document.getElementById('retryFailedOut');
+  const kpiFailed = document.getElementById('kpiFailed');
+  const qsError = document.getElementById('qsError');
+
+  btn.disabled = true;
+  out.textContent = '再投入中…';
+  try{
+    const res = await fetch('/admin/internal-seo/retry-failed', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCsrf(),
+        'X-CSRF-Token': getCsrf(),
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      body: JSON.stringify({})
+    });
+    const json = await res.json();
+    if(json.ok){
+      out.textContent = `再投入: ${json.requeued} 件`;
+      // 失敗ジョブはキューへ戻った想定なので、画面上の error 表示を 0 に更新
+      if (kpiFailed) kpiFailed.textContent = '0';
+      if (qsError) qsError.textContent = '0';
+    }else{
+      out.textContent = `失敗: ${json.error || 'unknown'}`;
+    }
+  }catch(e){
+    out.textContent = '通信エラー: ' + e.message;
+  }finally{
+    // 0 件なら引き続き disabled のままでもOK
+    const currentFailed = Number(kpiFailed?.textContent || '0');
+    btn.disabled = currentFailed <= 0;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', ()=>{
+  refreshCapacity();
+  document.getElementById('capRefresh').addEventListener('click', refreshCapacity);
+
+  const retryBtn = document.getElementById('retryFailedBtn');
+  if (retryBtn) retryBtn.addEventListener('click', retryFailedJobs);
+});
+</script>
+{% endblock %}

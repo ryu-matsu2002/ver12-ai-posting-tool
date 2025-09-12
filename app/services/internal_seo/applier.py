@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from html import unescape
 from typing import Dict, List, Optional, Tuple
+import os
+import time
+import random
 
 from app import db
 from app.models import (
@@ -437,6 +440,26 @@ def apply_actions_for_site(site_id: int, limit_posts: Optional[int] = 50, dry_ru
         total["swapped"] += res.swapped
         total["skipped"] += res.skipped
         total["processed_posts"] += 1
+
+        
+        # --- レート制御：WP REST API 負荷保護 ---
+        if not dry_run:
+            try:
+                # 1分あたりの最大件数（例: 120 → 0.5秒間隔）
+                per_min = int(os.getenv("INTERNAL_SEO_RATE_LIMIT_PER_MIN", "0"))
+                if per_min > 0:
+                    base_sleep = 60.0 / max(1, per_min)
+                else:
+                    base_sleep = 0.5  # デフォルト最低500ms
+
+                # 200〜500ms は最低保証
+                base_sleep = max(base_sleep, 0.2)
+
+                # ±30% のランダム揺らぎを加える
+                sleep_time = base_sleep * random.uniform(0.7, 1.3)
+                time.sleep(sleep_time)
+            except Exception as e:
+                logger.warning(f"[Applier] rate-limit sleep skipped due to error: {e}")
 
     logger.info("[Applier] site=%s result=%s", site_id, total)
     return total
