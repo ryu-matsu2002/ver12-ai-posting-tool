@@ -1,7 +1,15 @@
 # app/services/internal_seo/enqueue.py
 import os
+from typing import Optional, Dict, Any
 from sqlalchemy import text
 from app import db
+from app.models import Site
+try:
+    from flask import current_app  # ログ出力に使う（任意）
+except Exception:
+    current_app = None  # type: ignore
+
+__all__ = ["enqueue_new_site", "enqueue_internal_seo_for_site"]
 
 def enqueue_internal_seo_for_site(site_id: int, kind: str = "new-site") -> None:
     """
@@ -19,6 +27,18 @@ def enqueue_internal_seo_for_site(site_id: int, kind: str = "new-site") -> None:
         "incremental": os.getenv("INTERNAL_SEO_INCREMENTAL", "1") == "1",
         "job_kind": kind,
     }
+
+    # 既存 queued/running があれば重複投入しない
+    exists = db.session.execute(text("""
+        SELECT 1
+          FROM internal_seo_job_queue
+         WHERE site_id = :sid
+           AND status IN ('queued','running')
+         LIMIT 1
+    """), {"sid": site_id}).first()
+    if exists:
+        return
+
     db.session.execute(text("""
         INSERT INTO internal_seo_job_queue
           (site_id, pages, per_page, min_score, max_k, limit_sources, limit_posts,
@@ -29,21 +49,7 @@ def enqueue_internal_seo_for_site(site_id: int, kind: str = "new-site") -> None:
     """), params)
     db.session.commit()
 
-# --- appended: provide enqueue_new_site API for internal SEO ---
-
-from __future__ import annotations
-import os
-from typing import Optional, Dict, Any
-from sqlalchemy import text
-try:
-    from flask import current_app  # ログ出力に使う（コンテキスト外でも安全に）
-except Exception:
-    current_app = None  # type: ignore
-
-from app import db
-from app.models import Site
-
-__all__ = ["enqueue_new_site"]
+# --- provide enqueue_new_site API for internal SEO ---
 
 def enqueue_new_site(site_id: int,
                      pages: Optional[int] = None,
