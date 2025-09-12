@@ -579,106 +579,6 @@ def _craft_blog_title(site) -> str:
     return fallbacks[_deterministic_index(salt, len(fallbacks))][:48]
 
 
-
-# ─────────────────────────────────────────────
-# blog_id スラッグ生成・入力欄設定ヘルパ
-# ─────────────────────────────────────────────
-def _slugify_ascii(s: str) -> str:
-    """日本語/記号混じり → 半角英数とハイフンの短いスラッグ（先頭英字、長さ20程度）"""
-    try:
-        from unidecode import unidecode
-    except Exception:
-        def unidecode(x): return x
-    if not s:
-        s = "blog"
-    s = unidecode(str(s)).lower()
-    s = s.replace("&", " and ")
-    s = _re.sub(r"[^a-z0-9]+", "-", s)
-    s = _re.sub(r"-{2,}", "-", s).strip("-")
-    if s and s[0].isdigit():
-        s = "blog-" + s
-    if not s:
-        s = "blog"
-    s = s[:20]
-    if len(s) < 3:
-        s = (s + "-blog")[:20]
-    return s
-
-
-async def _try_set_desired_blog_id(page, desired: str) -> bool:
-    """
-    ブログ作成画面で希望 blog_id / サブドメインを入力する。
-    画面ごとの違いに備えて複数セレクタを順に試す。
-    成功/入力欄が見つからない場合は True、明確な失敗で False を返す。
-    """
-    # まず従来セレクタ（ID型）
-    id_selectors = [
-        '#blogId',
-        'input[name="blog_id"]',
-        'input[name="livedoor_blog_id"]',
-        'input[name="blogId"]',
-        'input#livedoor_blog_id',
-        'input[placeholder*="ブログURL"]',
-    ]
-    try:
-        for sel in id_selectors:
-            try:
-                if await page.locator(sel).count() > 0:
-                    await page.fill(sel, desired)
-                    return True
-            except Exception:
-                continue
-    except Exception:
-        pass
-
-    # サブドメイン型（今回ヒットしているやつ）
-    try:
-        sub_loc = None
-        if await page.locator('#sub').count() > 0:
-            sub_loc = page.locator('#sub').first
-        elif await page.locator('input[name="sub"]').count() > 0:
-            sub_loc = page.locator('input[name="sub"]').first
-
-        if sub_loc:
-            # base があれば最初の有効optionを選ぶ（既定でOKならそのまま）
-            try:
-                if await page.locator('#base').count() > 0:
-                    base = page.locator('#base').first
-                    # 選択済みでも change を発火させ domaincheck を走らせる
-                    await base.evaluate("(el)=>el.dispatchEvent(new Event('change', {bubbles:true}))")
-            except Exception:
-                pass
-
-            # 入力とイベント発火（htmxのdomaincheck用）
-            try:
-                await sub_loc.fill("")
-            except Exception:
-                try:
-                    await sub_loc.click()
-                    await sub_loc.press("Control+A")
-                    await sub_loc.press("Delete")
-                except Exception:
-                    pass
-            await sub_loc.fill(desired)
-            try:
-                await sub_loc.evaluate("(el)=>el.dispatchEvent(new Event('keyup', {bubbles:true}))")
-            except Exception:
-                pass
-
-            # domaincheck の結果を短時間待つ（OK/NGはこの後のリトライ側で判定）
-            try:
-                await page.wait_for_timeout(1200)  # htmx domaincheck 余裕を持たせる
-            except Exception:
-                pass
-            return True
-    except Exception:
-        pass
-
-    # どれも見つからない → 致命ではない
-    return True
-
-
-
 # ─────────────────────────────────────────────
 # 追加：フレーム横断・同意チェック・エラーテキスト採取
 # ─────────────────────────────────────────────
@@ -1196,24 +1096,8 @@ async def recover_atompub_key(page, livedoor_id: str | None, nickname: str, emai
         except Exception:
             desired_title = "こつこつブログ"  # 最終フォールバック
 
-        # 2.5) blog_id 候補（ユニーク化フォールバック）
-        from_slug = _slugify_ascii((desired_blog_id or livedoor_id or "blog"))
-        blog_id_candidates = [
-            from_slug,
-            f"{from_slug}-{random.randint(100,999)}",
-            f"{from_slug}-{int(time.time())%100000}",
-        ]
-
-        # 3) 直列化＋バックオフ付きで「作成→成功判定」をリトライ
-        blog_id_from_url = None
         with pg_advisory_lock(LD_CREATE_LOCK_KEY):
             for attempt in range(1, LD_CREATE_MAX_RETRIES + 1):
-                current_id = blog_id_candidates[min(attempt-1, len(blog_id_candidates)-1)]
-                # blog_id 入力（あれば・失敗しても致命ではない）
-                try:
-                    await _try_set_desired_blog_id(page, current_id)
-                except Exception:
-                    pass
 
                 _human_sleep()
                 ok_submit = await _set_title_and_submit(page, desired_title)
