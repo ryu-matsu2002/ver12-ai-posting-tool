@@ -6,6 +6,7 @@ from sqlalchemy import DateTime
 from . import db
 from app import db
 from sqlalchemy import Text
+
 try:
     # Postgres なら JSONB に自動マッピングされます（SQLAlchemy の JSON 型）
     from sqlalchemy import JSON as SA_JSON
@@ -619,3 +620,56 @@ class InternalSeoRun(db.Model):
     __table_args__ = (
         db.Index("ix_internal_seo_runs_site_status_started", "site_id", "status", "started_at"),
     )    
+
+
+# ──── NEW: 外部サインアップ一時タスク（方式A用・追加のみ） ────
+class ExternalSignupTask(db.Model):
+    """
+    方式A（ローカル・ヘルパー）での“アカウント作成タスク”を一時的に保持するテーブル。
+    既存機能に影響を与えないよう **追加のみ**。既存モデルは変更しない。
+    """
+    __tablename__ = "external_signup_tasks"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # ワンタイムトークン（短TTL・ユニーク）
+    token = db.Column(db.String(64), unique=True, nullable=False, index=True)
+
+    # 実行主体のひも付け（監査と多ユーザー環境のため）
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("site.id"), nullable=False, index=True)
+
+    # プロバイダ（例: 'livedoor'）—将来拡張に備える
+    provider = db.Column(db.String(32), nullable=False, default="livedoor", index=True)
+
+    # 入力パラメータ（希望 blog_id、ニックネーム等をJSONで保持）
+    payload = db.Column(db.JSON, nullable=True)
+
+    # サーバー側で取得した検証URLを短時間だけ保持（ヘルパーへ渡す）
+    verification_url = db.Column(db.Text, nullable=True)
+
+    # 結果（blog_id, api_key, endpoint, public_url など）をJSONで受け取り保存
+    result = db.Column(db.JSON, nullable=True)
+
+    # ステータス：pending / running / done / failed / expired
+    status = db.Column(db.String(16), nullable=False, default="pending", index=True)
+
+    # 失敗内容などの短いメッセージ
+    message = db.Column(db.Text, nullable=True)
+
+    # 期限（TTL切れで expired 扱いにする）
+    expires_at = db.Column(DateTime(timezone=True), nullable=False)
+
+    # 監査用タイムスタンプ
+    created_at = db.Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, index=True)
+    updated_at = db.Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # 参照
+    user = db.relationship("User", backref=db.backref("external_signup_tasks", lazy="dynamic"))
+    site = db.relationship("Site", backref=db.backref("external_signup_tasks", lazy="dynamic"))
+
+    def is_expired(self) -> bool:
+        return datetime.utcnow() >= (self.expires_at if self.expires_at else datetime.utcnow())
+
+    def __repr__(self) -> str:
+        return f"<ExternalSignupTask token={self.token} status={self.status} provider={self.provider}>"

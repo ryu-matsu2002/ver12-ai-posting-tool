@@ -98,6 +98,9 @@ def create_app() -> Flask:
         app.register_blueprint(admin_bp)
         app.register_blueprint(stripe_webhook_bp)
 
+        from .blueprints.signup_tasks import bp as signup_tasks_bp
+        app.register_blueprint(signup_tasks_bp)
+
         app.jinja_env.filters["comma"] = comma_filter
         from . import models
 
