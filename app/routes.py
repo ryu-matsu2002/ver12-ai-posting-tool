@@ -6332,15 +6332,22 @@ def external_seo_callback():
             st.setdefault("site_id", site_id)
             session["captcha_status"] = st
 
-    return jsonify({"ok": True})
+    # この時点でOKレスポンスは作っておく（後で返す）
+    resp = jsonify({"ok": True})
 
-    # --- ここから：完了/失敗を検知したらセマフォ解放 & セッショントークン破棄 ---
+    # --- 完了/失敗を検知したらセマフォ解放 & セッショントークン破棄 ---
     try:
         step_l = (step or "").lower()
+        prog_i = None
+        if isinstance(progress, (int, float)):
+            try:
+                prog_i = int(progress)
+            except Exception:
+                prog_i = None
         should_release = (
-            step_l in {"apikey_received", "apiKey_received".lower(), "done", "complete", "failed", "error"}
+            step_l in {"apikey_received", "done", "complete", "failed", "error"}
             or bool(api_key)
-            or (isinstance(progress, (int, float)) and int(progress) >= 100)
+            or (prog_i is not None and prog_i >= 100)
         )
         if should_release and tok:
             try:
@@ -6354,6 +6361,62 @@ def external_seo_callback():
     except Exception:
         pass
 
-    return jsonify({"ok": True})
+    return resp
 
+# --- 外部SEO: クライアントヘルパーがCAPTCHA画像をアップロードする受け口 ---
+@bp.post("/external-seo/prepare_captcha")
+@login_required
+def external_seo_prepare_captcha_upload():
+    """
+    クライアント（127.0.0.1のヘルパー）が撮ったCAPTCHA画像をアップロード。
+    期待: multipart/form-data で file, token, site_id, account_id を受け取る
+    返却: { ok: True, captcha_url: "https://.../static/captchas/xxx.png" }
+    """
+    from flask import request, session, jsonify, url_for
+    from pathlib import Path
+    from uuid import uuid4
+    import time as _time
+    import os
 
+    # tokenは /external-seo/start で発行・ブラウザに紐付いた extseo_token
+    tok = (request.form.get("token") or "").strip()
+    if not tok:
+        return jsonify({"ok": False, "error": "missing token"}), 400
+
+    # 参考: ブラウザセッション側に extseo_token があれば突き合わせる（ズレても致命ではない）
+    try:
+        if session.get("extseo_token") and session["extseo_token"] != tok:
+            current_app.logger.warning("[EXTSEO-UP] token mismatch (session present but different)")
+    except Exception:
+        pass
+
+    site_id = request.form.get("site_id", type=int)
+    account_id = request.form.get("account_id", type=int)
+
+    f = request.files.get("file")
+    if not f or not getattr(f, "filename", ""):
+        return jsonify({"ok": False, "error": "no file"}), 400
+
+    # 保存先
+    capt_dir = Path("app/static/captchas")
+    capt_dir.mkdir(parents=True, exist_ok=True)
+    ts = _time.strftime("%Y%m%d_%H%M%S")
+    name = f"captcha_{ts}_{uuid4().hex[:8]}.png"
+    save_path = capt_dir / name
+    f.save(str(save_path))
+
+    # 公開URL
+    captcha_url = url_for("static", filename=f"captchas/{name}", _external=True) + f"?v={int(_time.time())}"
+
+    # UIポーリング用の軽い状態をセッションに積む（見えない環境なら無視されるだけ）
+    st = dict(session.get("captcha_status") or {})
+    st.update({
+        "step": "captcha_shown",
+        "progress": max(15, int(st.get("progress") or 0)),
+        "captcha_url": captcha_url,
+        "site_id": site_id or st.get("site_id"),
+        "account_id": account_id or st.get("account_id"),
+    })
+    session["captcha_status"] = st
+
+    return jsonify({"ok": True, "captcha_url": captcha_url})

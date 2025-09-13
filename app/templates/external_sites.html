@@ -782,18 +782,18 @@
   /* ================== 方式A: ローカル・ヘルパー設定 ================== */
   const SIGNUP_VIA_CLIENT_FLAG = JSON.parse(`{{ SIGNUP_VIA_CLIENT | default(false) | tojson }}`);
   const HELPER_ORIGIN = 'http://127.0.0.1:17653';
-  const HELPER_PING = HELPER_ORIGIN + '/ping';
+  const HELPER_PING   = HELPER_ORIGIN + '/ping';
 
   // ヘルパーに “開始” を投げっぱなしで通知（失敗してもUIは続行）
   async function helperStart(payload){
     try{
       await fetch(HELPER_ORIGIN + '/start', {
         method: 'POST',
-        mode: 'no-cors',
+        mode: 'cors',                 // ← no-corsをやめてCORSで素直に送る
         credentials: 'omit',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload || {})
-      });
+      }); // 204/200 どちらでもOK
     }catch(_){}
   }
 
@@ -821,10 +821,9 @@
     const ctrl = new AbortController();
     const to = setTimeout(()=>ctrl.abort(), timeoutMs);
     try{
-      const res = await fetch(HELPER_PING, { signal: ctrl.signal, cache:'no-store', credentials:'omit', mode:'no-cors' });
+      const res = await fetch(HELPER_PING, { signal: ctrl.signal, cache:'no-store', credentials:'omit', mode:'cors' });
       clearTimeout(to);
-      // mode:no-cors だとopaqueになるので、ネットワーク成功だけ見ればOK
-      return true;
+      return !!res && (res.ok || res.status === 200);
     }catch(_){
       clearTimeout(to);
       return false;
