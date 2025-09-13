@@ -306,7 +306,62 @@
   }
   /* ボタン＋注記を常に1行で横並びに */
   .add-row{ display:flex; align-items:center; gap:12px; flex-wrap:nowrap; white-space:nowrap; }
-  .add-row > *{ white-space:nowrap; }
+
+  /* ========== 方式A: ヘルパーポップアップ（大きく中央表示） ========== */
+  #helperModal.backdrop {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.55);
+    display: none; align-items: center; justify-content: center;
+    z-index: 1000;
+  }
+  #helperModal.backdrop.is-open { display: flex; }
+  #helperModal .panel {
+    width: min(860px, 92vw);
+    max-height: 86vh;
+    overflow: auto;
+    background: linear-gradient(135deg, #5b2f7f, #7b49a3);
+    color: #fff;
+    border: 1px solid var(--edge);
+    border-radius: 20px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.45);
+    padding: 26px 28px;
+  }
+  #helperModal .panel h2 {
+    font-size: 1.6rem; font-weight: 900; margin: 0 0 8px;
+  }
+  #helperModal .panel p.lead {
+    font-size: 1rem; opacity: .95; margin: 0 0 18px;
+  }
+  #helperModal .dl-area {
+    display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0 18px;
+  }
+  #helperModal .dl-area a {
+    display: inline-flex; align-items: center; gap: .5rem;
+    padding: .75rem 1.1rem; border-radius: .8rem;
+    font-weight: 800; background: #2563EB; border: 1px solid #1D4ED8; color: #fff;
+    text-decoration: none;
+  }
+  #helperModal .dl-area a.secondary {
+    background: rgba(255,255,255,.10); border-color: rgba(255,255,255,.25);
+  }
+  #helperModal .tip {
+    font-size: .9rem; opacity: .9;
+    background: rgba(0,0,0,.18); border: 1px dashed rgba(255,255,255,.25);
+    padding: 10px 12px; border-radius: 10px;
+  }
+  #helperModal .footer {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px;
+  }
+  #helperModal .progress {
+    height: 8px; background: rgba(255,255,255,.15); border-radius: 999px; overflow: hidden; flex: 1;
+  }
+  #helperModal .progress > div {
+    height: 8px; width: 0%; background: #22C55E; transition: width .25s ease;
+  }
+  #helperModal .close-btn {
+    background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.25); color: #fff;
+    padding: .55rem .9rem; border-radius: .7rem; font-weight: 800;
+  }
 </style>
 
 {% set ALLOW_MULTI_BLOG_USER_IDS = [1, 2, 5] %}
@@ -666,6 +721,35 @@
   </div>
 </div>
 
+<!-- ===================== 方式A: ヘルパーポップアップ（大きく中央） ===================== -->
+<div id="helperModal" class="backdrop">
+  <div class="panel">
+    <h2>アカウント作成ヘルパーのセットアップ</h2>
+    <p class="lead">
+      外部SEOの<b>アカウント作成</b>を安定させるため、<b>この端末で一度だけ</b>ヘルパーをインストール＆起動してください。<br>
+      ヘルパーが起動すると、この画面は自動で閉じて続行します。
+    </p>
+
+    <div class="dl-area">
+      <!-- OS自動判定で primary / secondary を切替（JSで仕上げ） -->
+      <a id="dlWin" href="/static/downloads/signup_helper_win.exe">Windows版をダウンロード</a>
+      <a id="dlMac" href="/static/downloads/signup_helper_mac.dmg" class="secondary">macOS版をダウンロード</a>
+      <a id="dlLin" href="/static/downloads/signup_helper_linux.tar.gz" class="secondary">Linux版をダウンロード</a>
+    </div>
+
+    <div class="tip">
+      ダウンロード後にファイルを開くだけで起動します。セキュリティダイアログが出る場合は、信頼して実行を許可してください。<br>
+      起動すると、ブラウザ（Chrome/Chromium）が自動で立ち上がることがあります。
+    </div>
+
+    <div class="footer">
+      <div style="min-width:180px; font-weight:800; opacity:.9;">起動を待機中…</div>
+      <div class="progress" aria-hidden="true"><div id="helperProg"></div></div>
+      <button type="button" class="close-btn" onclick="closeHelperModal()">閉じる</button>
+    </div>
+  </div>
+</div>
+
 <!-- ===================== CAPTCHAモーダル & Toast（既存） ===================== -->
 <div id="captchaModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
   <div class="bg-white p-6 rounded-2xl shadow-lg w-[420px] max-w-[92vw] relative">
@@ -695,6 +779,90 @@
 
 {% block scripts %}
 <script>
+  /* ================== 方式A: ローカル・ヘルパー設定 ================== */
+  const SIGNUP_VIA_CLIENT_FLAG = JSON.parse(`{{ SIGNUP_VIA_CLIENT | default(false) | tojson }}`);
+  const HELPER_ORIGIN = 'http://127.0.0.1:17653';
+  const HELPER_PING = HELPER_ORIGIN + '/ping';
+
+  function osDetect(){
+    const ua = navigator.userAgent || '';
+    return {
+      isWin: /Windows|Win64|WOW64/i.test(ua),
+      isMac: /Macintosh|Mac OS X/i.test(ua),
+      isLin: /Linux|X11/i.test(ua) && !/Android|CrOS/i.test(ua),
+    };
+  }
+  function setupHelperDlButtons(){
+    const {isWin,isMac,isLin} = osDetect();
+    const win = document.getElementById('dlWin');
+    const mac = document.getElementById('dlMac');
+    const lin = document.getElementById('dlLin');
+    if(!win||!mac||!lin) return;
+    // primary/secondary を切替
+    if(isMac){ mac.classList.remove('secondary'); win.classList.add('secondary'); }
+    else if(isLin){ lin.classList.remove('secondary'); win.classList.add('secondary'); mac.classList.add('secondary'); }
+    else { /* 既定: Windowsがprimary */ }
+  }
+
+  async function pingHelper(timeoutMs=400){
+    const ctrl = new AbortController();
+    const to = setTimeout(()=>ctrl.abort(), timeoutMs);
+    try{
+      const res = await fetch(HELPER_PING, { signal: ctrl.signal, cache:'no-store', credentials:'omit', mode:'no-cors' });
+      clearTimeout(to);
+      // mode:no-cors だとopaqueになるので、ネットワーク成功だけ見ればOK
+      return true;
+    }catch(_){
+      clearTimeout(to);
+      return false;
+    }
+  }
+
+  let helperPollTimer=null, helperProgress=0;
+  function openHelperModal(){
+    setupHelperDlButtons();
+    helperProgress = 0;
+    document.getElementById('helperProg').style.width = '0%';
+    document.getElementById('helperModal').classList.add('is-open');
+    // 1秒ごとに /ping 再試行して、繋がったら自動クローズ
+    helperPollTimer && clearInterval(helperPollTimer);
+    helperPollTimer = setInterval(async ()=>{
+      helperProgress = Math.min(helperProgress + 7, 96);
+      document.getElementById('helperProg').style.width = helperProgress + '%';
+      const ok = await pingHelper(400);
+      if(ok){
+        document.getElementById('helperProg').style.width = '100%';
+        closeHelperModal();
+        localStorage.setItem('signup_helper_installed', '1'); // デバイス記憶（目安）
+      }
+    }, 1000);
+  }
+  function closeHelperModal(){
+    document.getElementById('helperModal').classList.remove('is-open');
+    helperPollTimer && clearInterval(helperPollTimer);
+    helperPollTimer = null;
+  }
+  async function ensureHelperReady(continueFn){
+    if(!SIGNUP_VIA_CLIENT){ return continueFn && continueFn(); }
+    // 既に起動しているか高速チェック
+    if(await pingHelper(350)){ return continueFn && continueFn(); }
+    // 起動していなければ大きなポップアップを出す
+    openHelperModal();
+    // ポップアップは自動クローズされる。クローズをフックして続行する。
+    const obs = new MutationObserver(()=>{
+      const open = document.getElementById('helperModal').classList.contains('is-open');
+      if(!open){
+        obs.disconnect();
+        // クローズ後、もう一度pingしてOKなら続行
+        pingHelper(400).then(ok=>{
+          if(ok){ continueFn && continueFn(); }
+          else{ alert('ヘルパーの起動が確認できませんでした。起動後にもう一度お試しください。'); }
+        });
+      }
+    });
+    obs.observe(document.getElementById('helperModal'), { attributes:true, attributeFilter:['class'] });
+  }
+
   /* ================== 軽量ユーティリティ ================== */
   const CURRENT_USER_ID = Number('{{ current_user.id | default(0, true) | int }}');
   const ALLOW_MULTI_BLOG_USER_IDS = [1,2,5];
@@ -937,22 +1105,33 @@
     btn.innerText=label||"新規ブログ制作開始";
   }
 
+  /* ================== ブログ追加（=アカウント作成）— 方式A: ヘルパー存在チェックを挟む ================== */
   async function newAccountStart(button){
     const siteId=button.getAttribute('data-site-id'); if(!siteId) return;
     sessionStorage.setItem(SELECT_KEY, siteId);
-    button.disabled=true; const old=button.innerText; button.innerText="制作中…";
-    try{
-      const body=new URLSearchParams(); body.append("site_id", siteId);
-      const res=await fetch("/external-seo/new-account",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body,credentials:"same-origin"});
-      const text=await res.text(); let data; try{ data=JSON.parse(text);}catch{ throw new Error(`APIがJSONを返していません (HTTP ${res.status}).`); }
-      if(!data.ok) throw new Error(data.error||"作成に失敗しました");
-      renderNewAccountCard(data.site_id, data.account); try{ incrementLdCount(siteId,+1);}catch(_){}
-      if(!ALLOW_MULTI_BLOG_USER_IDS.includes(CURRENT_USER_ID)){
-        const addBtn=document.getElementById(`addBtn-${siteId}`); if(addBtn){ addBtn.disabled=true; addBtn.classList.add("opacity-60","cursor-not-allowed"); }
-      }
-      ensureLdOpen(siteId);
-    }catch(err){ alert(err.message||"ブログ作成に失敗しました"); }
-    finally{ button.disabled=false; button.innerText=old; }
+
+    const runCore = async ()=>{
+      button.disabled=true; const old=button.innerText; button.innerText="制作中…";
+      try{
+        const body=new URLSearchParams(); body.append("site_id", siteId);
+        const res=await fetch("/external-seo/new-account",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body,credentials:"same-origin"});
+        const text=await res.text(); let data; try{ data=JSON.parse(text);}catch{ throw new Error(`APIがJSONを返していません (HTTP ${res.status}).`); }
+        if(!data.ok) throw new Error(data.error||"作成に失敗しました");
+        renderNewAccountCard(data.site_id, data.account); try{ incrementLdCount(siteId,+1);}catch(_){}
+        if(!ALLOW_MULTI_BLOG_USER_IDS.includes(CURRENT_USER_ID)){
+          const addBtn=document.getElementById(`addBtn-${siteId}`); if(addBtn){ addBtn.disabled=true; addBtn.classList.add("opacity-60","cursor-not-allowed"); }
+        }
+        ensureLdOpen(siteId);
+      }catch(err){ alert(err.message||"ブログ作成に失敗しました"); }
+      finally{ button.disabled=false; button.innerText=old; }
+    };
+
+    // SIGNUP_VIA_CLIENT=ON のときだけヘルパー確認 → 未起動なら大きいポップアップ表示
+    if(SIGNUP_VIA_CLIENT){
+      ensureHelperReady(runCore);
+    }else{
+      runCore();
+    }
   }
 
   function incrementLdCount(siteId, delta){
@@ -1178,28 +1357,33 @@
     window.addEventListener('beforeunload', ()=>{ navigator.sendBeacon && navigator.sendBeacon('/external-seo/end'); });
   });
 
-// 外部SEO同時実行制御
-async function startExtSeoIfAvailable(btn){
-  try {
-    const r = await fetch("/external-seo/start",{method:"POST",credentials:"same-origin"});
-    if(r.status===429){ showToast("現在混雑中です","error"); return; }
-    const js = await r.json();
-    if(!js.ok){ showToast(js.message||"外部SEOは実行できません","error"); return; }
-    sessionStorage.setItem("extseoToken", js.token);
-    handleCaptchaClick(btn); // 元の処理へ
-  } catch(e){
-    showToast("通信エラーにより実行できません","error");
+  // 外部SEO同時実行制御
+  async function startExtSeoIfAvailable(btn){
+    try {
+      const r = await fetch("/external-seo/start",{method:"POST",credentials:"same-origin"});
+      if(r.status===429){ showToast("現在混雑中です","error"); return; }
+      const js = await r.json();
+      if(!js.ok){ showToast(js.message||"外部SEOは実行できません","error"); return; }
+      sessionStorage.setItem("extseoToken", js.token);
+      handleCaptchaClick(btn); // 元の処理へ
+    } catch(e){
+      showToast("通信エラーにより実行できません","error");
+    }
   }
-}
 
-async function releaseExtSeoToken(){
-  // サーバ側はセッションの extseo_token を pop するため JSON ボディ不要
-  if(!sessionStorage.getItem("extseoToken")) return;
-  try{
-    await fetch("/external-seo/end",{ method:"POST", credentials:"same-origin" });
-  }catch(e){ console.warn("release失敗", e); }
-  sessionStorage.removeItem("extseoToken");
-}
+  async function releaseExtSeoToken(){
+    // サーバ側はセッションの extseo_token を pop するため JSON ボディ不要
+    if(!sessionStorage.getItem("extseoToken")) return;
+    try{
+      await fetch("/external-seo/end",{ method:"POST", credentials:"same-origin" });
+    }catch(e){ console.warn("release失敗", e); }
+    sessionStorage.removeItem("extseoToken");
+  }
+
+  // ポップアップの手動クローズ
+  function closeHelperModal(){ 
+    document.getElementById('helperModal').classList.remove('is-open'); 
+    if(helperPollTimer){ clearInterval(helperPollTimer); helperPollTimer=null; } 
+  }
 </script>
 {% endblock %}
-
