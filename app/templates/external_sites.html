@@ -843,7 +843,7 @@
     helperPollTimer = null;
   }
   async function ensureHelperReady(continueFn){
-    if(!SIGNUP_VIA_CLIENT){ return continueFn && continueFn(); }
+    if(!SIGNUP_VIA_CLIENT_FLAG){ return continueFn && continueFn(); }
     // 既に起動しているか高速チェック
     if(await pingHelper(350)){ return continueFn && continueFn(); }
     // 起動していなければ大きなポップアップを出す
@@ -1127,7 +1127,7 @@
     };
 
     // SIGNUP_VIA_CLIENT=ON のときだけヘルパー確認 → 未起動なら大きいポップアップ表示
-    if(SIGNUP_VIA_CLIENT){
+    if(SIGNUP_VIA_CLIENT_FLAG){
       ensureHelperReady(runCore);
     }else{
       runCore();
@@ -1380,10 +1380,5 @@
     sessionStorage.removeItem("extseoToken");
   }
 
-  // ポップアップの手動クローズ
-  function closeHelperModal(){ 
-    document.getElementById('helperModal').classList.remove('is-open'); 
-    if(helperPollTimer){ clearInterval(helperPollTimer); helperPollTimer=null; } 
-  }
 </script>
 {% endblock %}
