@@ -1,9 +1,9 @@
 # helper/main.py
-import threading, time, json, os
+import threading, time, json, os, socket
 from flask import Flask, request, jsonify
 import requests
 
-# 任意: Playwright を使う場合に import（まだ必須ではない）
+# 任意: Playwright を使う（後で本実装を差し込み）
 # from playwright.sync_api import sync_playwright
 
 app = Flask(__name__)
@@ -34,9 +34,22 @@ def run_signup_job(job_id, payload):
         #     ... ここでフォーム入力/画像DL ... 最後に apiKey 取得 ...
         #     browser.close()
 
-        # ダミー進捗（2〜3秒で完了通知）
-        for i in range(3):
+        # （後でここに Playwright の実処理を移植）
+        # with sync_playwright() as p:
+        #     browser = p.chromium.launch(headless=False)
+        #     page = browser.new_page()
+        #     ... 実処理 ...
+        #     browser.close()
+
+        # まずはダミー進捗（2〜3秒で完了通知）
+        for _ in range(3):
             time.sleep(1)
+
+        # 実行端末のパブリックIPを取得（検証用）
+        try:
+            public_ip = requests.get("https://api.ipify.org", timeout=5).text.strip()
+        except Exception:
+            public_ip = None
 
         callback_url = payload.get("callback_url")
         data = {
@@ -48,6 +61,8 @@ def run_signup_job(job_id, payload):
             "token": payload.get("token"),      # サーバ照合用（セッション extseo_token）
             "progress": 100,
             "step": "apiKey_received",
+            "helper_host": socket.gethostname(),
+            "helper_ip_public": public_ip,
             # "api_key": "xxxxx"  # 実装後ここに取得キー
         }
         if callback_url:

@@ -6200,6 +6200,14 @@ def external_seo_callback():
     from app.models import ExternalBlogAccount, Site, BlogType
     from app.services.blog_signup.crypto_utils import encrypt
 
+    # try_acquire と対になる解放関数（同じモジュール/同ファイル内にある前提）
+    # もし別名なら release に読み替えてください
+    try:
+        release  # type: ignore[name-defined]
+    except NameError:
+        # 他モジュールにある場合はこちらを使う（存在しなければ削除してください）
+        from app.services.semaphore import release  # type: ignore
+
     data = request.get_json(silent=True) or {}
     tok  = (data.get("token") or "").strip()
     if not tok:
@@ -6216,6 +6224,8 @@ def external_seo_callback():
 
     step      = (data.get("step") or data.get("status") or "").strip()
     progress  = data.get("progress")
+    helper_host = data.get("helper_host")
+    helper_ip_public = data.get("helper_ip_public")
     blog_id   = (data.get("blog_id") or "").strip() or None
     endpoint  = (data.get("endpoint") or "").strip() or None
     api_key   = (data.get("api_key") or "").strip() or None
@@ -6223,8 +6233,8 @@ def external_seo_callback():
     # 進捗ログ（最低限）
     try:
         current_app.logger.info(
-            "[EXTSEO-CB] tok=%s site=%s acc=%s step=%s prog=%s",
-            tok[:8]+"…" if tok else "-", site_id, account_id, step, progress
+            "[EXTSEO-CB] tok ok, site=%s acc=%s step=%s prog=%s helper_host=%s helper_ip=%s",
+            site_id, account_id, step, progress, helper_host, helper_ip_public
         )
     except Exception:
         pass
@@ -6323,3 +6333,27 @@ def external_seo_callback():
             session["captcha_status"] = st
 
     return jsonify({"ok": True})
+
+    # --- ここから：完了/失敗を検知したらセマフォ解放 & セッショントークン破棄 ---
+    try:
+        step_l = (step or "").lower()
+        should_release = (
+            step_l in {"apikey_received", "apiKey_received".lower(), "done", "complete", "failed", "error"}
+            or bool(api_key)
+            or (isinstance(progress, (int, float)) and int(progress) >= 100)
+        )
+        if should_release and tok:
+            try:
+                release(tok)  # try_acquire と対になる解放
+                current_app.logger.info("[EXTSEO-CB] released semaphore token")
+            except Exception as e:
+                current_app.logger.exception("[EXTSEO-CB] release token failed: %s", e)
+            # ブラウザ側セッションに同じトークンが残っていれば消す（再実行時の衝突防止）
+            if session.get("extseo_token") == tok:
+                session.pop("extseo_token", None)
+    except Exception:
+        pass
+
+    return jsonify({"ok": True})
+
+

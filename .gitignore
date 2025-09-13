@@ -1,16 +1,25 @@
-# 環境設定
-.env
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
 
-# Python キャッシュ
-**/__pycache__/
-*.pyc
+# Virtual env
+venv/
+.venv/
+env/
+ENV/
 
-# Flask インスタンスディレクトリ（SQLite等のローカル DB を含む）
+# Build / packaging
+build/
+dist/
+*.egg-info/
+*.spec
+
+# Flask
 instance/
 
-# 仮想環境
-venv/
-
-/credentials/service_account.json
-
+# Local secrets / logs
+.env
 credentials/*.json
+credentials/service_account.json
+*.log
