@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 load_dotenv(override=False)
 
 from flask import Flask
+from flask import current_app  # ← 追加：context_processorで参照
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_migrate import Migrate
@@ -51,6 +52,10 @@ def create_app() -> Flask:
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["STRIPE_WEBHOOK_SECRET"] = os.getenv("STRIPE_WEBHOOK_SECRET")
 
+    # === 方式A 機能フラグ（環境変数でON/OFF）=====================
+    # SIGNUP_VIA_CLIENT=1 のときだけ UI にヘルパー導線を表示＆新APIを使う
+    app.config["SIGNUP_VIA_CLIENT"] = os.getenv("SIGNUP_VIA_CLIENT", "0") == "1"
+
     # ─── SQLAlchemy 接続プール設定（切断に強くする） ──────────────
     #  - pool_pre_ping: 事前に接続をヘルスチェックして自動再接続
     #  - pool_recycle: 使い回し時間の上限（DB側のidle timeoutより短めに）
@@ -87,8 +92,11 @@ def create_app() -> Flask:
     # --- 追加: Jinja から to_jst() を直接呼べるようにする ---
     @app.context_processor
     def _inject_utils():
-        # テンプレートで {{ to_jst(...) }} として呼べます
-        return dict(to_jst=to_jst)
+        # テンプレートで {{ to_jst(...) }} / {{ SIGNUP_VIA_CLIENT }} を参照可能に
+        return dict(
+            to_jst=to_jst,
+            SIGNUP_VIA_CLIENT=current_app.config.get("SIGNUP_VIA_CLIENT", False),
+        )
 
     # ─── Blueprints 登録とスケジューラ起動 ───────
     with app.app_context():
