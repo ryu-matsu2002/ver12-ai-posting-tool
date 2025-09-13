@@ -821,14 +821,11 @@
   let helperPollTimer=null, helperProgress=0;
   function openHelperModal(){
     setupHelperDlButtons();
-    helperProgress = 0;
-    document.getElementById('helperProg').style.width = '0%';
+    document.getElementById('helperProg').style.width = '10%';
     document.getElementById('helperModal').classList.add('is-open');
     // 1秒ごとに /ping 再試行して、繋がったら自動クローズ
     helperPollTimer && clearInterval(helperPollTimer);
     helperPollTimer = setInterval(async ()=>{
-      helperProgress = Math.min(helperProgress + 7, 96);
-      document.getElementById('helperProg').style.width = helperProgress + '%';
       const ok = await pingHelper(400);
       if(ok){
         document.getElementById('helperProg').style.width = '100%';
