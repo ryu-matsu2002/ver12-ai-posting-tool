@@ -6173,3 +6173,153 @@ def external_seo_end():
         return jsonify({"ok": False, "error": "no active external-seo token"}), 400
     release(token)
     return jsonify({"ok": True})
+
+# -----------------------------------------------------------------
+# 外部SEO: ローカルヘルパー → サーバー 進捗/完了コールバック
+# -----------------------------------------------------------------
+@bp.post("/external-seo/callback")
+def external_seo_callback():
+    """
+    ローカルヘルパー（127.0.0.1:17653で動く小さなプロセス）からの進捗/完了通知を受け取る。
+    認証はブラウザ側で /external-seo/start にて払い出した一時トークン (extseo_token) を使用。
+    - JSON 例:
+      {
+        "token": "...",                 # /external-seo/start が発行した値
+        "site_id": 123,                 # 任意（あると整合チェックできる）
+        "account_id": 456,              # 任意（あるとDB反映できる）
+        "step": "captcha_shown",        # 任意（進捗テキスト）
+        "progress": 35,                 # 任意（0-100）
+        "status": "running|done|error", # 任意
+        "blog_id": "my-blog",           # 任意（確定した livedoor_blog_id）
+        "endpoint": "https://...",      # 任意（AtomPub endpoint）
+        "api_key": "xxxxx"              # 任意（取得できた場合のみ）
+      }
+    """
+    from flask import request, jsonify, session, current_app
+    from app import db
+    from app.models import ExternalBlogAccount, Site, BlogType
+    from app.services.blog_signup.crypto_utils import encrypt
+
+    data = request.get_json(silent=True) or {}
+    tok  = (data.get("token") or "").strip()
+    if not tok:
+        return jsonify({"ok": False, "error": "missing token"}), 400
+
+    # 可能ならブラウザセッションのトークンと突き合わせる（ヘルパーは通常Cookieなし）
+    sess_tok = session.get("extseo_token")
+    if sess_tok and sess_tok != tok:
+        # ブラウザと別セッション（Cookieなし）ならここはズレることがあるため、警告に留めて処理は継続
+        current_app.logger.warning("[EXTSEO-CB] token mismatch (session present but different)")
+
+    site_id    = data.get("site_id")
+    account_id = data.get("account_id")
+
+    step      = (data.get("step") or data.get("status") or "").strip()
+    progress  = data.get("progress")
+    blog_id   = (data.get("blog_id") or "").strip() or None
+    endpoint  = (data.get("endpoint") or "").strip() or None
+    api_key   = (data.get("api_key") or "").strip() or None
+
+    # 進捗ログ（最低限）
+    try:
+        current_app.logger.info(
+            "[EXTSEO-CB] tok=%s site=%s acc=%s step=%s prog=%s",
+            tok[:8]+"…" if tok else "-", site_id, account_id, step, progress
+        )
+    except Exception:
+        pass
+
+    # account_id が無ければ進捗だけ受け付けて終了
+    if not account_id:
+        # セッションが見える場合のみ、軽い進捗を保存（UIの /captcha_status から拾える）
+        if "captcha_status" in session:
+            st = dict(session.get("captcha_status") or {})
+            if step:
+                st["step"] = step
+            if isinstance(progress, (int, float)):
+                st["progress"] = max(0, min(100, int(progress)))
+            session["captcha_status"] = st
+        return jsonify({"ok": True, "noted": True})
+
+    # --- DB 反映（APIキー・blog_idなどが来た場合） -------------------------
+    acct = ExternalBlogAccount.query.get(account_id)
+    if not acct:
+        return jsonify({"ok": False, "error": "account not found"}), 404
+
+    # site_id が来ている場合は軽い整合チェック（ズレていても致命ではないので 400 は返さない）
+    if site_id and getattr(acct, "site_id", None) and acct.site_id != site_id:
+        current_app.logger.warning("[EXTSEO-CB] site/account mismatch: site_id=%s acc.site_id=%s",
+                                   site_id, acct.site_id)
+
+    touched = False
+
+    # livedoor_blog_id が確定したら反映
+    if blog_id and hasattr(acct, "livedoor_blog_id"):
+        try:
+            acct.livedoor_blog_id = blog_id
+            # username 未設定 or 仮なら補完
+            if hasattr(acct, "username") and (not acct.username or str(acct.username).startswith("u-")):
+                acct.username = blog_id
+            touched = True
+        except Exception:
+            db.session.rollback()
+            return jsonify({"ok": False, "error": "failed to save blog_id"}), 500
+
+    # AtomPub endpoint があれば保存
+    if endpoint and hasattr(acct, "atompub_endpoint"):
+        try:
+            acct.atompub_endpoint = endpoint
+            touched = True
+        except Exception:
+            db.session.rollback()
+            return jsonify({"ok": False, "error": "failed to save endpoint"}), 500
+
+    # APIキーが来た場合は暗号化して保存し、API投稿可にする
+    if api_key and hasattr(acct, "atompub_key_enc"):
+        try:
+            acct.atompub_key_enc = encrypt(api_key)
+            if hasattr(acct, "api_post_enabled"):
+                acct.api_post_enabled = True
+            # 付随フラグ
+            if hasattr(acct, "is_captcha_completed"):
+                acct.is_captcha_completed = True
+            touched = True
+        except Exception:
+            db.session.rollback()
+            return jsonify({"ok": False, "error": "failed to save api_key"}), 500
+
+    if touched:
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            return jsonify({"ok": False, "error": "db commit failed"}), 500
+
+        # セッションが見えるときは UI 用ステータスも更新（見えない環境ならスキップでOK）
+        st = dict(session.get("captcha_status") or {})
+        st.update({
+            "captcha_sent": True,
+            "email_verified": True if api_key else st.get("email_verified"),
+            "account_created": True if api_key or blog_id else st.get("account_created"),
+            "api_key_received": True if api_key else st.get("api_key_received"),
+            "step": "API取得完了" if api_key else (step or st.get("step")),
+            "site_id": site_id or st.get("site_id"),
+            "account_id": account_id,
+        })
+        if isinstance(progress, (int, float)):
+            st["progress"] = max(0, min(100, int(progress)))
+        session["captcha_status"] = st
+
+    else:
+        # 進捗だけ更新（セッションが見える場合）
+        if "captcha_status" in session:
+            st = dict(session.get("captcha_status") or {})
+            if step:
+                st["step"] = step
+            if isinstance(progress, (int, float)):
+                st["progress"] = max(0, min(100, int(progress)))
+            st.setdefault("account_id", account_id)
+            st.setdefault("site_id", site_id)
+            session["captcha_status"] = st
+
+    return jsonify({"ok": True})

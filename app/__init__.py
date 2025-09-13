@@ -120,8 +120,8 @@ def create_app() -> Flask:
             return db.session.get(User, int(user_id))
         
         # ✅ 修正①: external_bp の import & 登録は app context 内で最後に行う
-        #from .controllers.external_seo import external_bp
-        #app.register_blueprint(external_bp)
+        from .controllers.external_seo import external_bp
+        app.register_blueprint(external_bp)
     
 
     # --- DBセッションのクリーンアップ: リクエスト終了時にロールバック＆解放 ---
