@@ -1356,6 +1356,7 @@
 
   // 外部SEO同時実行制御
   async function startExtSeoIfAvailable(btn){
+  const runCore = async ()=>{
     try {
       const r = await fetch("/external-seo/start",{method:"POST",credentials:"same-origin"});
       if(r.status===429){ showToast("現在混雑中です","error"); return; }
@@ -1366,7 +1367,14 @@
     } catch(e){
       showToast("通信エラーにより実行できません","error");
     }
+  };
+  // ヘルパー必須モードなら、起動確認 → OKになったら実行
+  if(SIGNUP_VIA_CLIENT_FLAG){
+    ensureHelperReady(runCore);
+  }else{
+    runCore();
   }
+}
 
   async function releaseExtSeoToken(){
     // サーバ側はセッションの extseo_token を pop するため JSON ボディ不要
