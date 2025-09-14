@@ -38,7 +38,6 @@ from .image_utils import fetch_featured_image  # ← ✅ 正しい
 from collections import defaultdict
 
 
-
 from .article_generator import (
     _unique_title,
     _compose_body,
@@ -47,6 +46,22 @@ from .article_generator import (
 from app.forms import EditKeywordForm
 from .forms import KeywordForm
 from app.image_utils import _is_image_url
+
+# ==== 外部SEO: 簡易ステータスストア（トークン→状態） ====
+EXTSEO_STATUS = {}  # { token: { step, progress, captcha_url, site_id, account_id, ... } }
+
+def _extseo_update(token: str, **kv):
+    """外部SEOステータスをマージ更新（progressは0-100に丸める）"""
+    st = dict(EXTSEO_STATUS.get(token) or {})
+    for k, v in kv.items():
+        if v is None:
+            continue
+        if k == "progress" and isinstance(v, (int, float)):
+            v = max(0, min(100, int(v)))
+        st[k] = v
+    EXTSEO_STATUS[token] = st
+    return st
+
 
 
 JST = timezone("Asia/Tokyo")
@@ -6363,24 +6378,11 @@ def external_seo_end():
 @bp.post("/external-seo/callback")
 def external_seo_callback():
     """
-    ローカルヘルパー（127.0.0.1:17653で動く小さなプロセス）からの進捗/完了通知を受け取る。
-    認証はブラウザ側で /external-seo/start にて払い出した一時トークン (extseo_token) を使用。
-    - JSON 例:
-      {
-        "token": "...",                 # /external-seo/start が発行した値
-        "site_id": 123,                 # 任意（あると整合チェックできる）
-        "account_id": 456,              # 任意（あるとDB反映できる）
-        "step": "captcha_shown",        # 任意（進捗テキスト）
-        "progress": 35,                 # 任意（0-100）
-        "status": "running|done|error", # 任意
-        "blog_id": "my-blog",           # 任意（確定した livedoor_blog_id）
-        "endpoint": "https://...",      # 任意（AtomPub endpoint）
-        "api_key": "xxxxx"              # 任意（取得できた場合のみ）
-      }
+    ローカルヘルパーからの進捗/完了通知。
     """
     from flask import request, jsonify, session, current_app
     from app import db
-    from app.models import ExternalBlogAccount, Site, BlogType
+    from app.models import ExternalBlogAccount
     from app.services.blog_signup.crypto_utils import encrypt
 
     data = request.get_json(silent=True) or {}
@@ -6388,14 +6390,22 @@ def external_seo_callback():
     if not tok:
         return jsonify({"ok": False, "error": "missing token"}), 400
 
-    # 可能ならブラウザセッションのトークンと突き合わせる（ヘルパーは通常Cookieなし）
-    sess_tok = session.get("extseo_token")
-    if sess_tok and sess_tok != tok:
-        # ブラウザと別セッション（Cookieなし）ならここはズレることがあるため、警告に留めて処理は継続
-        current_app.logger.warning("[EXTSEO-CB] token mismatch (session present but different)")
+    # 可能ならブラウザセッションのトークンと突き合わせ（ズレても致命ではない）
+    try:
+        if session.get("extseo_token") and session["extseo_token"] != tok:
+            current_app.logger.warning("[EXTSEO-CB] token mismatch (session present but different)")
+    except Exception:
+        pass
 
-    site_id    = data.get("site_id")
-    account_id = data.get("account_id")
+    # 型を整える（str "46" と int 46 の不一致で誤警告が出ないように）
+    def _to_int(v):
+        try:
+            return int(v)
+        except Exception:
+            return v
+
+    site_id    = _to_int(data.get("site_id"))
+    account_id = _to_int(data.get("account_id"))
 
     step      = (data.get("step") or data.get("status") or "").strip()
     progress  = data.get("progress")
@@ -6405,7 +6415,7 @@ def external_seo_callback():
     endpoint  = (data.get("endpoint") or "").strip() or None
     api_key   = (data.get("api_key") or "").strip() or None
 
-    # 進捗ログ（最低限）
+    # 進捗ログ
     try:
         current_app.logger.info(
             "[EXTSEO-CB] tok ok, site=%s acc=%s step=%s prog=%s helper_host=%s helper_ip=%s",
@@ -6414,35 +6424,38 @@ def external_seo_callback():
     except Exception:
         pass
 
+    # ✅ まずトークンストアを更新（UIは /external-seo/status で読む）
+    _extseo_update(tok,
+                   step=step or None,
+                   progress=progress if isinstance(progress, (int, float)) else None,
+                   site_id=site_id,
+                   account_id=account_id,
+                   blog_id=blog_id,
+                   endpoint=endpoint,
+                   api_key_received=True if api_key else None)
+
     # account_id が無ければ進捗だけ受け付けて終了
     if not account_id:
-        # セッションが見える場合のみ、軽い進捗を保存（UIの /captcha_status から拾える）
-        if "captcha_status" in session:
-            st = dict(session.get("captcha_status") or {})
-            if step:
-                st["step"] = step
-            if isinstance(progress, (int, float)):
-                st["progress"] = max(0, min(100, int(progress)))
-            session["captcha_status"] = st
         return jsonify({"ok": True, "noted": True})
 
-    # --- DB 反映（APIキー・blog_idなどが来た場合） -------------------------
+    # --- DB 反映（APIキー・blog_idなどが来た場合） ---
     acct = ExternalBlogAccount.query.get(account_id)
     if not acct:
         return jsonify({"ok": False, "error": "account not found"}), 404
 
-    # site_id が来ている場合は軽い整合チェック（ズレていても致命ではないので 400 は返さない）
-    if site_id and getattr(acct, "site_id", None) and acct.site_id != site_id:
-        current_app.logger.warning("[EXTSEO-CB] site/account mismatch: site_id=%s acc.site_id=%s",
-                                   site_id, acct.site_id)
+    # site_id の整合チェック（型合わせ済み）
+    try:
+        if site_id is not None and getattr(acct, "site_id", None) is not None and int(acct.site_id) != int(site_id):
+            current_app.logger.warning("[EXTSEO-CB] site/account mismatch: site_id=%s acc.site_id=%s",
+                                       site_id, acct.site_id)
+    except Exception:
+        pass
 
     touched = False
 
-    # livedoor_blog_id が確定したら反映
     if blog_id and hasattr(acct, "livedoor_blog_id"):
         try:
             acct.livedoor_blog_id = blog_id
-            # username 未設定 or 仮なら補完
             if hasattr(acct, "username") and (not acct.username or str(acct.username).startswith("u-")):
                 acct.username = blog_id
             touched = True
@@ -6450,7 +6463,6 @@ def external_seo_callback():
             db.session.rollback()
             return jsonify({"ok": False, "error": "failed to save blog_id"}), 500
 
-    # AtomPub endpoint があれば保存
     if endpoint and hasattr(acct, "atompub_endpoint"):
         try:
             acct.atompub_endpoint = endpoint
@@ -6459,13 +6471,11 @@ def external_seo_callback():
             db.session.rollback()
             return jsonify({"ok": False, "error": "failed to save endpoint"}), 500
 
-    # APIキーが来た場合は暗号化して保存し、API投稿可にする
     if api_key and hasattr(acct, "atompub_key_enc"):
         try:
             acct.atompub_key_enc = encrypt(api_key)
             if hasattr(acct, "api_post_enabled"):
                 acct.api_post_enabled = True
-            # 付随フラグ
             if hasattr(acct, "is_captcha_completed"):
                 acct.is_captcha_completed = True
             touched = True
@@ -6480,37 +6490,7 @@ def external_seo_callback():
             db.session.rollback()
             return jsonify({"ok": False, "error": "db commit failed"}), 500
 
-        # セッションが見えるときは UI 用ステータスも更新（見えない環境ならスキップでOK）
-        st = dict(session.get("captcha_status") or {})
-        st.update({
-            "captcha_sent": True,
-            "email_verified": True if api_key else st.get("email_verified"),
-            "account_created": True if api_key or blog_id else st.get("account_created"),
-            "api_key_received": True if api_key else st.get("api_key_received"),
-            "step": "API取得完了" if api_key else (step or st.get("step")),
-            "site_id": site_id or st.get("site_id"),
-            "account_id": account_id,
-        })
-        if isinstance(progress, (int, float)):
-            st["progress"] = max(0, min(100, int(progress)))
-        session["captcha_status"] = st
-
-    else:
-        # 進捗だけ更新（セッションが見える場合）
-        if "captcha_status" in session:
-            st = dict(session.get("captcha_status") or {})
-            if step:
-                st["step"] = step
-            if isinstance(progress, (int, float)):
-                st["progress"] = max(0, min(100, int(progress)))
-            st.setdefault("account_id", account_id)
-            st.setdefault("site_id", site_id)
-            session["captcha_status"] = st
-
-    # この時点でOKレスポンスは作っておく（後で返す）
-    resp = jsonify({"ok": True})
-
-    # --- 完了/失敗を検知したらセマフォ解放 & セッショントークン破棄 ---
+    # セマフォ解放判定（省略可。既存実装があればそのまま）
     try:
         step_l = (step or "").lower()
         prog_i = None
@@ -6520,58 +6500,71 @@ def external_seo_callback():
             except Exception:
                 prog_i = None
         should_release = (
-            step_l in {"apikey_received", "done", "complete", "failed", "error"}
+            step_l in {"apikey_received", "api_key_ok", "done", "complete", "failed", "error"}
             or bool(api_key)
             or (prog_i is not None and prog_i >= 100)
         )
         if should_release and tok:
             try:
-                release(tok)  # try_acquire と対になる解放
+                release(tok)  # 既存の try_acquire に対応
                 current_app.logger.info("[EXTSEO-CB] released semaphore token")
             except Exception as e:
                 current_app.logger.exception("[EXTSEO-CB] release token failed: %s", e)
-            # ブラウザ側セッションに同じトークンが残っていれば消す（再実行時の衝突防止）
             if session.get("extseo_token") == tok:
                 session.pop("extseo_token", None)
     except Exception:
         pass
 
-    return resp
+    return jsonify({"ok": True})
+
+
+@bp.get("/external-seo/status")
+@login_required
+def external_seo_status():
+    """UIポーリング用：現在のトークンに紐づく進捗/画像URLなどを返す"""
+    from flask import jsonify, session
+    tok = session.get("extseo_token")
+    if not tok:
+        return jsonify({"ok": False, "error": "no token"}), 400
+    st = EXTSEO_STATUS.get(tok) or {}
+    return jsonify({"ok": True, **st})
+
 
 # --- 外部SEO: クライアントヘルパーがCAPTCHA画像をアップロードする受け口 ---
 @bp.post("/external-seo/prepare_captcha")
 def external_seo_prepare_captcha_upload():
     """
     クライアント（127.0.0.1のヘルパー）が撮ったCAPTCHA画像をアップロード。
-    期待: multipart/form-data で file, token, site_id, account_id を受け取る
+    期待: multipart/form-data で file(or captcha), token, site_id, account_id を受け取る
     返却: { ok: True, captcha_url: "https://.../static/captchas/xxx.png" }
     """
-    from flask import request, session, jsonify, url_for
+    from flask import request, session, jsonify, url_for, current_app
     from pathlib import Path
     from uuid import uuid4
     import time as _time
-    import os
 
-    # tokenは /external-seo/start で発行・ブラウザに紐付いた extseo_token
-    tok = (request.form.get("token") or "").strip()
+    # token は /external-seo/start で払い出したもの
+    tok = (request.form.get("token") or request.values.get("token") or "").strip()
     if not tok:
         return jsonify({"ok": False, "error": "missing token"}), 400
 
-    # 参考: ブラウザセッション側に extseo_token があれば突き合わせる（ズレても致命ではない）
+    # 任意の整合チェック（ズレても致命ではないので警告ログのみ）
     try:
         if session.get("extseo_token") and session["extseo_token"] != tok:
             current_app.logger.warning("[EXTSEO-UP] token mismatch (session present but different)")
     except Exception:
         pass
 
-    site_id = request.form.get("site_id", type=int)
-    account_id = request.form.get("account_id", type=int)
-
-    f = request.files.get("file")
+    # ファイルは 'file' または 'captcha' のどちらでも受ける
+    f = request.files.get("file") or request.files.get("captcha")
     if not f or not getattr(f, "filename", ""):
         return jsonify({"ok": False, "error": "no file"}), 400
 
-    # 保存先
+    # 付帯情報（あれば保存）
+    site_id = request.form.get("site_id", type=int)
+    account_id = request.form.get("account_id", type=int)
+
+    # 保存
     capt_dir = Path("app/static/captchas")
     capt_dir.mkdir(parents=True, exist_ok=True)
     ts = _time.strftime("%Y%m%d_%H%M%S")
@@ -6582,15 +6575,26 @@ def external_seo_prepare_captcha_upload():
     # 公開URL
     captcha_url = url_for("static", filename=f"captchas/{name}", _external=True) + f"?v={int(_time.time())}"
 
-    # UIポーリング用の軽い状態をセッションに積む（見えない環境なら無視されるだけ）
-    st = dict(session.get("captcha_status") or {})
-    st.update({
-        "step": "captcha_shown",
-        "progress": max(15, int(st.get("progress") or 0)),
-        "captcha_url": captcha_url,
-        "site_id": site_id or st.get("site_id"),
-        "account_id": account_id or st.get("account_id"),
-    })
-    session["captcha_status"] = st
+    # ✅ ブラウザセッションに依存せず、トークンで状態を保持
+    _extseo_update(tok,
+                   step="captcha_shown",
+                   progress=20,
+                   captcha_url=captcha_url,
+                   site_id=site_id,
+                   account_id=account_id)
+
+    # 互換: セッションを使うUIが残っている場合のために、入れてもおく（見えない環境なら無視されるだけ）
+    try:
+        st = dict(session.get("captcha_status") or {})
+        st.update({
+            "step": "captcha_shown",
+            "progress": max(15, int(st.get("progress") or 0)),
+            "captcha_url": captcha_url,
+            "site_id": site_id or st.get("site_id"),
+            "account_id": account_id or st.get("account_id"),
+        })
+        session["captcha_status"] = st
+    except Exception:
+        pass
 
     return jsonify({"ok": True, "captcha_url": captcha_url})
