@@ -783,19 +783,35 @@
   const SIGNUP_VIA_CLIENT_FLAG = JSON.parse(`{{ SIGNUP_VIA_CLIENT | default(false) | tojson }}`);
   const HELPER_ORIGIN = 'http://127.0.0.1:17653';
   const HELPER_PING   = HELPER_ORIGIN + '/ping';
+  /* ヘルパーがCAPTCHA画像をアップロードする先（サーバ側受け口） */
+  const HELPER_UPLOAD_URL = location.origin + "/external-seo/prepare_captcha";
 
-  // ヘルパーに “開始” を投げっぱなしで通知（失敗してもUIは続行）
-  async function helperStart(payload){
-    try{
-      await fetch(HELPER_ORIGIN + '/start', {
-        method: 'POST',
-        mode: 'cors',                 // ← no-corsをやめてCORSで素直に送る
-        credentials: 'omit',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload || {})
-      }); // 204/200 どちらでもOK
-    }catch(_){}
-  }
+  // ヘルパー開始（CORSでJSON受け取り・job_idを保存し、upload_urlを付加）
+    async function helperStart(payload){
+      try{
+        const body = Object.assign({}, payload || {}, { upload_url: HELPER_UPLOAD_URL });
+        const res = await fetch(HELPER_ORIGIN + '/start', {
+          method: 'POST',
+          mode: 'cors',
+          credentials: 'omit',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        let jobId = null;
+        if(res && res.ok){
+          try{
+            const js = await res.json();
+            if(js && js.ok && js.job_id){
+              jobId = js.job_id;
+              sessionStorage.setItem('helperJobId', jobId);
+            }
+          }catch(_){/* ignore */}
+        }
+        return jobId;
+      }catch(_){
+        return null;
+      }
+    }
 
   function osDetect(){
     const ua = navigator.userAgent || '';
@@ -1196,32 +1212,44 @@
     sessionStorage.setItem("currentSiteId", siteId);
     sessionStorage.setItem("currentAccountId", accountId);
     sessionStorage.setItem("currentPlatform", platform);
-    const params=new URLSearchParams(); params.append("site_id",siteId); params.append("account_id",accountId); params.append("blog",platform);
-    fetch("/prepare_captcha",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:params})
-      .then(r=>r.json())
-      .then(data=>{
-        if(data && data.captcha_url){
-          maxSeenPct=0; setAccProgress(15);
-          document.getElementById("captchaImage").src=data.captcha_url+"?t="+Date.now();
-          document.getElementById("captchaModal").classList.remove("hidden");
-          document.getElementById("captchaForm").reset();
-          startProgressPolling();
-        }else{
-          alert(data && data.error ? data.error : "CAPTCHA画像の取得に失敗しました");
+    if (SIGNUP_VIA_CLIENT_FLAG){
+      // クライアント方式: 画像はヘルパー→サーバへアップロード。ここでは即モーダルを開きポーリング。
+      maxSeenPct = 0;
+      setAccProgress(12);
+      const img = document.getElementById("captchaImage");
+      if(img) img.src = ""; // 後で /captcha_status の captcha_url が埋まる
+      document.getElementById("captchaModal").classList.remove("hidden");
+      document.getElementById("captchaForm").reset();
+      startProgressPolling();
+    } else {
+      // サーバ方式: 既存の /prepare_captcha を呼ぶ
+      const params=new URLSearchParams();
+      params.append("site_id",siteId);
+      params.append("account_id",accountId);
+      params.append("blog",platform);
+      fetch("/prepare_captcha",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:params})
+        .then(r=>r.json())
+        .then(data=>{
+          if(data && data.captcha_url){
+            maxSeenPct=0; setAccProgress(15);
+            document.getElementById("captchaImage").src=data.captcha_url+"?t="+Date.now();
+            document.getElementById("captchaModal").classList.remove("hidden");
+            document.getElementById("captchaForm").reset();
+            startProgressPolling();
+          }else{
+            alert(data && data.error ? data.error : "CAPTCHA画像の取得に失敗しました");
+            restoreCaptchaButton(siteId, accountId, "❌ 再挑戦");
+            releaseExtSeoToken();
+          }
+        })
+        .catch(err=>{
+          console.error(err);
+          alert("CAPTCHA取得中にエラーが発生しました");
           restoreCaptchaButton(siteId, accountId, "❌ 再挑戦");
-          // 準備失敗時はセマフォ解放
           releaseExtSeoToken();
-        }
-      })
-      .catch(err=>{
-        console.error(err);
-        alert("CAPTCHA取得中にエラーが発生しました");
-        restoreCaptchaButton(siteId, accountId, "❌ 再挑戦");
-        // 通信エラー時も解放
-        releaseExtSeoToken();
-      });
+        });
+    }
   }
-
   function closeCaptcha(){
     document.getElementById("captchaModal").classList.add("hidden");
     if(progressInterval){ clearInterval(progressInterval); progressInterval=null; }
@@ -1251,10 +1279,56 @@
     btn.setAttribute("aria-busy","true");
     btn.classList.remove("bg-blue-600");
     btn.classList.add("bg-gray-500","pointer-events-none","opacity-70");
-
     const fd=new FormData(document.getElementById("captchaForm"));
+    if (SIGNUP_VIA_CLIENT_FLAG){
+      // ヘルパーに直接解答を送る（ユーザーIPで続行）
+      const jobId = sessionStorage.getItem("helperJobId");
+      if(!jobId){
+        showToast("ヘルパーの起動情報が見つかりません。再度お試しください。","error");
+        restoreCaptchaButton(siteId, accountId, "❌ 再挑戦");
+        releaseExtSeoToken();
+        closeCaptcha();
+        return;
+      }
+      fetch(HELPER_ORIGIN + "/solve", {
+        method: "POST",
+        mode: "cors",
+        credentials: "omit",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ job_id: jobId, captcha_text: String(fd.get("captcha_text")||"") })
+      })
+      .then(r=>r.json())
+      .then(async data=>{
+        // ヘルパーは /external-seo/callback も送るため、UIはポーリングで最終確定する。
+        if(data && data.status==="captcha_failed"){
+          showToast("CAPTCHA突破に失敗しました。再度お試しください。","error");
+          restoreCaptchaButton(siteId, accountId, "❌ 再挑戦");
+          await releaseExtSeoToken();
+          closeCaptcha();
+          return;
+        }
+        if(data && data.status==="recreate_required"){
+          showToast("ブログ制作に失敗。『↻ ブログを再制作』からやり直してください。","error");
+          restoreCaptchaButton(siteId, accountId, "↻ ブログを再制作");
+          await releaseExtSeoToken();
+          closeCaptcha();
+          return;
+        }
+        // 通常は "done" かつコールバックでAPI取得済みに更新される。ここではポーリング継続。
+        setAccProgress(70);
+      })
+      .catch(async err=>{
+        console.error(err);
+        showToast("CAPTCHA送信中にエラーが発生しました","error");
+        restoreCaptchaButton(siteId, accountId, "❌ 再挑戦");
+        await releaseExtSeoToken();
+        closeCaptcha();
+      });
+      return;
+    }
+    // （サーバ方式）従来どおり
     const payload=new URLSearchParams({"captcha_text":fd.get("captcha_text"),"site_id":siteId,"account_id":accountId,"blog":platform});
-    fetch("/submit_captcha",{method:"POST",body:payload})
+    fetch("/submit_captcha",{method:"POST",body:payload})      
       .then(r=>r.json())
       .then(async data=>{
         if(data.status==="captcha_failed"){ 
@@ -1309,6 +1383,14 @@
         .then(r=>r.json())
         .then(data=>{
           if(!data) return;
+          // クライアント方式: ヘルパーがアップロードした画像URLが来たら反映
+          if (SIGNUP_VIA_CLIENT_FLAG && data.captcha_url){
+            const img = document.getElementById("captchaImage");
+            if(img && (!img.src || !img.src.includes(data.captcha_url))){
+              img.src = data.captcha_url + "&t=" + Date.now();
+              document.getElementById("captchaModal").classList.remove("hidden");
+            }
+          }
           setAccProgress( percentForStep(data.step,data) );
           if(data.step && data.step!==lastStatus){ lastStatus=data.step; updateCaptchaStatusUI(data); }
           const done = ((typeof data.progress==='number' && data.progress>=100) || /api[\s_-]*key|apikey|api取得完了|received/i.test(String(data.step||'')));
@@ -1375,16 +1457,18 @@
       const js = await r.json();
       if(!js.ok){ showToast(js.message||"外部SEOは実行できません","error"); return; }
       sessionStorage.setItem("extseoToken", js.token);
-      // ヘルパー必須モードでは ローカル127.0.0.1:17653 に開始通知を投げる
+      // ヘルパー必須モードでは ローカル127.0.0.1:17653 に開始通知を投げる（upload_url も渡す）
         if(SIGNUP_VIA_CLIENT_FLAG){
           const payload = {
             token: js.token,
             site_id: btn?.dataset?.siteId || sessionStorage.getItem("currentSiteId"),
             account_id: btn?.dataset?.accountId || sessionStorage.getItem("currentAccountId"),
             blog: btn?.dataset?.platform || "livedoor",
-            callback_url: location.origin + "/external-seo/callback"
+            callback_url: location.origin + "/external-seo/callback",
+            upload_url: HELPER_UPLOAD_URL
           };
-          helperStart(payload);
+          const _jid = await helperStart(payload);
+          // job_id は helperStart 内で sessionStorage.helperJobId に保存される
         }
       handleCaptchaClick(btn); // 元の処理へ
     } catch(e){
