@@ -6151,17 +6151,52 @@ def external_seo_new_account():
         return jsonify({"ok": False, "error": f"サーバエラー: {str(e)}"}), 200
     
 
-# ────────── 外部SEO並列制御API ──────────
+# ────────── 外部SEOステータスAPI（統合版：これ1本だけ残す） ──────────
 from app.utils.semaphore import current_active, try_acquire, release, LIMIT
 
-@bp.route("/external-seo/status", methods=["GET"])
+@bp.get("/external-seo/status")
 @login_required
 def external_seo_status():
-    return jsonify({
-        "active": current_active(),
+    """
+    フロントのポーリング用APIを一本化：
+      - 並列実行の使用状況（active/limit/available）
+      - extseo_token に紐づく進捗・captcha_url 等の状態
+    を同時に返す。フロントは必要なキーだけ見ればOK（下位互換）。
+    """
+    from flask import jsonify, session
+
+    # 1) 並列実行の容量情報
+    active = current_active()
+    cap = {
+        "active": active,
         "limit": LIMIT,
-        "available": max(LIMIT - current_active(), 0)
-    })
+        "available": max(LIMIT - active, 0),
+    }
+
+    # 2) トークンに紐づく進捗（あれば返す）
+    tok = session.get("extseo_token")
+    st = {}
+    # EXTSEO_STATUS はファイル先頭などで dict 初期化済み想定
+    try:
+        st = EXTSEO_STATUS.get(tok) or {}
+    except Exception:
+        st = {}
+
+    # セッションにだけ積んでいるUI用の軽い進捗があればマージ（任意）
+    try:
+        sess_st = session.get("captcha_status") or {}
+        if sess_st:
+            st = {**st, **sess_st}
+    except Exception:
+        pass
+
+    # まとめて返す（下位互換：従来のキーもそのまま st に含める）
+    resp = {"ok": True, **cap, **st}
+    if not tok:
+        resp["token_missing"] = True
+    return jsonify(resp)
+
+
 
 @bp.route("/external-seo/start", methods=["POST"])
 @login_required
@@ -6517,17 +6552,6 @@ def external_seo_callback():
 
     return jsonify({"ok": True})
 
-
-@bp.get("/external-seo/status")
-@login_required
-def external_seo_status():
-    """UIポーリング用：現在のトークンに紐づく進捗/画像URLなどを返す"""
-    from flask import jsonify, session
-    tok = session.get("extseo_token")
-    if not tok:
-        return jsonify({"ok": False, "error": "no token"}), 400
-    st = EXTSEO_STATUS.get(tok) or {}
-    return jsonify({"ok": True, **st})
 
 
 # --- 外部SEO: クライアントヘルパーがCAPTCHA画像をアップロードする受け口 ---
