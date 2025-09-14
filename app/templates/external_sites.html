@@ -1107,12 +1107,13 @@
     if (data && typeof data.percent  === 'number') return clampPct(data.percent);
     if (data && typeof data.pct      === 'number') return clampPct(data.pct);
     const s=String(step||'').toLowerCase();
-    if (/(ready|captcha|取得|fetch)/.test(s)) return 15;
-    if (/(show|download|表示)/.test(s)) return 20;
-    if (/(submit|送信)/.test(s)) return 40;
-    if (/(verify|認証|成功)/.test(s)) return 70;
-    if (/(register|作成|登録|完成)/.test(s)) return 85;
-    if (/(api[\s_-]*key|apikey|received)/.test(s)) return 100;
+    if (/starting/.test(s))            return 10;
+    if (/(captcha_required|captcha|取得)/.test(s)) return 18;
+    if (/(captcha_submitted|submit|送信)/.test(s)) return 45;
+    if (/(waiting_email|verify|認証)/.test(s))     return 60;
+    if (/(creating_blog|register|作成|登録)/.test(s)) return 82;
+    if (/(issuing_api_key)/.test(s))   return 92;
+    if (/(api[\s_-]*key|apikey|api_key_ok|received)/.test(s)) return 100;
     return maxSeenPct + 5;
   }
   function setCaptchaDoneUI(siteId, accountId){
@@ -1220,16 +1221,7 @@
     sessionStorage.setItem("currentSiteId", siteId);
     sessionStorage.setItem("currentAccountId", accountId);
     sessionStorage.setItem("currentPlatform", platform);
-    if (SIGNUP_VIA_CLIENT_FLAG){
-      // クライアント方式: 画像はヘルパー→サーバへアップロード。ここでは即モーダルを開きポーリング。
-      maxSeenPct = 0;
-      setAccProgress(12);
-      const img = document.getElementById("captchaImage");
-      if(img) img.src = ""; // 後で /captcha_status の captcha_url が埋まる
-      document.getElementById("captchaModal").classList.remove("hidden");
-      document.getElementById("captchaForm").reset();
-      startProgressPolling();
-    } else {
+     if (!SIGNUP_VIA_CLIENT_FLAG){
       // サーバ方式: 既存の /prepare_captcha を呼ぶ
       const params=new URLSearchParams();
       params.append("site_id",siteId);
@@ -1271,6 +1263,44 @@
     // ユーザーが途中で閉じた場合もセマフォは解放しておく
     releaseExtSeoToken();
   }
+
+  function disableAndMarkBusy(el, label){
+  el.disabled = true;
+  el.classList.add('pointer-events-none','opacity-60');
+  el.setAttribute('aria-busy','true');
+  if (label) el.innerText = label;
+}
+
+async function waitAndOpenCaptcha(siteId, accountId){
+  // 画像がサーバに載るまで /external-seo/status をポーリング
+  maxSeenPct = 0; setAccProgress(12);
+  const timer = setInterval(async () => {
+    try{
+      const r = await fetch("/external-seo/status", { credentials: "same-origin" });
+      const js = await r.json();
+      if (js){
+        // 進捗バーは随時更新
+        setAccProgress(percentForStep(js.step, js));
+        // 画像URLが来た瞬間にだけモーダルを開く
+        if (js.captcha_url){
+          clearInterval(timer);
+          showCaptchaModal(js.captcha_url);
+          startProgressPolling(); // 以降は通常ポーリング
+        }
+      }
+    }catch(_){}
+  }, 1000);
+}
+
+function showCaptchaModal(url){
+  const img = document.getElementById("captchaImage");
+  if (img){
+    const sep = url.includes("?") ? "&" : "?";
+    img.src = url + sep + "t=" + Date.now();
+  }
+  document.getElementById("captchaModal").classList.remove("hidden");
+  document.getElementById("captchaForm").reset();
+}
 
   function submitCaptcha(event){
     event.preventDefault();
@@ -1387,7 +1417,7 @@
     progressInterval=setInterval(()=>{
       const siteId=sessionStorage.getItem("currentSiteId");
       const accountId=sessionStorage.getItem("currentAccountId");
-      fetch("/captcha_status"+(accountId?("?account_id="+encodeURIComponent(accountId)):""))
+      fetch("/external-seo/status")
         .then(r=>r.json())
         .then(data=>{
           if(!data) return;
@@ -1484,7 +1514,13 @@
           }
           // job_id は helperStart 内で sessionStorage.helperJobId に保存される
         }
-      handleCaptchaClick(btn); // 元の処理へ
+      // ここではモーダルを“まだ”開かない。サーバに画像が来てから開く。
+      if (SIGNUP_VIA_CLIENT_FLAG) {
+        disableAndMarkBusy(btn, "📷 CAPTCHA取得中…");
+        waitAndOpenCaptcha(btn.dataset.siteId, btn.dataset.accountId);
+      } else {
+        handleCaptchaClick(btn); // サーバ方式は従来どおり
+      }
     } catch(e){
       showToast("通信エラーにより実行できません","error");
     }
