@@ -6257,6 +6257,94 @@ def external_seo_bootstrap():
         "verify_poll_url": verify_poll_url,
     })
 
+# ==== 追加: 外部SEO ステータスポーリング ====
+@bp.get("/external-seo/captcha_status")
+@login_required
+def external_seo_captcha_status():
+    """
+    UIが定期ポーリングして進捗やCAPTCHA画像URL、完了フラグを取得する。
+    セッションが見えない環境では空に近いレスポンスになるが、それでOK。
+    """
+    from flask import session, jsonify
+
+    st = dict(session.get("captcha_status") or {})
+
+    # 既定値（UI側での扱いを安定させる）
+    st.setdefault("step", "idle")
+    try:
+        st["progress"] = max(0, min(100, int(st.get("progress") or 0)))
+    except Exception:
+        st["progress"] = 0
+
+    # よく使うフィールドは必ず鍵を用意しておく（undefined回避）
+    st.setdefault("captcha_url", None)
+    st.setdefault("captcha_sent", False)
+    st.setdefault("email_verified", False)
+    st.setdefault("account_created", False)
+    st.setdefault("api_key_received", False)
+    st.setdefault("site_id", None)
+    st.setdefault("account_id", None)
+
+    # extseo_token が生きているか（並列ガードの可視化）
+    st["extseo_active"] = bool(session.get("extseo_token"))
+
+    return jsonify({"ok": True, **st})
+
+
+# ==== 追加: 外部SEO メール認証URLのポーリング ====
+@bp.get("/external-seo/fetch_verify_url")
+def external_seo_fetch_verify_url():
+    """
+    ヘルパー（ユーザーPC）からポーリングされる。
+    サーバ側（VPS時代と同じメール受信ロジック）で最新の認証メール本文を取得し、
+    Livedoorの verify リンクを抽出して返す。見つからなければ ok:false。
+    クライアントは一定間隔で再ポーリングする想定。
+    例: GET /external-seo/fetch_verify_url?token=<inbox_token>&timeout=120&interval=5
+    """
+    from flask import request, jsonify, current_app
+    # 既存：livedoor_signup から従来の抽出ロジックをそのまま使用（完全踏襲）
+    from app.services.blog_signup.livedoor_signup import (
+        extract_verification_url,          # 本文から verify URL 抜き出し
+        poll_latest_link_gw,               # = mail_tm の poll を再輸出（VPS時代の実装）
+    )
+
+    token = (request.args.get("token") or "").strip()
+    if not token:
+        return jsonify({"ok": False, "error": "missing token"}), 400
+
+    # デフォルトは 120秒/5秒間隔（VPS時代の体感に合わせる）
+    try:
+        timeout_sec = int(request.args.get("timeout", 120))
+    except Exception:
+        timeout_sec = 120
+    try:
+        interval_sec = int(request.args.get("interval", 5))
+    except Exception:
+        interval_sec = 5
+
+    # poll_latest_link_gw は “メール本文テキスト” を返す想定（従来互換）
+    # task_id=token をキーに、timeout/interval に応じてリトライ
+    try:
+        email_body = poll_latest_link_gw(
+            task_id=token,
+            max_attempts=max(1, int(timeout_sec // max(1, interval_sec))),
+            interval=max(1, interval_sec),
+        )
+    except Exception as e:
+        current_app.logger.exception("[EXTSEO-VERIFY] poll error: %s", e)
+        return jsonify({"ok": False, "error": "poll_error"}), 500
+
+    if not email_body:
+        # まだ届かないだけ。ポーリング継続させる
+        return jsonify({"ok": False, "reason": "no_mail"})
+
+    # 本文から Livedoor の verify URL を抽出（規則は livedoor_signup.extract_verification_url に完全準拠）
+    url = extract_verification_url(email_body)
+    if not url:
+        return jsonify({"ok": False, "reason": "no_link"})
+
+    # 見つかった → 返す（ヘルパーが“ユーザーIPで”このURLにアクセスして認証を完了させる）
+    return jsonify({"ok": True, "verification_url": url})
 
 
 @bp.route("/external-seo/end", methods=["POST"])
@@ -6452,7 +6540,6 @@ def external_seo_callback():
 
 # --- 外部SEO: クライアントヘルパーがCAPTCHA画像をアップロードする受け口 ---
 @bp.post("/external-seo/prepare_captcha")
-@login_required
 def external_seo_prepare_captcha_upload():
     """
     クライアント（127.0.0.1のヘルパー）が撮ったCAPTCHA画像をアップロード。
