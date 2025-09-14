@@ -6200,14 +6200,6 @@ def external_seo_callback():
     from app.models import ExternalBlogAccount, Site, BlogType
     from app.services.blog_signup.crypto_utils import encrypt
 
-    # try_acquire と対になる解放関数（同じモジュール/同ファイル内にある前提）
-    # もし別名なら release に読み替えてください
-    try:
-        release  # type: ignore[name-defined]
-    except NameError:
-        # 他モジュールにある場合はこちらを使う（存在しなければ削除してください）
-        from app.services.semaphore import release  # type: ignore
-
     data = request.get_json(silent=True) or {}
     tok  = (data.get("token") or "").strip()
     if not tok:
