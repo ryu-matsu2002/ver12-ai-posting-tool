@@ -785,6 +785,9 @@
   const HELPER_PING   = HELPER_ORIGIN + '/ping';
   /* ヘルパーがCAPTCHA画像をアップロードする先（サーバ側受け口） */
   const HELPER_UPLOAD_URL = location.origin + "/external-seo/prepare_captcha";
+  // ヘルパー未起動のまま進めたとき、/ping が OK になり次第 /start を自動投げするための一時保管
+  // （ヘルパーモーダルのポーリングから拾います）
+  let __pendingJobPayload = null;
 
   // ヘルパー開始（CORSでJSON受け取り・job_idを保存し、upload_urlを付加）
     async function helperStart(payload){
@@ -857,6 +860,11 @@
       const ok = await pingHelper(400);
       if(ok){
         document.getElementById('helperProg').style.width = '100%';
+        // ヘルパーが立ち上がった瞬間に /start が未送信なら自動送出
+        if (__pendingJobPayload) {
+          try { await helperStart(__pendingJobPayload); } catch(_) {}
+          __pendingJobPayload = null;
+        }
         closeHelperModal();
         localStorage.setItem('signup_helper_installed', '1'); // デバイス記憶（目安）
       }
@@ -1467,7 +1475,13 @@
             callback_url: location.origin + "/external-seo/callback",
             upload_url: HELPER_UPLOAD_URL
           };
-          const _jid = await helperStart(payload);
+          // ヘルパーが既に起動していれば即 /start、未起動なら pending として保持し
+          // モーダル側の /ping 成功タイミングで自動送出する
+          if (await pingHelper(300)) {
+            await helperStart(payload);
+          } else {
+            __pendingJobPayload = payload;
+          }
           // job_id は helperStart 内で sessionStorage.helperJobId に保存される
         }
       handleCaptchaClick(btn); // 元の処理へ
