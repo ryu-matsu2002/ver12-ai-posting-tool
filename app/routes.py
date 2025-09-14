@@ -6164,6 +6164,101 @@ def external_seo_start():
     session["extseo_token"] = token
     return jsonify({"ok": True, "token": token})
 
+# ==== 追加: 外部SEO ブートストラップ（サーバが従来規則で値を生成し、ヘルパーに渡す）====
+@bp.post("/external-seo/bootstrap")
+@login_required
+def external_seo_bootstrap():
+    from flask import request, jsonify, session
+    from flask_login import current_user
+    from app import db
+    from app.models import Site
+    from app.services.mail_utils.mail_gw import create_inbox
+    # 生成規則は従来のまま流用
+    from app.services.blog_signup.livedoor_signup import (
+        generate_safe_id, generate_safe_password, suggest_livedoor_blog_id,
+        _craft_blog_title as ld_craft_blog_title  # 私有関数だが import 可。規則完全一致のため使用
+    )
+
+    # /external-seo/start で配られた extseo_token を必須とする
+    tok = session.get("extseo_token")
+    if not tok:
+        return jsonify({"ok": False, "error": "missing extseo_token; call /external-seo/start first"}), 400
+
+    # 入力（JSON or form 両対応）
+    if request.is_json:
+        site_id = request.json.get("site_id")
+        account_id = request.json.get("account_id")
+    else:
+        site_id = request.form.get("site_id")
+        account_id = request.form.get("account_id")
+
+    try:
+        site_id = int(site_id) if site_id is not None else None
+    except Exception:
+        site_id = None
+    try:
+        account_id = int(account_id) if account_id is not None else None
+    except Exception:
+        account_id = None
+
+    if not site_id:
+        return jsonify({"ok": False, "error": "missing site_id"}), 400
+
+    site = Site.query.get(site_id)
+    if not site or (not current_user.is_admin and site.user_id != current_user.id):
+        return jsonify({"ok": False, "error": "permission denied"}), 403
+
+    # ▼ 従来と同じ規則で生成（＝VPS時代と完全一致）
+    email, inbox_token = create_inbox()                 # 既存GWのまま
+    livedoor_id = generate_safe_id()
+    password    = generate_safe_password()
+    try:
+        blog_title = ld_craft_blog_title(site)          # タイトル規則を完全踏襲
+    except Exception:
+        blog_title = "ブログ"
+    try:
+        desired_blog_id = suggest_livedoor_blog_id(site.name or site.url or "", db.session)
+    except Exception:
+        desired_blog_id = None
+
+    # UI ポーリング用の軽い初期状態
+    st = dict(session.get("captcha_status") or {})
+    st.update({
+        "step": "bootstrap_ok",
+        "progress": max(5, int(st.get("progress") or 0)),
+        "site_id": site_id,
+        "account_id": account_id,
+    })
+    session["captcha_status"] = st
+
+    # 絶対URL（Blueprint 名に依存せず、確実に解決）
+    root = request.url_root.rstrip("/")
+    callback_url = f"{root}/external-seo/callback"
+    upload_url   = f"{root}/external-seo/prepare_captcha"
+    # STEP 3 で実装予定。先に URL を返しておき、ヘルパーは存在すれば使う
+    verify_poll_url = f"{root}/external-seo/fetch_verify_url?token={inbox_token}"
+
+    return jsonify({
+        "ok": True,
+        "token": tok,
+        "site_id": site_id,
+        "account_id": account_id,
+        # 従来規則で生成した値（＝ヘルパーは“受け取ったまま”使う）
+        "email": email,
+        "inbox_token": inbox_token,
+        "livedoor_id": livedoor_id,
+        "password": password,
+        "blog_title": blog_title,
+        "desired_blog_id": desired_blog_id,
+        # ヘルパーが叩くサーバ側の入口
+        "callback_url": callback_url,
+        "upload_url": upload_url,
+        # メール認証URLの取得（STEP 3でサーバ実装。無ければヘルパーは自前fallback）
+        "verify_poll_url": verify_poll_url,
+    })
+
+
+
 @bp.route("/external-seo/end", methods=["POST"])
 @login_required
 def external_seo_end():
