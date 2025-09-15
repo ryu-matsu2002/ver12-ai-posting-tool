@@ -780,7 +780,7 @@
 {% block scripts %}
 <script>
   /* ================== 方式A: ローカル・ヘルパー設定 ================== */
-  const SIGNUP_VIA_CLIENT_FLAG = JSON.parse(`{{ SIGNUP_VIA_CLIENT | default(false) | tojson }}`);
+  const SIGNUP_VIA_CLIENT_FLAG = false;
   const HELPER_ORIGIN = 'https://127.0.0.1:17653';
   const HELPER_PING   = HELPER_ORIGIN + '/ping';
   /* ヘルパーがCAPTCHA画像をアップロードする先（サーバ側受け口） */
