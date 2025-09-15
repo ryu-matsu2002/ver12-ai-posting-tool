@@ -3171,6 +3171,7 @@ def api_rankings():
         .filter(~User.id.in_([1, 14, 24]))  # 追加：ID14・24も除外
         # ランキングから除外するサイト名
         .filter(~Site.name.in_(["天草生うに本舗 丸健水産オンラインショップ"]))
+        .filter(~Site.url.like("https://shopping-douko.com%"))
         .filter(GSCDailyTotal.date >= start_date, GSCDailyTotal.date <= end_date)
         .group_by(Site.id, Site.name, Site.url, User.last_name, User.first_name, User.username)
         .order_by(func.coalesce(func.sum(metric_col), 0).desc())
