@@ -1096,6 +1096,7 @@
 
   /* ================== CAPTCHA / 進捗 / 削除 ================== */
   let progressInterval=null, lastStatus=null, captchaSubmitLocked=false, maxSeenPct=0;
+  let CAPTCHA_SUBMITTED = false;   // ← 追加
   function clampPct(x){ return Math.max(0, Math.min(100, Math.round(Number(x)||0))); }
   function setAccProgress(pct, instant=false){
     const bar=document.getElementById('accProgressBar'), num=document.getElementById('accProgressPct'); if(!bar||!num) return;
@@ -1235,7 +1236,6 @@
             document.getElementById("captchaImage").src=data.captcha_url+"?t="+Date.now();
             document.getElementById("captchaModal").classList.remove("hidden");
             document.getElementById("captchaForm").reset();
-            startProgressPolling();
           }else{
             alert(data && data.error ? data.error : "CAPTCHA画像の取得に失敗しました");
             restoreCaptchaButton(siteId, accountId, "❌ 再挑戦");
@@ -1365,6 +1365,7 @@ function showCaptchaModal(url){
       return;
     }
     // （サーバ方式）従来どおり
+    CAPTCHA_SUBMITTED = true;
     const payload=new URLSearchParams({"captcha_text":fd.get("captcha_text"),"site_id":siteId,"account_id":accountId,"blog":platform});
     fetch("/submit_captcha",{method:"POST",body:payload})      
       .then(r=>r.json())
@@ -1431,7 +1432,13 @@ function showCaptchaModal(url){
           }
           setAccProgress( percentForStep(data.step,data) );
           if(data.step && data.step!==lastStatus){ lastStatus=data.step; updateCaptchaStatusUI(data); }
-          const done = ((typeof data.progress==='number' && data.progress>=100) || /api[\s_-]*key|apikey|api取得完了|received/i.test(String(data.step||'')));
+          const stepStr = String(data.step || '');
+          const done =
+            data.api_key_received === true ||
+            /^api[_\s-]*key[_\s-]*ok$/i.test(stepStr) ||
+            /^apikey[_\s-]*ok$/i.test(stepStr) ||
+            (typeof data.progress === 'number' && data.progress >= 100 &&
+              CAPTCHA_SUBMITTED && /(issuing_api_key|api[_\s-]*key[_\s-]*ok)/i.test(stepStr));
           if(done){
             const sid=data.site_id||siteId, aid=data.account_id||accountId;
             if(sid && aid) switchToPostCTA(sid,aid);
