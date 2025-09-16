@@ -9,6 +9,7 @@ from googleapiclient.errors import HttpError
 from flask import current_app
 from app.models import Site, GSCMetric, GSCDailyTotal, GSCConfig  # ✅ 追加
 from app import db
+from typing import List, Dict, Tuple, Optional
 
 # ────── Service Account 認証情報の読み込み ──────
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -21,6 +22,29 @@ def get_search_console_service():
     )
     service = build("searchconsole", "v1", credentials=credentials)
     return service
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 環境変数ヘルパー（値が無ければデフォルトにフォールバック）
+def _get_env_int(key: str, default: int) -> int:
+    try:
+        return int(os.getenv(key, str(default)))
+    except Exception:
+        return default
+
+def _jst_today() -> date:
+    """JSTベースの今日（日付）を返す。"""
+    JST = timezone(timedelta(hours=9))
+    return datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(JST).date()
+
+def _jst_28d_window_end_start() -> Tuple[date, date]:
+    """
+    GSC UI と合わせて『昨日までの28日』を基本窓とする。
+    end = 昨日(JST), start = end - 27 日
+    """
+    end_d = _jst_today() - timedelta(days=1)
+    start_d = end_d - timedelta(days=27)
+    return end_d, start_d
 
 # ────── ✅✅✅ 追加: GSCMetricとして保存する処理 ──────
 def store_metrics_from_gsc_rows(rows, site, metric_date: date):
@@ -122,6 +146,104 @@ def _resolve_property_uri(site: Site) -> str:
     if cfg and cfg.property_uri:
         return cfg.property_uri.strip()
     return _site_url_norm(site)
+
+def _run_query_date_matrix(property_uri: str, start_d: date, end_d: date, row_limit: int = 25000) -> List[Dict]:
+    """
+    dimensions=['query','date'] のマトリクスを取得。
+    28日合計などのアプリ側集計に使う。
+    """
+    service = get_search_console_service()
+    body = {
+        "startDate": start_d.isoformat(),
+        "endDate": end_d.isoformat(),
+        "dimensions": ["query", "date"],
+        "rowLimit": row_limit,
+        "dataState": "FINAL",
+    }
+    logging.info(f"[GSC] query-date matrix: {property_uri} {start_d}..{end_d}")
+    resp = service.searchanalytics().query(siteUrl=property_uri, body=body).execute()
+    rows = resp.get("rows", []) or []
+    logging.info(f"[GSC] query-date rows={len(rows)} {property_uri}")
+    return rows
+
+def _aggregate_query_stats(rows: List[Dict]) -> Dict[str, Dict]:
+    """
+    rows（keys=[query, 'YYYY-MM-DD']）をクエリ単位に集計。
+    - impressions_28d: 合計表示回数
+    - first_seen_date: 最初に観測された日付（最小日付）
+    """
+    from datetime import date as _date
+    stats: Dict[str, Dict] = {}
+    for r in rows:
+        if not r.get("keys"): 
+            continue
+        q, ds = r["keys"][0], r["keys"][1]
+        try:
+            d = _date.fromisoformat(ds)
+        except Exception:
+            continue
+        imp = int(r.get("impressions", 0) or 0)
+        s = stats.get(q)
+        if not s:
+            stats[q] = {"impressions_28d": imp, "first_seen_date": d}
+        else:
+            s["impressions_28d"] += imp
+            if d < s["first_seen_date"]:
+                s["first_seen_date"] = d
+    return stats
+
+# ─────────────────────────────────────────────────────────────────────
+# ✅ 新着クエリ抽出（cutoff以降に初観測 ＆ 28日合計imprがENV以上）
+def fetch_new_queries_since(
+    site: Site,
+    cutoff_date: Optional[date] = None,
+    min_impressions: Optional[int] = None,
+    row_limit: int = 25000,
+) -> List[Dict]:
+    """
+    返り値: [{"query": str, "impressions_28d": int, "first_seen_date": date}, ...]
+    - first_seen_date >= cutoff_date
+    - impressions_28d >= min_impressions
+    窓は JST基準で『昨日までの28日』に固定（UI整合性のため）。
+    """
+    # フォールバック
+    if cutoff_date is None:
+        cutoff_date = getattr(site, "gsc_autogen_since", None) or _jst_today()
+    if min_impressions is None:
+        min_impressions = _get_env_int("GSC_MIN_IMPRESSIONS", 20)
+
+    # 集計窓（28日固定）
+    end_d, start_d = _jst_28d_window_end_start()
+
+    # siteUrl は検証済みの property を優先
+    property_uri = _resolve_property_uri(site)
+
+    try:
+        rows = _run_query_date_matrix(property_uri, start_d, end_d, row_limit=row_limit)
+        stats = _aggregate_query_stats(rows)
+
+        # フィルタ適用
+        picked: List[Dict] = []
+        for q, s in stats.items():
+            if s["first_seen_date"] >= cutoff_date and s["impressions_28d"] >= min_impressions:
+                picked.append({
+                    "query": q,
+                    "impressions_28d": int(s["impressions_28d"]),
+                    "first_seen_date": s["first_seen_date"],
+                })
+
+        logging.info(
+            "[GSC-AUTOGEN] pick_new_queries site_id=%s prop=%s start=%s end=%s cutoff=%s picked=%s (rows=%s, min_impr=%s)",
+            site.id, property_uri, start_d, end_d, cutoff_date, len(picked), len(rows), min_impressions
+        )
+        return picked
+    except HttpError as e:
+        status = getattr(e, "status_code", None) or getattr(e.resp, "status", None)
+        logging.warning(f"[GSC-AUTOGEN] query-date failed ({status}) site={site.id} prop={property_uri}")
+        return []
+    except Exception as e:
+        logging.exception(f"[GSC-AUTOGEN] unexpected error site={site.id} prop={property_uri}: {e}")
+        return []
 
 def fetch_daily_totals_for_property(property_uri: str, start_d: date, end_d: date):
     """

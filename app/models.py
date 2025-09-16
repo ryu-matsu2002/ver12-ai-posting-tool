@@ -112,6 +112,10 @@ class Site(db.Model):
     user_id  = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     gsc_connected = db.Column(db.Boolean, default=False)  # ✅ 追加
     gsc_generation_started = db.Column(db.Boolean, default=False)  # ✅ GSC記事生成ボタンの実行フラグ
+    # ✅ GSCオートジェンの基準日（これ以降に初観測のクエリのみ対象）
+    gsc_autogen_since = db.Column(db.Date, nullable=True, index=True)
+    # （任意）最後にオートジェンを回した時刻を残したい場合
+    # last_gsc_autogen_at = db.Column(DateTime(timezone=True), nullable=True, index=True)
     clicks = db.Column(db.Integer, default=0)         # 総クリック数（GSC）
     impressions = db.Column(db.Integer, default=0)    # 表示回数（GSC）
     genre_id = db.Column(db.Integer, db.ForeignKey('genres.id'), nullable=True)  # ← 追加
@@ -311,6 +315,45 @@ class GSCConfig(db.Model):
 
     user = db.relationship("User", backref="gsc_configs")
     site = db.relationship("Site", backref="gsc_configs")
+
+# app/models.py の末尾付近（既存モデル群のあと）に新規クラスを追加
+class GSCAutogenDaily(db.Model):
+    """
+    GSC自動記事化の“日次サマリー”
+    1サイト×1日につき1行（DRYRUNでも記録）
+    """
+    __tablename__ = "gsc_autogen_daily"
+
+    id = db.Column(db.Integer, primary_key=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("site.id"), nullable=False, index=True)
+
+    # 実行対象日（UTC基準でOK。UIでJSTに変換表示）
+    run_date = db.Column(db.Date, nullable=False, index=True)
+
+    started_at  = db.Column(DateTime(timezone=True), nullable=True)
+    finished_at = db.Column(DateTime(timezone=True), nullable=True)
+
+    picked         = db.Column(db.Integer, nullable=False, default=0)   # 抽出総数
+    queued         = db.Column(db.Integer, nullable=False, default=0)   # キュー投入数
+    dup            = db.Column(db.Integer, nullable=False, default=0)   # 既存重複で除外
+    limit_skipped  = db.Column(db.Integer, nullable=False, default=0)   # 上限で除外
+    dryrun         = db.Column(db.Boolean, nullable=False, default=False)
+
+    # 画面でサンプル表示するための10件など
+    sample_keywords_json = db.Column(SA_JSON, nullable=True)
+    # 任意：例外要約
+    error = db.Column(db.Text, nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("site_id", "run_date", name="uq_gsc_autogen_daily_site_date"),
+        db.Index("ix_gsc_autogen_daily_site_run", "site_id", "run_date"),
+    )
+
+    site = db.relationship("Site", backref=db.backref("gsc_autogen_daily", lazy="dynamic"))
+
+
 
 # app/models.py
 class ChatLog(db.Model):

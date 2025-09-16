@@ -14,12 +14,13 @@ from .wp_client import post_to_wp  # 統一された WordPress 投稿関数
 from sqlalchemy.orm import selectinload
 
 # ✅ GSCクリック・表示回数の毎日更新ジョブ用
-from app.google_client import update_all_gsc_sites
+from app.google_client import update_all_gsc_sites, fetch_new_queries_since
 
 # 既存 import の下あたりに追加
 from concurrent.futures import ThreadPoolExecutor
 from .models import (Site, Keyword, ExternalSEOJob,
                      BlogType, ExternalBlogAccount, ExternalArticleSchedule)
+from app.models import GSCAutogenDaily  # ★ 追加：日次サマリ
 
 # app/tasks.py （インポートセクションの BlogType などの下あたり）
 from app.services.blog_signup.livedoor_signup import signup as livedoor_signup
@@ -35,6 +36,8 @@ from app.services.internal_seo.planner import plan_links_for_site
 from app.services.internal_seo.applier import apply_actions_for_site
 import os
 from math import inf
+from typing import List, Dict, Set, Tuple, Optional
+import json
 
 # ────────────────────────────────────────────────
 # APScheduler ＋ スレッドプール
@@ -42,6 +45,31 @@ from math import inf
 # グローバルな APScheduler インスタンス（__init__.py で start されています）
 scheduler = BackgroundScheduler(timezone="UTC")
 executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="extseo")
+
+
+# ────────────────────────────────────────────────
+# GSCオートジェン：サイトごとの軽量ロック（PostgreSQL advisory lock）
+# ────────────────────────────────────────────────
+def _lock_key(site_id: int) -> int:
+    # 適当な名前空間キー（衝突回避用に固定係数）
+    return 91337_00000 + int(site_id)
+
+def _try_lock_site(site_id: int) -> bool:
+    k = _lock_key(site_id)
+    try:
+        got = db.session.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": k}).scalar()
+        return bool(got)
+    except Exception:
+        # DBがPostgreSQL以外でも落ちないようフォールバック（ロック無しで進行）
+        current_app.logger.warning("[GSC-AUTOGEN] advisory lock unsupported; continue without lock (site=%s)", site_id)
+        return True
+
+def _unlock_site(site_id: int) -> None:
+    k = _lock_key(site_id)
+    try:
+        db.session.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": k})
+    except Exception:
+        pass
 
 # --------------------------------------------------------------------------- #
 # 1) WordPress 自動投稿ジョブ
@@ -221,6 +249,140 @@ def _gsc_generation_job(app):
                 current_app.logger.warning(f"[GSC自動生成] 失敗 - {site.url}: {e}")
 
         current_app.logger.info("✅ GSC記事生成ジョブが完了しました")
+
+
+# ──────────────────────────────────────────
+# 🆕 GSCオートジェン（日次・新着限定・上限・DRYRUN・見える化）
+# ──────────────────────────────────────────
+def gsc_autogen_daily_job(app):
+    """
+    ENVのUTC時刻に日次で起動：
+      - 対象：gsc_connected=True & gsc_generation_started=True
+      - 新着抽出：fetch_new_queries_since(site)
+      - 事前フィルタ：Keyword/Article 既存排除
+      - 上限：ENV GSC_AUTOGEN_LIMIT
+      - DRYRUN：ENV GSC_AUTOGEN_DRYRUN=1 なら投入せずカウントのみ
+      - サマリ保存：GSCAutogenDaily（run_date=JST）
+    """
+    from app.models import PromptTemplate  # 局所 import（循環回避）
+    from app.article_generator import enqueue_generation
+    JST = pytz.timezone("Asia/Tokyo")
+    jst_today = datetime.utcnow().replace(tzinfo=pytz.utc).astimezone(JST).date()
+
+    limit_per_site = int(os.getenv("GSC_AUTOGEN_LIMIT", "50"))
+    dryrun = os.getenv("GSC_AUTOGEN_DRYRUN", "1") == "1"
+
+    with app.app_context():
+        sites = Site.query.filter_by(gsc_connected=True, gsc_generation_started=True).all()
+        current_app.logger.info("[GSC-AUTOGEN] start: targets=%s limit=%s dryrun=%s", len(sites), limit_per_site, int(dryrun))
+
+        for site in sites:
+            if not _try_lock_site(site.id):
+                current_app.logger.info("[GSC-AUTOGEN] skip (locked) site=%s", site.id)
+                continue
+            started_at = datetime.utcnow()
+            error_msg: Optional[str] = None
+            try:
+                # 1) 新着抽出（cutoff 以降・28d impr しきい値は関数内でENV反映）
+                rows = fetch_new_queries_since(site)
+                candidate_keywords = [r["query"] for r in rows]
+                picked_cnt = len(candidate_keywords)
+
+                # 2) 事前フィルタ（重複や既存記事の除外）
+                filt = filter_autogen_candidates(site.id, candidate_keywords)
+                deduped = filt["deduped"]
+                dup_cnt = len(filt["dup_keywords"]) + len(filt["art_dup_keywords"])
+
+                # 3) 上限
+                allowed = deduped[: max(0, limit_per_site)]
+                limit_skipped = max(0, len(deduped) - len(allowed))
+
+                queued_cnt = 0
+                sample = allowed[:10]
+
+                # 4) DRYRUN or 実投入
+                if dryrun or not allowed:
+                    pass  # 何もしない（カウントのみ）
+                else:
+                    # 4-1) Keyword を作成（存在しないはずだが念のため重複排除）
+                    existing = {
+                        r[0]
+                        for r in db.session.query(Keyword.keyword)
+                        .filter(Keyword.site_id == site.id, Keyword.keyword.in_(allowed))
+                        .all()
+                    }
+                    to_insert = [kw for kw in allowed if kw not in existing]
+                    for kw in to_insert:
+                        db.session.add(Keyword(
+                            keyword=kw,
+                            site_id=site.id,
+                            user_id=site.user_id,
+                            source="gsc",
+                            status="pending",
+                            used=False
+                        ))
+                    if to_insert:
+                        db.session.commit()
+
+                    # 4-2) プロンプト取得
+                    prompt = (PromptTemplate.query
+                              .filter_by(user_id=site.user_id)
+                              .order_by(PromptTemplate.id.desc())
+                              .first())
+                    title_pt = prompt.title_pt if prompt else ""
+                    body_pt  = prompt.body_pt  if prompt else ""
+
+                    # 4-3) キュー投入（既存の enqueue_generation を利用）
+                    enqueue_generation(
+                        user_id=site.user_id,
+                        site_id=site.id,
+                        keywords=allowed,
+                        title_prompt=title_pt,
+                        body_prompt=body_pt,
+                        format="html",
+                        self_review=False,
+                        source="gsc",
+                    )
+                    queued_cnt = len(allowed)
+
+                # 5) サマリ保存（upsert）
+                rec = GSCAutogenDaily.query.filter_by(site_id=site.id, run_date=jst_today).first()
+                if not rec:
+                    rec = GSCAutogenDaily(site_id=site.id, user_id=site.user_id, run_date=jst_today)
+                rec.picked = int(picked_cnt)
+                rec.queued = int(queued_cnt)
+                rec.dup = int(dup_cnt)
+                rec.limit_skipped = int(limit_skipped)
+                rec.dryrun = int(dryrun)
+                rec.sample_keywords_json = json.dumps(sample, ensure_ascii=False)
+                rec.started_at = rec.started_at or started_at
+                rec.finished_at = datetime.utcnow()
+                rec.error = None
+                db.session.add(rec)
+                db.session.commit()
+
+                current_app.logger.info(
+                    "[GSC-AUTOGEN] site=%s pick=%s queued=%s dup=%s limit=%s dryrun=%s",
+                    site.id, picked_cnt, queued_cnt, dup_cnt, limit_skipped, int(dryrun)
+                )
+            except Exception as e:
+                db.session.rollback()
+                error_msg = str(e)
+                # サマリにもエラーを残す
+                try:
+                    rec = GSCAutogenDaily.query.filter_by(site_id=site.id, run_date=jst_today).first()
+                    if not rec:
+                        rec = GSCAutogenDaily(site_id=site.id, user_id=site.user_id, run_date=jst_today)
+                    rec.started_at = rec.started_at or started_at
+                    rec.finished_at = datetime.utcnow()
+                    rec.error = error_msg
+                    db.session.add(rec)
+                    db.session.commit()
+                except Exception:
+                    pass
+                current_app.logger.exception("[GSC-AUTOGEN] failed site=%s: %s", site.id, error_msg)
+            finally:
+                _unlock_site(site.id)
 
 # app/tasks.py どこでも OK ですが _run_external_seo_job の直前あたりが読みやすい
 def _run_livedoor_signup(app, site_id: int) -> None:
@@ -509,13 +671,16 @@ def init_scheduler(app):
         max_instances=1
     )
 
-    # ✅ GSC記事生成ジョブ
+    # 🆕 ✅ GSCオートジェン（日次・新着限定）
+    gsc_utc_hour = int(os.getenv("GSC_AUTOGEN_UTC_HOUR", "18"))
+    gsc_utc_min  = int(os.getenv("GSC_AUTOGEN_UTC_MIN", "0"))
     scheduler.add_job(
-        func=_gsc_generation_job,
-        trigger="interval",
-        minutes=20,
+        func=gsc_autogen_daily_job,
+        trigger="cron",
+        hour=gsc_utc_hour,
+        minute=gsc_utc_min,
         args=[app],
-        id="gsc_generation_job",
+        id="gsc_autogen_daily_job",
         replace_existing=True,
         max_instances=1
     )
@@ -570,8 +735,61 @@ def init_scheduler(app):
     scheduler.start()
     app.logger.info("Scheduler started: auto_post_job every 3 minutes")
     app.logger.info("Scheduler started: gsc_metrics_job daily at 0:00")
-    app.logger.info("Scheduler started: gsc_generation_job every 20 minutes")
-    app.logger.info("Scheduler started: external_post_job every 10 minutes")
+    app.logger.info(f"Scheduler started: gsc_autogen_daily_job daily at {gsc_utc_hour:02d}:{gsc_utc_min:02d} UTC")
+    
+    
+# ────────────────────────────────────────────────
+# GSCオートジェン：事前フィルタ用ユーティリティ（タスク5で利用）
+# ────────────────────────────────────────────────
+def _build_dup_sets(site_id: int, candidates: List[str]) -> Tuple[Set[str], Set[str]]:
+    """
+    事前フィルタのための“既存集合”を用意。
+    戻り値:
+      (gsc_keywords_set, article_dup_set)
+        - gsc_keywords_set … Keyword(source='gsc') として既に存在するキーワード
+        - article_dup_set  … Article の pending/gen/done/posted に既存のキーワード
+    """
+    from app.models import Keyword, Article
+    gsc_keywords_set: Set[str] = {
+        r[0] for r in db.session.query(Keyword.keyword)
+        .filter(
+            Keyword.site_id == site_id,
+            Keyword.source == "gsc",
+            Keyword.keyword.in_(candidates)
+        ).all()
+    }
+    article_dup_set: Set[str] = {
+        r[0] for r in db.session.query(Article.keyword)
+        .filter(
+            Article.site_id == site_id,
+            Article.keyword.in_(candidates),
+            Article.status.in_(["pending", "gen", "done", "posted"])
+        ).all()
+    }
+    return gsc_keywords_set, article_dup_set
+
+def filter_autogen_candidates(site_id: int, candidates: List[str]) -> Dict[str, List[str]]:
+    """
+    新規投入前の“事前フィルタ”：重複や衝突のある候補を除外。
+    戻り値:
+      {
+        "deduped": [...],           # 投入候補（重複除外後）
+        "dup_keywords": [...],      # 既存 Keyword(source='gsc') 由来の除外
+        "art_dup_keywords": [...],  # 既存 Article 由来の除外
+      }
+    """
+    if not candidates:
+        return {"deduped": [], "dup_keywords": [], "art_dup_keywords": []}
+    gsc_dup, art_dup = _build_dup_sets(site_id, candidates)
+    dup_keywords = sorted(list(gsc_dup))
+    art_dup_keywords = sorted(list(art_dup))
+    blocked = gsc_dup.union(art_dup)
+    deduped = [kw for kw in candidates if kw not in blocked]
+    return {
+        "deduped": deduped,
+        "dup_keywords": dup_keywords,
+        "art_dup_keywords": art_dup_keywords,
+    }    
 
 # ────────────────────────────────────────────────
 # 内部SEO 自動化ジョブ

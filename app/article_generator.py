@@ -15,6 +15,7 @@ from . import db
 from .models import Article, Keyword
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Sequence, Optional   # ← 先頭付近の import に追記
+from typing import Set
 
 
 # OpenAI設定
@@ -408,8 +409,24 @@ def enqueue_generation(
             ).all()
             kw_map = {k.keyword: k for k in keyword_objs}
 
+            # ▼ 最終ガード用：既存記事（重複）をまとめて先読み
+            #    status が pending / gen / done / posted のものは“重複”として新規生成をスキップ
+            dup_statuses = {"pending", "gen", "done", "posted"}
+            existing_article_kw: Set[str] = {
+                r[0] for r in db.session.query(Article.keyword)
+                .filter(
+                    Article.site_id == site_id,
+                    Article.keyword.in_(keywords[:40]),
+                    Article.status.in_(list(dup_statuses))
+                ).all()
+            }
+
             # ▼ 記事データを DB に登録
             for kw, c in zip(keywords[:40], copies):
+                # ✅ 最終ガード：既存記事の重複は投入スキップ（安全・冪等）
+                if kw in existing_article_kw:
+                    logging.info(f"[enqueue] skip duplicate keyword for site={site_id} kw='{kw}' (exists in articles)")
+                    continue
                 for _ in range(c):
                     try:
                         title = _unique_title(kw.strip(), title_prompt)
