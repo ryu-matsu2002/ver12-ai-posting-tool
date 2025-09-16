@@ -273,7 +273,8 @@ def gsc_autogen_daily_job(app):
     dryrun = os.getenv("GSC_AUTOGEN_DRYRUN", "1") == "1"
 
     with app.app_context():
-        sites = Site.query.filter_by(gsc_connected=True, gsc_generation_started=True).all()
+        # 日次オートジェン有効フラグ（migration: gsc_autogen_daily）を使用
+        sites = Site.query.filter_by(gsc_connected=True, gsc_autogen_daily=True).all()
         current_app.logger.info("[GSC-AUTOGEN] start: targets=%s limit=%s dryrun=%s", len(sites), limit_per_site, int(dryrun))
 
         for site in sites:
