@@ -116,6 +116,8 @@ class Site(db.Model):
     gsc_autogen_since = db.Column(db.Date, nullable=True, index=True)
     # （任意）最後にオートジェンを回した時刻を残したい場合
     # last_gsc_autogen_at = db.Column(DateTime(timezone=True), nullable=True, index=True)
+    # Site モデル内
+    gsc_autogen_daily = db.Column(db.Boolean, default=False, nullable=False)
     clicks = db.Column(db.Integer, default=0)         # 総クリック数（GSC）
     impressions = db.Column(db.Integer, default=0)    # 表示回数（GSC）
     genre_id = db.Column(db.Integer, db.ForeignKey('genres.id'), nullable=True)  # ← 追加
@@ -351,7 +353,8 @@ class GSCAutogenDaily(db.Model):
         db.Index("ix_gsc_autogen_daily_site_run", "site_id", "run_date"),
     )
 
-    site = db.relationship("Site", backref=db.backref("gsc_autogen_daily", lazy="dynamic"))
+    site = db.relationship("Site", backref=db.backref("gsc_autogen_daily_logs", lazy="dynamic"))
+
 
 
 

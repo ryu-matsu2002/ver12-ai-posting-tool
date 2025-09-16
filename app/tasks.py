@@ -349,7 +349,7 @@ def gsc_autogen_daily_job(app):
                 # 5) サマリ保存（upsert）
                 rec = GSCAutogenDaily.query.filter_by(site_id=site.id, run_date=jst_today).first()
                 if not rec:
-                    rec = GSCAutogenDaily(site_id=site.id, user_id=site.user_id, run_date=jst_today)
+                    rec = GSCAutogenDaily(site_id=site.id, run_date=jst_today)
                 rec.picked = int(picked_cnt)
                 rec.queued = int(queued_cnt)
                 rec.dup = int(dup_cnt)
@@ -373,7 +373,7 @@ def gsc_autogen_daily_job(app):
                 try:
                     rec = GSCAutogenDaily.query.filter_by(site_id=site.id, run_date=jst_today).first()
                     if not rec:
-                        rec = GSCAutogenDaily(site_id=site.id, user_id=site.user_id, run_date=jst_today)
+                        rec = GSCAutogenDaily(site_id=site.id, run_date=jst_today)
                     rec.started_at = rec.started_at or started_at
                     rec.finished_at = datetime.utcnow()
                     rec.error = error_msg
