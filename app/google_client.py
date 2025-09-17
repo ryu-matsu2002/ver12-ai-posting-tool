@@ -76,7 +76,7 @@ def fetch_search_queries_for_site(site: Site, days: int = 28, row_limit: int = 2
         # JST準拠で“昨日まで”
         JST = timezone(timedelta(hours=9))
         today_jst = datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(JST).date()
-        end_date = today_jst
+        end_date = today_jst - timedelta(days=1)  # 昨日まで
         start_date = end_date - timedelta(days=days)
         property_uri = _resolve_property_uri(site)
 
@@ -408,14 +408,16 @@ def _run_search_analytics(site: Site, days: int, dimensions: list[str], row_limi
     # JST準拠で“昨日まで”の窓に統一
     JST = timezone(timedelta(hours=9))
     today_jst = datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(JST).date()
-    end_date = today_jst
+    end_date = today_jst - timedelta(days=1)  # 昨日まで
     start_date = end_date - timedelta(days=days)
 
     body = {
         "startDate": start_date.isoformat(),
         "endDate": end_date.isoformat(),
         "dimensions": dimensions,
-        "rowLimit": row_limit
+        "rowLimit": row_limit,
+        "searchType": "web",
+        "dataState": "FINAL",
     }
     if order_by_impressions:
         body["orderBy"] = [{"field": "impressions", "descending": True}]
