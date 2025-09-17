@@ -70,36 +70,46 @@ def store_metrics_from_gsc_rows(rows, site, metric_date: date):
     logging.info(f"[GSCMetric] ✅ 保存完了: {site.name} ({len(rows)} 件)")
 
 # ────── 🔍 Search Console からキーワード取得 ──────
-def fetch_search_queries_for_site(site: Site, days: int = 28, row_limit: int = 1000) -> list[str]:
+def fetch_search_queries_for_site(site: Site, days: int = 28, row_limit: int = 25000) -> list[str]:
     try:
-        # ✅ 修正: URL末尾に / を補完（GSC APIは完全一致が必須）
-        site_url = site.url
-        if not site_url.endswith("/"):
-            site_url += "/"
-
-        # ✅ クエリ取得ログ（事前）
-        logging.info(f"[GSC] クエリ取得開始: {site_url}")
-
         service = get_search_console_service()
-        end_date = date.today()
+        # JST準拠で“昨日まで”
+        JST = timezone(timedelta(hours=9))
+        today_jst = datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(JST).date()
+        end_date = today_jst
         start_date = end_date - timedelta(days=days)
+        property_uri = _resolve_property_uri(site)
 
-        request = {
-            "startDate": start_date.isoformat(),
-            "endDate": end_date.isoformat(),
-            "dimensions": ["query"],
-            "rowLimit": row_limit
-        }
+        logging.info(f"[GSC] クエリ取得開始: {property_uri}")
 
-        response = service.searchanalytics().query(siteUrl=site_url, body=request).execute()
-        rows = response.get("rows", [])
+        rows = []
+        start_row = 0
+        while True:
+            body = {
+                "startDate": start_date.isoformat(),
+                "endDate": end_date.isoformat(),
+                "dimensions": ["query"],
+                "rowLimit": row_limit,
+                "startRow": start_row,
+                "searchType": "web",
+                "dataState": "FINAL",
+            }
+            resp = service.searchanalytics().query(siteUrl=property_uri, body=body).execute()
+            chunk = resp.get("rows", []) or []
+            rows.extend(chunk)
+            logging.info(f"[GSC] pagination: fetched={len(chunk)} total={len(rows)} startRow={start_row}")
+            if len(chunk) < row_limit:
+                break
+            start_row += row_limit
 
         # ✅ 追加: クエリ取得結果のログ
-        logging.info(f"[GSC] {len(rows)} 件のクエリを取得: {site_url}")
+        logging.info(f"[GSC] {len(rows)} 件のクエリを取得: {property_uri}")
         if not rows:
-            logging.warning(f"[GSC] クエリが0件（空）で返却されました: {site_url}")
+            logging.warning(f"[GSC] クエリが0件（空）で返却されました: {property_uri}")
 
         # ✅✅✅ GSCMetricに保存（今回の新機能）
+        # ※注意：この保存は“期間合算”を1日付に押し込む設計。
+        # UI合計との一致性を重視するなら、dimensions=['query','date']で日次保存に改修推奨。
         store_metrics_from_gsc_rows(rows, site, end_date)
 
         # ✅ 既存機能: 検索キーワードのリストを返す（記事生成用）
@@ -158,6 +168,7 @@ def _run_query_date_matrix(property_uri: str, start_d: date, end_d: date, row_li
         "endDate": end_d.isoformat(),
         "dimensions": ["query", "date"],
         "rowLimit": row_limit,
+        "searchType": "web",
         "dataState": "FINAL",
     }
     logging.info(f"[GSC] query-date matrix: {property_uri} {start_d}..{end_d}")
@@ -255,7 +266,9 @@ def fetch_daily_totals_for_property(property_uri: str, start_d: date, end_d: dat
         "startDate": start_d.isoformat(),
         "endDate": end_d.isoformat(),
         "dimensions": ["date"],
-        "rowLimit": 25000
+        "rowLimit": 25000,
+        "searchType": "web",
+        "dataState": "FINAL",
     }
     logging.info(f"[GSC] daily totals: {property_uri} {start_d}..{end_d}")
     try:
@@ -385,7 +398,10 @@ def update_site_daily_totals(site: Site, days: int = 35) -> int:
 def _run_search_analytics(site: Site, days: int, dimensions: list[str], row_limit: int,
                           order_by_impressions: bool = False):
     service = get_search_console_service()
-    end_date = date.today()
+    # JST準拠で“昨日まで”の窓に統一
+    JST = timezone(timedelta(hours=9))
+    today_jst = datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(JST).date()
+    end_date = today_jst
     start_date = end_date - timedelta(days=days)
 
     body = {
@@ -397,11 +413,11 @@ def _run_search_analytics(site: Site, days: int, dimensions: list[str], row_limi
     if order_by_impressions:
         body["orderBy"] = [{"field": "impressions", "descending": True}]
 
-    site_url = _site_url_norm(site)
-    logging.info(f"[GSC] query dims={dimensions} limit={row_limit} {site_url}")
-    resp = service.searchanalytics().query(siteUrl=site_url, body=body).execute()
+    property_uri = _resolve_property_uri(site)
+    logging.info(f"[GSC] query dims={dimensions} limit={row_limit} prop={property_uri} body={body}")
+    resp = service.searchanalytics().query(siteUrl=property_uri, body=body).execute()
     rows = resp.get("rows", [])
-    logging.info(f"[GSC] rows={len(rows)} dims={dimensions} {site_url}")
+    logging.info(f"[GSC] rows={len(rows)} dims={dimensions} prop={property_uri}")
     return rows
 
 # 追加：上位クエリ40件（表示回数降順）
@@ -453,17 +469,20 @@ def fetch_totals_direct(property_uri: str, start_d: date, end_d: date) -> dict:
     body = {
         "startDate": start_d.isoformat(),
         "endDate": end_d.isoformat(),
-        "dimensions": [],           # ← 無次元で合計
-        "dataState": "FINAL",       # ← UI寄せ
-        "rowLimit": 1
+        # 無次元は避けたいが互換のため残す。APIがtotalsを返さない場合あり
+        "dimensions": [],
+        "dataState": "FINAL",
+        "searchType": "web",
+        "rowLimit": 1,
     }
     resp = service.searchanalytics().query(siteUrl=property_uri, body=body).execute()
-    # rowsが空でも totals を見る（APIは 'rows' なしで totals を返す場合あり）
-    totals = resp.get("rows", [{}])
-    if totals and "clicks" in totals[0]:
-        return {"clicks": int(totals[0].get("clicks", 0) or 0),
-                "impressions": int(totals[0].get("impressions", 0) or 0)}
-    # フォールバック: APIのトップレベルに totals があることも
+    # rowsベース or top-level totals ベースの双方を探る
+    if "rows" in resp and resp["rows"]:
+        r0 = resp["rows"][0]
+        return {
+            "clicks": int(r0.get("clicks", 0) or 0),
+            "impressions": int(r0.get("impressions", 0) or 0),
+        }
     return {
         "clicks": int(resp.get("clicks", 0) or 0),
         "impressions": int(resp.get("impressions", 0) or 0),
