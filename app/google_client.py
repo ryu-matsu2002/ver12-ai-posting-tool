@@ -390,17 +390,13 @@ def update_site_daily_totals(site: Site, days: int = 35) -> int:
             continue
     # すべて失敗：403ならスキップ、その他はraise
     if last_err:
-        try:
-            from googleapiclient.errors import HttpError  # ← ここで確実にimport
-            is_http = isinstance(last_err, HttpError)
-        except Exception:
-            is_http = False
-        if is_http:
+        if isinstance(last_err, HttpError):
             status = getattr(last_err, "status_code", None) or getattr(last_err.resp, "status", None)
             if status == 403:
-                logging.warning(f"[GSC] skip site (403 forbidden): site_id={site.id} url={site.url}")
+                logging.warning(f"[GSC] skip site (403 forbidden): site_id=%s url=%s", site.id, site.url)
                 return 0
         raise last_err
+
 
 def _run_search_analytics(site: Site, days: int, dimensions: list[str], row_limit: int,
                           order_by_impressions: bool = False):
