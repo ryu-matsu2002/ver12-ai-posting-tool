@@ -735,6 +735,7 @@ def init_scheduler(app):
 
     scheduler.start()
     app.logger.info("Scheduler started: auto_post_job every 3 minutes")
+    app.logger.info("Scheduler started: external_post_job every 10 minutes")
     app.logger.info("Scheduler started: gsc_metrics_job daily at 0:00")
     app.logger.info(f"Scheduler started: gsc_autogen_daily_job daily at {gsc_utc_hour:02d}:{gsc_utc_min:02d} UTC")
     
