@@ -390,8 +390,8 @@ def update_site_daily_totals(site: Site, days: int = 35) -> int:
             continue
     # すべて失敗：403ならスキップ、その他はraise
     if last_err:
-        from googleapiclient.errors import HttpError
         try:
+            from googleapiclient.errors import HttpError  # ← ここで確実にimport
             is_http = isinstance(last_err, HttpError)
         except Exception:
             is_http = False
