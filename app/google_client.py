@@ -388,12 +388,19 @@ def update_site_daily_totals(site: Site, days: int = 35) -> int:
             logging.exception(f"[GSC] unexpected error for prop={prop}: {e}")
             last_err = e
             continue
-    # すべて失敗した場合のみ raise
+    # すべて失敗：403ならスキップ、その他はraise
     if last_err:
+        from googleapiclient.errors import HttpError
+        try:
+            is_http = isinstance(last_err, HttpError)
+        except Exception:
+            is_http = False
+        if is_http:
+            status = getattr(last_err, "status_code", None) or getattr(last_err.resp, "status", None)
+            if status == 403:
+                logging.warning(f"[GSC] skip site (403 forbidden): site_id={site.id} url={site.url}")
+                return 0
         raise last_err
-    return 0
-
-
 
 def _run_search_analytics(site: Site, days: int, dimensions: list[str], row_limit: int,
                           order_by_impressions: bool = False):
