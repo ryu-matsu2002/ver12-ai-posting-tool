@@ -104,7 +104,7 @@
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/gsc-connect') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">link</span>Search Console連携
       </a>
-      {% if current_user.is_authenticated and current_user.is_admin %}
+      {% if current_user.is_authenticated and (current_user.is_admin or session.get('admin_id')) %}
       <a href="{{ url_for('admin.admin_users') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full text-yellow-300 font-semibold">
         <span class="material-icons align-middle mr-2">admin_panel_settings</span>管理者ページ
@@ -133,6 +133,20 @@
 
   <!-- ===== MAINコンテンツ領域 ===== -->
   <main class="flex-1 overflow-y-auto p-6 bg-white text-black relative">
+    {% if session.get('admin_id') %}
+  <div class="mb-4 p-3 rounded bg-yellow-100 text-yellow-900 border border-yellow-300 flex items-center justify-between">
+    <div>
+      🛡️ <strong>管理者モード（なりすまし中）</strong>：
+      現在 <span class="font-semibold">{{ current_user.username }}</span> さんとして操作しています。
+    </div>
+    <div class="space-x-2">
+      <a href="{{ url_for('admin.admin_users') }}"
+         class="px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 text-sm">別ユーザーに切替</a>
+      <a href="{{ url_for('admin.admin_return') }}"
+         class="px-3 py-1 rounded bg-gray-700 text-white hover:bg-gray-800 text-sm">管理者に戻る</a>
+    </div>
+  </div>
+{% endif %}
 
     <!-- ユーザープロフィール -->
 <div class="flex justify-end mb-6">

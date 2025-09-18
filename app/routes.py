@@ -70,6 +70,59 @@ bp = Blueprint("main", __name__)
 # 必要なら app/__init__.py で admin_bp を登録
 admin_bp = Blueprint("admin", __name__)
 
+# === Impersonation helpers =====================================================
+# 置き場所：bp/admin_bp を作った直後（最初のルート定義より前）
+
+def is_admin_effective() -> bool:
+    """
+    現在ログイン中のユーザーが管理者、または admin_id をセッションに保持している
+    （=管理者がなりすまし中）なら True
+    """
+    try:
+        return (
+            getattr(current_user, "is_authenticated", False)
+            and (getattr(current_user, "is_admin", False) or session.get("admin_id"))
+        )
+    except Exception:
+        return False
+
+from functools import wraps
+
+def admin_required_effective(view_func):
+    """
+    なりすまし中でも管理者権限を維持している場合は通すデコレーター
+    """
+    @wraps(view_func)
+    @login_required
+    def _wrapped(*args, **kwargs):
+        if not is_admin_effective():
+            abort(403)
+        return view_func(*args, **kwargs)
+    return _wrapped
+
+@admin_bp.route("/admin/return")
+@login_required
+def admin_return():
+    """
+    セッションに保存した admin_id に戻る（管理者へ復帰）
+    """
+    admin_id = session.get("admin_id")
+    if not admin_id:
+        flash("管理者セッションが見つかりません。", "warning")
+        return redirect(url_for("main.dashboard", username=current_user.username))
+
+    admin = User.query.get(admin_id)
+    if not admin:
+        session.pop("admin_id", None)
+        flash("管理者アカウントが存在しません。", "danger")
+        return redirect(url_for("main.login"))
+
+    login_user(admin)
+    session.pop("admin_id", None)
+    flash("管理者に戻りました。", "info")
+    return redirect(url_for("admin.admin_users"))
+# ==============================================================================
+
 
 @bp.route('/robots.txt')
 def robots_txt():
@@ -371,10 +424,8 @@ def special_purchase(username):
 import traceback
 
 @admin_bp.route("/admin/sync-stripe-payments", methods=["POST"])
-@login_required
+@admin_required_effective
 def sync_stripe_payments():
-    if not current_user.is_admin:
-        abort(403)
 
     try:
         response = stripe.PaymentIntent.list(limit=100)
@@ -405,7 +456,7 @@ def sync_stripe_payments():
 
 
 @admin_bp.route("/admin/update-fee", methods=["POST"])
-@login_required
+@admin_required_effective
 def update_manual_fee():
     try:
         data = request.get_json()
@@ -438,7 +489,7 @@ from app.models import Article, User, PromptTemplate, Site
 from os.path import exists, getsize
 
 @admin_bp.route("/admin")
-@login_required
+@admin_required_effective
 def admin_dashboard():
     if not current_user.is_admin:
         flash("このページにはアクセスできません。", "error")
@@ -449,20 +500,16 @@ def admin_dashboard():
 
 
 @admin_bp.route("/admin/prompts")
-@login_required
+@admin_required_effective
 def admin_prompt_list():
-    if not current_user.is_admin:
-        abort(403)
 
     users = User.query.order_by(User.last_name, User.first_name).all()
     return render_template("admin/prompts.html", users=users)
 
 
 @admin_bp.route("/admin/keywords")
-@login_required
+@admin_required_effective
 def admin_keyword_list():
-    if not current_user.is_admin:
-        abort(403)
 
     # 全ユーザー取得（first_name/last_name順で表示順が安定）
     users = User.query.order_by(User.last_name, User.first_name).all()
@@ -470,10 +517,8 @@ def admin_keyword_list():
 
 
 @admin_bp.route("/admin/gsc-status")
-@login_required
+@admin_required_effective
 def admin_gsc_status():
-    if not current_user.is_admin:
-        abort(403)
 
     from app.models import Site, Article, User, GSCConfig
     from sqlalchemy import case
@@ -504,13 +549,13 @@ def admin_gsc_status():
 
 # 📊 統計サマリ（既存）
 @admin_bp.route('/admin/dashboard')
-@login_required
+@admin_required_effective
 def admin_summary():
     return render_template("admin/dashboard.html")
 
 # 🔄 処理中ジョブ一覧
 @admin_bp.route("/admin/job-status")
-@login_required
+@admin_required_effective
 def job_status():
     processing_articles = Article.query.filter_by(status="gen").order_by(Article.created_at.desc()).all()
     return render_template("admin/job_status.html", articles=processing_articles)
@@ -519,7 +564,7 @@ import subprocess
 from flask import jsonify
 
 @admin_bp.route("/admin/log-stream")
-@login_required
+@admin_required_effective
 def log_stream():
     """最新の system.log を読み込んでJSONで返す（最大30行）"""
     try:
@@ -545,7 +590,7 @@ def log_stream():
 
 # 🧠 API使用量／トークン分析
 @admin_bp.route("/admin/api-usage")
-@login_required
+@admin_required_effective
 def api_usage():
     from app.models import TokenUsageLog, User
     from datetime import datetime
@@ -586,7 +631,7 @@ def api_usage():
 
 # 💰 今月の売上＆取り分サマリ
 @admin_bp.route("/admin/revenue-summary")
-@login_required
+@admin_required_effective
 def revenue_summary():
     from app.models import PaymentLog, User
     from datetime import datetime
@@ -622,7 +667,7 @@ def revenue_summary():
 # 📈 売上推移グラフ＋CSVダウンロード
 # 📈 月別売上グラフ + CSVダウンロード
 @admin_bp.route("/admin/revenue-graph")
-@login_required
+@admin_required_effective
 def revenue_graph():
     from app.models import PaymentLog
     from datetime import datetime, timedelta
@@ -647,7 +692,7 @@ def revenue_graph():
 
 # 📥 CSVダウンロードルート
 @admin_bp.route("/admin/download-revenue-log")
-@login_required
+@admin_required_effective
 def download_revenue_log():
     from app.models import PaymentLog, User
     import csv
@@ -684,7 +729,7 @@ def download_revenue_log():
 
 # ─────────── 管理者：ジャンル管理（ユーザーごとのジャンル表示）
 @admin_bp.route("/admin/genres", methods=["GET"])
-@login_required
+@admin_required_effective
 def manage_genres():
     if not current_user.is_admin:
         abort(403)
@@ -696,10 +741,8 @@ def manage_genres():
 
 
 @admin_bp.route("/admin/genres/delete/<int:genre_id>", methods=["POST"])
-@login_required
+@admin_required_effective
 def delete_genre(genre_id):
-    if not current_user.is_admin:
-        abort(403)
 
     genre = Genre.query.get_or_404(genre_id)
     db.session.delete(genre)
@@ -709,10 +752,8 @@ def delete_genre(genre_id):
 
 
 @admin_bp.route("/admin/users", methods=["GET", "POST"])  # ✅ POST対応を追加
-@login_required
+@admin_required_effective
 def admin_users():
-    if not current_user.is_admin:
-        abort(403)
 
     # ✅ サイト枠追加リクエスト処理（POSTで来たときのみ）
     if request.method == "POST":
@@ -783,10 +824,8 @@ def admin_users():
 
 
 @admin_bp.route("/api/admin/user_stats/<int:user_id>")
-@login_required
+@admin_required_effective
 def api_user_stats(user_id):
-    if not current_user.is_admin:
-        return jsonify({"error": "管理者権限が必要です"}), 403
 
     from collections import defaultdict
 
@@ -832,10 +871,8 @@ def api_user_stats(user_id):
 
 
 @admin_bp.route("/admin/user/<int:uid>")
-@login_required
+@admin_required_effective
 def admin_user_detail(uid):
-    if not current_user.is_admin:
-        abort(403)
 
     user = User.query.get_or_404(uid)
 
@@ -860,10 +897,8 @@ def admin_user_detail(uid):
 from app.forms import QuotaUpdateForm
 
 @admin_bp.route("/admin/quota-edit/<int:uid>", methods=["GET", "POST"])
-@login_required
+@admin_required_effective
 def admin_quota_edit(uid):
-    if not current_user.is_admin:
-        abort(403)
 
     user = User.query.get_or_404(uid)
     form = QuotaUpdateForm()
@@ -898,11 +933,9 @@ def admin_quota_edit(uid):
 
 
 @admin_bp.post("/admin/user/<int:uid>/toggle-special")
-@login_required
+@admin_required_effective
 def toggle_special_access(uid):
     # 管理者のみ許可
-    if not current_user.is_admin:
-        abort(403)
 
     # 対象ユーザー取得
     user = User.query.get_or_404(uid)
@@ -917,7 +950,7 @@ def toggle_special_access(uid):
 
 
 @admin_bp.route("/admin/sites")
-@login_required
+@admin_required_effective
 def admin_sites():
     if not current_user.is_admin:
         flash("このページにはアクセスできません。", "error")
@@ -999,10 +1032,8 @@ def admin_sites():
     return render_template("admin/sites.html", sites_by_user=sites_by_user)
 
 @admin_bp.route('/admin/delete_site/<int:site_id>', methods=['POST'])
-@login_required
+@admin_required_effective
 def delete_site(site_id):
-    if not current_user.is_admin:
-        abort(403)
 
     site = Site.query.get_or_404(site_id)
 
@@ -1032,10 +1063,8 @@ def delete_site(site_id):
 
 
 @admin_bp.route("/admin/user/<int:uid>/bulk-delete", methods=["POST"])
-@login_required
+@admin_required_effective
 def bulk_delete_articles(uid):
-    if not current_user.is_admin:
-        abort(403)
 
     # pending または gen 状態の記事を一括削除
     Article.query.filter(
@@ -1050,10 +1079,8 @@ def bulk_delete_articles(uid):
 
 
 @admin_bp.post("/admin/delete-stuck-articles")
-@login_required
+@admin_required_effective
 def delete_stuck_articles():
-    if not current_user.is_admin:
-        abort(403)
 
     stuck = Article.query.filter(Article.status.in_(["pending", "gen"])).all()
 
@@ -1076,11 +1103,9 @@ from sqlalchemy import func, extract, text
 import time
 
 @admin_bp.route("/admin/accounting", methods=["GET", "POST"])
-@login_required
+@admin_required_effective
 def accounting():
     t0 = time.perf_counter()
-    if not current_user.is_admin:
-        abort(403)
 
     selected_month = request.args.get("month", "all")
 
@@ -1230,10 +1255,8 @@ def accounting():
 
 
 @admin_bp.route("/admin/accounting/details", methods=["GET"])
-@login_required
+@admin_required_effective
 def accounting_details():
-    if not current_user.is_admin:
-        abort(403)
 
     selected_month = request.args.get("month", "all")
 
@@ -1277,10 +1300,8 @@ def accounting_details():
 
 
 @admin_bp.route("/admin/accounting/adjust", methods=["POST"])
-@login_required
+@admin_required_effective
 def adjust_quota():
-    if not current_user.is_admin:
-        abort(403)
 
     from flask import request, jsonify
 
@@ -1361,10 +1382,8 @@ def adjust_quota():
 
 # --- 既存: ユーザー全記事表示 ---
 @admin_bp.route("/admin/user/<int:uid>/articles")
-@login_required
+@admin_required_effective
 def user_articles(uid):
-    if not current_user.is_admin:
-        abort(403)
 
     from collections import defaultdict
     from app.article_generator import _generate_slots_per_site
@@ -1428,10 +1447,8 @@ def user_articles(uid):
 
 # --- ✅ 追加: サイト単位の記事一覧表示 ---
 @admin_bp.route("/admin/site/<int:site_id>/articles")
-@login_required
+@admin_required_effective
 def site_articles(site_id):
-    if not current_user.is_admin:
-        abort(403)
 
     from app.models import Site, Article, User
     from sqlalchemy.orm import selectinload
@@ -1468,10 +1485,8 @@ def site_articles(site_id):
 
 
 @admin_bp.post("/admin/user/<int:uid>/delete-stuck")
-@login_required
+@admin_required_effective
 def delete_user_stuck_articles(uid):
-    if not current_user.is_admin:
-        abort(403)
 
     user = User.query.get_or_404(uid)
 
@@ -1489,24 +1504,26 @@ def delete_user_stuck_articles(uid):
     return redirect(url_for("admin.user_articles", uid=uid))
 
 @admin_bp.post("/admin/login-as/<int:user_id>")
-@login_required
+@admin_required_effective
 def admin_login_as(user_id):
-    if not current_user.is_admin:
-        abort(403)
+    # 有効管理者のチェック（通常管理者 or 既にadmin_id保持中）
 
+    # いま本当に管理者としてログインしている場合、元の管理者IDを保持
+    # （既に保持しているなら上書きしない＝多段なりすましを避ける）
+    if ("admin_id" not in session) and getattr(current_user, "is_admin", False):
+        session["admin_id"] = current_user.id
+
+    # 対象ユーザーに完全切替（＝以後 current_user は対象ユーザー）
     user = User.query.get_or_404(user_id)
     login_user(user)
-    flash(f"{user.email} としてログインしました", "info")
-    return redirect(url_for("main.dashboard", username=current_user.username))
 
-
+    flash(f"{user.email} としてログインしました（管理者モード維持）", "info")
+    return redirect(url_for("main.dashboard", username=user.username))
 
 
 @admin_bp.route("/admin/delete_user/<int:user_id>", methods=["POST"])
-@login_required
+@admin_required_effective
 def delete_user(user_id):
-    if not current_user.is_admin:
-        abort(403)
 
     user = User.query.get_or_404(user_id)
 
@@ -1519,10 +1536,8 @@ def delete_user(user_id):
 
 # ──────────────── GSCサイト状況一覧（管理者）────────────────
 @admin_bp.route("/admin/gsc_sites")
-@login_required
+@admin_required_effective
 def admin_gsc_sites():
-    if not current_user.is_admin:
-        abort(403)
 
     from sqlalchemy.orm import selectinload
     from collections import defaultdict
@@ -1572,10 +1587,8 @@ def admin_gsc_sites():
 
 
 @admin_bp.get("/admin/user/<int:uid>/stuck-articles")
-@login_required
+@admin_required_effective
 def stuck_articles(uid):
-    if not current_user.is_admin:
-        abort(403)
 
     user = User.query.get_or_404(uid)
 
@@ -1588,10 +1601,8 @@ def stuck_articles(uid):
 
 
 @admin_bp.post("/admin/user/<int:uid>/regenerate-stuck")
-@login_required
+@admin_required_effective
 def regenerate_user_stuck_articles(uid):
-    if not current_user.is_admin:
-        abort(403)
 
     stuck_articles = Article.query.filter(
         Article.user_id == uid,
@@ -1646,11 +1657,8 @@ import json
 # ※ admin_bp は既存の Blueprint を使用
 
 @admin_bp.route("/api/admin/rankings")
-@login_required
+@admin_required_effective
 def admin_rankings():
-    # 管理者チェック
-    if not getattr(current_user, "is_admin", False):
-        return jsonify({"error": "管理者のみアクセス可能です"}), 403
 
     # ==== クエリ取得 ====
     rank_type = (request.args.get("type") or "site").lower()        # site / impressions / clicks / posted_articles
@@ -1825,7 +1833,7 @@ def admin_rankings():
 
 
 @admin_bp.route("/admin/ranking-page")
-@login_required
+@admin_required_effective
 def admin_ranking_page():
     if not getattr(current_user, "is_admin", False):
         return redirect(url_for("main.dashboard", username=current_user.username))
@@ -1835,10 +1843,8 @@ def admin_ranking_page():
 
 # 監視ページ
 @admin_bp.route("/admin/monitoring")
-@login_required
+@admin_required_effective
 def admin_monitoring():
-    if not current_user.is_admin:
-        return "アクセス拒否", 403
 
     memory = get_memory_usage()
     cpu = get_cpu_load()
@@ -1853,7 +1859,7 @@ def admin_monitoring():
 
 
 @admin_bp.route("/admin/captcha-dataset", methods=["POST"])
-@login_required
+@admin_required_effective
 def admin_captcha_label_update():
     from pathlib import Path
 
@@ -1875,7 +1881,7 @@ def admin_captcha_label_update():
     return redirect(url_for("admin.admin_captcha_dataset"))
 
 @admin_bp.route("/admin/captcha-dataset", methods=["GET"])
-@login_required
+@admin_required_effective
 def admin_captcha_dataset():
     from pathlib import Path
     from flask import render_template
@@ -1923,10 +1929,9 @@ from app.models import Site, InternalSeoRun, InternalLinkAction, ContentIndex
 
 # ---- stats: 1ラン分の詳細 ----
 @admin_bp.route("/admin/internal-seo/run/<int:run_id>/stats", methods=["GET"])
-@login_required
+@admin_required_effective
 def admin_internal_seo_run_stats(run_id: int):
-    if not getattr(current_user, "is_admin", False):
-        abort(403)
+    
     run = InternalSeoRun.query.get_or_404(run_id)
     payload = {"ok": True, "stats": run.stats or {}}
     resp = make_response(jsonify(payload))
@@ -1935,10 +1940,9 @@ def admin_internal_seo_run_stats(run_id: int):
 
 # ---- 画面本体 ----
 @admin_bp.route("/admin/internal-seo", methods=["GET"])
-@login_required
+@admin_required_effective
 def admin_internal_seo_index():
-    if not getattr(current_user, "is_admin", False):
-        abort(403)
+    
     selected_site_id = request.args.get("site_id", type=int)
     per_page = request.args.get("per_page", default=50, type=int)
     return render_template(
@@ -1949,10 +1953,9 @@ def admin_internal_seo_index():
 
 # ---- 概要ダッシュボード（総数 / 適用済み / キュー / 直近ラン）----
 @admin_bp.route("/admin/internal-seo/overview", methods=["GET"])
-@login_required
+@admin_required_effective
 def admin_internal_seo_overview():
-    if not getattr(current_user, "is_admin", False):
-        abort(403)
+    
 
     # 総サイト数
     total_sites = Site.query.count()
@@ -1990,10 +1993,9 @@ def admin_internal_seo_overview():
 
 # ---- NEW: オーナー一覧（ユーザー別セクション） ----
 @admin_bp.route("/admin/internal-seo/owners", methods=["GET"])
-@login_required
+@admin_required_effective
 def admin_internal_seo_owners():
-    if not getattr(current_user, "is_admin", False):
-        abort(403)
+    
 
     # Site.owner_id または Site.user_id を優先採用
     owner_col = getattr(Site, "owner_id", None) or getattr(Site, "user_id", None)
@@ -2046,10 +2048,8 @@ def admin_internal_seo_owners():
 # ---- サイト一覧（owner_id / 検索 / カーソル / メトリクス付き） ----
 # GET /admin/internal-seo/sites?q=&owner_id=&limit=&cursor_id=
 @admin_bp.route("/admin/internal-seo/sites", methods=["GET"])
-@login_required
+@admin_required_effective
 def admin_internal_seo_sites():
-    if not getattr(current_user, "is_admin", False):
-        abort(403)
 
     q = (request.args.get("q") or "").strip()
     owner_id = request.args.get("owner_id", type=int)
@@ -2177,10 +2177,8 @@ def admin_internal_seo_sites():
 
 # ---- 実行履歴（キーセット） ----
 @admin_bp.route("/admin/internal-seo/list", methods=["GET"])
-@login_required
+@admin_required_effective
 def admin_internal_seo_list():
-    if not getattr(current_user, "is_admin", False):
-        abort(403)
 
     site_id = request.args.get("site_id", type=int)
     status  = request.args.get("status")  # e.g. 'error', 'success', 'running', 'queued'
@@ -2249,7 +2247,7 @@ def admin_internal_seo_list():
 
 # ---- 失敗ジョブの一括リトライ（error -> queued）※任意API ----
 @admin_bp.route("/admin/internal-seo/retry-failed", methods=["POST"])
-@login_required
+@admin_required_effective
 def admin_internal_seo_retry_failed():
     """
     internal_seo_job_queue の status='error' を 'queued' に戻す。
@@ -2257,8 +2255,6 @@ def admin_internal_seo_retry_failed():
     - running/queued のものは対象外。
     返却: {"ok": true, "requeued": n}
     """
-    if not getattr(current_user, "is_admin", False):
-        return jsonify({"ok": False, "error": "forbidden"}), 403
 
     site_id = None
     if request.is_json:
@@ -2288,10 +2284,8 @@ def admin_internal_seo_retry_failed():
 
 # ---- 手動実行（非同期トリガ） ----
 @admin_bp.route("/admin/internal-seo/run", methods=["POST"])
-@login_required
+@admin_required_effective
 def admin_internal_seo_run():
-    if not getattr(current_user, "is_admin", False):
-        abort(403)
 
     site_id = request.form.get("site_id", type=int)
     if not site_id:
@@ -2327,10 +2321,8 @@ def admin_internal_seo_run():
 
 # ---- まとめ実行（※このUIでは個別実行を推し、APIは互換維持） ----
 @admin_bp.route("/admin/internal-seo/run-batch", methods=["POST"])
-@login_required
+@admin_required_effective
 def admin_internal_seo_run_batch():
-    if not getattr(current_user, "is_admin", False):
-        abort(403)
 
     if request.is_json:
         payload = request.get_json(silent=True) or {}
@@ -2385,10 +2377,9 @@ def admin_internal_seo_run_batch():
 
 # ---- 容量メーター ----
 @admin_bp.route("/admin/internal-seo/capacity", methods=["GET"])
-@login_required
+@admin_required_effective
 def admin_internal_seo_capacity():
-    if not getattr(current_user, "is_admin", False):
-        abort(403)
+    
 
     max_parallel = int(os.getenv("INTERNAL_SEO_WORKER_PARALLELISM", 3))
 
@@ -2412,11 +2403,9 @@ def admin_internal_seo_capacity():
 
 # ---- 詳細ログ（アクション） ----
 @admin_bp.route("/admin/internal-seo/actions", methods=["GET"])
-@login_required
+@admin_required_effective
 def admin_internal_seo_actions():
-    if not getattr(current_user, "is_admin", False):
-        abort(403)
-
+    
     site_id = request.args.get("site_id", type=int)
     post_id = request.args.get("post_id", type=int)
     status  = request.args.get("status")
@@ -2513,10 +2502,8 @@ def admin_internal_seo_actions():
 
 # ---- 全サイト一括 enqueue（まだ queued/running でないサイトのみ投入）----
 @admin_bp.route("/admin/internal-seo/enqueue-all", methods=["POST"])
-@login_required
+@admin_required_effective
 def admin_internal_seo_enqueue_all():
-    if not getattr(current_user, "is_admin", False):
-        return jsonify({"ok": False, "error": "forbidden"}), 403
 
     # 受け取りパラメータ（未指定なら .env / 環境変数 → 既定値 の順）
     def _env_int(key: str, default: int) -> int:
