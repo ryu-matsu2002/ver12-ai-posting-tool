@@ -568,7 +568,7 @@ def generate_and_schedule_external_articles(
     実装（高速化版）:
       1) まず 100 本分の Article(status="pending") と ExternalArticleSchedule を一気に作成
       2) その後、本文生成を ThreadPoolExecutor(max_workers=4) で並列実行し、
-         本文末尾にその記事専用リンクを追記して Article.status="done" にする
+         本文にその記事専用リンクを追記して Article.status="done" にする
       3) 投稿は既存の _run_external_post_job が拾って行う
     """
     app = current_app._get_current_object()

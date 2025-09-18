@@ -27,6 +27,14 @@ from app.services.blog_signup.livedoor_signup import signup as livedoor_signup
 # 既存 import 群の下に追加
 from app.external_seo_generator import generate_and_schedule_external_articles
 
+from app.external_seo_generator import (
+    TITLE_PROMPT as EXT_TITLE_PROMPT,
+    BODY_PROMPT  as EXT_BODY_PROMPT,
+)
+from app.models import PromptTemplate
+from app.article_generator import _generate
+
+
 # === 内部SEO 自動化 で使う import ===
 from app.models import InternalSeoRun
 from app.utils.db_retry import with_db_retry
@@ -385,6 +393,127 @@ def gsc_autogen_daily_job(app):
             finally:
                 _unlock_site(site.id)
 
+
+# --------------------------------------------------------------------------- #
+# 🆕 Pending Regenerator Job（通常 & 外部SEO）— 手動再生成と同じフローを自動で実行
+# --------------------------------------------------------------------------- #
+def _pending_regenerator_job(app):
+    """
+    40分おきに実行:
+      - 通常記事（source <> 'external'）で status IN ('pending','gen') を再生成
+        * ユーザーごとに直近の PromptTemplate を使って、_generate() を呼ぶ
+      - 外部SEO（source='external'）で status IN ('pending','gen') も再生成
+        * external_seo_generator の固定プロンプトを使って、_generate() を呼ぶ
+    既存のスケジュール/投稿フローには一切手を加えない（副作用なし）。
+    """
+    with app.app_context():
+        try:
+            # ======== 環境変数による上限（安全） =========
+            normal_per_run      = int(os.getenv("PENDING_REGEN_NORMAL_PER_RUN", "200"))
+            normal_per_user_max = int(os.getenv("PENDING_REGEN_NORMAL_PER_USER", "60"))
+            ext_per_run         = int(os.getenv("PENDING_REGEN_EXT_PER_RUN", "20"))
+            normal_workers      = int(os.getenv("PENDING_REGEN_WORKERS", "10"))
+            ext_workers         = int(os.getenv("PENDING_REGEN_EXT_WORKERS", "4"))
+
+            # ------------------------------
+            # 1) 通常記事（source <> 'external'）
+            # ------------------------------
+            if normal_per_run > 0:
+                # pending/gen を持つユーザーを多い順に抽出
+                user_rows = db.session.execute(text("""
+                    WITH u_has_prompt AS (
+                      SELECT user_id, 1 AS has_prompt
+                      FROM prompt_template
+                      GROUP BY user_id
+                    )
+                    SELECT
+                      a.user_id,
+                      COUNT(*) AS pending_cnt,
+                      COALESCE(MAX(u.has_prompt), 0) AS has_prompt
+                    FROM articles a
+                    LEFT JOIN u_has_prompt u ON u.user_id = a.user_id
+                    WHERE a.status IN ('pending','gen') AND (a.source IS NULL OR a.source <> 'external')
+                    GROUP BY a.user_id
+                    ORDER BY pending_cnt DESC
+                """)).mappings().all()
+
+                picked_normal = []
+                for row in user_rows:
+                    if len(picked_normal) >= normal_per_run:
+                        break
+                    uid = int(row["user_id"])
+                    # プロンプトが無いユーザーはスキップ（手動再生成の仕様に合わせる）
+                    prompt = (PromptTemplate.query
+                              .filter_by(user_id=uid)
+                              .order_by(PromptTemplate.id.desc())
+                              .first())
+                    if not prompt:
+                        current_app.logger.info(f"[pending-regenerator] skip user {uid}: no PromptTemplate")
+                        continue
+
+                    remain = normal_per_run - len(picked_normal)
+                    take   = min(normal_per_user_max, remain)
+                    if take <= 0:
+                        break
+
+                    arts = (Article.query
+                            .filter(Article.user_id == uid,
+                                    Article.status.in_(["pending","gen"]),
+                                    (Article.source == None) | (Article.source != "external"))  # noqa: E711
+                            .order_by(Article.created_at.asc())
+                            .limit(take)
+                            .all())
+                    for a in arts:
+                        # 既に posted/done などに誤って混入していないか保険
+                        if a.status not in ("pending","gen"):
+                            continue
+                        picked_normal.append((a.id, uid, prompt.title_pt or "", prompt.body_pt or ""))
+                        if len(picked_normal) >= normal_per_run:
+                            break
+
+                if picked_normal:
+                    current_app.logger.info(f"[pending-regenerator] normal picked={len(picked_normal)} users={len(user_rows)}")
+                    from concurrent.futures import ThreadPoolExecutor, as_completed
+                    with ThreadPoolExecutor(max_workers=normal_workers) as ex:
+                        futs = [
+                            ex.submit(_generate, app, aid, tpt, bpt, "html", False, user_id=uid)
+                            for (aid, uid, tpt, bpt) in picked_normal
+                        ]
+                        for f in as_completed(futs):
+                            try:
+                                f.result()
+                            except Exception as e:
+                                current_app.logger.exception(f"[pending-regenerator] normal generate error: {e}")
+
+            # ------------------------------
+            # 2) 外部SEO（source = 'external'）
+            # ------------------------------
+            if ext_per_run > 0:
+                ext_articles = (Article.query
+                                .filter(Article.status.in_(["pending","gen"]),
+                                        Article.source == "external")
+                                .order_by(Article.created_at.asc())
+                                .limit(ext_per_run)
+                                .all())
+                if ext_articles:
+                    current_app.logger.info(f"[pending-regenerator] external picked={len(ext_articles)}")
+                    from concurrent.futures import ThreadPoolExecutor, as_completed
+                    with ThreadPoolExecutor(max_workers=ext_workers) as ex:
+                        futs = [
+                            # external は固定プロンプトで再生成（既存の自動生成と同一ロジックの核を使用）
+                            ex.submit(_generate, app, art.id, EXT_TITLE_PROMPT, EXT_BODY_PROMPT, "html", False, user_id=art.user_id)
+                            for art in ext_articles
+                        ]
+                        for f in as_completed(futs):
+                            try:
+                                f.result()
+                            except Exception as e:
+                                current_app.logger.exception(f"[pending-regenerator] external generate error: {e}")
+
+        except Exception as e:
+            current_app.logger.exception(f"[pending-regenerator] job failed: {e}")
+
+
 # app/tasks.py どこでも OK ですが _run_external_seo_job の直前あたりが読みやすい
 def _run_livedoor_signup(app, site_id: int) -> None:
     """
@@ -660,6 +789,18 @@ def init_scheduler(app):
         max_instances=5
     )
 
+
+    # 🆕 Pending 再生成ジョブ（40分おき）
+    scheduler.add_job(
+        func=_pending_regenerator_job,
+        trigger="interval",
+        minutes=40,
+        args=[app],
+        id="pending_regenerator_job",
+        replace_existing=True,
+        max_instances=1,
+    )
+
     # ✅ GSCクリック・表示回数を毎日0時に自動更新するジョブ
     scheduler.add_job(
         func=_gsc_metrics_job,
@@ -738,7 +879,8 @@ def init_scheduler(app):
     app.logger.info("Scheduler started: external_post_job every 10 minutes")
     app.logger.info("Scheduler started: gsc_metrics_job daily at 0:00")
     app.logger.info(f"Scheduler started: gsc_autogen_daily_job daily at {gsc_utc_hour:02d}:{gsc_utc_min:02d} UTC")
-    
+    app.logger.info("Scheduler started: pending_regenerator_job every 40 minutes")
+
     
 # ────────────────────────────────────────────────
 # GSCオートジェン：事前フィルタ用ユーティリティ（タスク5で利用）
