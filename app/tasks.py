@@ -559,7 +559,7 @@ def _run_external_post_job(app, schedule_id: int | None = None):
         rows = (
             rows_q
             .order_by(ExternalArticleSchedule.scheduled_date.asc())
-            .limit(1 if schedule_id is not None else 10)
+            .limit(1 if schedule_id is not None else 12)
             .all()
         )
 
