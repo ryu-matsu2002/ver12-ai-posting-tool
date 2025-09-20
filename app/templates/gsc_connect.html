@@ -48,12 +48,17 @@
           <p class="text-sm text-blue-600 break-all">{{ site.url }}</p>
           <p class="text-xs text-gray-500 mt-1">👁 表示回数: {{ site.impressions or 0 }}</p>
         </div>
-
         <div class="text-right space-y-1">
           {% if site.gsc_connected %}
-            <span class="inline-block bg-green-600 text-white text-xs font-semibold px-3 py-1 rounded">
-              ✅ GSC連携済み
-            </span>
+            <div class="flex items-center justify-end gap-2">
+              <a href="{{ url_for('main.gsc_generate') }}?site_id={{ site.id }}"
+                 class="inline-block bg-lime-600 hover:bg-lime-700 text-white text-sm px-4 py-2 rounded">
+                GSC生成
+              </a>
+              <span class="inline-block bg-green-600 text-white text-xs font-semibold px-3 py-1 rounded">
+                ✅ GSC連携済み
+              </span>
+            </div>
           {% else %}
             <form method="post" action="{{ url_for('main.connect_gsc', site_id=site.id) }}">
               <button type="submit"
