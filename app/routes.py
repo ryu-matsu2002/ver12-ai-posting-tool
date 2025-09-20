@@ -409,7 +409,9 @@ def special_purchase(username):
     if current_user.username != username:
         abort(403)
 
-    if not getattr(current_user, "is_special_access", False):
+    # 管理者 or 管理者モードなら常に許可 / それ以外は is_special_access 必須
+    is_admin = bool(getattr(current_user, "is_admin", False) or session.get("admin_id"))
+    if not is_admin and not getattr(current_user, "is_special_access", False):
         flash("このページにはアクセスできません。", "danger")
         return redirect(url_for("main.dashboard", username=username))
 

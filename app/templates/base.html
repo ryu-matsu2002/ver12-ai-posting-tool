@@ -110,7 +110,7 @@
         <span class="material-icons align-middle mr-2">admin_panel_settings</span>管理者ページ
       </a>
       {% endif %}
-      {% if current_user.is_authenticated and (getattr(current_user, 'is_admin', False) or session.get('admin_id')) %}
+      {% if current_user.is_authenticated and ((current_user.is_admin|default(false)) or session.get('admin_id')) %}
         <a href="{{ url_for('main.special_purchase', username=username) }}"
            class="block px-6 py-2 hover:bg-primaryHover rounded-r-full text-yellow-400 font-semibold">
           <span class="material-icons align-middle mr-2">credit_card</span>TCC専用決済ページ
