@@ -110,15 +110,13 @@
         <span class="material-icons align-middle mr-2">admin_panel_settings</span>管理者ページ
       </a>
       {% endif %}
-      {# --- 特別購入ページリンクは左メニューから非表示（ルートは存続） --- #}
-      {# 復活する場合は下記の条件を元に戻してください
-         {% if current_user.is_authenticated and current_user.is_special_access %}
-            <a href="{{ url_for('main.special_purchase', username=username) }}"
-               class="block px-6 py-2 hover:bg-primaryHover rounded-r-full text-yellow-400 font-semibold">
-              <span class="material-icons align-middle mr-2">credit_card</span>TCC専用決済ページ
-            </a>
-         {% endif %}
-      #}
+      {% if current_user.is_authenticated and (getattr(current_user, 'is_admin', False) or session.get('admin_id')) %}
+        <a href="{{ url_for('main.special_purchase', username=username) }}"
+           class="block px-6 py-2 hover:bg-primaryHover rounded-r-full text-yellow-400 font-semibold">
+          <span class="material-icons align-middle mr-2">credit_card</span>TCC専用決済ページ
+        </a>
+      {% endif %}
+
       <a href="{{ url_for('main.login') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/login') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">login</span>ログイン
