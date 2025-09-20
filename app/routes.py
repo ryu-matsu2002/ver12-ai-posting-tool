@@ -420,7 +420,6 @@ def special_purchase(username):
     )
 
 
-
 import traceback
 
 @admin_bp.route("/admin/sync-stripe-payments", methods=["POST"])
