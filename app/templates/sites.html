@@ -147,7 +147,7 @@
       </div>
 
       <div class="text-right font-bold text-lg text-green-700 mt-4">
-        合計金額: <span id="total_price">¥{{ 3000 if default_plan == 'affiliate' else 20000 }}</span>
+        合計金額: <span id="total_price">¥{{ 5000 if default_plan == 'affiliate' else 20000 }}</span>
       </div>
 
       <button id="pay-now" class="w-full mt-4 py-3 bg-gradient-to-r from-green-400 to-green-600 hover:from-green-500 hover:to-green-700 text-white rounded-lg text-lg font-bold shadow-md transform hover:scale-105 transition">
@@ -196,7 +196,7 @@
   const card = elements.create("card");
   card.mount("#card-element");
 
-  const priceMap = { affiliate: 3000, business: 20000 };
+  const priceMap = { affiliate: 5000, business: 20000 };
   const submitButton = document.getElementById("submit-payment");
   const payNowButton = document.getElementById("pay-now");
   const paymentMessage = document.getElementById("payment-message");
