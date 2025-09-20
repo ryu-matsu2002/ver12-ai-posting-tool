@@ -327,7 +327,7 @@ def create_payment_intent():
         if special == "yes":
             unit_price = 1000
         else:
-            unit_price = 3000 if plan_type == "affiliate" else 20000
+            unit_price = 5000 if plan_type == "affiliate" else 20000
 
         total_amount = unit_price * site_count
 
