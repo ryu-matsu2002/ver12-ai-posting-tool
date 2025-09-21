@@ -1,0 +1,85 @@
+{% extends "base_admin.html" %}
+{% block title %}内部SEO 概要{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width: 980px;">
+  <h1 class="mb-3">内部SEO プレビュー</h1>
+
+  <div class="mb-3">
+    <a href="{{ url_for('admin.admin_internal_seo_overview') }}" class="btn btn-secondary btn-sm">← 内部SEO Overviewへ戻る</a>
+    <a href="{{ url_for('admin.admin_internal_seo_preview', site_id=site_id, post_id=post_id, format='json') }}" class="btn btn-outline-primary btn-sm">JSONで見る</a>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-body">
+      <h5 class="card-title">結果サマリ</h5>
+      <ul class="mb-0">
+        <li><strong>Site ID:</strong> {{ site_id }}</li>
+        <li><strong>Post ID:</strong> {{ post_id }}</li>
+        <li><strong>Applied（仮適用本数）:</strong> {{ result.applied }}</li>
+        <li><strong>Swapped（置換採用）:</strong> {{ result.swapped }}</li>
+        <li><strong>Skipped（見送り）:</strong> {{ result.skipped }}</li>
+        <li><strong>Message:</strong> {{ result.message or '-' }}</li>
+      </ul>
+    </div>
+  </div>
+
+  {% if previews and previews|length > 0 %}
+    <div class="table-responsive">
+      <table class="table table-sm table-striped align-middle">
+        <thead>
+          <tr>
+            <th style="width: 110px;">位置</th>
+            <th>アンカー文字</th>
+            <th>リンク先</th>
+            <th style="width: 23%;">段落 抜粋（前）</th>
+            <th style="width: 23%;">段落 抜粋（後）</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for it in previews %}
+            {% set anchor = it.anchor_text %}
+            <tr>
+              <td><code>{{ it.position }}</code><br><small>#{{ it.paragraph_index }}</small></td>
+              <td>
+                <span class="badge text-bg-primary">{{ it.anchor_text }}</span>
+              </td>
+              <td>
+                <div>
+                  <a href="{{ it.target_url }}" target="_blank" rel="noopener">#{{ it.target_post_id }}</a>
+                </div>
+                <small class="text-muted">{{ it.target_url }}</small>
+              </td>
+              <td>
+                <div class="excerpt">
+                  {{ it.paragraph_excerpt_before | replace(anchor, '<mark>' ~ anchor ~ '</mark>') | safe }}
+                </div>
+              </td>
+              <td>
+                <div class="excerpt">
+                  {{ it.paragraph_excerpt_after | replace(anchor, '<mark>' ~ anchor ~ '</mark>') | safe }}
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="alert alert-info">プレビュー可能な項目はありません（pending が無い/マッチなし）。</div>
+  {% endif %}
+</div>
+
+<style>
+  .container { padding-top: 8px; }
+  .excerpt {
+    white-space: normal;
+    word-break: break-word;
+    line-height: 1.4;
+  }
+  mark {
+    padding: 0 .15em;
+    border-radius: 2px;
+  }
+</style>
+{% endblock %}

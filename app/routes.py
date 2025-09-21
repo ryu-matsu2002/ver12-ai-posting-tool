@@ -1992,6 +1992,55 @@ def admin_internal_seo_overview():
     )
 
 
+@admin_bp.route("/admin/internal-seo/preview", methods=["GET"])
+def admin_internal_seo_preview():
+    """
+    ドライラン（実適用なし）で、どの語句がどのURLにリンクされるかのプレビューを返す。
+    ?site_id=...&post_id=...&format=json
+    """
+    site_id = request.args.get("site_id", type=int)
+    post_id = request.args.get("post_id", type=int)
+    fmt = (request.args.get("format") or "json").lower()
+    if not site_id or not post_id:
+        return jsonify({"ok": False, "error": "missing site_id or post_id"}), 400
+
+    html, res, items = preview_apply_for_post(site_id, post_id)
+
+    if fmt == "json":
+        return jsonify({
+            "ok": True,
+            "result": {
+                "applied": res.applied,
+                "swapped": res.swapped,
+                "skipped": res.skipped,
+                "message": res.message,
+            },
+            "previews": [
+                {
+                    "position": it.position,
+                    "anchor_text": it.anchor_text,
+                    "target_post_id": it.target_post_id,
+                    "target_url": it.target_url,
+                    "paragraph_index": it.paragraph_index,
+                    "paragraph_excerpt_before": it.paragraph_excerpt_before,
+                    "paragraph_excerpt_after": it.paragraph_excerpt_after,
+                }
+                for it in items
+            ],
+        })
+    elif fmt == "html":
+        # HTMLビュー（テンプレートは次ステップで追加）
+        return render_template(
+            "admin/internal_seo_preview.html",
+            site_id=site_id,
+            post_id=post_id,
+            result=res,
+            previews=items,
+        )
+    else:
+        return jsonify({"ok": False, "error": "unsupported format"}), 400
+
+
 # ---- NEW: オーナー一覧（ユーザー別セクション） ----
 @admin_bp.route("/admin/internal-seo/owners", methods=["GET"])
 @admin_required_effective
@@ -3283,6 +3332,8 @@ from os import getenv
 from app.forms import SiteForm
 from app.models import SiteQuotaLog
 from app.services.internal_seo.enqueue import enqueue_new_site
+from app.services.internal_seo.applier import preview_apply_for_post
+from flask import render_template
 
 @bp.route("/<username>/sites", methods=["GET", "POST"])
 @login_required

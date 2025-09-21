@@ -190,6 +190,70 @@ class ApplyResult:
     skipped: int = 0
     message: str = ""
 
+@dataclass
+class PreviewItem:
+    position: str
+    anchor_text: str
+    target_post_id: int
+    target_url: str
+    paragraph_index: int
+    paragraph_excerpt_before: str
+    paragraph_excerpt_after: str
+
+def preview_apply_for_post(site_id: int, src_post_id: int) -> Tuple[str, ApplyResult, List[PreviewItem]]:
+    """
+    **副作用なし**のプレビュー。
+    - pending actions を読み込み、_apply_plan_to_html を使って“仮適用”したHTMLを作る
+    - DB更新もWP更新も行わない
+    - どのアンカーが採用されたか（位置・テキスト・URL・前後抜粋）を返す
+    """
+    cfg = InternalSeoConfig.query.filter_by(site_id=site_id).one_or_none()
+    if not cfg:
+        cfg = InternalSeoConfig(site_id=site_id)
+        db.session.add(cfg)
+        db.session.commit()
+
+    site = Site.query.get(site_id)
+    wp_post = fetch_single_post(site, src_post_id)
+    if not wp_post:
+        return "", ApplyResult(message="fetch-failed-or-excluded"), []
+
+    actions = (
+        InternalLinkAction.query
+        .filter_by(site_id=site_id, post_id=src_post_id, status="pending")
+        .order_by(InternalLinkAction.created_at.asc())
+        .all()
+    )
+    if not actions:
+        return wp_post.content_html or "", ApplyResult(message="no-pending"), []
+
+    url_map = _action_targets_with_urls(site_id, actions)
+
+    original_paras = _split_paragraphs(wp_post.content_html or "")
+    new_html, res = _apply_plan_to_html(site, src_post_id, wp_post.content_html, actions, cfg, url_map)
+    new_paras = _split_paragraphs(new_html)
+
+    previews: List[PreviewItem] = []
+    # _apply_plan_to_html 内で in-memory に a.status="applied" を立てるが、ここではcommitしない
+    for a in actions:
+        if a.status == "applied":
+            try:
+                pidx = int(a.position.split(":")[1]) if a.position and a.position.startswith("p:") else -1
+            except Exception:
+                pidx = -1
+            before_snip = _html_to_text(original_paras[pidx])[:120] if (0 <= pidx < len(original_paras)) else ""
+            after_snip  = _html_to_text(new_paras[pidx])[:120] if (0 <= pidx < len(new_paras)) else ""
+            previews.append(PreviewItem(
+                position=a.position or "",
+                anchor_text=a.anchor_text or "",
+                target_post_id=int(a.target_post_id),
+                target_url=url_map.get(a.target_post_id, "") or "",
+                paragraph_index=pidx,
+                paragraph_excerpt_before=before_snip,
+                paragraph_excerpt_after=after_snip,
+            ))
+    return new_html, res, previews    
+
 def _apply_plan_to_html(
     site: Site,
     src_post_id: int,

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from html import unescape
 from typing import Dict, Iterable, List, Optional, Tuple
+from collections import Counter
 
 from app import db
 from app.models import (
@@ -65,6 +66,52 @@ def _candidate_anchor_from(title: str, para_text: str) -> Optional[str]:
         if tk in para_norm:
             # 過度に長いのは避ける
             return tk[:40]
+    return None
+
+def _candidate_anchor_from_target_content(
+    site: Site,
+    target_post_id: int,
+    para_text: str,
+    *,
+    max_len: int = 40,
+    min_token_len: int = 2,
+) -> Optional[str]:
+    """
+    ターゲット記事“本文”から抽出した語を優先して、段落内の自然語句をアンカーにする。
+    - ターゲット本文HTMLを取得→テキスト化→JP_TOKENでトークン化
+    - 長い語句を優先しつつ、頻度もスコアに入れて順位付け
+    - 段落テキスト内に最初に出現した語を採用（過剰長は切り詰め）
+    フォールバックは従来のタイトル由来アンカーに任せる（呼び出し側）。
+    """
+    para_norm = (para_text or "").strip()
+    if not para_norm:
+        return None
+    try:
+        tgt = fetch_single_post(site, target_post_id)
+    except Exception:
+        tgt = None
+    if not tgt or not (tgt.content_html or "").strip():
+        return None
+    tgt_txt = _html_to_text(tgt.content_html)
+    if not tgt_txt:
+        return None
+    tokens = [t for t in JP_TOKEN.findall(tgt_txt) if len(t) >= min_token_len]
+    if not tokens:
+        return None
+    # Wikipedia 的な振る舞い：段落内で最も早い位置に現れる語を選ぶ（タイは“より長い語”を優先）
+    earliest: Optional[Tuple[int, int, str]] = None  # (start_idx, -len, token)
+    seen = set()
+    for tk in tokens:
+        if tk in seen:
+            continue
+        seen.add(tk)
+        idx = para_norm.find(tk)
+        if idx >= 0:
+            cand = (idx, -len(tk), tk)
+            if (earliest is None) or (cand < earliest):
+                earliest = cand
+    if earliest:
+        return earliest[2][:max_len]        
     return None
 
 def _pick_paragraph_slots(paragraphs: List[str], need: int, min_len: int) -> List[int]:
@@ -227,7 +274,9 @@ def plan_links_for_post(
     for slot_idx, tgt_pid in zip(slots, candidates):
         title, tgt_url = tgt_map.get(tgt_pid, ("", ""))
         para_text = _html_to_text(paragraphs[slot_idx])
-        anchor = _candidate_anchor_from(title, para_text)
+        # まず“ターゲット本文”由来で自然語句アンカーを探す → だめならタイトル法にフォールバック
+        anchor = _candidate_anchor_from_target_content(site, tgt_pid, para_text) \
+                 or _candidate_anchor_from(title, para_text)
         if not anchor or not tgt_url:
             continue
 
@@ -297,7 +346,8 @@ def plan_links_for_post(
                         )
                         if tr:
                             t_title, t_url = tr[0] or "", tr[1] or ""
-                    anc = _candidate_anchor_from(t_title, _html_to_text(paragraphs[slot_for_swap]))
+                    anc = _candidate_anchor_from_target_content(site, pid, _html_to_text(paragraphs[slot_for_swap])) \
+                          or _candidate_anchor_from(t_title, _html_to_text(paragraphs[slot_for_swap]))
                     if not anc or not t_url:
                         continue
                     db.session.add(InternalLinkAction(
