@@ -667,6 +667,38 @@ class InternalSeoRun(db.Model):
         db.Index("ix_internal_seo_runs_site_status_started", "site_id", "status", "started_at"),
     )    
 
+# === Internal SEO: ジョブキュー（ナイトリー投入＆ワーカー消化用） ===
+class InternalSeoJobQueue(db.Model):
+    __tablename__ = "internal_seo_job_queue"
+
+    id = db.Column(db.Integer, primary_key=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("site.id"), nullable=False, index=True)
+
+    # 実行パラメータ（ENVのデフォルトと同等）
+    pages = db.Column(db.Integer, nullable=True)
+    per_page = db.Column(db.Integer, nullable=True)
+    min_score = db.Column(db.Float, nullable=True)
+    max_k = db.Column(db.Integer, nullable=True)
+    limit_sources = db.Column(db.Integer, nullable=True)
+    limit_posts = db.Column(db.Integer, nullable=True)
+    incremental = db.Column(db.Boolean, nullable=False, default=True)
+
+    job_kind = db.Column(db.String(40), nullable=False, default="nightly-enqueue")  # nightly-enqueue / worker / manual etc.
+    status = db.Column(db.String(20), nullable=False, default="queued")            # queued / running / done / error
+    message = db.Column(db.Text, nullable=True)
+
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    started_at = db.Column(db.DateTime, nullable=True)
+    ended_at   = db.Column(db.DateTime, nullable=True)
+
+    site = db.relationship("Site", backref=db.backref("internal_seo_job_queue_items", lazy="dynamic"))
+
+    __table_args__ = (
+        # タスク5の要件： (status, created_at) にインデックス
+        db.Index("idx_internal_seo_job_queue_status_created", "status", "created_at"),
+    )
+
+
 
 # ──── NEW: 外部サインアップ一時タスク（方式A用・追加のみ） ────
 class ExternalSignupTask(db.Model):
