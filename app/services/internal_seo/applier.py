@@ -583,12 +583,11 @@ def apply_actions_for_post(site_id: int, src_post_id: int, dry_run: bool = False
 
     # 3) 差分作成（旧仕様削除済みの本文に新仕様を適用）
     base_html = cleaned_html if cleaned_html is not None else (wp_post.content_html or "")
-    # 3.5) 見出し内リンクをサニタイズ（Hタグからはリンクを完全排除）
-    #      ※ サニタイズは適用前に base_html へ行う（適用結果へ確実に反映させるため）
+    # 3.5) まず入力HTMLをサニタイズ：見出し(H1〜H6)内の <a> を除去（中身は残す）
     base_html = _strip_links_in_headings(base_html)
-    # 4) 新仕様を適用
+    # サニタイズ済みの本文を元に新仕様を適用
     new_html, res = _apply_plan_to_html(site, src_post_id, base_html, actions, cfg, url_map)
-    # 4.5) 念のため new_html にも再サニタイズ（冪等・防御的）
+    # 念のため、適用後HTMLにも再サニタイズ（他要因でH内に混入しても除去）
     new_html = _strip_links_in_headings(new_html)
     # 記事先頭に 1回だけ下線CSSを注入（テーマ非依存）
     new_html = _ensure_inline_underline_style(site, new_html)
