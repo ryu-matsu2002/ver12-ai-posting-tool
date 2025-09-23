@@ -499,27 +499,21 @@ def _apply_plan_to_html(
 
             if best_swap and best_sc > worst_score + 0.10:  # マージン
                 s_act, new_href = best_swap
-                # HTML全体で1箇所 worst_url を new_href に差し替え（アンカー文は新しい案に）
-                whole_html = _rejoin_paragraphs(paragraphs)
-                # 最初の一致だけ置換（雑にやりすぎない）
+                # 段落単位で置換し、見出し/TOC 段落は除外
                 replaced = False
-                def _replace_first(h, newh, text):
-                    nonlocal replaced
-                    if replaced:
-                        return text
-                    idx = text.find(f'href="{h}"')
+                for i, para in enumerate(paragraphs):
+                    if _H_TAG.search(para) or _TOC_HINT.search(para):
+                        continue
+                    idx = para.find(f'href="{worst_url}"')
                     if idx == -1:
-                        return text
-                    # アンカー文も差し替えたいが、正確にやるにはパースが必要。
-                    # 簡易: href のみ差し替え、アンカー文は維持 or 追記。
+                        continue
+                    new_para = para.replace(f'href="{worst_url}"', f'href="{new_href}"', 1)
+                    # class/style を取り除き Wikipedia 風に（title は _normalize で整う）
+                    new_para = _add_attrs_to_first_anchor_with_href(new_para, new_href)
+                    paragraphs[i] = new_para
                     replaced = True
-                    return text.replace(f'href="{h}"', f'href="{newh}"', 1)
-
-                whole_html = _replace_first(worst_url, new_href, whole_html)
-                if replaced:
-                    # 差し替えた1本に識別クラス＆下線を注入（内部SEOリンクだけ視覚化）
-                    whole_html = _add_attrs_to_first_anchor_with_href(whole_html, new_href)
-                    paragraphs = [whole_html]  # 再分割は不要。まとまりで返す
+                    break
+                if replaced:                    
                     s_act.status = "applied"
                     s_act.reason = "swap"  # 採用された置換
                     s_act.applied_at = datetime.utcnow()
