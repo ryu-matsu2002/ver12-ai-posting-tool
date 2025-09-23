@@ -237,7 +237,7 @@ def plan_links_for_post(
     max_candidates: int = 60        # ← 余裕を持って拾う
 ) -> PlanStats:
     """
-    単一記事に対して本文内リンク **4-8本** の計画を作成し、InternalLinkAction(pending) で保存。
+    単一記事に対して本文内リンク **1-8本** の計画を作成し、InternalLinkAction(pending) で保存
     swapチェックONの場合は既存リンクと比較して置換候補も生成（pending, reason='swap_candidate'）。
     """
     stats = PlanStats()
@@ -280,10 +280,10 @@ def plan_links_for_post(
     if not candidates:
         logger.info("[Planner] src=%s no fresh candidates", src_post_id)
 
-    # 4) 本数決定（applier と揃える：最小4 / 最大8。サイト設定があれば尊重）
-    need_min = max(4, int(getattr(cfg, "min_links_per_post", 4) or 4))
+    # 4) 本数決定（applier と揃える：最小1 / 最大8。サイト設定があれば尊重）
+    need_min = max(1, int(getattr(cfg, "min_links_per_post", 1) or 1))
     need_max = min(8, int(getattr(cfg, "max_links_per_post", 8) or 8))
-    need = min(max(need_min, 4), need_max)
+    need = min(max(need_min, 1), need_max)
 
     # 5) 段落スロット選定
     # 段落長の閾値を緩和（最低 50 文字に下げる）
@@ -305,14 +305,30 @@ def plan_links_for_post(
     tgt_map: Dict[int, Tuple[str, str]] = {int(pid): (title or "", url or "") for (pid, title, url) in tgt_rows}
 
     # 7) スロット×ターゲットで pending アクションを作成
+    #    - 同一記事内で同じアンカー（キーワード）は1回までに制限
+    #      → nfkc正規化＋小文字化でキー化して重複スキップ
     actions_made = 0
-    for slot_idx, tgt_pid in zip(slots, candidates):
+    seen_anchor_keys = set()
+    slot_ptr = 0
+    for tgt_pid in candidates:
+        if slot_ptr >= len(slots):
+            break
+        slot_idx = slots[slot_ptr]
         title, tgt_url = tgt_map.get(tgt_pid, ("", ""))
         raw_para = paragraphs[slot_idx]
         para_text = _html_to_text(raw_para)
         if _H_TAG.search(raw_para) or _TOC_HINT.search(raw_para):
             continue  # 念のため
-
+        # ContentIndexに無い候補はフォールバックで1回だけ取得
+        if (not title) or (not tgt_url):
+            tr = (
+                ContentIndex.query
+                .with_entities(ContentIndex.title, ContentIndex.url)
+                .filter_by(site_id=site_id, wp_post_id=tgt_pid)
+                .one_or_none()
+            )
+            if tr:
+                title, tgt_url = tr[0] or "", tr[1] or ""
         # ターゲット本文テキスト（部分一致の材料）
         tgt_body_text = ""
         try:
@@ -332,6 +348,15 @@ def plan_links_for_post(
         if not anchor or not tgt_url:
             continue
 
+        if not anchor or not tgt_url:
+            continue
+        # --- 重複アンカー抑止（同一記事内1回まで） ---
+        anchor_key = nfkc_norm(anchor or "").strip().lower()
+        if anchor_key in seen_anchor_keys:
+            # 同じスロットでもう一度候補を試したいので、slot_ptrは進めずに次の候補へ
+            continue
+        seen_anchor_keys.add(anchor_key)
+
         # 監査ログに pending で登録（position は 'p:{index}'）
         act = InternalLinkAction(
             site_id=site_id,
@@ -346,6 +371,7 @@ def plan_links_for_post(
         )
         db.session.add(act)
         actions_made += 1
+        slot_ptr += 1
 
     if actions_made:
         db.session.commit()
@@ -415,6 +441,11 @@ def plan_links_for_post(
                     )
                     if not anc or not t_url:
                         continue
+                    # swap候補側でも同一記事内アンカーの重複を避ける
+                    anc_key = nfkc_norm(anc or "").strip().lower()
+                    if anc_key in seen_anchor_keys:
+                        continue
+                    seen_anchor_keys.add(anc_key)
                     db.session.add(InternalLinkAction(
                         site_id=site_id,
                         post_id=src_post_id,

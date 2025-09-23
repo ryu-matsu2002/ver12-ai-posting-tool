@@ -1,622 +1,266 @@
 {% extends "base_admin.html" %}
-{% block title %}内部SEO 管理{% endblock %}
+{% block title %}内部SEO ダッシュボード{% endblock %}
 
 {% block content %}
 <div class="container-fluid py-4 internal-seo">
-
-  <!-- CSRF（POSTで使用） -->
-  <meta name="csrf-token" content="{{ csrf_token() if csrf_token is defined }}">
-
-  <!-- 軽いUI用スタイル（GSC風） -->
   <style>
-    .internal-seo .guide{background:#f7fbff;border:1px solid #e3f0ff;border-left:4px solid #0d6efd;border-radius:.5rem;padding:.75rem .9rem;color:#0b3d91;font-size:.95rem}
-    .internal-seo .gsc-card{border:1px solid #e8eef5;background:#fff;border-radius:.75rem;box-shadow:0 2px 8px rgba(16,24,40,.06);transition:box-shadow .15s ease,transform .12s ease}
-    .internal-seo .gsc-card:hover{box-shadow:0 8px 20px rgba(13,110,253,.12);transform:translateY(-1px)}
-    .internal-seo .section-title{font-weight:600;color:#0d6efd}
-    .internal-seo .mini-label{font-size:.8rem;color:#6c757d}
-    .internal-seo .pill{display:inline-block;padding:.2rem .5rem;border-radius:999px;font-size:.75rem}
-    .internal-seo .pill-blue{background:#e7f1ff;color:#0d6efd}
-    .internal-seo .pill-green{background:#eaf7ea;color:#198754}
-    .internal-seo .btn-ghost{border:1px solid #dee2e6;background:#fff}
-    .internal-seo .kbd{background:#f1f3f5;border:1px solid #dee2e6;border-bottom-width:2px;padding:.05rem .35rem;border-radius:.35rem;font-size:.75rem}
-    .internal-seo .owner-header{background:#f8fafc;border:1px solid #e8eef5;border-radius:.5rem;padding:.6rem .8rem}
-    .internal-seo .metric{font-weight:600}
-    .internal-seo .muted{color:#6c757d}
-    .internal-seo .progress{height:12px}
-    .internal-seo .kpi .num{font-size:1.25rem;font-weight:700}
-    .internal-seo .kpi .lbl{font-size:.8rem;color:#6c757d}
+    .kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+    .kpi{background:#fff;border:1px solid #e6e8ef;border-radius:14px;padding:16px;box-shadow:0 4px 14px rgba(20,20,40,.05)}
+    .kpi h4{font-size:13px;margin:0;color:#6b7280;letter-spacing:.2px}
+    .kpi .v{font-size:28px;font-weight:800;margin-top:6px;color:#111827}
+    .section{margin-top:24px}
+    .card{background:#fff;border:1px solid #e6e8ef;border-radius:14px;padding:16px;box-shadow:0 4px 14px rgba(20,20,40,.05)}
+    .muted{color:#6b7280}
+    .table{width:100%;border-collapse:separate;border-spacing:0}
+    .table th,.table td{padding:10px 12px;border-bottom:1px solid #eef1f6;font-size:14px;vertical-align:middle}
+    .tag{display:inline-block;font-size:12px;border-radius:999px;padding:2px 10px;border:1px solid #e5e7eb}
+    .tag.idle{background:#fafafa}
+    .tag.queued{background:#fff7ed;border-color:#fed7aa}
+    .tag.running{background:#ecfeff;border-color:#a5f3fc}
+    .logs{max-height:520px;overflow:auto}
+    .log-item{display:grid;grid-template-columns:140px 140px 1fr 110px 110px 110px;gap:10px;padding:10px 0;border-bottom:1px solid #f1f5f9}
+    .log-item .ts{font-variant-numeric:tabular-nums}
+    .toolbar{gap:8px}
+    @media (max-width: 1200px){
+      .kpi-grid{grid-template-columns:repeat(2,1fr)}
+      .log-item{grid-template-columns:140px 120px 1fr 90px 90px 90px}
+    }
+    @media (max-width: 700px){
+      .kpi-grid{grid-template-columns:1fr}
+      .log-item{grid-template-columns:1fr;row-gap:4px}
+    }
   </style>
 
-  <!-- 見出し + ガイド + 全体操作 -->
-  <div class="d-flex align-items-center mb-3">
-    <h2 class="h4 mb-0">🔧 内部SEO 管理</h2>
-    <div class="ms-auto d-flex align-items-center gap-2">
-      <button id="enqueueAllBtn" class="btn btn-sm btn-primary">全サイトをキューに登録</button>
-      <span id="enqueueAllOut" class="mini-label text-muted"></span>
-      <button id="capacityRefresh" class="btn btn-sm btn-ghost">再計測</button>
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h2 class="mb-0">内部SEO ダッシュボード</h2>
+    <div class="d-flex align-items-center toolbar">
+      <label class="me-2 muted">期間:</label>
+      <select id="days" class="form-select d-inline-block" style="width:auto">
+        <option value="7"  {% if days==7  %}selected{% endif %}>過去7日</option>
+        <option value="14" {% if days==14 %}selected{% endif %}>過去14日</option>
+        <option value="30" {% if days==30 %}selected{% endif %}>過去30日</option>
+      </select>
+      <button id="reloadAll" class="btn btn-outline-primary btn-sm">再読み込み</button>
     </div>
   </div>
 
-  <div class="guide mb-3">
-    <strong class="me-2">ガイド</strong>
-    左の<strong>ユーザー（オーナー）</strong>を開き、各<strong>サイトカードの「内部SEO開始」</strong>で実行。<br>
-    パラメータは下の<strong>「高度な設定」</strong>で必要時のみ編集できます。プレビューは<strong>下段の「プレビュー」</strong>から個別確認可能。
+  <!-- KPI -->
+  <div class="kpi-grid">
+    <div class="kpi"><h4>登録サイト数</h4><div class="v" id="k_total">-</div></div>
+    <div class="kpi"><h4>キュー中</h4><div class="v" id="k_queued">-</div></div>
+    <div class="kpi"><h4>実行中</h4><div class="v" id="k_running">-</div></div>
+    <div class="kpi"><h4>本日の適用リンク数</h4><div class="v" id="k_applied_today">-</div></div>
   </div>
 
-  <!-- 処理余力（メーター） -->
-  <div class="card border-0 shadow-sm mb-4">
-    <div class="card-body">
-      <div class="d-flex align-items-center mb-2">
-        <div class="section-title mb-0">⚡ 現在の処理余力</div>
-        <span id="capacityText" class="pill pill-blue ms-2">計測中…</span>
+  <!-- 期間合計（H内除去/旧仕様削除） -->
+  <div class="section card">
+    <div class="row">
+      <div class="col-md-6">
+        <div class="muted">Hタグ内リンク除去（期間合計）</div>
+        <div class="v" id="k_removed_h">-</div>
       </div>
-      <div class="progress">
-        <div id="capacityBar" class="progress-bar bg-secondary" role="progressbar" style="width:0%">0%</div>
+      <div class="col-md-6">
+        <div class="muted">旧仕様リンク削除（期間合計）</div>
+        <div class="v" id="k_legacy_removed">-</div>
       </div>
+    </div>
+    <div class="muted mt-2">※ 期間は上部セレクタで切替（デフォルト7日）</div>
+  </div>
+
+  <!-- 各ユーザー × 各サイトの進捗 -->
+  <div class="section card">
+    <div class="d-flex align-items-center justify-content-between mb-2">
+      <h4 class="mb-0">ユーザー別 × サイト別 進捗</h4>
+      <input id="progressSearch" type="search" class="form-control" placeholder="ユーザー/サイトで絞り込み" style="max-width:280px">
+    </div>
+    <div class="table-responsive">
+      <table class="table" id="progressTable">
+        <thead>
+          <tr>
+            <th style="width:180px">ユーザー</th>
+            <th style="width:260px">サイト</th>
+            <th style="width:160px">直近実行</th>
+            <th style="width:130px;text-align:right">適用リンク</th>
+            <th style="width:130px;text-align:right">スキップ</th>
+            <th style="width:160px;text-align:right">H内除去</th>
+            <th style="width:160px;text-align:right">旧仕様削除</th>
+            <th style="width:110px">状態</th>
+          </tr>
+        </thead>
+        <tbody id="progressTbody">
+          <tr><td class="muted" colspan="8">読み込み中...</td></tr>
+        </tbody>
+      </table>
     </div>
   </div>
 
-  <!-- KPI ダッシュボード -->
-  <div class="card border-0 shadow-sm mb-4">
-    <div class="card-body">
-      <div class="d-flex align-items-center">
-        <div class="section-title">📊 KPI（期間集計）</div>
-        <div class="ms-auto d-flex align-items-center gap-2">
-          <div class="mini-label">Site ID</div>
-          <input type="number" id="kpiSiteId" class="form-control form-control-sm" style="width:120px" placeholder="空=全体">
-          <div class="mini-label ms-2">期間</div>
-          <select id="kpiRange" class="form-select form-select-sm" style="width:140px">
-            <option value="1d">1日</option>
-            <option value="7d" selected>7日</option>
-            <option value="30d">30日</option>
-            <option value="all">全期間</option>
-          </select>
-          <button id="kpiRefreshBtn" class="btn btn-sm btn-ghost">更新</button>
-        </div>
-      </div>
-      <div class="row g-2 mt-2 kpi">
-        <div class="col-6 col-md"><div class="gsc-card p-3 text-center">
-          <div class="num" id="kpiApplied">-</div><div class="lbl">適用(applied)</div></div></div>
-        <div class="col-6 col-md"><div class="gsc-card p-3 text-center">
-          <div class="num" id="kpiSwapped">-</div><div class="lbl">置換(swapped)</div></div></div>
-        <div class="col-6 col-md"><div class="gsc-card p-3 text-center">
-          <div class="num" id="kpiSkipped">-</div><div class="lbl">スキップ(skipped)</div></div></div>
-        <div class="col-6 col-md"><div class="gsc-card p-3 text-center">
-          <div class="num" id="kpiLegacy">-</div><div class="lbl">旧仕様削除(legacy_deleted)</div></div></div>
-        <div class="col-6 col-md"><div class="gsc-card p-3 text-center">
-          <div class="num" id="kpiPending">-</div><div class="lbl">現在の保留(pending)</div></div></div>
-      </div>
-      <div class="mini-label mt-2" id="kpiMeta">-</div>
-    </div>
-  </div>
-
-  <!-- ユーザーごとのアコーディオン -->
-  <div class="card border-0 shadow-sm mb-4">
-    <div class="card-body">
-      <div class="d-flex align-items-center">
-        <div class="section-title">👤 ユーザーごとのサイト</div>
-        <div class="ms-auto mini-label">検索は各セクション内の入力を使用</div>
-      </div>
-      <div id="ownersAccordion" class="accordion mt-3">
-        <div class="text-muted" id="ownersEmpty">読み込み中…</div>
+  <!-- リアルタイムログ（ポーリング更新） -->
+  <div class="section card">
+    <div class="d-flex align-items-center justify-content-between mb-2">
+      <h4 class="mb-0">リアルタイムログ</h4>
+      <div class="d-flex align-items-center" style="gap:8px">
+        <label class="muted">自動更新:</label>
+        <select id="autoInterval" class="form-select" style="width:auto">
+          <option value="0">停止</option>
+          <option value="3000" selected>3秒</option>
+          <option value="5000">5秒</option>
+          <option value="10000">10秒</option>
+        </select>
+        <button id="refreshLogs" class="btn btn-outline-secondary btn-sm">今すぐ更新</button>
       </div>
     </div>
-  </div>
-
-  <!-- 高度な設定（折りたたみ） -->
-  <div class="card border-0 shadow-sm mb-4">
-    <div class="card-body">
-      <button class="btn btn-sm btn-ghost" type="button" data-bs-toggle="collapse" data-bs-target="#advSettings" aria-expanded="false">
-        ⚙️ 高度な設定（開くと編集できます）
-      </button>
-      <div class="collapse mt-3" id="advSettings">
-        <div class="row g-2">
-          <div class="col-6 col-md-2"><div class="mini-label">pages</div>
-            <input type="number" id="batchPages" class="form-control form-control-sm" value="{{ request.args.get('pages', 10) }}">
-          </div>
-          <div class="col-6 col-md-2"><div class="mini-label">per_page</div>
-            <input type="number" id="batchPerPage" class="form-control form-control-sm" value="{{ request.args.get('per_page', 100) }}">
-          </div>
-          <div class="col-6 col-md-2"><div class="mini-label">min_score</div>
-            <input type="number" step="0.01" id="batchMinScore" class="form-control form-control-sm" value="{{ request.args.get('min_score', 0.05) }}">
-          </div>
-          <div class="col-6 col-md-2"><div class="mini-label">max_k</div>
-            <input type="number" id="batchMaxK" class="form-control form-control-sm" value="{{ request.args.get('max_k', 80) }}">
-          </div>
-          <div class="col-6 col-md-2"><div class="mini-label">limit_sources</div>
-            <input type="number" id="batchLimitSources" class="form-control form-control-sm" value="{{ request.args.get('limit_sources', 200) }}">
-          </div>
-          <div class="col-6 col-md-2"><div class="mini-label">limit_posts</div>
-            <input type="number" id="batchLimitPosts" class="form-control form-control-sm" value="{{ request.args.get('limit_posts', 50) }}">
-          </div>
-          <div class="col-6 col-md-2"><div class="mini-label">incremental</div>
-            <select id="batchIncremental" class="form-select form-select-sm">
-              <option value="true" selected>true</option>
-              <option value="false">false</option>
-            </select>
-          </div>
-        </div>
-        <div class="mini-label mt-2">
-          ※ ここで設定した値は、以後の「内部SEO開始」ボタン押下時の送信値に使われます。
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- プレビュー（post_id指定） -->
-  <div class="card border-0 shadow-sm mb-4">
-    <div class="card-body">
-      <div class="d-flex align-items-center">
-        <div class="section-title">🧪 プレビュー</div>
-        <div class="ms-auto mini-label">site_id & post_id を指定して適用前の挙動を確認</div>
-      </div>
-      <div class="row g-2 mt-1">
-        <div class="col-6 col-md-2">
-          <div class="mini-label">Site ID</div>
-          <input type="number" id="prevSiteId" class="form-control form-control-sm" placeholder="Site ID">
-        </div>
-        <div class="col-6 col-md-2">
-          <div class="mini-label">Post ID</div>
-          <input type="number" id="prevPostId" class="form-control form-control-sm" placeholder="Post ID">
-        </div>
-        <div class="col-12 col-md-4 d-flex align-items-end gap-2">
-          <a id="prevOpenHtml" class="btn btn-sm btn-outline-primary disabled" target="_blank" href="#">HTML表示</a>
-          <button id="prevOpenJson" class="btn btn-sm btn-ghost">JSON取得</button>
-          <span id="prevOut" class="mini-label text-muted"></span>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- 実行履歴（簡潔版） -->
-  <div class="card border-0 shadow-sm">
-    <div class="card-body">
-      <div class="d-flex align-items-center mb-2">
-        <div class="section-title">📜 実行履歴</div>
-        <div class="ms-auto d-flex align-items-end gap-2">
-          <div>
-            <div class="mini-label">Site ID</div>
-            <input type="number" id="siteIdInput" class="form-control form-control-sm" style="width:120px" placeholder="Site ID">
-          </div>
-          <div>
-            <div class="mini-label">Status</div>
-            <select id="statusSelect" class="form-select form-select-sm" style="width:140px">
-              <option value="">(すべて)</option>
-              <option value="running">running</option>
-              <option value="success">success</option>
-              <option value="error">error</option>
-            </select>
-          </div>
-          <div>
-            <div class="mini-label">件数</div>
-            {% set pp = per_page or 50 %}
-            <select id="perPageSelect" class="form-select form-select-sm" style="width:110px">
-              {% for n in [25,50,100,200] %}
-                <option value="{{ n }}" {% if pp==n %}selected{% endif %}>{{ n }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <button id="applyFilterBtn" class="btn btn-sm btn-primary">再適用</button>
-          <button id="clearFilterBtn" class="btn btn-sm btn-ghost">クリア</button>
-          <a class="btn btn-sm btn-ghost" href="/admin/internal-seo/detail" target="_blank">詳細ログを開く</a>
-        </div>
-      </div>
-
-      <div class="table-responsive">
-        <table class="table table-sm align-middle mb-0">
-          <thead class="table-light">
-            <tr>
-              <th style="width:72px">ID</th>
-              <th style="width:72px">Site</th>
-              <th style="width:110px">Status</th>
-              <th style="width:120px">Kind</th>
-              <th>Started</th>
-              <th>Ended</th>
-              <th style="width:120px">Duration(ms)</th>
-              <th style="width:140px">詳細</th>
-            </tr>
-          </thead>
-          <tbody id="runsBody">
-            <tr id="placeholderRow"><td colspan="8" class="text-muted">読み込み中…</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div class="d-flex mt-2">
-        <button id="loadMoreBtn" class="btn btn-sm btn-ghost ms-auto d-none" type="button">もっと見る</button>
-      </div>
-    </div>
+    <div class="logs" id="logs"></div>
   </div>
 </div>
 
-<!-- 詳細モーダル -->
-<div class="modal fade" id="statsModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">実行詳細</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
-      </div>
-      <div class="modal-body">
-        <div id="statsBody" class="small font-monospace"><div class="text-muted">読み込み中…</div></div>
-      </div>
-      <div class="modal-footer">
-        <a class="btn btn-ghost" id="goDetailLink" href="#" target="_blank">詳細ログページを開く</a>
-        <button class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
-      </div>
-    </div>
-  </div>
-</div>
-{% endblock %}
-
-{% block scripts %}
-{{ super() }}
 <script>
-// ====================== Utils ======================
-function esc(v){ if(v===null||v===undefined) return ''; return String(v).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }
-function fmtLocal(iso){ if(!iso) return '-'; try{const d=new Date(iso);const p=x=>String(x).padStart(2,'0');return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`}catch(e){return iso}}
-function getCsrf(){ return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '' }
-function badge(st){ if(st==='success') return '<span class="badge bg-success">success</span>'; if(st==='running') return '<span class="badge bg-info text-dark">running</span>'; if(st==='error') return '<span class="badge bg-danger">error</span>'; return `<span class="badge bg-secondary">${esc(st||'-')}</span>` }
+(function(){
+  const $  = (s)=>document.querySelector(s);
+  const $$ = (s)=>Array.from(document.querySelectorAll(s));
+  const daysSel = $("#days");
+  const reloadAllBtn = $("#reloadAll");
+  const progressSearch = $("#progressSearch");
+  const logsBox = $("#logs");
+  const refreshLogsBtn = $("#refreshLogs");
+  const autoSel = $("#autoInterval");
 
-// ====================== Capacity ======================
-async function refreshCapacity(){
-  try{
-    const r = await fetch('/admin/internal-seo/capacity',{headers:{'Accept':'application/json'}});
-    if(!r.ok) throw new Error(`HTTP ${r.status}`);
-    const c = await r.json();
-    const run=c.running??0, max=c.max_parallel??1, q=c.queued??0, avail=c.available??Math.max(0,max-run);
-    const pct = Math.round(100*(run/Math.max(1,max)));
-    const bar = document.getElementById('capacityBar');
-    bar.style.width=pct+'%'; bar.textContent=`${pct}%`;
-    bar.classList.remove('bg-success','bg-warning','bg-danger','bg-secondary');
-    if(pct<=50) bar.classList.add('bg-success'); else if(pct<=80) bar.classList.add('bg-warning'); else bar.classList.add('bg-danger');
-    document.getElementById('capacityText').textContent=`max:${max} / running:${run} / queued:${q} / available:${avail} / suggest:${c.suggest_batch_size}`;
-  }catch(e){
-    const bar=document.getElementById('capacityBar'); bar.style.width='0%'; bar.textContent='N/A'; bar.classList.remove('bg-success','bg-warning','bg-danger'); bar.classList.add('bg-secondary');
-    document.getElementById('capacityText').textContent='取得失敗: '+e.message;
-  }
-}
-setInterval(refreshCapacity,15000);
+  let logsLatestISO = null; // 直近ログの created_at ISO を保持（増分取得用）
+  let autoTimer = null;
+  let progressCache = [];   // クライアント側フィルタ用
 
-// ====================== KPI ======================
-async function refreshKpis(){
-  const siteId = document.getElementById('kpiSiteId')?.value || '';
-  const range = document.getElementById('kpiRange')?.value || '7d';
-  const qs = new URLSearchParams(); if(siteId) qs.set('site_id', siteId); qs.set('range', range);
-  try{
-    const r = await fetch('/admin/internal-seo/kpis?'+qs.toString(), {headers:{'Accept':'application/json'}});
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    const d = await r.json();
-    document.getElementById('kpiApplied').textContent = d.applied ?? 0;
-    document.getElementById('kpiSwapped').textContent = d.swapped ?? 0;
-    document.getElementById('kpiSkipped').textContent = d.skipped ?? 0;
-    document.getElementById('kpiLegacy').textContent  = d.legacy_deleted ?? 0;
-    document.getElementById('kpiPending').textContent = d.pending_now ?? 0;
-    document.getElementById('kpiMeta').textContent = `範囲: ${esc(d.range)} / site_id: ${d.site_id ?? 'all'} / last_run: ${d.last_run?.status ?? '-'} (${d.last_run?.started_at ?? '-'})`;
-  }catch(e){
-    document.getElementById('kpiMeta').textContent = 'KPI取得失敗: '+e.message;
-    ['kpiApplied','kpiSwapped','kpiSkipped','kpiLegacy','kpiPending'].forEach(id=>document.getElementById(id).textContent='-');
-  }
-}
-
-// ====================== 全サイト一括 enqueue ======================
-async function enqueueAll(){
-  const btn = document.getElementById('enqueueAllBtn');
-  const out = document.getElementById('enqueueAllOut');
-
-  const payload = {
-    pages:         Number(document.getElementById('batchPages')?.value || 10),
-    per_page:      Number(document.getElementById('batchPerPage')?.value || 100),
-    min_score:     Number(document.getElementById('batchMinScore')?.value || 0.05),
-    max_k:         Number(document.getElementById('batchMaxK')?.value || 80),
-    limit_sources: Number(document.getElementById('batchLimitSources')?.value || 200),
-    limit_posts:   Number(document.getElementById('batchLimitPosts')?.value || 50),
-    incremental:   String(document.getElementById('batchIncremental')?.value || 'true')
-  };
-
-  btn.disabled = true; out.textContent = '投入中…';
-  try{
-    const res = await fetch('/admin/internal-seo/enqueue-all', {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'X-CSRFToken': getCsrf(),
-        'X-CSRF-Token': getCsrf(),
-        'X-Requested-With': 'XMLHttpRequest'
-      },
-      body: JSON.stringify(payload)
-    });
-    const json = await res.json();
-    if(json.ok){
-      out.textContent = `登録数: ${json.inserted} 件`;
-      refreshCapacity();
-    }else{
-      out.textContent = `失敗: ${json.error || 'unknown error'}`;
+  daysSel.addEventListener("change", ()=> location.href = `?days=${daysSel.value}`);
+  reloadAllBtn.addEventListener("click", ()=> loadAll(true));
+  refreshLogsBtn.addEventListener("click", ()=> loadLogs(true));
+  autoSel.addEventListener("change", ()=>{
+    if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+    const ms = parseInt(autoSel.value, 10);
+    if(ms>0){
+      autoTimer = setInterval(()=> loadLogs(false), ms);
     }
-  }catch(e){
-    out.textContent = '通信エラー: ' + e.message;
-  }finally{
-    btn.disabled = false;
-  }
-}
+  });
 
-// ====================== Owners (accordion) ======================
-function ownerSectionHTML(o){
-  const oid = o.id===null ? 'all' : o.id;
-  return `
-    <div class="accordion-item mb-2">
-      <h2 class="accordion-header" id="head-${oid}">
-        <button class="accordion-button collapsed owner-header" type="button" data-bs-toggle="collapse" data-bs-target="#pane-${oid}" aria-expanded="false">
-          <div class="w-100 d-flex align-items-center">
-            <div class="fw-semibold">${esc(o.name)}</div>
-            <div class="ms-3 mini-label">サイト数 <span class="metric">${o.site_count}</span></div>
-            <div class="ms-3 mini-label">稼働中 <span class="metric">${o.running_count||0}</span></div>
-            <div class="ms-auto d-flex align-items-center gap-2" style="max-width:360px">
-              <input type="text" class="form-control form-control-sm" placeholder="このユーザー内を検索" data-owner-search="${oid}">
-              <button class="btn btn-sm btn-ghost" data-owner-reload="${oid}">更新</button>
-            </div>
-          </div>
-        </button>
-      </h2>
-      <div id="pane-${oid}" class="accordion-collapse collapse" data-owner-pane="${oid}">
-        <div class="accordion-body">
-          <div id="grid-${oid}" class="d-grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));">
-            <div class="text-muted" data-owner-empty="${oid}">読み込み中…</div>
-          </div>
-          <div class="d-flex mt-2">
-            <button class="btn btn-sm btn-ghost ms-auto d-none" type="button" data-owner-more="${oid}">もっと見る</button>
-          </div>
-        </div>
-      </div>
-    </div>`;
-}
-function siteCardHTML(s){
-  const m = s.metrics || {};
-  const running = !!m.running;
-  const last = m.last_run_status || '-';
-  const progressDen = (m.applied||0) + (m.pending||0);
-  const pct = progressDen ? Math.round(100 * (m.applied||0) / progressDen) : 0;
-  return `
-    <div class="gsc-card p-3 d-flex justify-content-between align-items-start">
-      <div class="me-3">
-        <div class="fw-semibold">${esc(s.name)} <span class="muted">#${s.id}</span></div>
-        <div class="mini-label mt-1">
-          反映済み: <span class="metric">${m.applied||0}</span>
-          / 保留: <span class="metric">${m.pending||0}</span>
-          / スキップ: <span class="metric">${m.skipped||0}</span>
-        </div>
-        <div class="mini-label mt-1">
-          最終: ${badge(last)} / 開始: ${esc(m.last_run_started_at? fmtLocal(m.last_run_started_at):'-')}
-        </div>
-        <div class="mt-2">
-          <div class="progress" title="進捗（反映済/反映+保留）">
-            <div class="progress-bar" role="progressbar" style="width:${pct}%">${pct}%</div>
-          </div>
-        </div>
-      </div>
-      <div class="text-end">
-        <form method="post" action="/admin/internal-seo/run" class="d-inline">
-          <input type="hidden" name="csrf_token" value="${esc(getCsrf())}">
-          <input type="hidden" name="site_id" value="${s.id}">
-          <input type="hidden" name="pages" value="${document.getElementById('batchPages')?.value || 10}">
-          <input type="hidden" name="per_page" value="${document.getElementById('batchPerPage')?.value || 100}">
-          <input type="hidden" name="min_score" value="${document.getElementById('batchMinScore')?.value || 0.05}">
-          <input type="hidden" name="max_k" value="${document.getElementById('batchMaxK')?.value || 80}">
-          <input type="hidden" name="limit_sources" value="${document.getElementById('batchLimitSources')?.value || 200}">
-          <input type="hidden" name="limit_posts" value="${document.getElementById('batchLimitPosts')?.value || 50}">
-          <input type="hidden" name="incremental" value="${document.getElementById('batchIncremental')?.value || 'true'}">
-          <button class="btn btn-sm ${running? 'btn-secondary disabled':'btn-outline-primary'}" type="submit" ${running? 'disabled':''}>
-            ${running? '実行中…':'▶ 内部SEO開始'}
-          </button>
-        </form>
-        <div class="mt-2">
-          <a class="btn btn-sm btn-ghost" href="/admin/internal-seo/detail?site_id=${encodeURIComponent(s.id)}" target="_blank">詳細ログ</a>
-        </div>
-      </div>
-    </div>`;
-}
-async function loadSitesForOwner(ownerId, opts){
-  const state = loadSitesForOwner.state || (loadSitesForOwner.state = {});
-  const key = String(ownerId);
-  const st = state[key] || (state[key] = {cursor: null, q:'', hasMore:true, loading:false});
-  if(opts?.reset){ st.cursor=null; st.hasMore=true; document.querySelector(`#grid-${ownerId}`).innerHTML=''; }
-  if(typeof opts?.q === 'string'){ st.q = opts.q.trim(); st.cursor=null; st.hasMore=true; document.querySelector(`#grid-${ownerId}`).innerHTML=''; }
-  if(st.loading || !st.hasMore) return;
-  st.loading = true;
-  const params = new URLSearchParams();
-  params.set('owner_id', ownerId==='all' ? '' : ownerId);
-  params.set('limit','24');
-  if(st.q) params.set('q', st.q);
-  if(st.cursor) params.set('cursor_id', st.cursor);
-  try{
-    const res = await fetch(`/admin/internal-seo/sites?${params.toString()}`, {headers:{'Accept':'application/json'}});
-    if(!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    const list = data.rows || [];
-    const grid = document.querySelector(`#grid-${ownerId}`);
-    const empty = document.querySelector(`[data-owner-empty="${ownerId}"]`);
-    if(empty) empty.remove();
-    const tmp = document.createElement('div');
-    const frag = document.createDocumentFragment();
-    for(const s of list){ tmp.innerHTML = siteCardHTML(s); frag.appendChild(tmp.firstElementChild); }
-    grid.appendChild(frag);
-    st.cursor = data.next_cursor_id || null;
-    st.hasMore = !!data.has_more;
-    const moreBtn = document.querySelector(`[data-owner-more="${ownerId}"]`);
-    moreBtn.classList.toggle('d-none', !st.hasMore);
-  }catch(e){
-    const grid = document.querySelector(`#grid-${ownerId}`);
-    const err = document.createElement('div'); err.className='text-danger'; err.textContent='サイト取得失敗: '+e.message;
-    grid.appendChild(err);
-    st.hasMore=false;
-  }finally{ st.loading=false; }
-}
-async function loadOwners(){
-  const cont = document.getElementById('ownersAccordion');
-  const empty = document.getElementById('ownersEmpty');
-  if(empty) empty.textContent='読み込み中…';
-  try{
-    const r = await fetch('/admin/internal-seo/owners',{headers:{'Accept':'application/json'}});
-    if(!r.ok) throw new Error(`HTTP ${r.status}`);
-    const data = await r.json();
-    const owners = data.rows || [];
-    if(empty) empty.remove();
-    const tmp = document.createElement('div');
-    const frag = document.createDocumentFragment();
-    for(const o of owners){
-      tmp.innerHTML = ownerSectionHTML(o);
-      const el = tmp.firstElementChild;
-      frag.appendChild(el);
-      const pane = el.querySelector('[data-owner-pane]');
-      pane.addEventListener('shown.bs.collapse', () => {
-        const oid = pane.getAttribute('data-owner-pane');
-        loadSitesForOwner(oid, {reset:true});
-      });
-      el.querySelector('[data-owner-search]').addEventListener('keydown', (ev)=>{
-        if(ev.key==='Enter'){ ev.preventDefault(); loadSitesForOwner(pane.getAttribute('data-owner-pane'), {q: ev.target.value}); }
-      });
-      el.querySelector('[data-owner-reload]').addEventListener('click', ()=>{
-        const q = el.querySelector('[data-owner-search]').value;
-        loadSitesForOwner(pane.getAttribute('data-owner-pane'), {q, reset:true});
-      });
-      el.querySelector('[data-owner-more]').addEventListener('click', ()=>{
-        loadSitesForOwner(pane.getAttribute('data-owner-pane'));
-      });
-    }
-    cont.appendChild(frag);
-  }catch(e){
-    if(empty) empty.textContent = 'オーナー取得失敗: '+e.message;
-  }
-}
+  progressSearch.addEventListener("input", ()=>{
+    renderProgress(progressCache, progressSearch.value.trim().toLowerCase());
+  });
 
-// ====================== Runs (history) ======================
-let nextCursorTs=null, nextCursorId=null, runsLoading=false, runsReachedEnd=false;
-async function loadRuns(initial=false){
-  if(runsLoading||runsReachedEnd) return; runsLoading=true;
-  const tbody=document.getElementById('runsBody'); const ph=document.getElementById('placeholderRow'); if(ph) ph.remove();
-  const params=new URLSearchParams();
-  const siteId=document.getElementById('siteIdInput')?.value||''; const perPage=document.getElementById('perPageSelect')?.value||'50';
-  const status=document.getElementById('statusSelect')?.value||'';
-  if(siteId) params.set('site_id', siteId);
-  if(status) params.set('status', status);
-  params.set('limit', perPage);
-  if(!initial && nextCursorTs && nextCursorId){ params.set('cursor_ts', nextCursorTs); params.set('cursor_id', nextCursorId); }
-  try{
-    const res=await fetch(`/admin/internal-seo/list?${params.toString()}`,{headers:{'Accept':'application/json'}});
-    if(!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data=await res.json(); const rows=data.rows||[]; const frag=document.createDocumentFragment();
-    for(const r of rows){
-      const tr=document.createElement('tr');
-      tr.innerHTML=`
-        <td>${r.id}</td>
-        <td>${r.site_id}</td>
-        <td>${badge(r.status)}</td>
-        <td class="text-muted">${esc(r.job_kind||'')}</td>
-        <td>${fmtLocal(r.started_at)}</td>
-        <td>${fmtLocal(r.ended_at)}</td>
-        <td>${r.duration_ms??'-'}</td>
-        <td>
-          <button class="btn btn-sm btn-outline-primary" data-run-id="${r.id}" data-site-id="${r.site_id}" onclick="openStatsModal(this)">詳細</button>
-          <a class="btn btn-sm btn-ghost" href="/admin/internal-seo/detail?site_id=${encodeURIComponent(r.site_id)}" target="_blank">ログ一覧</a>
-        </td>`;
-      frag.appendChild(tr);
-    }
-    tbody.appendChild(frag);
-    nextCursorTs=data.next_cursor_ts||null; nextCursorId=data.next_cursor_id||null; runsReachedEnd=!data.has_more;
-    document.getElementById('loadMoreBtn').classList.toggle('d-none', runsReachedEnd);
-  }catch(e){
-    const tr=document.createElement('tr'); tr.innerHTML=`<td colspan="8" class="text-danger">読み込み失敗: ${e.message}</td>`; tbody.appendChild(tr); runsReachedEnd=true;
-  }finally{ runsLoading=false; }
-}
-
-// 詳細モーダル
-async function openStatsModal(btn){
-  const runId=btn.getAttribute('data-run-id'); const siteId=btn.getAttribute('data-site-id');
-  const body=document.getElementById('statsBody'); body.innerHTML='<div class="text-muted">読み込み中…</div>';
-  try{
-    const res=await fetch(`/admin/internal-seo/run/${runId}/stats`,{headers:{'Accept':'application/json'}});
-    if(!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data=await res.json(); const s=(data&&data.stats)||{}; const rows=[];
-    const row = (t,o)=>{ const kv=Object.entries(o||{}).map(([k,v])=>`<tr><th class="w-25">${esc(k)}</th><td>${esc(typeof v==='object'?JSON.stringify(v):v)}</td></tr>`).join(''); return `<tr class="table-active"><th colspan="2">${esc(t)}</th></tr>${kv}` }
-    if(s.indexer) rows.push(row('Indexer',s.indexer));
-    if(s.link_graph) rows.push(row('LinkGraph',s.link_graph));
-    if(s.planner) rows.push(row('Planner',s.planner));
-    if(s.applier) rows.push(row('Applier',s.applier));
-    if(s.params) rows.push(row('Params',s.params));
-    body.innerHTML = rows.length ? `<table class="table table-sm mb-0"><tbody>${rows.join('')}</tbody></table>` : '<div class="text-muted">詳細データなし</div>';
-    document.getElementById('goDetailLink').href=`/admin/internal-seo/detail?site_id=${encodeURIComponent(siteId)}&run_id=${encodeURIComponent(runId)}`;
-  }catch(e){ body.innerHTML=`<div class="text-danger">エラー: ${e.message}</div>`; }
-  new bootstrap.Modal(document.getElementById('statsModal')).show();
-}
-
-// ====================== Preview helpers ======================
-function updatePreviewLinks(){
-  const s = document.getElementById('prevSiteId')?.value||'';
-  const p = document.getElementById('prevPostId')?.value||'';
-  const a = document.getElementById('prevOpenHtml');
-  if(s && p){
-    a.classList.remove('disabled');
-    a.href = `/admin/internal-seo/preview?site_id=${encodeURIComponent(s)}&post_id=${encodeURIComponent(p)}&format=html`;
-  }else{
-    a.classList.add('disabled');
-    a.href='#';
-  }
-}
-async function previewJson(){
-  const out=document.getElementById('prevOut');
-  const s=document.getElementById('prevSiteId')?.value||'';
-  const p=document.getElementById('prevPostId')?.value||'';
-  if(!s || !p){ out.textContent='site_id と post_id を入力してください'; return; }
-  out.textContent='取得中…';
-  try{
-    const r = await fetch(`/admin/internal-seo/preview?site_id=${encodeURIComponent(s)}&post_id=${encodeURIComponent(p)}&format=json`, {headers:{'Accept':'application/json'}});
-    if(!r.ok) throw new Error('HTTP '+r.status);
+  async function loadKpis(){
+    const r = await fetch(`/admin/internal-seo/kpis?days={{days}}`);
     const j = await r.json();
-    out.textContent = `applied=${j.result?.applied||0} swapped=${j.result?.swapped||0} skipped=${j.result?.skipped||0} msg=${j.result?.message||''}`;
-  }catch(e){ out.textContent='エラー: '+e.message; }
-}
+    $("#k_total").textContent = (j.total_sites||0).toLocaleString();
+    $("#k_queued").textContent = (j.queued_sites||0).toLocaleString();
+    $("#k_running").textContent = (j.running_sites||0).toLocaleString();
+    $("#k_applied_today").textContent = (j.applied_today||0).toLocaleString();
+    $("#k_removed_h").textContent = (j.removed_in_h_total||0).toLocaleString();
+    $("#k_legacy_removed").textContent = (j.legacy_removed_total||0).toLocaleString();
+  }
 
-// ====================== Init ======================
-document.addEventListener('DOMContentLoaded', ()=>{
-  // capacity
-  refreshCapacity();
-  document.getElementById('capacityRefresh').addEventListener('click', refreshCapacity);
+  async function loadProgress(){
+    const r = await fetch(`/admin/internal-seo/progress?days={{days}}`);
+    const j = await r.json();
+    progressCache = j.rows || [];
+    renderProgress(progressCache, progressSearch.value.trim().toLowerCase());
+  }
 
-  // KPI
-  refreshKpis();
-  document.getElementById('kpiRefreshBtn').addEventListener('click', refreshKpis);
-  document.getElementById('kpiRange').addEventListener('change', refreshKpis);
+  function renderProgress(rows, q){
+    const tb = $("#progressTbody");
+    tb.innerHTML = "";
+    let filtered = rows;
+    if(q){
+      filtered = rows.filter(r =>
+        (r.username||"").toLowerCase().includes(q) ||
+        (r.site_name||"").toLowerCase().includes(q)
+      );
+    }
+    if(filtered.length===0){
+      tb.innerHTML = `<tr><td class="muted" colspan="8">該当データがありません</td></tr>`;
+      return;
+    }
+    for(const r of filtered){
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${escapeHtml(r.username||"-")}</td>
+        <td>${escapeHtml(r.site_name||"-")}</td>
+        <td>${r.last_run_at ? `<span class="ts">${escapeHtml(r.last_run_at)}</span>` : '<span class="muted">-</span>'}</td>
+        <td style="text-align:right">${(r.applied_links||0).toLocaleString()}</td>
+        <td style="text-align:right">${(r.skipped_count||0).toLocaleString()}</td>
+        <td style="text-align:right">${(r.removed_in_headings||0).toLocaleString()}</td>
+        <td style="text-align:right">${(r.legacy_removed||0).toLocaleString()}</td>
+        <td>${renderStatusTag(r.queue_status)}</td>
+      `;
+      tb.appendChild(tr);
+    }
+  }
 
-  // enqueue-all
-  document.getElementById('enqueueAllBtn').addEventListener('click', enqueueAll);
+  function renderStatusTag(st){
+    const s = (st||"idle").toLowerCase();
+    return `<span class="tag ${s}">${s}</span>`;
+  }
 
-  // owners & sites
-  loadOwners();
+  async function loadLogs(forceFull){
+    const params = new URLSearchParams();
+    params.set("limit", forceFull || !logsLatestISO ? "80" : "80");
+    if(!forceFull && logsLatestISO){
+      params.set("since", logsLatestISO);
+    }
+    const r = await fetch(`/admin/internal-seo/logs?${params.toString()}`);
+    const j = await r.json();
+    const logs = j.logs || [];
+    if(logs.length===0) return;
 
-  // runs
-  loadRuns(true);
-  document.getElementById('loadMoreBtn').addEventListener('click', ()=>loadRuns(false));
-  document.getElementById('applyFilterBtn').addEventListener('click', ()=>{
-    nextCursorTs=null; nextCursorId=null; runsReachedEnd=false;
-    document.getElementById('runsBody').innerHTML='<tr id="placeholderRow"><td colspan="8" class="text-muted">読み込み中…</td></tr>';
-    loadRuns(true);
+    // 新しいものから返ってくる想定（id DESC）
+    // 画面には上から新しい順で表示
+    const frag = document.createDocumentFragment();
+    for(const it of logs){
+      const div = document.createElement("div");
+      div.className = "log-item";
+      div.innerHTML = `
+        <div class="ts">${escapeHtml(it.created_at)}</div>
+        <div>${escapeHtml(it.username||"-")}</div>
+        <div><strong>${escapeHtml(it.site_name||"-")}</strong><br><span class="muted">${escapeHtml(it.status||"")}${it.reason?`：${escapeHtml(it.reason)}`:""}</span></div>
+        <div>適用 ${Number(it.applied_links||0).toLocaleString()}</div>
+        <div>H除去 ${Number(it.removed_in_headings||0).toLocaleString()}</div>
+        <div>旧削除 ${Number(it.legacy_removed||0).toLocaleString()}</div>
+      `;
+      frag.appendChild(div);
+    }
+    // 先頭に挿入
+    logsBox.prepend(frag);
+
+    // 最新時刻を記録（次回は増分取得）
+    logsLatestISO = logs[0].created_at;
+    // 古すぎる表示は切る（視認性のため 2,000件程度で刈り込み）
+    const MAX_NODES = 2000;
+    const nodes = logsBox.children;
+    if(nodes.length > MAX_NODES){
+      for(let i=MAX_NODES;i<nodes.length;i++){
+        nodes[i].remove();
+      }
+    }
+  }
+
+  function escapeHtml(s){
+    if(s==null) return "";
+    return String(s).replace(/[&<>"']/g, m => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[m]));
+  }
+
+  async function loadAll(forceFull){
+    await Promise.all([
+      loadKpis(),
+      loadProgress(),
+      loadLogs(forceFull)
+    ]);
+  }
+
+  // 初期ロード
+  loadAll(true).then(()=>{
+    // 自動更新（ログのみ）
+    const ms = parseInt(autoSel.value,10);
+    if(ms>0){
+      autoTimer = setInterval(()=> loadLogs(false), ms);
+    }
   });
-  document.getElementById('clearFilterBtn').addEventListener('click', ()=>{
-    document.getElementById('siteIdInput').value='';
-    document.getElementById('statusSelect').value='';
-    nextCursorTs=null; nextCursorId=null; runsReachedEnd=false;
-    document.getElementById('runsBody').innerHTML='<tr id="placeholderRow"><td colspan="8" class="text-muted">読み込み中…</td></tr>';
-    loadRuns(true);
-  });
-
-  // preview
-  ['prevSiteId','prevPostId'].forEach(id=>{
-    const el=document.getElementById(id);
-    el.addEventListener('input', updatePreviewLinks);
-  });
-  document.getElementById('prevOpenJson').addEventListener('click', previewJson);
-  updatePreviewLinks();
-});
+})();
 </script>
 {% endblock %}

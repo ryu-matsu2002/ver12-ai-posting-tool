@@ -1918,7 +1918,7 @@ def admin_captcha_dataset():
 
 # 内部SEOルートコード（admin_bp 配下）
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from flask import render_template, request, redirect, url_for, flash, abort, jsonify, make_response
 from flask_login import login_required, current_user
 from sqlalchemy import desc, and_, or_, func
@@ -1927,6 +1927,8 @@ from sqlalchemy import text
 
 from app import db
 from app.models import Site, InternalSeoRun, InternalLinkAction, ContentIndex
+JST = timezone(timedelta(hours=9))
+
 
 # ---- stats: 1ラン分の詳細 ----
 @admin_bp.route("/admin/internal-seo/run/<int:run_id>/stats", methods=["GET"])
@@ -1943,14 +1945,10 @@ def admin_internal_seo_run_stats(run_id: int):
 @admin_bp.route("/admin/internal-seo", methods=["GET"])
 @admin_required_effective
 def admin_internal_seo_index():
-    
-    selected_site_id = request.args.get("site_id", type=int)
-    per_page = request.args.get("per_page", default=50, type=int)
-    return render_template(
-        "admin/internal_seo.html",
-        selected_site_id=selected_site_id,
-        per_page=per_page,
-    )
+
+    # ダッシュボード（KPI + 進捗 + リアルタイムログ）
+    days = request.args.get("days", default=7, type=int)
+    return render_template("admin/internal_seo.html", days=days)
 
 # ---- 概要ダッシュボード（総数 / 適用済み / キュー / 直近ラン）----
 @admin_bp.route("/admin/internal-seo/overview", methods=["GET"])
@@ -2039,7 +2037,103 @@ def admin_internal_seo_preview():
         )
     else:
         return jsonify({"ok": False, "error": "unsupported format"}), 400
+    
 
+# ---- 進捗（ユーザー × サイト） ----
+@admin_bp.route("/admin/internal-seo/progress", methods=["GET"])
+@admin_required_effective
+def admin_internal_seo_progress():
+    """
+    各ユーザー × 各サイトの進捗（期間内）
+    - last_run（直近処理日時）
+    - applied_links / skipped / removed_in_headings / legacy_removed（期間合計）
+    - queue_status（queued/running/idle）
+    """
+    days = int(request.args.get("days", 7))
+    since = (datetime.now(JST) - timedelta(days=days)).astimezone(timezone.utc)
+
+    sql = text("""
+      WITH site_info AS (
+        SELECT s.id AS site_id, s.name AS site_name, s.user_id
+        FROM site s
+      ),
+      user_info AS (
+        SELECT u.id AS user_id, u.username
+        FROM "user" u
+      ),
+      logs AS (
+        SELECT
+          l.site_id,
+          l.status,
+          COALESCE(l.applied_links, (l.details->>'applied_links')::int) AS applied_links,
+          COALESCE(l.removed_in_headings, (l.details->>'removed_in_headings')::int) AS removed_in_headings,
+          COALESCE(l.legacy_removed, (l.details->>'legacy_removed')::int) AS legacy_removed,
+          l.created_at
+        FROM internal_seo_job_log l
+        WHERE l.created_at >= :since
+      ),
+      last_run AS (
+        SELECT site_id, MAX(created_at) AS last_run_at
+        FROM logs
+        GROUP BY site_id
+      ),
+      agg AS (
+        SELECT
+          site_id,
+          COALESCE(SUM(CASE WHEN status='applied' THEN applied_links ELSE 0 END),0) AS applied_links,
+          COALESCE(SUM(CASE WHEN status='skipped' THEN 1 ELSE 0 END),0) AS skipped_count,
+          COALESCE(SUM(removed_in_headings),0) AS removed_in_headings,
+          COALESCE(SUM(legacy_removed),0)       AS legacy_removed
+        FROM logs
+        GROUP BY site_id
+      ),
+      qstat AS (
+        SELECT site_id,
+               MAX(CASE WHEN status='running' THEN 2
+                        WHEN status='queued'  THEN 1
+                        ELSE 0 END) AS st_rank
+        FROM internal_seo_job_queue
+        GROUP BY site_id
+      )
+      SELECT
+        ui.user_id, ui.username,
+        si.site_id, si.site_name,
+        lr.last_run_at,
+        COALESCE(a.applied_links,0)      AS applied_links,
+        COALESCE(a.skipped_count,0)      AS skipped_count,
+        COALESCE(a.removed_in_headings,0) AS removed_in_headings,
+        COALESCE(a.legacy_removed,0)      AS legacy_removed,
+        CASE COALESCE(q.st_rank,0)
+          WHEN 2 THEN 'running'
+          WHEN 1 THEN 'queued'
+          ELSE 'idle'
+        END AS queue_status
+      FROM site_info si
+      JOIN user_info ui ON ui.user_id = si.user_id
+      LEFT JOIN last_run lr ON lr.site_id = si.site_id
+      LEFT JOIN agg a      ON a.site_id  = si.site_id
+      LEFT JOIN qstat q    ON q.site_id  = si.site_id
+      ORDER BY ui.username ASC, si.site_name ASC
+    """)
+    rows = db.session.execute(sql, {"since": since}).mappings().all() or []
+
+    data = []
+    for r in rows:
+        data.append({
+            "user_id": r.get("user_id"),
+            "username": r.get("username"),
+            "site_id": r.get("site_id"),
+            "site_name": r.get("site_name"),
+            "last_run_at": (r.get("last_run_at").astimezone(JST).isoformat(timespec="seconds")
+                            if r.get("last_run_at") else None),
+            "applied_links": int(r.get("applied_links") or 0),
+            "skipped_count": int(r.get("skipped_count") or 0),
+            "removed_in_headings": int(r.get("removed_in_headings") or 0),
+            "legacy_removed": int(r.get("legacy_removed") or 0),
+            "queue_status": r.get("queue_status") or "idle",
+        })
+    return jsonify({"days": days, "rows": data})
+    
 
 # ---- NEW: オーナー一覧（ユーザー別セクション） ----
 @admin_bp.route("/admin/internal-seo/owners", methods=["GET"])
@@ -2602,104 +2696,121 @@ def admin_internal_seo_enqueue_all():
     inserted = res.rowcount if res.rowcount is not None else 0
     return jsonify({"ok": True, "inserted": int(inserted)})
 
-# ---- KPI 集計（期間/サイト別）----
-from datetime import datetime, timedelta
-from sqlalchemy import func, case, or_
-
+# ---- KPI（全体サマリ：登録/キュー/実行/本日の適用/H内除去/旧仕様削除） ----
 @admin_bp.route("/admin/internal-seo/kpis", methods=["GET"])
 @admin_required_effective
 def admin_internal_seo_kpis():
-    """
-    期間(range)とsite_idで絞ったKPIを返す。
-      - applied / swapped / skipped / legacy_deleted（期間内）
-      - pending_now（現在のpending件数）
-      - last_run（直近ランの概要）
-    range: 1d | 7d | 30d | all
-    """
-    site_id = request.args.get("site_id", type=int)
-    rng = (request.args.get("range") or "7d").lower()
-    now = datetime.utcnow()
+    days = int(request.args.get("days", 7))
+    since = (datetime.now(JST) - timedelta(days=days)).astimezone(timezone.utc)
 
-    days = None
-    if rng == "1d":
-        days = 1
-    elif rng == "7d":
-        days = 7
-    elif rng == "30d":
-        days = 30
-    elif rng == "all":
-        days = None
-    else:
-        days = 7  # default fallback
+    # 概況（サイト数/キュー/ランニング）
+    overview_sql = text("""
+      SELECT
+        (SELECT COUNT(*) FROM site) AS total_sites,
+        (SELECT COUNT(*) FROM internal_seo_job_queue WHERE status='queued')  AS queued_sites,
+        (SELECT COUNT(*) FROM internal_seo_job_queue WHERE status='running') AS running_sites
+    """)
+    overview = db.session.execute(overview_sql).mappings().first() or {}
 
-    start_dt = now - timedelta(days=days) if days is not None else None
+    # 適用・除去の集計（期間合計 + 本日）
+    agg_sql = text("""
+      WITH logs AS (
+        SELECT
+          l.id,
+          l.status,
+          COALESCE(l.applied_links, (l.details->>'applied_links')::int) AS applied_links,
+          COALESCE(l.removed_in_headings, (l.details->>'removed_in_headings')::int) AS removed_in_headings,
+          COALESCE(l.legacy_removed, (l.details->>'legacy_removed')::int) AS legacy_removed,
+          l.created_at AT TIME ZONE 'UTC' AS created_utc
+        FROM internal_seo_job_log l
+        WHERE l.created_at >= :since
+      )
+      SELECT
+        (SELECT COALESCE(SUM(applied_links),0)
+           FROM logs
+          WHERE status='applied'
+            AND created_utc::date = (now() AT TIME ZONE 'UTC')::date) AS applied_today,
+        (SELECT COALESCE(SUM(removed_in_headings),0) FROM logs) AS removed_in_h_total,
+        (SELECT COALESCE(SUM(legacy_removed),0)       FROM logs) AS legacy_removed_total
+    """)
+    agg = db.session.execute(agg_sql, {"since": since}).mappings().first() or {}
 
-    # アクションの基準時刻は coalesce(applied_at, updated_at, created_at)
-    coalesced_ts = func.coalesce(
-        InternalLinkAction.applied_at,
-        InternalLinkAction.updated_at,
-        InternalLinkAction.created_at,
-    )
-
-    q = InternalLinkAction.query.with_entities(
-        func.sum(case((InternalLinkAction.status == "applied", 1), else_=0)).label("applied"),
-        func.sum(case((InternalLinkAction.status == "skipped", 1), else_=0)).label("skipped"),
-        func.sum(case((InternalLinkAction.status == "legacy_deleted", 1), else_=0)).label("legacy_deleted"),
-        func.sum(
-            case((
-                (InternalLinkAction.reason == "swap") & (InternalLinkAction.status == "applied"), 1
-            ), else_=0)
-        ).label("swapped"),
-    )
-    if site_id:
-        q = q.filter(InternalLinkAction.site_id == site_id)
-    if start_dt is not None:
-        q = q.filter(coalesced_ts >= start_dt)
-
-    row = q.one()
-    applied = int(row.applied or 0)
-    skipped = int(row.skipped or 0)
-    legacy_deleted = int(row.legacy_deleted or 0)
-    swapped = int(row.swapped or 0)
-
-    # 現在の pending 件数（期間条件なし）
-    qp = InternalLinkAction.query.with_entities(func.count(InternalLinkAction.id))
-    if site_id:
-        qp = qp.filter(InternalLinkAction.site_id == site_id)
-    qp = qp.filter(InternalLinkAction.status == "pending")
-    pending_now = int(qp.scalar() or 0)
-
-    # 直近ラン
-    qrun = InternalSeoRun.query
-    if site_id:
-        qrun = qrun.filter(InternalSeoRun.site_id == site_id)
-    last = qrun.order_by(InternalSeoRun.started_at.desc(), InternalSeoRun.id.desc()).first()
-    last_run = None
-    if last:
-        last_run = dict(
-            id=last.id,
-            site_id=last.site_id,
-            status=last.status,
-            job_kind=last.job_kind,
-            started_at=last.started_at.isoformat() if last.started_at else None,
-            ended_at=last.ended_at.isoformat() if last.ended_at else None,
-            duration_ms=last.duration_ms,
-        )
-
-    payload = dict(
-        ok=True,
-        site_id=site_id,
-        range=rng,
-        applied=applied,
-        swapped=swapped,
-        skipped=skipped,
-        legacy_deleted=legacy_deleted,
-        pending_now=pending_now,
-        last_run=last_run,
-    )
+    payload = {
+        "total_sites": int(overview.get("total_sites") or 0),
+        "queued_sites": int(overview.get("queued_sites") or 0),
+        "running_sites": int(overview.get("running_sites") or 0),
+        "applied_today": int(agg.get("applied_today") or 0),
+        "removed_in_h_total": int(agg.get("removed_in_h_total") or 0),
+        "legacy_removed_total": int(agg.get("legacy_removed_total") or 0),
+        "days": days,
+    }
     resp = make_response(jsonify(payload))
     resp.headers["Cache-Control"] = "no-cache, no-store"
     return resp
+
+# ---- リアルタイムログ（増分） ----
+@admin_bp.route("/admin/internal-seo/logs", methods=["GET"])
+@admin_required_effective
+def admin_internal_seo_logs():
+    """
+    クエリ:
+      - limit: 取得件数（デフォルト 50, 最大 200）
+      - since: ISO8601（JST/UTC可）これ以降のログを返す
+    返却: id 降順（新→古）。フロントは上に積む。
+    """
+    limit = min(int(request.args.get("limit", 50)), 200)
+    since_str = request.args.get("since")
+    since_dt = None
+    if since_str:
+        try:
+            s = datetime.fromisoformat(since_str.replace("Z", "+00:00"))
+            since_dt = s.astimezone(timezone.utc)
+        except Exception:
+            since_dt = None
+
+    params = {"limit": limit}
+    where_add = ""
+    if since_dt:
+        where_add = "AND l.created_at > :since"
+        params["since"] = since_dt
+
+    sql = text(f"""
+      SELECT
+        l.id,
+        l.site_id,
+        s.name     AS site_name,
+        u.username AS username,
+        l.status,
+        COALESCE(l.reason, (l.details->>'reason')) AS reason,
+        COALESCE(l.applied_links, (l.details->>'applied_links')::int) AS applied_links,
+        COALESCE(l.removed_in_headings, (l.details->>'removed_in_headings')::int) AS removed_in_headings,
+        COALESCE(l.legacy_removed, (l.details->>'legacy_removed')::int) AS legacy_removed,
+        l.created_at
+      FROM internal_seo_job_log l
+      LEFT JOIN site  s ON s.id = l.site_id
+      LEFT JOIN "user" u ON u.id = s.user_id
+      WHERE 1=1
+        {where_add}
+      ORDER BY l.id DESC
+      LIMIT :limit
+    """)
+    rows = db.session.execute(sql, params).mappings().all() or []
+
+    out = []
+    for r in rows:
+        out.append({
+            "id": int(r.get("id")),
+            "site_id": r.get("site_id"),
+            "site_name": r.get("site_name"),
+            "username": r.get("username"),
+            "status": r.get("status"),
+            "reason": r.get("reason"),
+            "applied_links": int(r.get("applied_links") or 0),
+            "removed_in_headings": int(r.get("removed_in_headings") or 0),
+            "legacy_removed": int(r.get("legacy_removed") or 0),
+            "created_at": r.get("created_at").astimezone(JST).isoformat(timespec="seconds"),
+        })
+    return jsonify({"logs": out})
 
 
 # ────────────── キーワード ──────────────

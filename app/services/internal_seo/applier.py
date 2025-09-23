@@ -21,6 +21,7 @@ from app.models import (
 )
 from app.wp_client import fetch_single_post, update_post_content
 from app.services.internal_seo.legacy_cleaner import find_and_remove_legacy_links
+from app.services.internal_seo.utils import nfkc_norm
 
 logger = logging.getLogger(__name__)
 
@@ -410,8 +411,8 @@ def _apply_plan_to_html(
     # 既存内部リンクの個数
     existing_internal = _existing_internal_links_count(site, html)
 
-    # 既定を 4〜8 に引き上げ（サイト設定があればそれを優先）
-    need_min = max(4, int(cfg.min_links_per_post or 4))
+    # 既定を 1〜8 に変更（サイト設定があればそれを優先）
+    need_min = max(1, int(cfg.min_links_per_post or 1))
     need_max = min(8, int(cfg.max_links_per_post or 8))
 
     # 1) まずは reason='plan' を優先して挿入
@@ -419,6 +420,8 @@ def _apply_plan_to_html(
     swaps = [a for a in actions if a.reason == "swap_candidate"]
 
     inserted = 0
+    # 記事内で同一キーワード（アンカーテキスト）は1回まで
+    seen_anchor_keys = set()
     for act in plan_actions:
         if existing_internal + inserted >= need_max:
             break
@@ -438,6 +441,16 @@ def _apply_plan_to_html(
         if not href:
             res.skipped += 1
             continue
+        # --- 同一アンカー重複の抑止（記事内1回まで） ---
+        anchor_key = nfkc_norm((act.anchor_text or "").strip()).lower()
+        if anchor_key:
+            if anchor_key in seen_anchor_keys:
+                # 重複は適用しない
+                act.status = "skipped"
+                act.reason = "duplicate-anchor-in-article"
+                act.updated_at = datetime.utcnow()
+                res.skipped += 1
+                continue
 
         # 段落本文を先に取り出してから各種チェックを行う（未定義エラー対策）
         para_html = paragraphs[idx]
@@ -461,6 +474,8 @@ def _apply_plan_to_html(
         act.applied_at = datetime.utcnow()
         res.applied += 1
         inserted += 1
+        if anchor_key:
+            seen_anchor_keys.add(anchor_key)
 
     # 2) swap候補：既存内部リンクがある & まだ余裕がない場合に置換を試みる
     #   （簡易ルール：scoreの低そうな既存リンクをひとつだけ差し替え）
