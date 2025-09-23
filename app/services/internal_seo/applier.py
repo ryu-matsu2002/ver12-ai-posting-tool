@@ -354,6 +354,7 @@ def preview_apply_for_post(site_id: int, src_post_id: int) -> Tuple[str, ApplyRe
     # 3.5) 見出し内リンクをサニタイズ（Hタグからはリンクを完全排除）
     base_html = _strip_links_in_headings(base_html)
     new_html, res = _apply_plan_to_html(site, src_post_id, base_html, actions, cfg, url_map)
+    new_html = _strip_links_in_headings(new_html)  # ← 適用後も再サニタイズ
     res.legacy_deleted = len(deletions or [])
     new_paras = _split_paragraphs(new_html)
 
