@@ -23,13 +23,14 @@
     .internal-seo .metric{font-weight:600}
     .internal-seo .muted{color:#6c757d}
     .internal-seo .progress{height:12px}
+    .internal-seo .kpi .num{font-size:1.25rem;font-weight:700}
+    .internal-seo .kpi .lbl{font-size:.8rem;color:#6c757d}
   </style>
 
-  <!-- 見出し + ガイド -->
+  <!-- 見出し + ガイド + 全体操作 -->
   <div class="d-flex align-items-center mb-3">
     <h2 class="h4 mb-0">🔧 内部SEO 管理</h2>
     <div class="ms-auto d-flex align-items-center gap-2">
-      <!-- ✅ 追加：全サイト一括 enqueue ボタン -->
       <button id="enqueueAllBtn" class="btn btn-sm btn-primary">全サイトをキューに登録</button>
       <span id="enqueueAllOut" class="mini-label text-muted"></span>
       <button id="capacityRefresh" class="btn btn-sm btn-ghost">再計測</button>
@@ -38,8 +39,8 @@
 
   <div class="guide mb-3">
     <strong class="me-2">ガイド</strong>
-    左側の<strong>ユーザー（オーナー）</strong>セクションを開く → 表示された<strong>サイトカードの「内部SEO開始」</strong>を押すだけ。<br>
-    詳細パラメータは下の<strong>「高度な設定」</strong>で必要な時だけ開いて編集できます。
+    左の<strong>ユーザー（オーナー）</strong>を開き、各<strong>サイトカードの「内部SEO開始」</strong>で実行。<br>
+    パラメータは下の<strong>「高度な設定」</strong>で必要時のみ編集できます。プレビューは<strong>下段の「プレビュー」</strong>から個別確認可能。
   </div>
 
   <!-- 処理余力（メーター） -->
@@ -55,6 +56,40 @@
     </div>
   </div>
 
+  <!-- KPI ダッシュボード -->
+  <div class="card border-0 shadow-sm mb-4">
+    <div class="card-body">
+      <div class="d-flex align-items-center">
+        <div class="section-title">📊 KPI（期間集計）</div>
+        <div class="ms-auto d-flex align-items-center gap-2">
+          <div class="mini-label">Site ID</div>
+          <input type="number" id="kpiSiteId" class="form-control form-control-sm" style="width:120px" placeholder="空=全体">
+          <div class="mini-label ms-2">期間</div>
+          <select id="kpiRange" class="form-select form-select-sm" style="width:140px">
+            <option value="1d">1日</option>
+            <option value="7d" selected>7日</option>
+            <option value="30d">30日</option>
+            <option value="all">全期間</option>
+          </select>
+          <button id="kpiRefreshBtn" class="btn btn-sm btn-ghost">更新</button>
+        </div>
+      </div>
+      <div class="row g-2 mt-2 kpi">
+        <div class="col-6 col-md"><div class="gsc-card p-3 text-center">
+          <div class="num" id="kpiApplied">-</div><div class="lbl">適用(applied)</div></div></div>
+        <div class="col-6 col-md"><div class="gsc-card p-3 text-center">
+          <div class="num" id="kpiSwapped">-</div><div class="lbl">置換(swapped)</div></div></div>
+        <div class="col-6 col-md"><div class="gsc-card p-3 text-center">
+          <div class="num" id="kpiSkipped">-</div><div class="lbl">スキップ(skipped)</div></div></div>
+        <div class="col-6 col-md"><div class="gsc-card p-3 text-center">
+          <div class="num" id="kpiLegacy">-</div><div class="lbl">旧仕様削除(legacy_deleted)</div></div></div>
+        <div class="col-6 col-md"><div class="gsc-card p-3 text-center">
+          <div class="num" id="kpiPending">-</div><div class="lbl">現在の保留(pending)</div></div></div>
+      </div>
+      <div class="mini-label mt-2" id="kpiMeta">-</div>
+    </div>
+  </div>
+
   <!-- ユーザーごとのアコーディオン -->
   <div class="card border-0 shadow-sm mb-4">
     <div class="card-body">
@@ -63,7 +98,6 @@
         <div class="ms-auto mini-label">検索は各セクション内の入力を使用</div>
       </div>
       <div id="ownersAccordion" class="accordion mt-3">
-        <!-- ここにオーナー毎のセクションをJSで挿入 -->
         <div class="text-muted" id="ownersEmpty">読み込み中…</div>
       </div>
     </div>
@@ -109,6 +143,31 @@
     </div>
   </div>
 
+  <!-- プレビュー（post_id指定） -->
+  <div class="card border-0 shadow-sm mb-4">
+    <div class="card-body">
+      <div class="d-flex align-items-center">
+        <div class="section-title">🧪 プレビュー</div>
+        <div class="ms-auto mini-label">site_id & post_id を指定して適用前の挙動を確認</div>
+      </div>
+      <div class="row g-2 mt-1">
+        <div class="col-6 col-md-2">
+          <div class="mini-label">Site ID</div>
+          <input type="number" id="prevSiteId" class="form-control form-control-sm" placeholder="Site ID">
+        </div>
+        <div class="col-6 col-md-2">
+          <div class="mini-label">Post ID</div>
+          <input type="number" id="prevPostId" class="form-control form-control-sm" placeholder="Post ID">
+        </div>
+        <div class="col-12 col-md-4 d-flex align-items-end gap-2">
+          <a id="prevOpenHtml" class="btn btn-sm btn-outline-primary disabled" target="_blank" href="#">HTML表示</a>
+          <button id="prevOpenJson" class="btn btn-sm btn-ghost">JSON取得</button>
+          <span id="prevOut" class="mini-label text-muted"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- 実行履歴（簡潔版） -->
   <div class="card border-0 shadow-sm">
     <div class="card-body">
@@ -118,6 +177,15 @@
           <div>
             <div class="mini-label">Site ID</div>
             <input type="number" id="siteIdInput" class="form-control form-control-sm" style="width:120px" placeholder="Site ID">
+          </div>
+          <div>
+            <div class="mini-label">Status</div>
+            <select id="statusSelect" class="form-select form-select-sm" style="width:140px">
+              <option value="">(すべて)</option>
+              <option value="running">running</option>
+              <option value="success">success</option>
+              <option value="error">error</option>
+            </select>
           </div>
           <div>
             <div class="mini-label">件数</div>
@@ -210,12 +278,32 @@ async function refreshCapacity(){
 }
 setInterval(refreshCapacity,15000);
 
+// ====================== KPI ======================
+async function refreshKpis(){
+  const siteId = document.getElementById('kpiSiteId')?.value || '';
+  const range = document.getElementById('kpiRange')?.value || '7d';
+  const qs = new URLSearchParams(); if(siteId) qs.set('site_id', siteId); qs.set('range', range);
+  try{
+    const r = await fetch('/admin/internal-seo/kpis?'+qs.toString(), {headers:{'Accept':'application/json'}});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const d = await r.json();
+    document.getElementById('kpiApplied').textContent = d.applied ?? 0;
+    document.getElementById('kpiSwapped').textContent = d.swapped ?? 0;
+    document.getElementById('kpiSkipped').textContent = d.skipped ?? 0;
+    document.getElementById('kpiLegacy').textContent  = d.legacy_deleted ?? 0;
+    document.getElementById('kpiPending').textContent = d.pending_now ?? 0;
+    document.getElementById('kpiMeta').textContent = `範囲: ${esc(d.range)} / site_id: ${d.site_id ?? 'all'} / last_run: ${d.last_run?.status ?? '-'} (${d.last_run?.started_at ?? '-'})`;
+  }catch(e){
+    document.getElementById('kpiMeta').textContent = 'KPI取得失敗: '+e.message;
+    ['kpiApplied','kpiSwapped','kpiSkipped','kpiLegacy','kpiPending'].forEach(id=>document.getElementById(id).textContent='-');
+  }
+}
+
 // ====================== 全サイト一括 enqueue ======================
 async function enqueueAll(){
   const btn = document.getElementById('enqueueAllBtn');
   const out = document.getElementById('enqueueAllOut');
 
-  // 送信パラメータ（高度な設定から拾う）
   const payload = {
     pages:         Number(document.getElementById('batchPages')?.value || 10),
     per_page:      Number(document.getElementById('batchPerPage')?.value || 100),
@@ -233,7 +321,6 @@ async function enqueueAll(){
       headers: {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
-        // Flask-WTF 互換のCSRFヘッダ（あなたの実装に合わせて片方/両方使用）
         'X-CSRFToken': getCsrf(),
         'X-CSRF-Token': getCsrf(),
         'X-Requested-With': 'XMLHttpRequest'
@@ -243,7 +330,6 @@ async function enqueueAll(){
     const json = await res.json();
     if(json.ok){
       out.textContent = `登録数: ${json.inserted} 件`;
-      // 余力とキュー表示の刷新に備えて即時再計測
       refreshCapacity();
     }else{
       out.textContent = `失敗: ${json.error || 'unknown error'}`;
@@ -256,7 +342,6 @@ async function enqueueAll(){
 }
 
 // ====================== Owners (accordion) ======================
-/**  ownerセクションのテンプレ    */
 function ownerSectionHTML(o){
   const oid = o.id===null ? 'all' : o.id;
   return `
@@ -286,8 +371,6 @@ function ownerSectionHTML(o){
       </div>
     </div>`;
 }
-
-/** サイトカード */
 function siteCardHTML(s){
   const m = s.metrics || {};
   const running = !!m.running;
@@ -333,30 +416,24 @@ function siteCardHTML(s){
       </div>
     </div>`;
 }
-
-/** owner配下のサイトをロード（検索・追加ロード対応） */
 async function loadSitesForOwner(ownerId, opts){
   const state = loadSitesForOwner.state || (loadSitesForOwner.state = {});
   const key = String(ownerId);
   const st = state[key] || (state[key] = {cursor: null, q:'', hasMore:true, loading:false});
-
   if(opts?.reset){ st.cursor=null; st.hasMore=true; document.querySelector(`#grid-${ownerId}`).innerHTML=''; }
   if(typeof opts?.q === 'string'){ st.q = opts.q.trim(); st.cursor=null; st.hasMore=true; document.querySelector(`#grid-${ownerId}`).innerHTML=''; }
   if(st.loading || !st.hasMore) return;
-
   st.loading = true;
   const params = new URLSearchParams();
   params.set('owner_id', ownerId==='all' ? '' : ownerId);
   params.set('limit','24');
   if(st.q) params.set('q', st.q);
   if(st.cursor) params.set('cursor_id', st.cursor);
-
   try{
     const res = await fetch(`/admin/internal-seo/sites?${params.toString()}`, {headers:{'Accept':'application/json'}});
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const list = data.rows || [];
-
     const grid = document.querySelector(`#grid-${ownerId}`);
     const empty = document.querySelector(`[data-owner-empty="${ownerId}"]`);
     if(empty) empty.remove();
@@ -364,10 +441,8 @@ async function loadSitesForOwner(ownerId, opts){
     const frag = document.createDocumentFragment();
     for(const s of list){ tmp.innerHTML = siteCardHTML(s); frag.appendChild(tmp.firstElementChild); }
     grid.appendChild(frag);
-
     st.cursor = data.next_cursor_id || null;
     st.hasMore = !!data.has_more;
-
     const moreBtn = document.querySelector(`[data-owner-more="${ownerId}"]`);
     moreBtn.classList.toggle('d-none', !st.hasMore);
   }catch(e){
@@ -377,19 +452,15 @@ async function loadSitesForOwner(ownerId, opts){
     st.hasMore=false;
   }finally{ st.loading=false; }
 }
-
-/** オーナー一覧ロード＆アコーディオン初期化 */
 async function loadOwners(){
   const cont = document.getElementById('ownersAccordion');
   const empty = document.getElementById('ownersEmpty');
   if(empty) empty.textContent='読み込み中…';
-
   try{
     const r = await fetch('/admin/internal-seo/owners',{headers:{'Accept':'application/json'}});
     if(!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
     const owners = data.rows || [];
-
     if(empty) empty.remove();
     const tmp = document.createElement('div');
     const frag = document.createDocumentFragment();
@@ -397,24 +468,18 @@ async function loadOwners(){
       tmp.innerHTML = ownerSectionHTML(o);
       const el = tmp.firstElementChild;
       frag.appendChild(el);
-
-      // 展開時に初回ロード
       const pane = el.querySelector('[data-owner-pane]');
       pane.addEventListener('shown.bs.collapse', () => {
         const oid = pane.getAttribute('data-owner-pane');
         loadSitesForOwner(oid, {reset:true});
       });
-
-      // 検索
       el.querySelector('[data-owner-search]').addEventListener('keydown', (ev)=>{
         if(ev.key==='Enter'){ ev.preventDefault(); loadSitesForOwner(pane.getAttribute('data-owner-pane'), {q: ev.target.value}); }
       });
-      // 更新
       el.querySelector('[data-owner-reload]').addEventListener('click', ()=>{
         const q = el.querySelector('[data-owner-search]').value;
         loadSitesForOwner(pane.getAttribute('data-owner-pane'), {q, reset:true});
       });
-      // もっと見る
       el.querySelector('[data-owner-more]').addEventListener('click', ()=>{
         loadSitesForOwner(pane.getAttribute('data-owner-pane'));
       });
@@ -432,7 +497,10 @@ async function loadRuns(initial=false){
   const tbody=document.getElementById('runsBody'); const ph=document.getElementById('placeholderRow'); if(ph) ph.remove();
   const params=new URLSearchParams();
   const siteId=document.getElementById('siteIdInput')?.value||''; const perPage=document.getElementById('perPageSelect')?.value||'50';
-  if(siteId) params.set('site_id', siteId); params.set('limit', perPage);
+  const status=document.getElementById('statusSelect')?.value||'';
+  if(siteId) params.set('site_id', siteId);
+  if(status) params.set('status', status);
+  params.set('limit', perPage);
   if(!initial && nextCursorTs && nextCursorId){ params.set('cursor_ts', nextCursorTs); params.set('cursor_id', nextCursorId); }
   try{
     const res=await fetch(`/admin/internal-seo/list?${params.toString()}`,{headers:{'Accept':'application/json'}});
@@ -482,13 +550,45 @@ async function openStatsModal(btn){
   new bootstrap.Modal(document.getElementById('statsModal')).show();
 }
 
+// ====================== Preview helpers ======================
+function updatePreviewLinks(){
+  const s = document.getElementById('prevSiteId')?.value||'';
+  const p = document.getElementById('prevPostId')?.value||'';
+  const a = document.getElementById('prevOpenHtml');
+  if(s && p){
+    a.classList.remove('disabled');
+    a.href = `/admin/internal-seo/preview?site_id=${encodeURIComponent(s)}&post_id=${encodeURIComponent(p)}&format=html`;
+  }else{
+    a.classList.add('disabled');
+    a.href='#';
+  }
+}
+async function previewJson(){
+  const out=document.getElementById('prevOut');
+  const s=document.getElementById('prevSiteId')?.value||'';
+  const p=document.getElementById('prevPostId')?.value||'';
+  if(!s || !p){ out.textContent='site_id と post_id を入力してください'; return; }
+  out.textContent='取得中…';
+  try{
+    const r = await fetch(`/admin/internal-seo/preview?site_id=${encodeURIComponent(s)}&post_id=${encodeURIComponent(p)}&format=json`, {headers:{'Accept':'application/json'}});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const j = await r.json();
+    out.textContent = `applied=${j.result?.applied||0} swapped=${j.result?.swapped||0} skipped=${j.result?.skipped||0} msg=${j.result?.message||''}`;
+  }catch(e){ out.textContent='エラー: '+e.message; }
+}
+
 // ====================== Init ======================
 document.addEventListener('DOMContentLoaded', ()=>{
   // capacity
   refreshCapacity();
   document.getElementById('capacityRefresh').addEventListener('click', refreshCapacity);
 
-  // ✅ 全サイト一括 enqueue
+  // KPI
+  refreshKpis();
+  document.getElementById('kpiRefreshBtn').addEventListener('click', refreshKpis);
+  document.getElementById('kpiRange').addEventListener('change', refreshKpis);
+
+  // enqueue-all
   document.getElementById('enqueueAllBtn').addEventListener('click', enqueueAll);
 
   // owners & sites
@@ -504,10 +604,19 @@ document.addEventListener('DOMContentLoaded', ()=>{
   });
   document.getElementById('clearFilterBtn').addEventListener('click', ()=>{
     document.getElementById('siteIdInput').value='';
+    document.getElementById('statusSelect').value='';
     nextCursorTs=null; nextCursorId=null; runsReachedEnd=false;
     document.getElementById('runsBody').innerHTML='<tr id="placeholderRow"><td colspan="8" class="text-muted">読み込み中…</td></tr>';
     loadRuns(true);
   });
+
+  // preview
+  ['prevSiteId','prevPostId'].forEach(id=>{
+    const el=document.getElementById(id);
+    el.addEventListener('input', updatePreviewLinks);
+  });
+  document.getElementById('prevOpenJson').addEventListener('click', previewJson);
+  updatePreviewLinks();
 });
 </script>
 {% endblock %}
