@@ -36,7 +36,7 @@ _TOC_HINT = re.compile(
     r'(id=["\']toc["\']|class=["\'][^"\']*(?:\btoctitle\b|\btoc\b|\bez\-toc\b)[^"\']*["\']|\[/?toc[^\]]*\])',
     re.IGNORECASE
 )
-_AI_STYLE_MARK = "<!-- ai-internal-link-style:v1 -->"
+_AI_STYLE_MARK = "<!-- ai-internal-link-style:v2 -->"
 
 def _split_paragraphs(html: str) -> List[str]:
     if not html:
@@ -131,14 +131,33 @@ def _ensure_inline_underline_style(site: Site, html: str) -> str:
     記事先頭に 1度だけ最小の <style> を挿入する。
       対象: サイト内URLへ向く a 要素（Wikipedia と同じく「内部リンクは下線」）
     """
-    if not html or _AI_STYLE_MARK in html:
+    if not html:
         return html
+    # 旧/新マーカー付きの既存ブロックを一旦取り除いてから v2 を入れる
+    html = re.sub(
+        r'<!-- ai-internal-link-style:v[0-9]+ -->\s*<style>.*?</style>',
+        '',
+        html,
+        flags=re.IGNORECASE | re.DOTALL
+    )
     site_url = site.url.rstrip("/")
-    # 記事本文先頭にマーカー付きで注入（重複防止）
-    # CSSセレクタに正規表現エスケープは不要（ブラウザ解釈を阻害するため使わない）
+    # 本文(.ai-content)内の内部リンクのみ下線。見出し/目次は除外。
     css = (
         f'{_AI_STYLE_MARK}<style>'
-        f'a[href^="{site_url}"]{{text-decoration:underline;}}'
+        # 本文に限定
+        f'.ai-content a[href^="{site_url}"]{{text-decoration:underline;}}'
+        # 見出しは除外（上書き）
+        f'.ai-content h1 a[href^="{site_url}"],'
+        f'.ai-content h2 a[href^="{site_url}"],'
+        f'.ai-content h3 a[href^="{site_url}"],'
+        f'.ai-content h4 a[href^="{site_url}"],'
+        f'.ai-content h5 a[href^="{site_url}"],'
+        f'.ai-content h6 a[href^="{site_url}"]{{text-decoration:none;}}'
+        # 代表的な TOC を除外（ez-toc / #toc / .toc / .toctitle）
+        f'.ai-content .toctitle a,'
+        f'.ai-content .toc a,'
+        f'#toc a,'
+        f'.ez-toc a{{text-decoration:none;}}'
         f'</style>'
     )
     return css + html
