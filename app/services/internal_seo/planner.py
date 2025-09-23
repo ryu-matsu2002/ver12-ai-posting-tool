@@ -10,13 +10,12 @@ from typing import Dict, Iterable, List, Optional, Tuple
 from collections import Counter
 
 from app import db
-from app.models import (
-    ContentIndex,
-    InternalLinkAction,
-    InternalLinkGraph,
-    InternalSeoConfig,
-    Site,
-)
+
+from app.models import ContentIndex, InternalLinkAction, InternalLinkGraph, InternalSeoConfig, Site
+from app.services.internal_seo.utils import html_to_text, nfkc_norm, extract_terms_for_partial
+from app.services.internal_seo.applier import _H_TAG, _TOC_HINT, _mask_existing_anchors  # 再利用
+
+
 from app.wp_client import fetch_single_post  # 現在のHTMLを読む用（swap判定で使用）
 
 logger = logging.getLogger(__name__)
@@ -114,16 +113,53 @@ def _candidate_anchor_from_target_content(
         return earliest[2][:max_len]        
     return None
 
+
+def _candidate_anchor_by_partial(
+    title: str,
+    target_body_text: str,
+    para_text: str,
+    *,
+    max_len: int = 40,
+    min_token_len: int = 2,
+) -> Optional[str]:
+    """
+    部分一致許容：タイトルおよびターゲット本文から抽出した代表トークン群（正規化/NFKC）を
+    段落テキスト（正規化/NFKC）に対して substring マッチ。長い語優先。
+    - “本文に出てこない語は挿入しない”方針は維持（必ず para に出現する語だけ返す）
+    - 記号・全半角の揺れを吸収
+    """
+    p_norm = nfkc_norm((para_text or "").strip())
+    if not p_norm:
+        return None
+    # 候補語：タイトル＋ターゲット本文から抽出
+    terms: List[str] = []
+    terms += extract_terms_for_partial(title or "")           # utils 由来（NFKC/フィルタ済み想定）
+    terms += extract_terms_for_partial(target_body_text or "")
+    # 重複除去し、長い順に
+    uniq = sorted({t for t in terms if len(t) >= min_token_len}, key=lambda s: (-len(s), s))
+    for t in uniq:
+        tn = nfkc_norm(t)
+        if tn and tn in p_norm:
+            return t[:max_len]
+    return None
+
 def _pick_paragraph_slots(paragraphs: List[str], need: int, min_len: int) -> List[int]:
     """
     序盤・中盤・終盤に分散するように段落indexを選ぶ。
     短すぎる段落は除外。
     """
+    # 見出し/TOC 段落は除外（applier と同方針）
+    def _is_ok_para(p: str) -> bool:
+        if _H_TAG.search(p) or _TOC_HINT.search(p):
+            return False
+        txt = _html_to_text(p)
+        return bool(txt) and len(txt) >= min_len
+
     # 短い記事にも対応するため、閾値未満でも最終的にフォールバックで拾う
-    eligible = [i for i, p in enumerate(paragraphs) if _html_to_text(p) and len(_html_to_text(p)) >= min_len]
+    eligible = [i for i, p in enumerate(paragraphs) if _is_ok_para(p)]
     if not eligible:
         # 1文でもある段落を対象にフォールバック（安全に末尾挿入）
-        eligible = [i for i, p in enumerate(paragraphs) if _html_to_text(p)]
+        eligible = [i for i, p in enumerate(paragraphs) if (_html_to_text(p) and not (_H_TAG.search(p) or _TOC_HINT.search(p)))]
         if not eligible:
             return []
     # 3ゾーンで均等抽出（必要数に応じて）
@@ -201,7 +237,7 @@ def plan_links_for_post(
     max_candidates: int = 60        # ← 余裕を持って拾う
 ) -> PlanStats:
     """
-    単一記事に対して本文内リンク 2-5本の計画を作成し、InternalLinkAction(pending) で保存。
+    単一記事に対して本文内リンク **4-8本** の計画を作成し、InternalLinkAction(pending) で保存。
     swapチェックONの場合は既存リンクと比較して置換候補も生成（pending, reason='swap_candidate'）。
     """
     stats = PlanStats()
@@ -244,11 +280,10 @@ def plan_links_for_post(
     if not candidates:
         logger.info("[Planner] src=%s no fresh candidates", src_post_id)
 
-    # 4) 2〜5本の本数決定（Config固定仕様に従う）
-    # 段落が短めの記事を救うため閾値を少し緩く（サイト設定があればそれを尊重）
-    need_min = max(2, int(getattr(cfg, "min_links_per_post", 2) or 2))
-    need_max = min(5, int(getattr(cfg, "max_links_per_post", 5) or 5))
-    need = min(max(need_min, 2), need_max)
+    # 4) 本数決定（applier と揃える：最小4 / 最大8。サイト設定があれば尊重）
+    need_min = max(4, int(getattr(cfg, "min_links_per_post", 4) or 4))
+    need_max = min(8, int(getattr(cfg, "max_links_per_post", 8) or 8))
+    need = min(max(need_min, 4), need_max)
 
     # 5) 段落スロット選定
     # 段落長の閾値を緩和（最低 50 文字に下げる）
@@ -273,10 +308,27 @@ def plan_links_for_post(
     actions_made = 0
     for slot_idx, tgt_pid in zip(slots, candidates):
         title, tgt_url = tgt_map.get(tgt_pid, ("", ""))
-        para_text = _html_to_text(paragraphs[slot_idx])
-        # まず“ターゲット本文”由来で自然語句アンカーを探す → だめならタイトル法にフォールバック
-        anchor = _candidate_anchor_from_target_content(site, tgt_pid, para_text) \
-                 or _candidate_anchor_from(title, para_text)
+        raw_para = paragraphs[slot_idx]
+        para_text = _html_to_text(raw_para)
+        if _H_TAG.search(raw_para) or _TOC_HINT.search(raw_para):
+            continue  # 念のため
+
+        # ターゲット本文テキスト（部分一致の材料）
+        tgt_body_text = ""
+        try:
+            _tgt = fetch_single_post(site, tgt_pid)
+            if _tgt and (_tgt.content_html or ""):
+                tgt_body_text = html_to_text(_tgt.content_html)
+        except Exception:
+            tgt_body_text = ""
+
+        # アンカー決定の優先順位：
+        # 1) ターゲット本文由来（自然語句） 2) タイトル法 3) 部分一致許容（タイトル＋本文）
+        anchor = (
+            _candidate_anchor_from_target_content(site, tgt_pid, para_text)
+            or _candidate_anchor_from(title, para_text)
+            or _candidate_anchor_by_partial(title, tgt_body_text, para_text)
+        )
         if not anchor or not tgt_url:
             continue
 
@@ -346,8 +398,21 @@ def plan_links_for_post(
                         )
                         if tr:
                             t_title, t_url = tr[0] or "", tr[1] or ""
-                    anc = _candidate_anchor_from_target_content(site, pid, _html_to_text(paragraphs[slot_for_swap])) \
-                          or _candidate_anchor_from(t_title, _html_to_text(paragraphs[slot_for_swap]))
+                    slot_para_raw = paragraphs[slot_for_swap] if 0 <= slot_for_swap < len(paragraphs) else ""
+                    slot_para_text = _html_to_text(slot_para_raw)
+                    # swap 候補のアンカー決定でも部分一致を利用
+                    tgt_body_for_swap = ""
+                    try:
+                        _t = fetch_single_post(Site.query.get(site_id), pid)
+                        if _t and (_t.content_html or ""):
+                            tgt_body_for_swap = html_to_text(_t.content_html)
+                    except Exception:
+                        tgt_body_for_swap = ""
+                    anc = (
+                        _candidate_anchor_from_target_content(Site.query.get(site_id), pid, slot_para_text)
+                        or _candidate_anchor_from(t_title, slot_para_text)
+                        or _candidate_anchor_by_partial(t_title, tgt_body_for_swap, slot_para_text)
+                    )
                     if not anc or not t_url:
                         continue
                     db.session.add(InternalLinkAction(
