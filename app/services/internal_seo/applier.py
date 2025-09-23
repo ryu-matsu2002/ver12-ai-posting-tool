@@ -32,6 +32,7 @@ _TAG_STRIP = re.compile(r"<[^>]+>")
 _SEO_CLASS = "ai-ilink"  # 互換用（生成時は使わない。既存の後方互換処理でのみ参照）
 
 _H_TAG = re.compile(r"<h[1-6]\b[^>]*>", re.IGNORECASE)
+_H_BLOCK = re.compile(r"(<h[1-6]\b[^>]*>)(.*?)(</h[1-6]\s*>)", re.IGNORECASE | re.DOTALL)
 _TOC_HINT = re.compile(
     r'(id=["\']toc["\']|class=["\'][^"\']*(?:\btoctitle\b|\btoc\b|\bez\-toc\b)[^"\']*["\']|\[/?toc[^\]]*\])',
     re.IGNORECASE
@@ -124,6 +125,27 @@ def _linkify_first_occurrence(para_html: str, anchor_text: str, href: str) -> Op
     linked = f'<a href="{href}" title="{anchor_text}">{anchor_text}</a>'
     masked = masked.replace(anchor_text, linked, 1)
     return _unmask_existing_anchors(masked, ph)
+
+def _strip_links_in_headings(html: str) -> str:
+    """
+    見出し(H1〜H6)内の <a>…</a> を **テキスト/内側HTMLだけ残して除去** する。
+    内部/外部リンクを問わず、見出しには一切リンクを残さない方針。
+    例: <h2>foo <a href="/bar"><b>bar</b></a></h2> → <h2>foo <b>bar</b></h2>
+    """
+    if not html:
+        return html
+    def _drop_anchor_inner_keep(m: re.Match) -> str:
+        open_h, inner, close_h = m.group(1), m.group(2), m.group(3)
+        # 見出し内部の a を全て除去（中身は残す）
+        inner = re.sub(
+            r"<a\b[^>]*>(.*?)</a\s*>",
+            r"\1",
+            inner,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        return open_h + inner + close_h
+    # すべての見出しブロックに対して実行
+    return _H_BLOCK.sub(_drop_anchor_inner_keep, html)
 
 def _ensure_inline_underline_style(site: Site, html: str) -> str:
     """
@@ -329,6 +351,8 @@ def preview_apply_for_post(site_id: int, src_post_id: int) -> Tuple[str, ApplyRe
     original_paras = _split_paragraphs(wp_post.content_html or "")
     # 3) 旧仕様を除去した本文をベースに新仕様を仮適用
     base_html = cleaned_html if cleaned_html is not None else (wp_post.content_html or "")
+    # 3.5) 見出し内リンクをサニタイズ（Hタグからはリンクを完全排除）
+    base_html = _strip_links_in_headings(base_html)
     new_html, res = _apply_plan_to_html(site, src_post_id, base_html, actions, cfg, url_map)
     res.legacy_deleted = len(deletions or [])
     new_paras = _split_paragraphs(new_html)
@@ -560,6 +584,8 @@ def apply_actions_for_post(site_id: int, src_post_id: int, dry_run: bool = False
     # 3) 差分作成（旧仕様削除済みの本文に新仕様を適用）
     base_html = cleaned_html if cleaned_html is not None else (wp_post.content_html or "")
     new_html, res = _apply_plan_to_html(site, src_post_id, base_html, actions, cfg, url_map)
+    # 3.5) 見出し内リンクをサニタイズ（Hタグからはリンクを完全排除）
+    base_html = _strip_links_in_headings(base_html)
     # 記事先頭に 1回だけ下線CSSを注入（テーマ非依存）
     new_html = _ensure_inline_underline_style(site, new_html)
     res.legacy_deleted = len(deletions or [])
