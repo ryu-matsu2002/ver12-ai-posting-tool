@@ -20,6 +20,7 @@ from app.models import (
     Site,
 )
 from app.wp_client import fetch_single_post, update_post_content
+from app.services.internal_seo.legacy_cleaner import find_and_remove_legacy_links
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,14 @@ logger = logging.getLogger(__name__)
 _P_CLOSE = re.compile(r"</p\s*>", re.IGNORECASE)
 _A_TAG = re.compile(r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a\s*>', re.IGNORECASE | re.DOTALL)
 _TAG_STRIP = re.compile(r"<[^>]+>")
-_SEO_CLASS = "ai-ilink"
+_SEO_CLASS = "ai-ilink"  # 互換用（生成時は使わない。既存の後方互換処理でのみ参照）
+
+_H_TAG = re.compile(r"<h[1-6]\b[^>]*>", re.IGNORECASE)
+_TOC_HINT = re.compile(
+    r'(id=["\']toc["\']|class=["\'][^"\']*(?:\btoctitle\b|\btoc\b|\bez\-toc\b)[^"\']*["\']|\[/?toc[^\]]*\])',
+    re.IGNORECASE
+)
+_AI_STYLE_MARK = "<!-- ai-internal-link-style:v1 -->"
 
 def _split_paragraphs(html: str) -> List[str]:
     if not html:
@@ -98,27 +106,73 @@ def _unmask_existing_anchors(html: str, placeholders: Dict[str, str]) -> str:
 def _linkify_first_occurrence(para_html: str, anchor_text: str, href: str) -> Optional[str]:
     """
     段落内の**未リンク領域**にある anchor_text の最初の出現を
-    <a href="... " class="ai-ilink" style="text-decoration:underline;">anchor_text</a>
+    Wikipedia風の <a href="..." class="ai-ilink" title="...">anchor_text</a>
     に置換する。見つからなければ None。
+    見出し/TOC を含むブロックでは実行しない。
     """
     if not (para_html and anchor_text and href):
+        return None
+    # 見出し・TOC っぽいブロックは一律除外
+    if _H_TAG.search(para_html) or _TOC_HINT.search(para_html):
         return None
     masked, ph = _mask_existing_anchors(para_html)
     # 生テキストで最初の一致を探す（HTMLタグは残るが <a> はマスク済み）
     idx = masked.find(anchor_text)
     if idx == -1:
         return None
-    linked = (
-        f'<a href="{href}" class="{_SEO_CLASS}" style="text-decoration:underline;">{anchor_text}</a>'
-    )
+    # Wikipedia風：href + title のみ（class/style は付けない）
+    linked = f'<a href="{href}" title="{anchor_text}">{anchor_text}</a>'
     masked = masked.replace(anchor_text, linked, 1)
     return _unmask_existing_anchors(masked, ph)
 
+def _ensure_inline_underline_style(site: Site, html: str) -> str:
+    """
+    テーマCSSを触らず、リンク要素にも style を書かずに下線を効かせるため、
+    記事先頭に 1度だけ最小の <style> を挿入する。
+      対象: サイト内URLへ向く a 要素（Wikipedia と同じく「内部リンクは下線」）
+    """
+    if not html or _AI_STYLE_MARK in html:
+        return html
+    site_url = site.url.rstrip("/")
+    # 記事本文先頭にマーカー付きで注入（重複防止）
+    # CSSセレクタに正規表現エスケープは不要（ブラウザ解釈を阻害するため使わない）
+    css = (
+        f'{_AI_STYLE_MARK}<style>'
+        f'a[href^="{site_url}"]{{text-decoration:underline;}}'
+        f'</style>'
+    )
+    return css + html
+
+def _normalize_existing_internal_links(html: str) -> str:
+    """
+    既存の ai-ilink / inline-style を Wikipedia 風に正規化:
+      <a href="..." class="ai-ilink" style="text-decoration:underline;">TEXT</a>
+        → <a href="..." title="TEXT">TEXT</a>
+    """
+    if not html:
+        return html
+    # a タグの属性部（前後）と href、内側HTMLを分離
+    pat = re.compile(
+        r'<a\b([^>]*)\bhref=["\']([^"\']+)["\']([^>]*)>(.*?)</a\s*>',
+        re.IGNORECASE | re.DOTALL
+    )
+    def _repl(m: re.Match) -> str:
+        attrs_all = (m.group(1) or "") + (m.group(3) or "")
+        href      = m.group(2) or ""
+        inner     = m.group(4) or ""
+        attrs_lc  = attrs_all.lower()
+        # 既存の ai-ilink または inline style を含む a のみ正規化対象
+        if ("ai-ilink" not in attrs_lc) and ("style=" not in attrs_lc):
+            return m.group(0)
+        text = _TAG_STRIP.sub(" ", unescape(inner)).strip()
+        return f'<a href="{href}" title="{text}">{inner}</a>'
+    return pat.sub(_repl, html)
+
 def _add_attrs_to_first_anchor_with_href(html: str, href: str) -> str:
     """
-    swap などで href を差し替えた最初の <a ... href="href"> に
-    class="internal-seo-link" と text-decoration:underline を注入する。
-    既に class/style があれば追記する。
+    swap などで href を差し替えた最初の <a ... href="href"> を Wikipedia 風に正規化する。
+    - class/style を除去
+    - title が無ければ空で付与（後続の正規化で本文テキストに同期）
     """
     if not html or not href:
         return html
@@ -128,26 +182,12 @@ def _add_attrs_to_first_anchor_with_href(html: str, href: str) -> str:
     )
     def _repl(m):
         start, end = m.group(1), m.group(2)
-        # class 付与/追記
-        if re.search(r'\bclass=["\']', start, re.IGNORECASE):
-            start = re.sub(
-                r'\bclass=["\']([^"\']*)',
-                rf'class="\1 {_SEO_CLASS}"',
-                start,
-                flags=re.IGNORECASE
-            )
-        else:
-            start += f' class="{_SEO_CLASS}"'
-        # style 付与/追記
-        if re.search(r'\bstyle=["\']', start, re.IGNORECASE):
-            start = re.sub(
-                r'\bstyle=["\']([^"\']*)',
-                r'style="\1 text-decoration:underline;"',
-                start,
-                flags=re.IGNORECASE
-            )
-        else:
-            start += ' style="text-decoration:underline;"'
+        # class/style を丸ごと除去
+        start = re.sub(r'\sclass=["\'][^"\']*["\']', '', start, flags=re.IGNORECASE)
+        start = re.sub(r'\sstyle=["\'][^"\']*["\']', '', start, flags=re.IGNORECASE)
+        # title が無ければ追加
+        if not re.search(r'\btitle=["\']', start, re.IGNORECASE):
+            start += ' title=""'
         return start + end
     # 最初の1件だけ注入
     return pat.sub(_repl, html, count=1)
@@ -181,6 +221,40 @@ def _existing_internal_links_count(site: Site, html: str) -> int:
     links = _extract_links(html)
     return sum(1 for (href, _) in links if _is_internal_url(site_url, href))
 
+
+def _all_url_to_title_map(site_id: int) -> Dict[str, str]:
+    """
+    サイト内すべての公開記事について URL→タイトル の辞書を返す。
+    旧仕様削除判定に利用。
+    """
+    rows = (
+        ContentIndex.query
+        .with_entities(ContentIndex.url, ContentIndex.title)
+        .filter_by(site_id=site_id, status="publish")
+        .filter(ContentIndex.wp_post_id.isnot(None))
+        .all()
+    )
+    return { (u or ""): (t or "") for (u, t) in rows if u }
+
+def _all_url_to_pid_map(site_id: int) -> Dict[str, int]:
+    """
+    サイト内すべての公開記事について URL→wp_post_id の辞書を返す。
+    旧仕様削除ログで target_post_id を紐づける用途。
+    """
+    rows = (
+        ContentIndex.query
+        .with_entities(ContentIndex.url, ContentIndex.wp_post_id)
+        .filter_by(site_id=site_id, status="publish")
+        .filter(ContentIndex.wp_post_id.isnot(None))
+        .all()
+    )
+    out: Dict[str, int] = {}
+    for (u, pid) in rows:
+        if u and pid is not None:
+            out[u] = int(pid)
+    return out
+
+
 # ---- 差分作成 ----
 
 @dataclass
@@ -188,6 +262,7 @@ class ApplyResult:
     applied: int = 0
     swapped: int = 0
     skipped: int = 0
+    legacy_deleted: int = 0
     message: str = ""
 
 @dataclass
@@ -217,20 +292,26 @@ def preview_apply_for_post(site_id: int, src_post_id: int) -> Tuple[str, ApplyRe
     wp_post = fetch_single_post(site, src_post_id)
     if not wp_post:
         return "", ApplyResult(message="fetch-failed-or-excluded"), []
+    
+    # 1) 旧仕様削除（プレビュー：DBは触らない）
+    url_title_map = _all_url_to_title_map(site_id)
+    cleaned_html, deletions = find_and_remove_legacy_links(wp_post.content_html or "", url_title_map)
 
+    # 2) 新仕様の pending を取得
     actions = (
         InternalLinkAction.query
         .filter_by(site_id=site_id, post_id=src_post_id, status="pending")
         .order_by(InternalLinkAction.created_at.asc())
         .all()
     )
-    if not actions:
-        return wp_post.content_html or "", ApplyResult(message="no-pending"), []
 
     url_map = _action_targets_with_urls(site_id, actions)
 
     original_paras = _split_paragraphs(wp_post.content_html or "")
-    new_html, res = _apply_plan_to_html(site, src_post_id, wp_post.content_html, actions, cfg, url_map)
+    # 3) 旧仕様を除去した本文をベースに新仕様を仮適用
+    base_html = cleaned_html if cleaned_html is not None else (wp_post.content_html or "")
+    new_html, res = _apply_plan_to_html(site, src_post_id, base_html, actions, cfg, url_map)
+    res.legacy_deleted = len(deletions or [])
     new_paras = _split_paragraphs(new_html)
 
     previews: List[PreviewItem] = []
@@ -252,7 +333,12 @@ def preview_apply_for_post(site_id: int, src_post_id: int) -> Tuple[str, ApplyRe
                 paragraph_excerpt_before=before_snip,
                 paragraph_excerpt_after=after_snip,
             ))
-    return new_html, res, previews    
+    # pending が無くても、旧仕様削除プレビューは返す（message を調整）
+    if not actions and res.legacy_deleted > 0:
+        res.message = "legacy-clean-only"
+    elif not actions:
+        res.message = "no-pending"
+    return new_html, res, previews   
 
 def _apply_plan_to_html(
     site: Site,
@@ -280,8 +366,9 @@ def _apply_plan_to_html(
     # 既存内部リンクの個数
     existing_internal = _existing_internal_links_count(site, html)
 
-    need_min = max(2, int(cfg.min_links_per_post or 2))
-    need_max = min(5, int(cfg.max_links_per_post or 5))
+    # 既定を 4〜8 に引き上げ（サイト設定があればそれを優先）
+    need_min = max(4, int(cfg.min_links_per_post or 4))
+    need_max = min(8, int(cfg.max_links_per_post or 8))
 
     # 1) まずは reason='plan' を優先して挿入
     plan_actions = [a for a in actions if a.reason in ("plan", "review_approved")]
@@ -307,8 +394,14 @@ def _apply_plan_to_html(
         if not href:
             res.skipped += 1
             continue
-        
+
+        # 段落本文を先に取り出してから各種チェックを行う（未定義エラー対策）
         para_html = paragraphs[idx]
+
+        # 見出し/目次の段落はスキップ（Wikipedia方針）
+        if _H_TAG.search(para_html) or _TOC_HINT.search(para_html):
+            res.skipped += 1
+            continue
         # 同じURLが段落内に既にあるならスキップ
         if href in [h for (h, _) in _extract_links(para_html)]:
             res.skipped += 1
@@ -413,8 +506,9 @@ def _apply_plan_to_html(
                     s_act.applied_at = datetime.utcnow()
                     res.swapped += 1
 
-    # 最終的な本文
+    # 本文を連結 → 既存の ai-ilink / inline-style を Wikipedia 風に正規化
     new_html = _rejoin_paragraphs(paragraphs)
+    new_html = _normalize_existing_internal_links(new_html)
     return new_html, res
 
 # ---- パブリックAPI ----
@@ -435,30 +529,41 @@ def apply_actions_for_post(site_id: int, src_post_id: int, dry_run: bool = False
     if not wp_post:
         return ApplyResult(message="fetch-failed-or-excluded")
 
-    # 対象アクション（plan / swap_candidate）
+    # 1) 旧仕様削除（apply：後で削除ログを保存）
+    url_title_map = _all_url_to_title_map(site_id)
+    url_pid_map   = _all_url_to_pid_map(site_id)
+    cleaned_html, deletions = find_and_remove_legacy_links(wp_post.content_html or "", url_title_map)
+
+    # 2) 対象アクション（plan / swap_candidate）
     actions = (
         InternalLinkAction.query
         .filter_by(site_id=site_id, post_id=src_post_id, status="pending")
         .order_by(InternalLinkAction.created_at.asc())
         .all()
     )
-    if not actions:
-        return ApplyResult(message="no-pending")
 
     url_map = _action_targets_with_urls(site_id, actions)
 
-    # 差分作成
-    new_html, res = _apply_plan_to_html(site, src_post_id, wp_post.content_html, actions, cfg, url_map)
+    # 3) 差分作成（旧仕様削除済みの本文に新仕様を適用）
+    base_html = cleaned_html if cleaned_html is not None else (wp_post.content_html or "")
+    new_html, res = _apply_plan_to_html(site, src_post_id, base_html, actions, cfg, url_map)
+    # 記事先頭に 1回だけ下線CSSを注入（テーマ非依存）
+    new_html = _ensure_inline_underline_style(site, new_html)
+    res.legacy_deleted = len(deletions or [])
 
     if dry_run:
-        # ドライランではDBを一切変更しない
+        # ドライラン：DBを一切変更しない（旧仕様削除件数だけ反映）
+        if not actions and res.legacy_deleted > 0:
+            res.message = "legacy-clean-only"
+        elif not actions:
+            res.message = "no-pending"
         return res
 
     # 監査用の抜粋
     before_excerpt = _html_to_text(wp_post.content_html)[:280]
     after_excerpt = _html_to_text(new_html)[:280]
 
-    # DB更新（監査ログの抜粋）
+    # 4) DB更新（監査ログの抜粋）
     for a in actions:
         if a.status == "applied":
             a.diff_before_excerpt = before_excerpt
@@ -467,6 +572,36 @@ def apply_actions_for_post(site_id: int, src_post_id: int, dry_run: bool = False
             # 適用されなかった pending はスキップへ
             a.status = a.status if a.status == "applied" else "skipped"
             a.updated_at = datetime.utcnow()
+
+    # 5) 旧仕様削除ログを保存（1削除=1行、status='legacy_deleted'）
+    if deletions:
+        now = datetime.utcnow()
+        for d in deletions:
+            anchor_text = (d.get("anchor_text") or "")
+            href        = (d.get("href") or "")
+            position    = (d.get("position") or "")
+            # target_post_id は cleaner が返すか、URL→PID で推定
+            tpid = d.get("target_post_id")
+            if not tpid and href:
+                tpid = url_pid_map.get(href)
+            try:
+                tpid_int = int(tpid) if tpid is not None else None
+            except Exception:
+                tpid_int = None
+            ila = InternalLinkAction(
+                site_id=site_id,
+                post_id=src_post_id,
+                target_post_id=tpid_int,
+                anchor_text=anchor_text,
+                position=position,
+                reason="legacy_cleanup",
+                status="legacy_deleted",
+                created_at=now,
+                updated_at=now,
+                diff_before_excerpt=before_excerpt,
+                diff_after_excerpt=after_excerpt,
+            )
+            db.session.add(ila)        
     db.session.commit()
 
     # WPへ反映
