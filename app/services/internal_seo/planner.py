@@ -12,7 +12,13 @@ from collections import Counter
 from app import db
 
 from app.models import ContentIndex, InternalLinkAction, InternalLinkGraph, InternalSeoConfig, Site
-from app.services.internal_seo.utils import html_to_text, nfkc_norm, extract_terms_for_partial, is_ng_anchor, STOPWORDS_N
+from app.services.internal_seo.utils import (
+    html_to_text,
+    nfkc_norm,
+    extract_terms_for_partial,
+    is_ng_anchor,
+    STOPWORDS_N,
+)
 from app.services.internal_seo.applier import _H_TAG, _TOC_HINT, _mask_existing_anchors  # 再利用
 
 
@@ -167,27 +173,32 @@ def _extract_para_tokens(para_text: str) -> list[str]:
 
 def _extract_target_tokens_from_index(site_id: int, pid: int) -> tuple[list[str], set[str]]:
     """
-    ContentIndex からタイトルとキーワードを軽量に取得。
+    ContentIndex からタイトルとキーワードを軽量に取得（必ず (list, set) を返す）。
     - 戻り: (重要語リスト, キーワード集合)  ※キーワード集合はスコア加点に使用
     """
-    tr = (
-        ContentIndex.query
-        .with_entities(ContentIndex.title, ContentIndex.keywords)
-        .filter_by(site_id=site_id, wp_post_id=pid)
-        .one_or_none()
-    )
-    if not tr:
+    try:
+        tr = (
+            ContentIndex.query
+            .with_entities(ContentIndex.title, ContentIndex.keywords)
+            .filter_by(site_id=site_id, wp_post_id=pid)
+            .one_or_none()
+        )
+        if not tr:
+            return [], set()
+        title = tr[0] or ""
+        kws_csv = tr[1] or ""
+        toks = JP_TOKEN.findall(title.lower())
+        # タイトルは重要なので重みを意識しつつ2回入れる（ここでは順序のみ利用）
+        imp: list[str] = []
+        for _ in range(2):
+            for t in toks:
+                if len(t) >= 2 and (nfkc_norm(t) not in STOPWORDS_N):
+                    imp.append(t)
+        kwset = {k.strip().lower() for k in (kws_csv or "").split(",") if k.strip()}
+        return imp, kwset
+    except Exception:
+        # どんな例外でも安全にフォールバック
         return [], set()
-    title = tr[0] or ""
-    kws_csv = tr[1] or ""
-    toks = JP_TOKEN.findall(title.lower())
-    # タイトルは重要なので重みを意識しつつ2回入れる（ここでは順序のみ利用）
-    imp = []
-    for _ in range(2):
-        for t in toks:
-            if len(t) >= 2 and (nfkc_norm(t) not in STOPWORDS_N):
-                imp.append(t)
-    kwset = {k.strip().lower() for k in (kws_csv or "").split(",") if k.strip()}
    
    
 def _get_keywords_set(site_id: int, pid: int) -> set[str]:
