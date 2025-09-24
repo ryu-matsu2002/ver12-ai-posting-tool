@@ -38,6 +38,7 @@ _TOC_HINT = re.compile(
     r'(id=["\']toc["\']|class=["\'][^"\']*(?:\btoctitle\b|\btoc\b|\bez\-toc\b)[^"\']*["\']|\[/?toc[^\]]*\])',
     re.IGNORECASE
 )
+_STYLE_BLOCK = re.compile(r"<style\b[^>]*>.*?</style\s*>", re.IGNORECASE | re.DOTALL)
 _AI_STYLE_MARK = "<!-- ai-internal-link-style:v2 -->"
 
 def _split_paragraphs(html: str) -> List[str]:
@@ -114,8 +115,8 @@ def _linkify_first_occurrence(para_html: str, anchor_text: str, href: str) -> Op
     """
     if not (para_html and anchor_text and href):
         return None
-    # 見出し・TOC っぽいブロックは一律除外
-    if _H_TAG.search(para_html) or _TOC_HINT.search(para_html):
+    # 見出し・TOC・STYLE ブロックは一律除外（本文以外は触らない）
+    if _H_TAG.search(para_html) or _TOC_HINT.search(para_html) or _STYLE_BLOCK.search(para_html):
         return None
     # NGアンカーは即中止
     if is_ng_anchor(anchor_text):

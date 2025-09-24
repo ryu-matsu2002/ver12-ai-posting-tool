@@ -32,6 +32,7 @@ _P_CLOSE = re.compile(r"</p\s*>", re.IGNORECASE)
 _BR_SPLIT = re.compile(r"<br\s*/?>", re.IGNORECASE)
 _A_TAG = re.compile(r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a\s*>', re.IGNORECASE | re.DOTALL)
 _TAG_STRIP = re.compile(r"<[^>]+>")
+_STYLE_BLOCK = re.compile(r"<style\b[^>]*>.*?</style\s*>", re.IGNORECASE | re.DOTALL)
 
 JP_TOKEN = re.compile(r"[一-龥ぁ-んァ-ンーA-Za-z0-9]{2,}")
 # アンカーテキストの推奨最大全角相当（長い文章リンクを避け、単語優先に）
@@ -343,6 +344,9 @@ def _pick_paragraph_slots(paragraphs: List[str], need: int, min_len: int) -> Lis
     def _is_ok_para(p: str) -> bool:
         if _H_TAG.search(p) or _TOC_HINT.search(p):
             return False
+        # スタイルブロックは本文対象外
+        if _STYLE_BLOCK.search(p):
+            return False
         txt = _html_to_text(p)
         return bool(txt) and len(txt) >= min_len
 
@@ -350,7 +354,11 @@ def _pick_paragraph_slots(paragraphs: List[str], need: int, min_len: int) -> Lis
     eligible = [i for i, p in enumerate(paragraphs) if _is_ok_para(p)]
     if not eligible:
         # 1文でもある段落を対象にフォールバック（安全に末尾挿入）
-        eligible = [i for i, p in enumerate(paragraphs) if (_html_to_text(p) and not (_H_TAG.search(p) or _TOC_HINT.search(p)))]
+        eligible = [
+            i for i, p in enumerate(paragraphs)
+            if (_html_to_text(p)
+                and not (_H_TAG.search(p) or _TOC_HINT.search(p) or _STYLE_BLOCK.search(p)))
+        ]
         if not eligible:
             return []
     # 3ゾーンで均等抽出（必要数に応じて）
