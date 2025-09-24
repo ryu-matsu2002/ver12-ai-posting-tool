@@ -17,9 +17,9 @@ from app.services.internal_seo.utils import (
     nfkc_norm,
     extract_terms_for_partial,
     is_ng_anchor,
-    STOPWORDS_N,
+    STOPWORDS,
 )
-from app.services.internal_seo.applier import _H_TAG, _TOC_HINT, _mask_existing_anchors  # 再利用
+from app.services.internal_seo.applier import _H_TAG, _TOC_HINT, _mask_existing_anchors, _split_paragraphs  # 再利用  # 再利用
 
 
 from app.wp_client import fetch_single_post  # 現在のHTMLを読む用（swap判定で使用）
@@ -35,15 +35,8 @@ _TAG_STRIP = re.compile(r"<[^>]+>")
 
 JP_TOKEN = re.compile(r"[一-龥ぁ-んァ-ンーA-Za-z0-9]{2,}")
 
-def _split_paragraphs_from_html(html: str) -> List[str]:
-    if not html:
-        return []
-    # まず </p> で分割。なければ <br> でも分割して最低限の段落を作る
-    parts = [p for p in _P_CLOSE.split(html) if p is not None]
-    if len(parts) <= 1:
-        parts = [p for p in _BR_SPLIT.split(html) if p is not None]
-    cleaned = [p.strip() for p in parts if (p and p.strip())]
-    return cleaned
+# 段落分割は applier と完全に同じ実装を使う（index不一致を避ける）
+# _split_paragraphs は applier から import 済み
 
 def _html_to_text(s: str) -> str:
     if not s:
@@ -102,7 +95,7 @@ def _candidate_anchor_from_target_content(
     tgt_txt = _html_to_text(tgt.content_html)
     if not tgt_txt:
         return None
-    tokens = [t for t in JP_TOKEN.findall(tgt_txt) if len(t) >= min_token_len and (nfkc_norm(t) not in STOPWORDS_N)]
+    tokens = [t for t in JP_TOKEN.findall(tgt_txt) if len(t) >= min_token_len and (nfkc_norm(t) not in STOPWORDS)]
     if not tokens:
         return None
     # Wikipedia 的な振る舞い：段落内で最も早い位置に現れる語を選ぶ（タイは“より長い語”を優先）
@@ -149,7 +142,7 @@ def _candidate_anchor_by_partial(
     terms += extract_terms_for_partial(title or "")           # utils 由来（NFKC/フィルタ済み想定）
     terms += extract_terms_for_partial(target_body_text or "")
     # 重複除去し、長い順に
-    uniq = sorted({t for t in terms if len(t) >= min_token_len and (nfkc_norm(t) not in STOPWORDS_N)}, key=lambda s: (-len(s), s))
+    uniq = sorted({t for t in terms if len(t) >= min_token_len and (nfkc_norm(t) not in STOPWORDS)}, key=lambda s: (-len(s), s))
     for t in uniq:
         tn = nfkc_norm(t)
         if tn and tn in p_norm:
@@ -166,7 +159,7 @@ def _extract_para_tokens(para_text: str) -> list[str]:
     for t in toks:
         if len(t) < 2:
             continue
-        if nfkc_norm(t) in STOPWORDS_N:
+        if nfkc_norm(t) in STOPWORDS:
             continue
         out.append(t)
     return out
@@ -192,7 +185,7 @@ def _extract_target_tokens_from_index(site_id: int, pid: int) -> tuple[list[str]
         imp: list[str] = []
         for _ in range(2):
             for t in toks:
-                if len(t) >= 2 and (nfkc_norm(t) not in STOPWORDS_N):
+                if len(t) >= 2 and (nfkc_norm(t) not in STOPWORDS):
                     imp.append(t)
         kwset = {k.strip().lower() for k in (kws_csv or "").split(",") if k.strip()}
         return imp, kwset
@@ -403,7 +396,7 @@ def plan_links_for_post(
         logger.info("[Planner] skip src=%s (fetch failed or excluded)", src_post_id)
         return stats
 
-    paragraphs = _split_paragraphs_from_html(wp_post.content_html)
+    paragraphs = _split_paragraphs(wp_post.content_html or "")
     if not paragraphs:
         logger.info("[Planner] skip src=%s (no paragraphs)", src_post_id)
         return stats
