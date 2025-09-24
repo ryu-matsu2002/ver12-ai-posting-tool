@@ -8,7 +8,7 @@ from datetime import datetime
 from html import unescape
 from typing import Dict, Iterable, List, Optional, Tuple
 from collections import Counter
-
+import os
 from app import db
 
 from app.models import ContentIndex, InternalLinkAction, InternalLinkGraph, InternalSeoConfig, Site
@@ -17,7 +17,7 @@ from app.services.internal_seo.utils import (
     nfkc_norm,
     extract_terms_for_partial,
     is_ng_anchor,
-    STOPWORDS,
+    STOPWORDS_N,
 )
 from app.services.internal_seo.applier import _H_TAG, _TOC_HINT, _mask_existing_anchors, _split_paragraphs  # 再利用  # 再利用
 
@@ -34,6 +34,9 @@ _A_TAG = re.compile(r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a\s*>', re.
 _TAG_STRIP = re.compile(r"<[^>]+>")
 
 JP_TOKEN = re.compile(r"[一-龥ぁ-んァ-ンーA-Za-z0-9]{2,}")
+# アンカーテキストの推奨最大全角相当（長い文章リンクを避け、単語優先に）
+# 必要に応じて環境変数 INTERNAL_SEO_MAX_ANCHOR_LEN で調整可能（デフォルト18）
+MAX_ANCHOR_CHARS = int(os.getenv("INTERNAL_SEO_MAX_ANCHOR_LEN", "18"))
 
 # 段落分割は applier と完全に同じ実装を使う（index不一致を避ける）
 # _split_paragraphs は applier から import 済み
@@ -63,7 +66,7 @@ def _candidate_anchor_from(title: str, para_text: str) -> Optional[str]:
             continue
         if tk in para_norm:
             # 過度に長いのは避ける
-            cand = tk[:40]
+            cand = tk[: min(40, MAX_ANCHOR_CHARS)]
             if not is_ng_anchor(cand):
                 return cand
     return None
@@ -95,7 +98,7 @@ def _candidate_anchor_from_target_content(
     tgt_txt = _html_to_text(tgt.content_html)
     if not tgt_txt:
         return None
-    tokens = [t for t in JP_TOKEN.findall(tgt_txt) if len(t) >= min_token_len and (nfkc_norm(t) not in STOPWORDS)]
+    tokens = [t for t in JP_TOKEN.findall(tgt_txt) if len(t) >= min_token_len and (nfkc_norm(t) not in STOPWORDS_N)]
     if not tokens:
         return None
     # Wikipedia 的な振る舞い：段落内で最も早い位置に現れる語を選ぶ（タイは“より長い語”を優先）
@@ -114,7 +117,7 @@ def _candidate_anchor_from_target_content(
             if (earliest is None) or (cand < earliest):
                 earliest = cand
     if earliest:
-        best = earliest[2][:max_len]
+        best = earliest[2][: min(max_len, MAX_ANCHOR_CHARS)]
         if not is_ng_anchor(best):
             return best        
     return None
@@ -142,11 +145,14 @@ def _candidate_anchor_by_partial(
     terms += extract_terms_for_partial(title or "")           # utils 由来（NFKC/フィルタ済み想定）
     terms += extract_terms_for_partial(target_body_text or "")
     # 重複除去し、長い順に
-    uniq = sorted({t for t in terms if len(t) >= min_token_len and (nfkc_norm(t) not in STOPWORDS)}, key=lambda s: (-len(s), s))
+    uniq = sorted(
+        {t for t in terms if len(t) >= min_token_len and (nfkc_norm(t) not in STOPWORDS_N)},
+        key=lambda s: (-len(s), s)
+    )
     for t in uniq:
         tn = nfkc_norm(t)
         if tn and tn in p_norm:
-            cand = t[:max_len]
+            cand = t[: min(max_len, MAX_ANCHOR_CHARS)]
             if not is_ng_anchor(cand):
                 return cand
     return None
@@ -159,7 +165,7 @@ def _extract_para_tokens(para_text: str) -> list[str]:
     for t in toks:
         if len(t) < 2:
             continue
-        if nfkc_norm(t) in STOPWORDS:
+        if nfkc_norm(t) in STOPWORDS_N:
             continue
         out.append(t)
     return out
@@ -185,7 +191,7 @@ def _extract_target_tokens_from_index(site_id: int, pid: int) -> tuple[list[str]
         imp: list[str] = []
         for _ in range(2):
             for t in toks:
-                if len(t) >= 2 and (nfkc_norm(t) not in STOPWORDS):
+                if len(t) >= 2 and (nfkc_norm(t) not in STOPWORDS_N):
                     imp.append(t)
         kwset = {k.strip().lower() for k in (kws_csv or "").split(",") if k.strip()}
         return imp, kwset
@@ -241,7 +247,7 @@ def _pick_anchor_from_overlap(site: Site, target_post_id: int, para_text: str) -
             best_score = score
             best = t
     if best and not is_ng_anchor(best):
-        return best[:40]
+        return best[: min(40, MAX_ANCHOR_CHARS)]
     return None
 
 def _pick_anchor_from_common_keywords(site_id: int, src_post_id: int, target_post_id: int, para_text: str) -> Optional[str]:
@@ -280,7 +286,51 @@ def _pick_anchor_from_common_keywords(site_id: int, src_post_id: int, target_pos
             best_score = score
             best = t
     if best and not is_ng_anchor(best):
-        return best[:40]
+        return best[: min(40, MAX_ANCHOR_CHARS)]
+    return None
+
+def _pick_anchor_from_common_keywords_single(
+    site_id: int,
+    src_post_id: int,
+    target_post_id: int,
+    para_text: str
+) -> Optional[str]:
+    """
+    ★新規★ ソース/ターゲットの共通keywordsに含まれる「単語」を本文中で最優先してアンカーにする。
+      - ContentIndex.keywords の共通集合（小文字・トリム済み）を用意
+      - 段落内トークンのうち、共通集合に入る単語を左から優先（同点は長い語優先）
+      - 禁止語は除外、長すぎる語は採用しない（MAX_ANCHOR_CHARS）
+    """
+    para = (para_text or "").strip()
+    if not para:
+        return None
+    para_tokens = JP_TOKEN.findall(para)
+    if not para_tokens:
+        return None
+    common = _get_keywords_set(site_id, src_post_id) & _get_keywords_set(site_id, target_post_id)
+    if not common:
+        return None
+    best: Optional[Tuple[int, int, str]] = None  # (start_idx, -len, token)
+    seen = set()
+    for t in para_tokens:
+        if t in seen:
+            continue
+        seen.add(t)
+        tn = nfkc_norm(t).lower()
+        if (not tn) or (tn not in common):
+            continue
+        if is_ng_anchor(t):
+            continue
+        if len(t) > MAX_ANCHOR_CHARS:
+            continue
+        idx = para.find(t)
+        if idx < 0:
+            continue
+        cand = (idx, -len(t), t)
+        if (best is None) or (cand < best):
+            best = cand
+    if best:
+        return best[2]
     return None
 
 
@@ -479,14 +529,13 @@ def plan_links_for_post(
         except Exception:
             tgt_body_text = ""
 
-        # ★ 改善版の優先順位（“本文の文章中のみ”＆NG語排除）★
-        # 1) ソース×ターゲットの共通keywords（本文中に実在）
+        # 1) ソース×ターゲットの共通keywordsの「単語」（本文中に実在）←最優先
         # 2) 段落×ターゲットの“重なり語”スコア
         # 3) ターゲット本文由来（自然語句）
         # 4) タイトル法
         # 5) 部分一致
         anchor = (
-            _pick_anchor_from_common_keywords(site_id, src_post_id, tgt_pid, para_text)
+            _pick_anchor_from_common_keywords_single(site_id, src_post_id, tgt_pid, para_text)
             or _pick_anchor_from_overlap(site, tgt_pid, para_text)
             or _candidate_anchor_from_target_content(site, tgt_pid, para_text)
             or _candidate_anchor_from(title, para_text)
@@ -585,7 +634,7 @@ def plan_links_for_post(
                     except Exception:
                         tgt_body_for_swap = ""
                     anc = (
-                        _pick_anchor_from_common_keywords(site_id, src_post_id, pid, slot_para_text)
+                        _pick_anchor_from_common_keywords_single(site_id, src_post_id, pid, slot_para_text)
                         or _pick_anchor_from_overlap(Site.query.get(site_id), pid, slot_para_text)
                         or _candidate_anchor_from_target_content(Site.query.get(site_id), pid, slot_para_text)
                         or _candidate_anchor_from(t_title, slot_para_text)
