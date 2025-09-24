@@ -1,3 +1,5 @@
+# app/cli_internal_seo.py
+
 import click
 import time
 from app import db

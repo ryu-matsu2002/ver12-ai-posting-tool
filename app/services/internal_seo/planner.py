@@ -12,7 +12,7 @@ from collections import Counter
 from app import db
 
 from app.models import ContentIndex, InternalLinkAction, InternalLinkGraph, InternalSeoConfig, Site
-from app.services.internal_seo.utils import html_to_text, nfkc_norm, extract_terms_for_partial
+from app.services.internal_seo.utils import html_to_text, nfkc_norm, extract_terms_for_partial, is_ng_anchor, STOPWORDS_N
 from app.services.internal_seo.applier import _H_TAG, _TOC_HINT, _mask_existing_anchors  # 再利用
 
 
@@ -64,7 +64,9 @@ def _candidate_anchor_from(title: str, para_text: str) -> Optional[str]:
             continue
         if tk in para_norm:
             # 過度に長いのは避ける
-            return tk[:40]
+            cand = tk[:40]
+            if not is_ng_anchor(cand):
+                return cand
     return None
 
 def _candidate_anchor_from_target_content(
@@ -94,7 +96,7 @@ def _candidate_anchor_from_target_content(
     tgt_txt = _html_to_text(tgt.content_html)
     if not tgt_txt:
         return None
-    tokens = [t for t in JP_TOKEN.findall(tgt_txt) if len(t) >= min_token_len]
+    tokens = [t for t in JP_TOKEN.findall(tgt_txt) if len(t) >= min_token_len and (nfkc_norm(t) not in STOPWORDS_N)]
     if not tokens:
         return None
     # Wikipedia 的な振る舞い：段落内で最も早い位置に現れる語を選ぶ（タイは“より長い語”を優先）
@@ -106,11 +108,16 @@ def _candidate_anchor_from_target_content(
         seen.add(tk)
         idx = para_norm.find(tk)
         if idx >= 0:
+            # STOPWORDS を除外
+            if is_ng_anchor(tk):
+                continue
             cand = (idx, -len(tk), tk)
             if (earliest is None) or (cand < earliest):
                 earliest = cand
     if earliest:
-        return earliest[2][:max_len]        
+        best = earliest[2][:max_len]
+        if not is_ng_anchor(best):
+            return best        
     return None
 
 
@@ -136,12 +143,142 @@ def _candidate_anchor_by_partial(
     terms += extract_terms_for_partial(title or "")           # utils 由来（NFKC/フィルタ済み想定）
     terms += extract_terms_for_partial(target_body_text or "")
     # 重複除去し、長い順に
-    uniq = sorted({t for t in terms if len(t) >= min_token_len}, key=lambda s: (-len(s), s))
+    uniq = sorted({t for t in terms if len(t) >= min_token_len and (nfkc_norm(t) not in STOPWORDS_N)}, key=lambda s: (-len(s), s))
     for t in uniq:
         tn = nfkc_norm(t)
         if tn and tn in p_norm:
-            return t[:max_len]
+            cand = t[:max_len]
+            if not is_ng_anchor(cand):
+                return cand
     return None
+
+
+# === 追加: 段落×ターゲット “重なり語” からベストを選ぶ ===
+def _extract_para_tokens(para_text: str) -> list[str]:
+    toks = JP_TOKEN.findall(para_text or "")
+    out = []
+    for t in toks:
+        if len(t) < 2:
+            continue
+        if nfkc_norm(t) in STOPWORDS_N:
+            continue
+        out.append(t)
+    return out
+
+def _extract_target_tokens_from_index(site_id: int, pid: int) -> tuple[list[str], set[str]]:
+    """
+    ContentIndex からタイトルとキーワードを軽量に取得。
+    - 戻り: (重要語リスト, キーワード集合)  ※キーワード集合はスコア加点に使用
+    """
+    tr = (
+        ContentIndex.query
+        .with_entities(ContentIndex.title, ContentIndex.keywords)
+        .filter_by(site_id=site_id, wp_post_id=pid)
+        .one_or_none()
+    )
+    if not tr:
+        return [], set()
+    title = tr[0] or ""
+    kws_csv = tr[1] or ""
+    toks = JP_TOKEN.findall(title.lower())
+    # タイトルは重要なので重みを意識しつつ2回入れる（ここでは順序のみ利用）
+    imp = []
+    for _ in range(2):
+        for t in toks:
+            if len(t) >= 2 and (nfkc_norm(t) not in STOPWORDS_N):
+                imp.append(t)
+    kwset = {k.strip().lower() for k in (kws_csv or "").split(",") if k.strip()}
+   
+   
+def _get_keywords_set(site_id: int, pid: int) -> set[str]:
+    """
+    ContentIndex.keywords をセットで取得（小文字・トリム済み）
+    """
+    tr = (
+        ContentIndex.query
+        .with_entities(ContentIndex.keywords)
+        .filter_by(site_id=site_id, wp_post_id=pid)
+        .one_or_none()
+    )
+    if not tr:
+        return set()
+    kws_csv = tr[0] or ""
+    return {k.strip().lower() for k in (kws_csv or "").split(",") if k.strip()}   
+
+def _pick_anchor_from_overlap(site: Site, target_post_id: int, para_text: str) -> Optional[str]:
+    """
+    段落に“実在する語” ∩ “ターゲットが大事にする語（タイトル・キーワード）”の交差から選ぶ。
+    スコア: 早く出てくるほど+ / 長いほど+ / キーワード命中で+ / NG語は即除外
+    """
+    para = (para_text or "").strip()
+    if not para:
+        return None
+    para_tokens = _extract_para_tokens(para)
+    if not para_tokens:
+        return None
+    imp_tokens, kwset = _extract_target_tokens_from_index(site.id, target_post_id)
+    if not imp_tokens and not kwset:
+        return None
+
+    best = None
+    best_score = -1.0
+    for t in set(para_tokens):
+        if is_ng_anchor(t):
+            continue
+        idx = para.find(t)
+        if idx < 0:
+            continue
+        length_bonus = min(len(t), 40) * 0.02     # 2文字で+0.04, 10文字で+0.2 くらい
+        pos_bonus    = max(0.0, 1.0 - (idx / max(1, len(para)))) * 0.3  # 早いほど+（最大0.3）
+        kw_bonus     = (t.lower() in kwset) * 0.3  # キーワードに載っていれば+0.3
+        imp_bonus    = (t in imp_tokens) * 0.2     # タイトル重要語なら+0.2
+        score = length_bonus + pos_bonus + kw_bonus + imp_bonus
+        if score > best_score:
+            best_score = score
+            best = t
+    if best and not is_ng_anchor(best):
+        return best[:40]
+    return None
+
+def _pick_anchor_from_common_keywords(site_id: int, src_post_id: int, target_post_id: int, para_text: str) -> Optional[str]:
+    """
+    ソース記事とターゲット記事の keywords の共通語を最優先。
+    - 共通keywordsを正規化して用意
+    - 段落内に“実在する語”のうち、早く出る/長い語を優先（禁止語は除外）
+    """
+    para = (para_text or "").strip()
+    if not para:
+        return None
+    para_tokens = _extract_para_tokens(para)  # 段落に実在する語（NG語はここでも除外）
+    if not para_tokens:
+        return None
+    src_kw = _get_keywords_set(site_id, src_post_id)
+    tgt_kw = _get_keywords_set(site_id, target_post_id)
+    common = src_kw & tgt_kw
+    if not common:
+        return None
+    # 正規化済みで照合するため、段落トークンを nfkc_norm したキーで判定
+    best = None
+    best_score = -1.0
+    for t in set(para_tokens):
+        if is_ng_anchor(t):
+            continue
+        tn = nfkc_norm(t).lower()
+        if not tn or tn not in common:
+            continue
+        idx = para.find(t)
+        if idx < 0:
+            continue
+        length_bonus = min(len(t), 40) * 0.02
+        pos_bonus    = max(0.0, 1.0 - (idx / max(1, len(para)))) * 0.3
+        score = length_bonus + pos_bonus
+        if score > best_score:
+            best_score = score
+            best = t
+    if best and not is_ng_anchor(best):
+        return best[:40]
+    return None
+
 
 def _pick_paragraph_slots(paragraphs: List[str], need: int, min_len: int) -> List[int]:
     """
@@ -338,14 +475,23 @@ def plan_links_for_post(
         except Exception:
             tgt_body_text = ""
 
-        # アンカー決定の優先順位：
-        # 1) ターゲット本文由来（自然語句） 2) タイトル法 3) 部分一致許容（タイトル＋本文）
+        # ★ 改善版の優先順位（“本文の文章中のみ”＆NG語排除）★
+        # 1) ソース×ターゲットの共通keywords（本文中に実在）
+        # 2) 段落×ターゲットの“重なり語”スコア
+        # 3) ターゲット本文由来（自然語句）
+        # 4) タイトル法
+        # 5) 部分一致
         anchor = (
-            _candidate_anchor_from_target_content(site, tgt_pid, para_text)
+            _pick_anchor_from_common_keywords(site_id, src_post_id, tgt_pid, para_text)
+            or _pick_anchor_from_overlap(site, tgt_pid, para_text)
+            or _candidate_anchor_from_target_content(site, tgt_pid, para_text)
             or _candidate_anchor_from(title, para_text)
             or _candidate_anchor_by_partial(title, tgt_body_text, para_text)
         )
         if not anchor or not tgt_url:
+            continue
+        # 最終NGチェック（保険）
+        if is_ng_anchor(anchor):
             continue
 
         if not anchor or not tgt_url:
@@ -435,7 +581,9 @@ def plan_links_for_post(
                     except Exception:
                         tgt_body_for_swap = ""
                     anc = (
-                        _candidate_anchor_from_target_content(Site.query.get(site_id), pid, slot_para_text)
+                        _pick_anchor_from_common_keywords(site_id, src_post_id, pid, slot_para_text)
+                        or _pick_anchor_from_overlap(Site.query.get(site_id), pid, slot_para_text)
+                        or _candidate_anchor_from_target_content(Site.query.get(site_id), pid, slot_para_text)
                         or _candidate_anchor_from(t_title, slot_para_text)
                         or _candidate_anchor_by_partial(t_title, tgt_body_for_swap, slot_para_text)
                     )

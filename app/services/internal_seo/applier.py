@@ -21,7 +21,7 @@ from app.models import (
 )
 from app.wp_client import fetch_single_post, update_post_content
 from app.services.internal_seo.legacy_cleaner import find_and_remove_legacy_links
-from app.services.internal_seo.utils import nfkc_norm
+from app.services.internal_seo.utils import nfkc_norm, is_ng_anchor
 
 logger = logging.getLogger(__name__)
 
@@ -117,10 +117,20 @@ def _linkify_first_occurrence(para_html: str, anchor_text: str, href: str) -> Op
     # 見出し・TOC っぽいブロックは一律除外
     if _H_TAG.search(para_html) or _TOC_HINT.search(para_html):
         return None
+    # NGアンカーは即中止
+    if is_ng_anchor(anchor_text):
+        return None
     masked, ph = _mask_existing_anchors(para_html)
     # 生テキストで最初の一致を探す（HTMLタグは残るが <a> はマスク済み）
     idx = masked.find(anchor_text)
     if idx == -1:
+        return None
+    # 簡易“語の境界”チェック：前後が連接中（英数/漢字/かな）なら見送り
+    def _is_word_char(ch: str) -> bool:
+        return bool(re.match(r"[A-Za-z0-9一-龥ぁ-んァ-ンー]", ch))
+    before = masked[idx - 1] if idx > 0 else ""
+    after = masked[idx + len(anchor_text)] if (idx + len(anchor_text)) < len(masked) else ""
+    if (before and _is_word_char(before)) or (after and _is_word_char(after)):
         return None
     # Wikipedia風：href + title のみ（class/style は付けない）
     linked = f'<a href="{href}" title="{anchor_text}">{anchor_text}</a>'
@@ -150,9 +160,9 @@ def _strip_links_in_headings(html: str) -> str:
 
 def _ensure_inline_underline_style(site: Site, html: str) -> str:
     """
-    テーマCSSを触らず、リンク要素にも style を書かずに下線を効かせるため、
+    テーマCSSを触らず、リンク要素にも style を書かずに下線と色を効かせるため、
     記事先頭に 1度だけ最小の <style> を挿入する。
-      対象: サイト内URLへ向く a 要素（Wikipedia と同じく「内部リンクは下線」）
+      対象: サイト内URLへ向く a 要素（Wikipedia と同じく「内部リンクは下線＋青」）
     """
     if not html:
         return html
@@ -164,26 +174,27 @@ def _ensure_inline_underline_style(site: Site, html: str) -> str:
         flags=re.IGNORECASE | re.DOTALL
     )
     site_url = site.url.rstrip("/")
-    # 本文(.ai-content)内の内部リンクのみ下線。見出し/目次は除外。
-    css = (
-        f'{_AI_STYLE_MARK}<style>'
-        # 本文に限定
-        f'.ai-content a[href^="{site_url}"]{{text-decoration:underline;}}'
-        # 見出しは除外（上書き）
-        f'.ai-content h1 a[href^="{site_url}"],'
-        f'.ai-content h2 a[href^="{site_url}"],'
-        f'.ai-content h3 a[href^="{site_url}"],'
-        f'.ai-content h4 a[href^="{site_url}"],'
-        f'.ai-content h5 a[href^="{site_url}"],'
-        f'.ai-content h6 a[href^="{site_url}"]{{text-decoration:none;}}'
-        # 代表的な TOC を除外（ez-toc / #toc / .toc / .toctitle）
-        f'.ai-content .toctitle a,'
-        f'.ai-content .toc a,'
-        f'#toc a,'
-        f'.ez-toc a{{text-decoration:none;}}'
-        f'</style>'
-    )
+
+    css = f'''{_AI_STYLE_MARK}<style>
+/* 本文に限定：内部リンクは下線＋青(#0645ad) */
+.ai-content a[href^="{site_url}"]{{text-decoration:underline;color:#0645ad;}}
+
+/* 見出しは除外（下線/色とも継承で上書き） */
+.ai-content h1 a[href^="{site_url}"],
+.ai-content h2 a[href^="{site_url}"],
+.ai-content h3 a[href^="{site_url}"],
+.ai-content h4 a[href^="{site_url}"],
+.ai-content h5 a[href^="{site_url}"],
+.ai-content h6 a[href^="{site_url}"]{{text-decoration:none;color:inherit;}}
+
+/* 代表的な TOC を除外（ez-toc / #toc / .toc / .toctitle） */
+.ai-content .toctitle a,
+.ai-content .toc a,
+#toc a,
+.ez-toc a{{text-decoration:none;color:inherit;}}
+</style>'''
     return css + html
+
 
 def _normalize_existing_internal_links(html: str) -> str:
     """
@@ -461,6 +472,13 @@ def _apply_plan_to_html(
             continue
         # 同じURLが段落内に既にあるならスキップ
         if href in [h for (h, _) in _extract_links(para_html)]:
+            res.skipped += 1
+            continue
+        # 最終NGチェック（保険）
+        if is_ng_anchor(act.anchor_text):
+            act.status = "skipped"
+            act.reason = "ng-anchor"
+            act.updated_at = datetime.utcnow()
             res.skipped += 1
             continue
         # 段落内の最初の未リンク出現をリンク化（Wikipedia風）
