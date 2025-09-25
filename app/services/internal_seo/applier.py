@@ -167,6 +167,11 @@ def _ensure_inline_underline_style(site: Site, html: str) -> str:
     """
     if not html:
         return html
+    
+    # ★追加：環境変数で注入を無効化（WPが<style>を剥がす場合に有効）
+    import os
+    if os.getenv("INTERNAL_SEO_EMBED_STYLE", "1") == "0":
+        return html
     # 旧/新マーカー付きの既存ブロックを一旦取り除いてから v2 を入れる
     html = re.sub(
         r'<!-- ai-internal-link-style:v[0-9]+ -->\s*<style>.*?</style>',

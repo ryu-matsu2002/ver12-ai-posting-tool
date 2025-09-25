@@ -45,6 +45,16 @@ JP_TOKEN = re.compile(r"[一-龥ぁ-んァ-ンーA-Za-z0-9]{2,}")
 # 必要に応じて環境変数 INTERNAL_SEO_MAX_ANCHOR_LEN で調整可能（デフォルト18）
 MAX_ANCHOR_CHARS = int(os.getenv("INTERNAL_SEO_MAX_ANCHOR_LEN", "18"))
 
+# 追加：<style>タグが剥がれて“CSSテキストだけ”になっても本文扱いにしないための判定
+_CSS_LIKE_TEXT = re.compile(
+    r'(?:/\*.*?\*/)|'           # コメント記法 /* ... */
+    r'(?:\{[^}]*\})|'           # {...} のプロパティ集合
+    r'(?:\btext-decoration\b)|' # 代表的なCSSプロパティ
+    r'(?:\bcolor\s*:)|'         # 代表的なCSSプロパティ
+    r'(?:\.ai-content\b)|'      # 今回の注入CSSで使用
+    r'(?:a\[href\^\=)'          # a[href^="..."] セレクタ
+, re.IGNORECASE | re.DOTALL)
+
 GENRE_JACCARD_MIN = float(os.getenv("INTERNAL_SEO_GENRE_JACCARD_MIN", "0.30"))
 TITLE_COSINE_MIN  = float(os.getenv("INTERNAL_SEO_TITLE_COSINE_MIN", "0.20"))
 
@@ -385,6 +395,9 @@ def _pick_paragraph_slots(paragraphs: List[str], need: int, min_len: int) -> Lis
         if _STYLE_BLOCK.search(p):
             return False
         txt = _html_to_text(p)
+        # ★追加：タグが剥がれても“CSSっぽいテキスト”は本文から除外
+        if _CSS_LIKE_TEXT.search(txt or ""):
+            return False
         return bool(txt) and len(txt) >= min_len
 
     # 短い記事にも対応するため、閾値未満でも最終的にフォールバックで拾う
