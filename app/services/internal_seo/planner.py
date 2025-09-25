@@ -634,6 +634,9 @@ def plan_links_for_post(
         # 最後の砦：タイトル由来の部分一致（正規化ゆれ救済）
         if not anchor:
             anchor = _candidate_anchor_from(title, para_text)
+        # さらにダメ押しのフォールバック：タイトル語の正規化・部分一致で拾う
+        if not anchor:
+            anchor = _candidate_anchor_by_partial(title, "", para_text)
         # ※ _candidate_anchor_from_target_content / _candidate_anchor_by_partial は
         #   タイトルに無い語を拾う可能性があるため、このフェーズでは使わない
         if not anchor or not tgt_url:
