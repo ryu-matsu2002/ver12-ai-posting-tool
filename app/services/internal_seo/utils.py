@@ -25,16 +25,38 @@ def nfkc_norm(s: str | None) -> str:
 def extract_terms_for_partial(title: str, min_len: int = 2) -> list[str]:
     """
     タイトルから “本文に載りやすい語” を抽出（漢字/かな/英数の2文字以上）。
-    長すぎる複合は避け、Wikipedia方針の“本文に出てくる語にだけリンク”に寄せる。
+    - まず長い塊を抽出
+    - さらに助詞（の/に/を/へ/と/が/で/や/から/まで）で分割
+    - カタカナ→漢字の境界でも分割（例: ワーホリ｜国）
+    最後に重複を除去し、上限8語に抑制。
     """
     raw = unicodedata.normalize("NFKC", title or "")
-    # 記号で分割 → 2文字以上の漢字・かな・英数の塊
-    toks = re.findall(r"[ぁ-んァ-ヴー一-龥A-Za-z0-9]{%d,}" % min_len, raw)
+    # 基本の長めトークンを取得
+    base_toks = re.findall(r"[ぁ-んァ-ヴー一-龥A-Za-z0-9]{%d,}" % min_len, raw)
+
+    # 追加の短語候補を生成（助詞・境界で分割）
+    extra: list[str] = []
+    for t in base_toks:
+        # 助詞で分割
+        parts = re.split(r"(?:から|まで|の|に|を|へ|と|が|で|や)", t)
+        for p in parts:
+            p = p.strip()
+            if not p:
+                continue
+            # カタカナ→漢字の境界でも分割（例: ワーホリ｜国）
+            subparts = re.split(r"(?<=[ァ-ヴー])(?=[一-龥])", p)
+            for q in subparts:
+                q = q.strip()
+                if len(q) >= min_len:
+                    extra.append(q)
+
+    toks = base_toks + extra
     # 重複除去（順序維持）
     seen, out = set(), []
     for t in toks:
         if t not in seen:
-            seen.add(t); out.append(t)
+            seen.add(t)
+            out.append(t)
     return out[:8]  # 上限（過剰に増やさない）
 
 

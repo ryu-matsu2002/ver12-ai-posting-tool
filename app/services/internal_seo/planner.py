@@ -631,10 +631,11 @@ def plan_links_for_post(
             cand_kw = _pick_anchor_from_common_keywords_single(site_id, src_post_id, tgt_pid, para_text)
             if cand_kw and cand_kw in title_tokens(title):
                 anchor = cand_kw
-        # 最後の砦：タイトル由来の部分一致（正規化ゆれ救済）
+        # タイトル由来の厳密含有（従来の簡易版）
         if not anchor:
             anchor = _candidate_anchor_from(title, para_text)
-        # さらにダメ押しのフォールバック：タイトル語の正規化・部分一致で拾う
+        # ★最後の砦：タイトルのみを材料にした部分一致フォールバック（正規化ゆれ救済）
+        #   ※ 要件「アンカーはタイトル語に含まれる」を守るため、target_body_text は使わない
         if not anchor:
             anchor = _candidate_anchor_by_partial(title, "", para_text)
         # ※ _candidate_anchor_from_target_content / _candidate_anchor_by_partial は
