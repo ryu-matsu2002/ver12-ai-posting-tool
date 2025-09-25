@@ -2,11 +2,16 @@
 import re
 import unicodedata
 from html import unescape
+from collections import Counter
+from math import sqrt
 
 _TAG = re.compile(r"<[^>]+>")
 _WS  = re.compile(r"\s+")
 # 句読点・全角記号も含めた記号類
 _PUNCT = re.compile(r"[、。・,.!！?？:：;；\"'“”‘’()\[\]（）【】『』…\-_—–/]+")
+_JP_TOKEN = re.compile(r"[一-龥ぁ-んァ-ンーA-Za-z0-9]{2,}")
+_PAREN_AROUND = re.compile(r"[（(][^）)]{0,12}$")  # 直前が開き括弧付近
+_PAREN_INSIDE = re.compile(r"^[^（)]{0,12}[）)]")  # 直後が閉じ括弧付近
 
 def html_to_text(s: str | None) -> str:
     return _TAG.sub(" ", unescape(s or "")).strip()
@@ -78,3 +83,72 @@ def is_ng_anchor(s: str | None) -> bool:
     if not _CJK_OR_WORD.search(s):
         return True
     return False
+
+
+# === 追加: タイトル語抽出 / 類似度ユーティリティ =========================
+def title_tokens(title: str) -> list[str]:
+    """
+    タイトルから“アンカー候補になり得る語”（2文字以上の漢字・かな・英数）を抽出。
+    長い順でユニーク化。
+    """
+    toks = _JP_TOKEN.findall(unicodedata.normalize("NFKC", title or ""))
+    uniq = sorted(set(toks), key=lambda t: (-len(t), t))
+    return [t for t in uniq if len(t) >= 2]
+
+def keywords_set(csv_like: str | None) -> set[str]:
+    if not csv_like:
+        return set()
+    return { (unicodedata.normalize("NFKC", k).strip().lower()) for k in (csv_like or "").split(",") if k.strip() }
+
+def jaccard(a: set[str], b: set[str]) -> float:
+    if not a or not b:
+        return 0.0
+    inter = len(a & b)
+    if inter == 0:
+        return 0.0
+    union = len(a | b)
+    return inter / max(1, union)
+
+def _tf(counter: Counter) -> dict[str, float]:
+    total = sum(counter.values()) or 1
+    return {k: v/total for k, v in counter.items()}
+
+def title_tfidf_cosine(a_title: str, b_title: str) -> float:
+    """
+    簡易：タイトル語のTFコサイン（IDFなし）。0〜1近似。
+    """
+    at = Counter(title_tokens(a_title))
+    bt = Counter(title_tokens(b_title))
+    if not at or not bt:
+        return 0.0
+    fa, fb = _tf(at), _tf(bt)
+    keys = set(fa) | set(fb)
+    num = sum(fa.get(k,0.0) * fb.get(k,0.0) for k in keys)
+    da = sqrt(sum((fa.get(k,0.0))**2 for k in keys))
+    db = sqrt(sum((fb.get(k,0.0))**2 for k in keys))
+    if da == 0 or db == 0:
+        return 0.0
+    return num/(da*db)
+
+def is_natural_span(context: str, anchor: str) -> bool:
+    """
+    段落中で anchor をリンク化しても読みに違和感が出にくい位置かの軽量チェック。
+    - 直前直後が助詞/記号のみでない
+    - 括弧の直後/直前に寄りすぎていない
+    """
+    if not context or not anchor:
+        return False
+    idx = context.find(anchor)
+    if idx < 0:
+        return False
+    before = context[max(0, idx-1):idx]
+    after  = context[idx+len(anchor):idx+len(anchor)+1]
+    # 直前直後が完全に連結文字の場合は避ける
+    if re.match(r"[A-Za-z0-9一-龥ぁ-んァ-ンー]", before or "") and re.match(r"[A-Za-z0-9一-龥ぁ-んァ-ンー]", after or ""):
+        return False
+    # 極端に括弧に寄っていないか
+    left = context[:idx][-12:]
+    right = context[idx+len(anchor):][:12]
+    if _PAREN_AROUND.search(left) or _PAREN_INSIDE.search(right):
+        return False
+    return True

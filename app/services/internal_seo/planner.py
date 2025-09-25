@@ -18,7 +18,13 @@ from app.services.internal_seo.utils import (
     extract_terms_for_partial,
     is_ng_anchor,
     STOPWORDS_N,
+    title_tokens,
+    keywords_set,
+    jaccard,
+    title_tfidf_cosine,
+    is_natural_span,
 )
+
 from app.services.internal_seo.applier import _H_TAG, _TOC_HINT, _mask_existing_anchors, _split_paragraphs  # 再利用  # 再利用
 
 
@@ -39,6 +45,9 @@ JP_TOKEN = re.compile(r"[一-龥ぁ-んァ-ンーA-Za-z0-9]{2,}")
 # 必要に応じて環境変数 INTERNAL_SEO_MAX_ANCHOR_LEN で調整可能（デフォルト18）
 MAX_ANCHOR_CHARS = int(os.getenv("INTERNAL_SEO_MAX_ANCHOR_LEN", "18"))
 
+GENRE_JACCARD_MIN = float(os.getenv("INTERNAL_SEO_GENRE_JACCARD_MIN", "0.30"))
+TITLE_COSINE_MIN  = float(os.getenv("INTERNAL_SEO_TITLE_COSINE_MIN", "0.20"))
+
 # 段落分割は applier と完全に同じ実装を使う（index不一致を避ける）
 # _split_paragraphs は applier から import 済み
 
@@ -58,14 +67,12 @@ def _candidate_anchor_from(title: str, para_text: str) -> Optional[str]:
     if not title_txt or not para_norm:
         return None
 
-    # タイトルのトークンを長い順に
-    tokens = JP_TOKEN.findall(title_txt)
-    tokens = sorted(set(tokens), key=lambda t: (-len(t), t))
+    tokens = title_tokens(title_txt)
 
     for tk in tokens:
         if len(tk) < 2:
             continue
-        if tk in para_norm:
+        if tk in para_norm and is_natural_span(para_norm, tk):
             # 過度に長いのは避ける
             cand = tk[: min(40, MAX_ANCHOR_CHARS)]
             if not is_ng_anchor(cand):
@@ -251,6 +258,36 @@ def _pick_anchor_from_overlap(site: Site, target_post_id: int, para_text: str) -
         return best[: min(40, MAX_ANCHOR_CHARS)]
     return None
 
+# === 新規: 「タイトル語 ∩ 段落」の厳密一致（最優先） =====================
+def _pick_anchor_from_title_overlap(title: str, para_text: str) -> Optional[str]:
+    """
+    要件：アンカーワードはリンク先記事タイトルの語と一致し、かつ段落に実在。
+    ルール：長い語優先→段落中で早く出る語を優先。NG語/不自然位置は除外。
+    """
+    if not title or not para_text:
+        return None
+    toks = title_tokens(title)
+    if not toks:
+        return None
+    ptxt = (para_text or "").strip()
+    best = None
+    best_key = None  # (idx, -len)
+    for tk in toks:
+        if is_ng_anchor(tk):
+            continue
+        idx = ptxt.find(tk)
+        if idx < 0:
+            continue
+        if not is_natural_span(ptxt, tk):
+            continue
+        key = (idx, -len(tk))
+        if (best is None) or (key < best_key):
+            best = tk
+            best_key = key
+    if best:
+        return best[: min(MAX_ANCHOR_CHARS, 40)]
+    return None
+
 def _pick_anchor_from_common_keywords(site_id: int, src_post_id: int, target_post_id: int, para_text: str) -> Optional[str]:
     """
     ソース記事とターゲット記事の keywords の共通語を最優先。
@@ -428,6 +465,35 @@ def _top_targets_for_source(site_id: int, src_post_id: int, topk: int, min_score
     return [(int(t), float(s)) for (t, s) in rows if s is not None and float(s) >= float(min_score)]
 
 
+def _same_genre_ok(site_id: int, src_post_id: int, tgt_post_id: int) -> bool:
+    """
+    keywordsのJaccardで同ジャンル判定。足りなければタイトルコサイン近似でフォールバック。
+    ContentIndexにカテゴリ/タグが無い前提で、keywordsとタイトルで代用。
+    """
+    src = (
+        ContentIndex.query
+        .with_entities(ContentIndex.keywords, ContentIndex.title)
+        .filter_by(site_id=site_id, wp_post_id=src_post_id)
+        .one_or_none()
+    )
+    tgt = (
+        ContentIndex.query
+        .with_entities(ContentIndex.keywords, ContentIndex.title)
+        .filter_by(site_id=site_id, wp_post_id=tgt_post_id)
+        .one_or_none()
+    )
+    if not src or not tgt:
+        return False
+    sj, tj = src[0] or "", tgt[0] or ""
+    ja = jaccard(keywords_set(sj), keywords_set(tj))
+    if ja >= GENRE_JACCARD_MIN:
+        return True
+    # フォールバック：タイトル近似
+    ta, tb = src[1] or "", tgt[1] or ""
+    cos = title_tfidf_cosine(ta, tb)
+    return cos >= TITLE_COSINE_MIN
+
+
 def plan_links_for_post(
     site_id: int,
     src_post_id: int,
@@ -465,7 +531,7 @@ def plan_links_for_post(
     url_to_pid = _url_to_post_id_map(site_id, existing_urls)
     existing_post_ids = {pid for pid in url_to_pid.values() if pid}  # 既にリンクしているpost_id
 
-    # 3) 候補ターゲットの収集（スコア順）
+    # 3) 候補ターゲットの収集（スコア順 → 同ジャンルでフィルタ）
     #    - 既存リンク先は優先度下げ（まずは新顔を入れたい）
     #    - 自身は除外
     raw_candidates = _top_targets_for_source(site_id, src_post_id, topk=max_candidates, min_score=min_score)
@@ -475,7 +541,13 @@ def plan_links_for_post(
             continue
         if t in existing_post_ids:
             continue
-        candidates.append(t)
+        # ★同ジャンル判定（keywords Jaccard or タイトル類似）
+        try:
+            if _same_genre_ok(site_id, src_post_id, t):
+                candidates.append(t)
+        except Exception:
+            # 判定に失敗した場合は安全側で除外
+            continue
     if not candidates:
         logger.info("[Planner] src=%s no fresh candidates", src_post_id)
 
@@ -537,18 +609,20 @@ def plan_links_for_post(
         except Exception:
             tgt_body_text = ""
 
-        # 1) ソース×ターゲットの共通keywordsの「単語」（本文中に実在）←最優先
-        # 2) 段落×ターゲットの“重なり語”スコア
-        # 3) ターゲット本文由来（自然語句）
-        # 4) タイトル法
-        # 5) 部分一致
-        anchor = (
-            _pick_anchor_from_common_keywords_single(site_id, src_post_id, tgt_pid, para_text)
-            or _pick_anchor_from_overlap(site, tgt_pid, para_text)
-            or _candidate_anchor_from_target_content(site, tgt_pid, para_text)
-            or _candidate_anchor_from(title, para_text)
-            or _candidate_anchor_by_partial(title, tgt_body_text, para_text)
-        )
+        # ★最優先：リンク先タイトル語 ∩ 段落 に限定
+        anchor = _pick_anchor_from_title_overlap(title, para_text)
+        # （安全フォールバック）共通keywordsや本文ベースの候補が出ても、
+        #   タイトルに載っていない語は採用しない（要件の厳格化）
+        if not anchor:
+            # 共通keywords経由でも “タイトルに存在する語” に限定して再チェック
+            cand_kw = _pick_anchor_from_common_keywords_single(site_id, src_post_id, tgt_pid, para_text)
+            if cand_kw and cand_kw in title_tokens(title):
+                anchor = cand_kw
+        # 最後の砦：タイトル由来の部分一致（正規化ゆれ救済）
+        if not anchor:
+            anchor = _candidate_anchor_from(title, para_text)
+        # ※ _candidate_anchor_from_target_content / _candidate_anchor_by_partial は
+        #   タイトルに無い語を拾う可能性があるため、このフェーズでは使わない
         if not anchor or not tgt_url:
             continue
         # 最終NGチェック（保険）
@@ -572,7 +646,7 @@ def plan_links_for_post(
             anchor_text=anchor[:255],
             position=f"p:{slot_idx}",
             status="pending",
-            reason="plan",
+            reason="plan:title_match",
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
         )
@@ -641,13 +715,9 @@ def plan_links_for_post(
                             tgt_body_for_swap = html_to_text(_t.content_html)
                     except Exception:
                         tgt_body_for_swap = ""
-                    anc = (
-                        _pick_anchor_from_common_keywords_single(site_id, src_post_id, pid, slot_para_text)
-                        or _pick_anchor_from_overlap(Site.query.get(site_id), pid, slot_para_text)
-                        or _candidate_anchor_from_target_content(Site.query.get(site_id), pid, slot_para_text)
-                        or _candidate_anchor_from(t_title, slot_para_text)
-                        or _candidate_anchor_by_partial(t_title, tgt_body_for_swap, slot_para_text)
-                    )
+                    # swapでも「タイトル語 ∩ 段落」を厳守
+                    anc = _pick_anchor_from_title_overlap(t_title, slot_para_text) or _candidate_anchor_from(t_title, slot_para_text)
+
                     if not anc or not t_url:
                         continue
                     # swap候補側でも同一記事内アンカーの重複を避ける
@@ -662,7 +732,7 @@ def plan_links_for_post(
                         anchor_text=anc[:255],
                         position=f"p:{slot_for_swap}",
                         status="pending",
-                        reason="swap_candidate",
+                        reason="swap_candidate:title_match",
                         created_at=datetime.utcnow(),
                         updated_at=datetime.utcnow(),
                     ))

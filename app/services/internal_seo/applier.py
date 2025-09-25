@@ -21,7 +21,7 @@ from app.models import (
 )
 from app.wp_client import fetch_single_post, update_post_content
 from app.services.internal_seo.legacy_cleaner import find_and_remove_legacy_links
-from app.services.internal_seo.utils import nfkc_norm, is_ng_anchor
+from app.services.internal_seo.utils import nfkc_norm, is_ng_anchor, title_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -257,18 +257,19 @@ def _post_url(site_id: int, wp_post_id: int) -> Optional[str]:
     )
     return row[0] if row else None
 
-def _action_targets_with_urls(site_id: int, actions: List[InternalLinkAction]) -> Dict[int, str]:
+def _action_targets_meta(site_id: int, actions: List[InternalLinkAction]) -> Dict[int, Tuple[str, str]]:
     need_ids = list({a.target_post_id for a in actions})
     if not need_ids:
         return {}
     rows = (
         ContentIndex.query
-        .with_entities(ContentIndex.wp_post_id, ContentIndex.url)
+        .with_entities(ContentIndex.wp_post_id, ContentIndex.url, ContentIndex.title)
         .filter(ContentIndex.site_id == site_id)
         .filter(ContentIndex.wp_post_id.in_(need_ids))
         .all()
     )
-    return {int(pid): (url or "") for (pid, url) in rows}
+    # return: {pid: (url, title)}
+    return {int(pid): ((url or ""), (title or "")) for (pid, url, title) in rows}
 
 def _existing_internal_links_count(site: Site, html: str) -> int:
     site_url = site.url.rstrip("/")
@@ -359,14 +360,14 @@ def preview_apply_for_post(site_id: int, src_post_id: int) -> Tuple[str, ApplyRe
         .all()
     )
 
-    url_map = _action_targets_with_urls(site_id, actions)
+    meta_map = _action_targets_meta(site_id, actions)
 
     original_paras = _split_paragraphs(wp_post.content_html or "")
     # 3) 旧仕様を除去した本文をベースに新仕様を仮適用
     base_html = cleaned_html if cleaned_html is not None else (wp_post.content_html or "")
     # 3.5) 見出し内リンクをサニタイズ（Hタグからはリンクを完全排除）
     base_html = _strip_links_in_headings(base_html)
-    new_html, res = _apply_plan_to_html(site, src_post_id, base_html, actions, cfg, url_map)
+    new_html, res = _apply_plan_to_html(site, src_post_id, base_html, actions, cfg, meta_map)
     new_html = _strip_links_in_headings(new_html)  # ← 適用後も再サニタイズ
     res.legacy_deleted = len(deletions or [])
     new_paras = _split_paragraphs(new_html)
@@ -385,7 +386,7 @@ def preview_apply_for_post(site_id: int, src_post_id: int) -> Tuple[str, ApplyRe
                 position=a.position or "",
                 anchor_text=a.anchor_text or "",
                 target_post_id=int(a.target_post_id),
-                target_url=url_map.get(a.target_post_id, "") or "",
+                target_url=(meta_map.get(a.target_post_id, ("",""))[0]) or "",
                 paragraph_index=pidx,
                 paragraph_excerpt_before=before_snip,
                 paragraph_excerpt_after=after_snip,
@@ -403,7 +404,7 @@ def _apply_plan_to_html(
     html: str,
     actions: List[InternalLinkAction],
     cfg: InternalSeoConfig,
-    target_url_map: Dict[int, str],
+    target_meta_map: Dict[int, Tuple[str, str]],  # pid -> (url, title)
 ) -> Tuple[str, ApplyResult]:
     """
     計画（plan/swap_candidate）のうち、本文内の挿入と置換を行う。
@@ -428,8 +429,10 @@ def _apply_plan_to_html(
     need_max = min(8, int(cfg.max_links_per_post or 8))
 
     # 1) まずは reason='plan' を優先して挿入
-    plan_actions = [a for a in actions if a.reason in ("plan", "review_approved")]
-    swaps = [a for a in actions if a.reason == "swap_candidate"]
+    def _reason_prefix(a):
+        return (a.reason or "").split(":", 1)[0]
+    plan_actions = [a for a in actions if _reason_prefix(a) in ("plan", "review_approved")]
+    swaps = [a for a in actions if _reason_prefix(a) == "swap_candidate"]
 
     inserted = 0
     # 記事内で同一キーワード（アンカーテキスト）は1回まで
@@ -449,8 +452,15 @@ def _apply_plan_to_html(
         if idx < 0 or idx >= len(paragraphs):
             res.skipped += 1
             continue
-        href = target_url_map.get(act.target_post_id)
+        href, tgt_title = target_meta_map.get(act.target_post_id, ("",""))
         if not href:
+            res.skipped += 1
+            continue
+        # ★安全ガード：アンカーは“ターゲットタイトルの語”に一致している必要がある
+        if act.anchor_text not in title_tokens(tgt_title or ""):
+            act.status = "skipped"
+            act.reason = "skipped:anchor-not-in-target-title"
+            act.updated_at = datetime.utcnow()
             res.skipped += 1
             continue
         # --- 同一アンカー重複の抑止（記事内1回まで） ---
@@ -542,7 +552,7 @@ def _apply_plan_to_html(
             best_swap = None
             best_sc = -1.0
             for s in swaps_sorted:
-                href = target_url_map.get(s.target_post_id)
+                href, _t = target_meta_map.get(s.target_post_id, ("",""))
                 if not href:
                     continue
                 row = (
@@ -614,14 +624,14 @@ def apply_actions_for_post(site_id: int, src_post_id: int, dry_run: bool = False
         .all()
     )
 
-    url_map = _action_targets_with_urls(site_id, actions)
+    meta_map = _action_targets_meta(site_id, actions)
 
     # 3) 差分作成（旧仕様削除済みの本文に新仕様を適用）
     base_html = cleaned_html if cleaned_html is not None else (wp_post.content_html or "")
     # 3.5) まず入力HTMLをサニタイズ：見出し(H1〜H6)内の <a> を除去（中身は残す）
     base_html = _strip_links_in_headings(base_html)
     # サニタイズ済みの本文を元に新仕様を適用
-    new_html, res = _apply_plan_to_html(site, src_post_id, base_html, actions, cfg, url_map)
+    new_html, res = _apply_plan_to_html(site, src_post_id, base_html, actions, cfg, meta_map)
     # 念のため、適用後HTMLにも再サニタイズ（他要因でH内に混入しても除去）
     new_html = _strip_links_in_headings(new_html)
     # 記事先頭に 1回だけ下線CSSを注入（テーマ非依存）
