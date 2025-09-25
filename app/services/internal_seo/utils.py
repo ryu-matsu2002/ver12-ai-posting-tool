@@ -110,12 +110,30 @@ def is_ng_anchor(s: str | None) -> bool:
 # === 追加: タイトル語抽出 / 類似度ユーティリティ =========================
 def title_tokens(title: str) -> list[str]:
     """
-    タイトルから“アンカー候補になり得る語”（2文字以上の漢字・かな・英数）を抽出。
-    長い順でユニーク化。
+    タイトルから“アンカー候補になり得る語”を抽出。
+    - NFKC 正規化
+    - まず長めの塊を取り、その後
+      * 助詞（の/に/を/へ/と/が/で/や/から/まで）で分割
+      * カタカナ→漢字の境界でも分割（例: ワーホリ｜国）
+    - 2文字以上を採用し、重複を除去して長い順に並べる
     """
-    toks = _JP_TOKEN.findall(unicodedata.normalize("NFKC", title or ""))
-    uniq = sorted(set(toks), key=lambda t: (-len(t), t))
-    return [t for t in uniq if len(t) >= 2]
+    raw = unicodedata.normalize("NFKC", title or "")
+    # ベース：漢字/かな/英数の2文字以上の塊
+    base = re.findall(r"[ぁ-んァ-ヴー一-龥A-Za-z0-9]{2,}", raw)
+    parts: list[str] = []
+    for t in base:
+        # 助詞で分割
+        for p in re.split(r"(?:から|まで|の|に|を|へ|と|が|で|や)", t):
+            p = p.strip()
+            if not p:
+                continue
+            # カタカナ→漢字の境界でさらに分割
+            for q in re.split(r"(?<=[ァ-ヴー])(?=[一-龥])", p):
+                q = q.strip()
+                if len(q) >= 2:
+                    parts.append(q)
+    uniq = sorted(set(parts), key=lambda s: (-len(s), s))
+    return uniq
 
 def keywords_set(csv_like: str | None) -> set[str]:
     if not csv_like:

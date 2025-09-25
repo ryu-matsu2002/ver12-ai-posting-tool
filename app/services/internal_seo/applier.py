@@ -461,8 +461,10 @@ def _apply_plan_to_html(
         if not href:
             res.skipped += 1
             continue
-        # ★安全ガード：アンカーは“ターゲットタイトルの語”に一致している必要がある
-        if act.anchor_text not in title_tokens(tgt_title or ""):
+        # ★安全ガード（緩和版）：
+        #   アンカーはターゲットタイトル内に NFKC 正規化で「部分一致」していればOK
+        #   例）タイトル「ワーホリ国での生活…」に対して「ワーホリ」も許可
+        if nfkc_norm(act.anchor_text) not in nfkc_norm(tgt_title or ""):
             act.status = "skipped"
             act.reason = "skipped:anchor-not-in-target-title"
             act.updated_at = datetime.utcnow()
