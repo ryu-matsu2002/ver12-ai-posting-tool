@@ -126,16 +126,17 @@ def _linkify_first_occurrence(para_html: str, anchor_text: str, href: str) -> Op
     idx = masked.find(anchor_text)
     if idx == -1:
         return None
-    # 簡易“語の境界”チェック：前後が連接中（英数/漢字/かな）なら見送り
+    # 簡易“語の境界”チェック：
+    # - 既存<a>はマスク済みなので、素のテキスト連結のみ判定
+    # - 前後が「語文字」でも、日本語の助詞なら“柔らかい境界”として許容する
     def _is_word_char(ch: str) -> bool:
-        # 日本語の本文では単語境界が空白で区切られないため、
-        # 「前後どちらかが非語字であればOK」に緩和するための判定
         return bool(re.match(r"[A-Za-z0-9一-龥ぁ-んァ-ンー]", ch))
+    SOFT_BOUNDARIES = set(list("でをにがはともへやの"))  # 日本語の主要助詞
     before = masked[idx - 1] if idx > 0 else ""
-    after = masked[idx + len(anchor_text)] if (idx + len(anchor_text)) < len(masked) else ""
-    # 以前は「前後どちらかが語字ならNG」だったため日本語で過剰除外に。
-    # 「前後**両方**が語字の時だけNG」へ緩和して通常の文中出現を許可する。
-    if (before and _is_word_char(before)) and (after and _is_word_char(after)):
+    after  = masked[idx + len(anchor_text)] if (idx + len(anchor_text)) < len(masked) else ""
+    # “両側が語文字かつ助詞でもない”ときだけ不自然として拒否
+    if (before and _is_word_char(before) and before not in SOFT_BOUNDARIES) and \
+       (after  and _is_word_char(after)  and after  not in SOFT_BOUNDARIES):
         return None
     # Wikipedia風：href + title のみ（class/style は付けない）
     linked = f'<a href="{href}" title="{anchor_text}">{anchor_text}</a>'
