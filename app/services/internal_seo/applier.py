@@ -128,10 +128,14 @@ def _linkify_first_occurrence(para_html: str, anchor_text: str, href: str) -> Op
         return None
     # 簡易“語の境界”チェック：前後が連接中（英数/漢字/かな）なら見送り
     def _is_word_char(ch: str) -> bool:
+        # 日本語の本文では単語境界が空白で区切られないため、
+        # 「前後どちらかが非語字であればOK」に緩和するための判定
         return bool(re.match(r"[A-Za-z0-9一-龥ぁ-んァ-ンー]", ch))
     before = masked[idx - 1] if idx > 0 else ""
     after = masked[idx + len(anchor_text)] if (idx + len(anchor_text)) < len(masked) else ""
-    if (before and _is_word_char(before)) or (after and _is_word_char(after)):
+    # 以前は「前後どちらかが語字ならNG」だったため日本語で過剰除外に。
+    # 「前後**両方**が語字の時だけNG」へ緩和して通常の文中出現を許可する。
+    if (before and _is_word_char(before)) and (after and _is_word_char(after)):
         return None
     # Wikipedia風：href + title のみ（class/style は付けない）
     linked = f'<a href="{href}" title="{anchor_text}">{anchor_text}</a>'
