@@ -80,7 +80,8 @@ STOPWORDS_N: set[str] = {  # <- これを公開して他モジュールでも使
 }
 
 _KANA_ONLY = re.compile(r"^[ぁ-んァ-ンー]+$")
-_CJK_OR_WORD = re.compile(r"[A-Za-z0-9一-龥]")
+# 有意文字の判定：英数・漢字に加えて「かな（ひら/カタカナ/長音）」も許可
+_CJK_OR_WORD = re.compile(r"[A-Za-z0-9一-龥ぁ-んァ-ンー]")
 
 def is_ng_anchor(s: str | None) -> bool:
     """
@@ -101,7 +102,7 @@ def is_ng_anchor(s: str | None) -> bool:
         return True
     if _KANA_ONLY.match(n) and len(n) < 4:
         return True
-    # A-Z/0-9/漢字が1つも含まれず、かなだけで極端に短いものは避ける
+    # 有意な文字（英数/漢字/かな）が1つも含まれない場合はNG
     if not _CJK_OR_WORD.search(s):
         return True
     return False
