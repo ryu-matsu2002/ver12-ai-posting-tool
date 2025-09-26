@@ -109,13 +109,28 @@ def _clean_gpt_output(text: str) -> str:
     # 先頭末尾の引用符・鉤括弧系は剥がす
     text = re.sub(r'^[\'"「『（\(\[]\s*', "", text)
     text = re.sub(r'\s*[\'"」』）\)\]]$', "", text)
-    # 禁止・冗長フレーズの簡易除去
+    # 禁止・冗長フレーズの簡易除去（順序大事：長いもの→短いもの）
     STOP_PHRASES = [
-        "ぜひ", "ぜひとも", "チェックしてみてください", "参考にしてください",
-        "ぜひチェックしてみてください", "ぜひご覧ください", "ぜひチェック", "ぜひ参考に"
+        "ぜひチェックしてみてください",
+        "チェックしてみてください",
+        "参考にしてください",
+        "ぜひご覧ください",
+        "ぜひ参考に",
+        "ぜひチェック",
+        "ぜひとも",
+        "ぜひ",
+        # 主語呼びかけ系（後続の「は」ごと除去）
+        "気になる方は",
+        "知りたい方は",
+        "詳しく知りたい方は",
     ]
     for s in STOP_PHRASES:
         text = text.replace(s, "")
+    # よく出る文法崩れの補正
+    text = re.sub(r"\s+", " ", text)              # 連続スペース
+    text = re.sub(r"(は|が)\s*について", "について", text)  # 「〜は/が について」→「について」
+    text = re.sub(r"に\s*ついて", "について", text)        # 全半角ゆらぎ
+    text = re.sub(r"はどうなっているのか", "の概要", text)   # 冗長疑問形の簡約
     # 多重スペース整理
     text = re.sub(r"\s{2,}", " ", text)
     return text.strip()
@@ -232,6 +247,9 @@ def _generate_anchor_text_via_llm(
                 except Exception:
                     first_kw = ""
             text = f"{first_kw or (dst_title or '')[:20]}について詳しい解説はコチラ"
+    # 最終の文法崩れ再チェック
+    text = _clean_gpt_output(text)
+    text = re.sub(r"[、。．.\s]+$", "", text)
     return text
 
 def _emit_anchor_html(href: str, text: str) -> str:
