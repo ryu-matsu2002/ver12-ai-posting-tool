@@ -578,7 +578,7 @@ def plan_links_for_post(
         logger.info("[Planner] src=%s no suitable paragraphs", src_post_id)
         return stats
 
-   # 6) ターゲット記事のタイトル/URL/キーワードを取得（アンカー生成 & meta 用）
+   # 6) ターゲット記事のタイトル/URL/キーワードを取得（アンカー生成の補助用）
     tgt_rows = (
         ContentIndex.query
         .with_entities(ContentIndex.wp_post_id, ContentIndex.title, ContentIndex.url, ContentIndex.keywords)
@@ -663,13 +663,6 @@ def plan_links_for_post(
         seen_anchor_keys.add(anchor_key)
 
         # 監査ログに pending で登録（position は 'p:{index}'）
-        # meta にはリンク先のタイトル/キーワード/URL を保存（applier が惹句生成に使用）
-        if not dst_kw_list:
-            # キーワードが空ならタイトルから代表語を抽出して補完
-            try:
-                dst_kw_list = [w for w in (title_tokens(title or "") or []) if w][:6]
-            except Exception:
-                dst_kw_list = []
         act = InternalLinkAction(
             site_id=site_id,
             post_id=src_post_id,
@@ -680,11 +673,6 @@ def plan_links_for_post(
             reason="plan:title_match",
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
-            meta={
-                "dst_title": title,
-                "dst_keywords": dst_kw_list,
-                "dst_url": tgt_url,
-            },
         )
         db.session.add(act)
         actions_made += 1
@@ -762,11 +750,6 @@ def plan_links_for_post(
                     if anc_key in seen_anchor_keys:
                         continue
                     seen_anchor_keys.add(anc_key)
-                    if not t_kws:
-                        try:
-                            t_kws = [w for w in (title_tokens(t_title or "") or []) if w][:6]
-                        except Exception:
-                            t_kws = []
                     db.session.add(InternalLinkAction(
                         site_id=site_id,
                         post_id=src_post_id,
@@ -777,11 +760,6 @@ def plan_links_for_post(
                         reason="swap_candidate:title_match",
                         created_at=datetime.utcnow(),
                         updated_at=datetime.utcnow(),
-                        meta={
-                            "dst_title": t_title,
-                            "dst_keywords": t_kws,
-                            "dst_url": t_url,
-                        },
                     ))
                     made_swaps += 1
             if made_swaps:
