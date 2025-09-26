@@ -40,6 +40,11 @@ except Exception:
 # ▼ 新旧の切替（ここを "legacy_phrase" にすれば従来動作）
 ANCHOR_MODE: str = "generated_line"
 
+# ▼ アンカー生成スタイル（llm / template）
+#   - llm: ChatGPTで「KWを自然に含む定型文」を生成（推奨・既定）
+#   - template: LLMを使わず {KW}について詳しい解説はコチラ の固定文
+ANCHOR_STYLE: str = _os.getenv("INTERNAL_SEO_ANCHOR_STYLE", "llm").strip().lower() or "llm"
+
 # ▼ LLM 呼び出し設定（記事生成と同等の流儀を最小限踏襲）
 ISEO_ANCHOR_MODEL: str = _os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 ISEO_ANCHOR_TEMPERATURE: float = 0.30
@@ -49,21 +54,21 @@ ISEO_SHRINK: float = 0.85
 ISEO_MAX_TOKENS: int = 160           # 惹句は短文のため小さめ
 ISEO_ANCHOR_MAX_CHARS: int = 60      # ソフト上限（切り捨てはしない。プロンプトで誘導）
 
-# ▼ プロンプト（applier.py 内に同居）
 ANCHOR_SYSTEM_PROMPT = (
-    "あなたはSEOに配慮する日本語の編集者です。"
-    "以下の仕様を厳守して、クリックしたくなるが誇大でない惹句を1行だけ作成します。"
-    "・出力は日本語で1行のみ（改行・引用符・記号の装飾なし）\n"
-    "・リンク先の主要キーワードを自然に含める\n"
-    "・煽り過ぎ/誤誘導/断定的表現は不可\n"
-    "・40〜60字を目安に簡潔に\n"
+    "あなたはSEOに配慮する日本語編集者です。"
+    "以下を厳守して、内部リンクのアンカー文（1行）を作成します。"
+    "・日本語で1文のみ（改行/引用符/絵文字/記号装飾なし）\n"
+    "・リンク先の主要キーワードを含める（タイトルを丸ごと繰り返さない）\n"
+    "・文末は必ず「について詳しい解説はコチラ」で終える\n"
+    "・煽り過ぎ/断定/誤誘導/価格言及は禁止\n"
+    "・全体で40〜60字に収める\n"
 )
 ANCHOR_USER_PROMPT_TEMPLATE = (
     "【リンク先タイトル】{dst_title}\n"
-    "【主要キーワード】{dst_keywords}\n"
-    "【文脈ヒント】{src_hint}\n"
-    "要件: 日本語で1行、改行禁止、引用符で囲まない、体言止めやですますのどちらでも可。\n"
-    "出力は惹句一文のみ。"
+    "【主要キーワード（重要度順）】{dst_keywords}\n"
+    "【段落の要旨（文脈ヒント）】{src_hint}\n"
+    "要件: 上記の仕様どおり、1文・40〜60字で、"
+    "【リンク先タイトル】のキーワードを自然に含め「〜について詳しい解説はコチラ」で結ぶアンカー文のみ出力。"
 )
 
 _P_CLOSE = re.compile(r"</p\s*>", re.IGNORECASE)
@@ -161,6 +166,10 @@ def _generate_anchor_text_via_llm(
     src_hint: str = "",
     user_id: Optional[int] = None,
 ) -> str:
+    """
+    LLMで「KWを1〜2語含む・40〜60字・…について詳しい解説はコチラ」文を生成。
+    最低限のバリデーションを行い、要件を満たさなければテンプレで補正。
+    """
     kw_csv = ", ".join([k for k in (dst_keywords or []) if k]) if isinstance(dst_keywords, (list, tuple)) else (dst_keywords or "")
     sys = ANCHOR_SYSTEM_PROMPT
     usr = ANCHOR_USER_PROMPT_TEMPLATE.format(
@@ -170,13 +179,34 @@ def _generate_anchor_text_via_llm(
     )
     out = _iseo_chat(
         [{"role": "system", "content": sys}, {"role": "user", "content": usr}],
-        max_t=ISEO_MAX_TOKENS,
-        temp=ISEO_ANCHOR_TEMPERATURE,
+        ISEO_MAX_TOKENS,
+        ISEO_ANCHOR_TEMPERATURE,
         user_id=user_id,
     )
     # 最終正規化（1行・装飾なし）
     out = _clean_gpt_output(out)
-    return out
+    # --- 追加バリデーション ---
+    text = out
+    # 末尾パターンが無ければ付与
+    if "詳しい解説はコチラ" not in text:
+        # キーワード先頭を拾って組み立て直す
+        first_kw = ""
+        if isinstance(dst_keywords, (list, tuple)) and dst_keywords:
+            first_kw = str(dst_keywords[0]).strip()
+        if not first_kw:
+            # タイトルから応急抽出
+            try:
+                from app.services.internal_seo.utils import title_tokens
+                toks = title_tokens(dst_title or "") or []
+                first_kw = toks[0] if toks else ""
+            except Exception:
+                first_kw = ""
+        base = (first_kw or (dst_title or "")[:20]).strip()
+        text = f"{base}について詳しい解説はコチラ"
+    # 長さ調整（60字超は丸める）
+    if len(text) > ISEO_ANCHOR_MAX_CHARS:
+        text = text[:ISEO_ANCHOR_MAX_CHARS].rstrip("、。 ・")
+    return text
 
 def _emit_anchor_html(href: str, text: str) -> str:
     text_safe = _TAG_STRIP.sub(" ", unescape(text or "")).strip()
@@ -315,22 +345,26 @@ def _ensure_inline_underline_style(site: Site, html: str) -> str:
     site_url = site.url.rstrip("/")
 
     css = f'''{_AI_STYLE_MARK}<style>
-/* 本文に限定：内部リンクは下線＋青(#0645ad) */
-.ai-content a[href^="{site_url}"]{{text-decoration:underline;color:#0645ad;}}
-
+/* 本文に限定：内部リンクは下線＋青(#0645ad)（テーマに勝てるよう !important） */
+:where(.ai-content,.entry-content,.post-content,article,.content) a[href^="{site_url}"] {{
+  text-decoration: underline !important;
+  color: #0645ad !important;
+}}
 /* 見出しは除外（下線/色とも継承で上書き） */
-.ai-content h1 a[href^="{site_url}"],
-.ai-content h2 a[href^="{site_url}"],
-.ai-content h3 a[href^="{site_url}"],
-.ai-content h4 a[href^="{site_url}"],
-.ai-content h5 a[href^="{site_url}"],
-.ai-content h6 a[href^="{site_url}"]{{text-decoration:none;color:inherit;}}
-
-/* 代表的な TOC を除外（ez-toc / #toc / .toc / .toctitle） */
-.ai-content .toctitle a,
-.ai-content .toc a,
-#toc a,
-.ez-toc a{{text-decoration:none;color:inherit;}}
+:where(.ai-content,.entry-content,.post-content,article,.content) h1 a[href^="{site_url}"],
+:where(.ai-content,.entry-content,.post-content,article,.content) h2 a[href^="{site_url}"],
+:where(.ai-content,.entry-content,.post-content,article,.content) h3 a[href^="{site_url}"],
+:where(.ai-content,.entry-content,.post-content,article,.content) h4 a[href^="{site_url}"],
+:where(.ai-content,.entry-content,.post-content,article,.content) h5 a[href^="{site_url}"],
+:where(.ai-content,.entry-content,.post-content,article,.content) h6 a[href^="{site_url}"] {{
+  text-decoration: none !important;
+  color: inherit !important;
+}}
+/* 代表的な TOC を除外（ez-toc / #toc / .toctitle） */
+.toctitle a, .toc a, #toc a, .ez-toc a {{
+  text-decoration: none !important;
+  color: inherit !important;
+}}
 </style>'''
     return css + html
 
@@ -520,9 +554,10 @@ def preview_apply_for_post(site_id: int, src_post_id: int) -> Tuple[str, ApplyRe
                 pidx = -1
             before_snip = _html_to_text(original_paras[pidx])[:120] if (0 <= pidx < len(original_paras)) else ""
             after_snip  = _html_to_text(new_paras[pidx])[:120] if (0 <= pidx < len(new_paras)) else ""
-            # metaにdst_urlがあればプレビューでも優先採用
-            _meta = (getattr(a, "meta", None) or {})
-            _dst_url_from_meta = (_meta.get("dst_url") or "").strip() if isinstance(_meta, dict) else ""
+            # meta は一度だけ取得
+            meta_obj = getattr(a, "meta", None)
+            meta_dict = meta_obj if isinstance(meta_obj, dict) else {}
+            _dst_url_from_meta = (meta_dict.get("dst_url") or "").strip()
             previews.append(PreviewItem(
                 position=a.position or "",
                 anchor_text=a.anchor_text or "",
@@ -594,7 +629,9 @@ def _apply_plan_to_html(
             res.skipped += 1
             continue
         # --- meta優先でリンク先情報を取得（fallbackはContentIndex由来のtarget_meta_map） ---
-        _meta: dict = (getattr(act, "meta", None) or {}) if isinstance(getattr(act, "meta", None), dict) else {}
+        # meta は一度だけ取得
+        meta_obj = getattr(act, "meta", None)
+        _meta: dict = meta_obj if isinstance(meta_obj, dict) else {}
         href0, tgt_title0 = target_meta_map.get(act.target_post_id, ("", ""))
         href_meta = (_meta.get("dst_url") or "").strip()
         title_meta = (_meta.get("dst_title") or "").strip()
@@ -634,12 +671,17 @@ def _apply_plan_to_html(
                         dst_kw_list = [w for w in (title_tokens(tgt_title or "") or []) if w][:6]
                     except Exception:
                         dst_kw_list = []
-                anchor_text = _generate_anchor_text_via_llm(
-                    dst_title=tgt_title or "",
-                    dst_keywords=dst_kw_list,
-                    src_hint=src_hint,
-                    user_id=None,  # user_id があれば渡せる
-                )
+                if ANCHOR_STYLE == "template":
+                    # 完全固定テンプレ
+                    base = (dst_kw_list[0] if dst_kw_list else (tgt_title or "")[:20]).strip()
+                    anchor_text = f"{base}について詳しい解説はコチラ"
+                else:
+                    anchor_text = _generate_anchor_text_via_llm(
+                        dst_title=tgt_title or "",
+                        dst_keywords=dst_kw_list,
+                        src_hint=src_hint,
+                        user_id=None,  # user_id があれば渡せる
+                    )
             except Exception as e:
                 logger.warning(f"[GEN-ANCHOR] LLM failed: {e}")
                 # フォールバックの定型（軽いCTA + タイトルの主要語）
@@ -821,6 +863,22 @@ def apply_actions_for_post(site_id: int, src_post_id: int, dry_run: bool = False
         db.session.commit()
 
     site = Site.query.get(site_id)
+    # ▼ topic スキップ（記事URLに 'topic' を含む場合は一切触らない）
+    try:
+        if os.getenv("INTERNAL_SEO_SKIP_TOPIC", "1") != "0":
+            src_url = _post_url(site_id, src_post_id) or ""
+            if "topic" in (src_url or "").lower():
+                return ApplyResult(message="skip-topic-page")
+    except Exception:
+        pass
+    # ▼ topic スキップ（記事URLに 'topic' を含む場合は一切触らない）
+    try:
+        if os.getenv("INTERNAL_SEO_SKIP_TOPIC", "1") != "0":
+            src_url = _post_url(site_id, src_post_id) or ""
+            if "topic" in (src_url or "").lower():
+                return "", ApplyResult(message="skip-topic-page"), []
+    except Exception:
+        pass
     wp_post = fetch_single_post(site, src_post_id)
     if not wp_post:
         return ApplyResult(message="fetch-failed-or-excluded")
