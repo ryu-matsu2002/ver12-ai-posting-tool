@@ -44,6 +44,8 @@ JP_TOKEN = re.compile(r"[一-龥ぁ-んァ-ンーA-Za-z0-9]{2,}")
 # アンカーテキストの推奨最大全角相当（長い文章リンクを避け、単語優先に）
 # 必要に応じて環境変数 INTERNAL_SEO_MAX_ANCHOR_LEN で調整可能（デフォルト18）
 MAX_ANCHOR_CHARS = int(os.getenv("INTERNAL_SEO_MAX_ANCHOR_LEN", "18"))
+# 同一段落に許容する最大リンク本数（不足時の救済用）
+MAX_LINKS_PER_PARA = int(os.getenv("INTERNAL_SEO_MAX_LINKS_PER_PARA", "2"))
 
 # 追加：<style>タグが剥がれて“CSSテキストだけ”になっても本文扱いにしないための判定
 _CSS_LIKE_TEXT = re.compile(
@@ -385,7 +387,14 @@ def _pick_anchor_from_common_keywords_single(
     return None
 
 
-def _pick_paragraph_slots(paragraphs: List[str], need: int, min_len: int) -> List[int]:
+def _pick_paragraph_slots(
+    paragraphs: List[str],
+    need: int,
+    min_len: int,
+    *,
+    allow_repeat: bool = False,
+    max_per_para: int = 1,
+) -> List[int]:
     """
     序盤・中盤・終盤に分散するように段落indexを選ぶ。
     短すぎる段落は除外。
@@ -434,10 +443,28 @@ def _pick_paragraph_slots(paragraphs: List[str], need: int, min_len: int) -> Lis
         zones = [0, n // 2, n - 1]
         zones = [eligible[min(max(z, 0), n - 1)] for z in zones][:need]
         return sorted(set(zones))[:need]
-    # need > 3 の場合は等間隔サンプリング
+    # need > 3 の場合は等間隔サンプリング（ユニークに）
     step = max(1, n // max(1, need))
-    slots = [eligible[min(i * step, n - 1)] for i in range(min(need, max(1, n)))]
-    slots = sorted(set(slots))
+    uniq_slots = [eligible[min(i * step, n - 1)] for i in range(min(need, n))]
+    uniq_slots = sorted(set(uniq_slots))[:min(need, n)]
+    if (not allow_repeat) or (len(uniq_slots) >= need):
+        return uniq_slots
+    # ここから救済：同一段落に複数本（max_per_para）まで許容して need を満たす
+    counts = {idx: 0 for idx in eligible}
+    for idx in uniq_slots:
+        counts[idx] += 1
+    slots = list(uniq_slots)
+    i = 0
+    while len(slots) < need and eligible:
+        idx = eligible[i % len(eligible)]
+        if counts[idx] < max_per_para:
+            slots.append(idx)
+            counts[idx] += 1
+        i += 1
+        # 念のためセーフガード
+        if i > need * max(1, len(eligible)) * max(1, max_per_para):
+            break
+    return slots[:need]
     # それでも不足する場合は「同一段落を再利用」して本数を満たす（各段落2本まで）
     if len(slots) < need and eligible:
         cap_per_para = 2
@@ -600,13 +627,31 @@ def plan_links_for_post(
     need_max = min(4, int(getattr(cfg, "max_links_per_post", 4) or 4))
     need = min(max(need_min, 2), need_max)
 
-    # 5) 段落スロット選定
-    # 段落長の閾値はまず設定値を使い、不足時は _pick_paragraph_slots 側で段階的に緩和
-    min_len = int(getattr(cfg, "min_paragraph_len", 80) or 80)
-    slots = _pick_paragraph_slots(paragraphs, need=need, min_len=min_len)
+    # 5) 段落スロット選定（段階的に緩和 → それでも不足なら同段落2本まで許容）
+    base_min_len = int(getattr(cfg, "min_paragraph_len", 80) or 80)
+    # 厳しめ→緩め の順で試行（重複排除・ユニーク優先）
+    thresholds = sorted({base_min_len, 60, 40, 20}, reverse=True)
+    slots: List[int] = []
+    for th in thresholds:
+        slots = _pick_paragraph_slots(paragraphs, need=need, min_len=th)
+        if len(slots) >= min(need, 2):  # まずは2本分以上確保できたらOK
+            break
+    if len(slots) < need:
+        # 同一段落に複数本まで入れて必要数を満たす（MAX_LINKS_PER_PARA で上限管理）
+        # 最後に試した閾値(thresholds[-1]＝最も緩い条件)で再度取得し直してから埋める
+        th = thresholds[-1]
+        slots = _pick_paragraph_slots(
+            paragraphs,
+            need=need,
+            min_len=th,
+            allow_repeat=True,
+            max_per_para=max(1, MAX_LINKS_PER_PARA),
+        )
     if not slots:
         logger.info("[Planner] src=%s no suitable paragraphs", src_post_id)
         return stats
+    # デバッグ（必要に応じてコメントアウト可）
+    logger.debug("[Planner] src=%s slots=%s need=%s", src_post_id, slots, need)
 
    # 6) ターゲット記事のタイトル/URL/キーワードを取得（アンカー生成の補助用）
     tgt_rows = (
