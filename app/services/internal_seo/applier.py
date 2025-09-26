@@ -51,17 +51,17 @@ ISEO_ANCHOR_TEMPERATURE: float = 0.30
 ISEO_ANCHOR_TOP_P: float = 0.9
 ISEO_CTX_LIMIT: int = 4000
 ISEO_SHRINK: float = 0.85
-ISEO_MAX_TOKENS: int = 160           # 惹句は短文のため小さめ
-ISEO_ANCHOR_MAX_CHARS: int = 60      # ソフト上限（切り捨てはしない。プロンプトで誘導）
+ISEO_MAX_TOKENS: int = 120           # 短文用にやや抑制
+ISEO_ANCHOR_MAX_CHARS: int = 58      # 上限を少しタイトに
 
 ANCHOR_SYSTEM_PROMPT = (
     "あなたはSEOに配慮する日本語編集者です。"
-    "以下を厳守して、内部リンクのアンカー文（1行）を作成します。"
-    "・日本語で1文のみ（改行/引用符/絵文字/記号装飾なし）\n"
-    "・リンク先の主要キーワードを含める（タイトルを丸ごと繰り返さない）\n"
-    "・文末は必ず「について詳しい解説はコチラ」で終える\n"
-    "・煽り過ぎ/断定/誤誘導/価格言及は禁止\n"
-    "・全体で40〜60字に収める\n"
+    "内部リンクのアンカー文（1行）を作成します。必ず以下を厳守：\n"
+    "・日本語で1文のみ（改行/引用符/絵文字/装飾なし）\n"
+    "・リンク先の主要キーワードを1〜2語だけ含める（タイトル丸写し禁止）\n"
+    "・文末は必ず「について詳しい解説はコチラ」で終える（句点や読点を付けない）\n"
+    "・煽り語や冗長表現は禁止（例：ぜひ／チェックしてみてください／参考にしてください など）\n"
+    "・全体で40〜58字に収める\n"
 )
 ANCHOR_USER_PROMPT_TEMPLATE = (
     "【リンク先タイトル】{dst_title}\n"
@@ -109,6 +109,15 @@ def _clean_gpt_output(text: str) -> str:
     # 先頭末尾の引用符・鉤括弧系は剥がす
     text = re.sub(r'^[\'"「『（\(\[]\s*', "", text)
     text = re.sub(r'\s*[\'"」』）\)\]]$', "", text)
+    # 禁止・冗長フレーズの簡易除去
+    STOP_PHRASES = [
+        "ぜひ", "ぜひとも", "チェックしてみてください", "参考にしてください",
+        "ぜひチェックしてみてください", "ぜひご覧ください", "ぜひチェック", "ぜひ参考に"
+    ]
+    for s in STOP_PHRASES:
+        text = text.replace(s, "")
+    # 多重スペース整理
+    text = re.sub(r"\s{2,}", " ", text)
     return text.strip()
 
 def _iseo_tok(s: str) -> int:
@@ -185,27 +194,44 @@ def _generate_anchor_text_via_llm(
     )
     # 最終正規化（1行・装飾なし）
     out = _clean_gpt_output(out)
-    # --- 追加バリデーション ---
+    # --- 追加バリデーション（厳格版） ---
     text = out
-    # 末尾パターンが無ければ付与
-    if "詳しい解説はコチラ" not in text:
-        # キーワード先頭を拾って組み立て直す
-        first_kw = ""
-        if isinstance(dst_keywords, (list, tuple)) and dst_keywords:
-            first_kw = str(dst_keywords[0]).strip()
-        if not first_kw:
-            # タイトルから応急抽出
-            try:
-                from app.services.internal_seo.utils import title_tokens
-                toks = title_tokens(dst_title or "") or []
-                first_kw = toks[0] if toks else ""
-            except Exception:
-                first_kw = ""
-        base = (first_kw or (dst_title or "")[:20]).strip()
-        text = f"{base}について詳しい解説はコチラ"
-    # 長さ調整（60字超は丸める）
+    # 語尾を強制整形：末尾句点・読点・空白を除去
+    text = re.sub(r"[、。．.\s]+$", "", text)
+    # 規定の終止句で終わらせる（重複防止のため一旦削る）
+    text = re.sub(r"(について詳しい解説はコチラ)$", r"\1", text)
+    if not text.endswith("について詳しい解説はコチラ"):
+        # 末尾が別表現なら置換
+        text = re.sub(r"(について.*)$", "について詳しい解説はコチラ", text)
+        if not text.endswith("について詳しい解説はコチラ"):
+            # どうしても整わない場合はテンプレで作り直し
+            first_kw = ""
+            if isinstance(dst_keywords, (list, tuple)) and dst_keywords:
+                first_kw = str(dst_keywords[0]).strip()
+            if not first_kw:
+                try:
+                    toks = title_tokens(dst_title or "") or []
+                    first_kw = toks[0] if toks else ""
+                except Exception:
+                    first_kw = ""
+            base = (first_kw or (dst_title or "")[:20]).strip()
+            text = f"{base}について詳しい解説はコチラ"
+    # 文字数を最終調整（超過は丸め、末尾の読点類は除去）
     if len(text) > ISEO_ANCHOR_MAX_CHARS:
-        text = text[:ISEO_ANCHOR_MAX_CHARS].rstrip("、。 ・")
+        text = text[:ISEO_ANCHOR_MAX_CHARS]
+        text = re.sub(r"[、。．.\s]+$", "", text)
+        # 超過丸めで終止句が欠けた場合はテンプレで復元
+        if not text.endswith("について詳しい解説はコチラ"):
+            first_kw = ""
+            if isinstance(dst_keywords, (list, tuple)) and dst_keywords:
+                first_kw = str(dst_keywords[0]).strip()
+            if not first_kw:
+                try:
+                    toks = title_tokens(dst_title or "") or []
+                    first_kw = toks[0] if toks else ""
+                except Exception:
+                    first_kw = ""
+            text = f"{first_kw or (dst_title or '')[:20]}について詳しい解説はコチラ"
     return text
 
 def _emit_anchor_html(href: str, text: str) -> str:
