@@ -171,7 +171,7 @@ def _generate_anchor_text_via_llm(
     out = _iseo_chat(
         [{"role": "system", "content": sys}, {"role": "user", "content": usr}],
         max_t=ISEO_MAX_TOKENS,
-        temperature=ISEO_ANCHOR_TEMPERATURE,
+        temp=ISEO_ANCHOR_TEMPERATURE,
         user_id=user_id,
     )
     # 最終正規化（1行・装飾なし）
