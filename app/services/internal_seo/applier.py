@@ -600,9 +600,9 @@ def _apply_plan_to_html(
     # 既存内部リンクの個数
     existing_internal = _existing_internal_links_count(site, html)
 
-    # 既定を 1〜8 に変更（サイト設定があればそれを優先）
-    need_min = max(1, int(cfg.min_links_per_post or 1))
-    need_max = min(8, int(cfg.max_links_per_post or 8))
+    # 既定を 2〜4 に変更（サイト設定があればそれを優先）
+    need_min = max(2, int(cfg.min_links_per_post or 2))
+    need_max = min(4, int(cfg.max_links_per_post or 4))
 
     # 1) まずは reason='plan' を優先して挿入
     def _reason_prefix(a):

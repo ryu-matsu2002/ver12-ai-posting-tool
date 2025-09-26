@@ -564,10 +564,11 @@ def plan_links_for_post(
     if not candidates:
         logger.info("[Planner] src=%s no fresh candidates", src_post_id)
 
-    # 4) 本数決定（applier と揃える：最小1 / 最大8。サイト設定があれば尊重）
-    need_min = max(1, int(getattr(cfg, "min_links_per_post", 1) or 1))
-    need_max = min(8, int(getattr(cfg, "max_links_per_post", 8) or 8))
-    need = min(max(need_min, 1), need_max)
+    # 4) 本数決定（applier と揃える：最小2 / 最大4。サイト設定があれば尊重）
+    need_min = max(2, int(getattr(cfg, "min_links_per_post", 2) or 2))
+    need_max = min(4, int(getattr(cfg, "max_links_per_post", 4) or 4))
+    # need は必ず min〜max の範囲に収める
+    need = min(max(need_min, 2), need_max)
 
     # 5) 段落スロット選定
     # 段落長の閾値を緩和（最低 50 文字に下げる）
