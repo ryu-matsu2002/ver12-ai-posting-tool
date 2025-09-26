@@ -27,6 +27,45 @@ logger = logging.getLogger(__name__)
 
 # ---- HTMLユーティリティ ----
 
+# ====== 新方式：ファイル内完結の設定・モデル・プロンプト ======
+import os as _os
+from typing import Any
+try:
+    from openai import OpenAI as _OpenAI, BadRequestError as _BadRequestError
+    _OPENAI_CLIENT = _OpenAI(api_key=_os.getenv("OPENAI_API_KEY", ""))
+except Exception:
+    _OPENAI_CLIENT = None
+    _BadRequestError = Exception
+
+# ▼ 新旧の切替（ここを "legacy_phrase" にすれば従来動作）
+ANCHOR_MODE: str = "generated_line"
+
+# ▼ LLM 呼び出し設定（記事生成と同等の流儀を最小限踏襲）
+ISEO_ANCHOR_MODEL: str = _os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+ISEO_ANCHOR_TEMPERATURE: float = 0.30
+ISEO_ANCHOR_TOP_P: float = 0.9
+ISEO_CTX_LIMIT: int = 4000
+ISEO_SHRINK: float = 0.85
+ISEO_MAX_TOKENS: int = 160           # 惹句は短文のため小さめ
+ISEO_ANCHOR_MAX_CHARS: int = 60      # ソフト上限（切り捨てはしない。プロンプトで誘導）
+
+# ▼ プロンプト（applier.py 内に同居）
+ANCHOR_SYSTEM_PROMPT = (
+    "あなたはSEOに配慮する日本語の編集者です。"
+    "以下の仕様を厳守して、クリックしたくなるが誇大でない惹句を1行だけ作成します。"
+    "・出力は日本語で1行のみ（改行・引用符・記号の装飾なし）\n"
+    "・リンク先の主要キーワードを自然に含める\n"
+    "・煽り過ぎ/誤誘導/断定的表現は不可\n"
+    "・40〜60字を目安に簡潔に\n"
+)
+ANCHOR_USER_PROMPT_TEMPLATE = (
+    "【リンク先タイトル】{dst_title}\n"
+    "【主要キーワード】{dst_keywords}\n"
+    "【文脈ヒント】{src_hint}\n"
+    "要件: 日本語で1行、改行禁止、引用符で囲まない、体言止めやですますのどちらでも可。\n"
+    "出力は惹句一文のみ。"
+)
+
 _P_CLOSE = re.compile(r"</p\s*>", re.IGNORECASE)
 _A_TAG = re.compile(r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a\s*>', re.IGNORECASE | re.DOTALL)
 _TAG_STRIP = re.compile(r"<[^>]+>")
@@ -53,6 +92,95 @@ def _split_paragraphs(html: str) -> List[str]:
     parts = [p.strip() for p in parts if p and p.strip()]
     # 全く分割できなければ本文全体を1段落として返す
     return parts or [html]
+
+# ---- LLMユーティリティ（applier内だけで完結）----
+def _clean_gpt_output(text: str) -> str:
+    text = re.sub(r"```(?:html)?", "", text or "")
+    text = re.sub(r"```", "", text)
+    text = text.replace("\u3000", " ")
+    text = text.strip()
+    # 改行は1行に潰す
+    text = re.sub(r"\s*\n+\s*", " ", text)
+    # 先頭末尾の引用符・鉤括弧系は剥がす
+    text = re.sub(r'^[\'"「『（\(\[]\s*', "", text)
+    text = re.sub(r'\s*[\'"」』）\)\]]$', "", text)
+    return text.strip()
+
+def _iseo_tok(s: str) -> int:
+    return int(len(s or "") / 1.8)
+
+def _iseo_chat(msgs: List[Dict[str, str]], max_t: int, temp: float, user_id: Optional[int] = None) -> str:
+    """
+    内部SEO用の軽ラッパ。記事生成の挙動を簡略化して踏襲。
+    TokenUsageLog 記録は user_id が無ければスキップ。
+    """
+    if _OPENAI_CLIENT is None:
+        raise RuntimeError("OpenAI client is not available")
+    used = sum(_iseo_tok(m.get("content", "")) for m in msgs)
+    available = ISEO_CTX_LIMIT - used - 16
+    max_t = max(1, min(max_t, available))
+
+    def _call(m: int) -> str:
+        res = _OPENAI_CLIENT.chat.completions.create(
+            model=ISEO_ANCHOR_MODEL,
+            messages=msgs,
+            max_tokens=m,
+            temperature=temp,
+            top_p=ISEO_ANCHOR_TOP_P,
+            timeout=60,
+        )
+        # TokenUsageLog（任意）
+        try:
+            if hasattr(res, "usage") and user_id:
+                from app.models import TokenUsageLog
+                usage = res.usage
+                log = TokenUsageLog(
+                    user_id=user_id,
+                    prompt_tokens=getattr(usage, "prompt_tokens", 0),
+                    completion_tokens=getattr(usage, "completion_tokens", 0),
+                    total_tokens=getattr(usage, "total_tokens", 0),
+                )
+                db.session.add(log)
+                db.session.commit()
+        except Exception as _e:
+            logger.warning(f"[ISEO TokenLog warn] { _e }")
+        content = (res.choices[0].message.content or "").strip()
+        return _clean_gpt_output(content)
+
+    try:
+        return _call(max_t)
+    except _BadRequestError as e:
+        if "max_tokens" in str(e):
+            retry_t = max(1, int(max_t * ISEO_SHRINK))
+            return _call(retry_t)
+        raise
+
+def _generate_anchor_text_via_llm(
+    dst_title: str,
+    dst_keywords: List[str] | Tuple[str, ...] | None,
+    src_hint: str = "",
+    user_id: Optional[int] = None,
+) -> str:
+    kw_csv = ", ".join([k for k in (dst_keywords or []) if k]) if isinstance(dst_keywords, (list, tuple)) else (dst_keywords or "")
+    sys = ANCHOR_SYSTEM_PROMPT
+    usr = ANCHOR_USER_PROMPT_TEMPLATE.format(
+        dst_title=(dst_title or "")[:200],
+        dst_keywords=(kw_csv or "")[:200],
+        src_hint=(src_hint or "")[:200],
+    )
+    out = _iseo_chat(
+        [{"role": "system", "content": sys}, {"role": "user", "content": usr}],
+        max_t=ISEO_MAX_TOKENS,
+        temperature=ISEO_ANCHOR_TEMPERATURE,
+        user_id=user_id,
+    )
+    # 最終正規化（1行・装飾なし）
+    out = _clean_gpt_output(out)
+    return out
+
+def _emit_anchor_html(href: str, text: str) -> str:
+    text_safe = _TAG_STRIP.sub(" ", unescape(text or "")).strip()
+    return f'<a href="{href}" title="{text_safe}">{text_safe}</a>'
 
 def _rejoin_paragraphs(paragraphs: List[str]) -> str:
     return "</p>".join(paragraphs)
@@ -392,11 +520,14 @@ def preview_apply_for_post(site_id: int, src_post_id: int) -> Tuple[str, ApplyRe
                 pidx = -1
             before_snip = _html_to_text(original_paras[pidx])[:120] if (0 <= pidx < len(original_paras)) else ""
             after_snip  = _html_to_text(new_paras[pidx])[:120] if (0 <= pidx < len(new_paras)) else ""
+            # metaにdst_urlがあればプレビューでも優先採用
+            _meta = (getattr(a, "meta", None) or {})
+            _dst_url_from_meta = (_meta.get("dst_url") or "").strip() if isinstance(_meta, dict) else ""
             previews.append(PreviewItem(
                 position=a.position or "",
                 anchor_text=a.anchor_text or "",
                 target_post_id=int(a.target_post_id),
-                target_url=(meta_map.get(a.target_post_id, ("",""))[0]) or "",
+                target_url=_dst_url_from_meta or (meta_map.get(a.target_post_id, ("",""))[0]) or "",
                 paragraph_index=pidx,
                 paragraph_excerpt_before=before_snip,
                 paragraph_excerpt_after=after_snip,
@@ -462,61 +593,135 @@ def _apply_plan_to_html(
         if idx < 0 or idx >= len(paragraphs):
             res.skipped += 1
             continue
-        href, tgt_title = target_meta_map.get(act.target_post_id, ("",""))
+        # --- meta優先でリンク先情報を取得（fallbackはContentIndex由来のtarget_meta_map） ---
+        _meta: dict = (getattr(act, "meta", None) or {}) if isinstance(getattr(act, "meta", None), dict) else {}
+        href0, tgt_title0 = target_meta_map.get(act.target_post_id, ("", ""))
+        href_meta = (_meta.get("dst_url") or "").strip()
+        title_meta = (_meta.get("dst_title") or "").strip()
+        # dst_keywords は list/tuple/str いずれにも対応（最終的にlist化）
+        kw_meta = _meta.get("dst_keywords")
+        if isinstance(kw_meta, str):
+            kw_meta_list = [k.strip() for k in kw_meta.split(",") if k.strip()]
+        elif isinstance(kw_meta, (list, tuple)):
+            kw_meta_list = [str(k).strip() for k in kw_meta if str(k).strip()]
+        else:
+            kw_meta_list = []
+        href = href_meta or href0
+        tgt_title = title_meta or tgt_title0
         if not href:
             res.skipped += 1
             continue
-        # ★安全ガード（緩和版）：
-        #   アンカーはターゲットタイトル内に NFKC 正規化で「部分一致」していればOK
-        #   例）タイトル「ワーホリ国での生活…」に対して「ワーホリ」も許可
-        if nfkc_norm(act.anchor_text) not in nfkc_norm(tgt_title or ""):
-            act.status = "skipped"
-            act.reason = "skipped:anchor-not-in-target-title"
-            act.updated_at = datetime.utcnow()
-            res.skipped += 1
-            continue
-        # --- 同一アンカー重複の抑止（記事内1回まで） ---
-        anchor_key = nfkc_norm((act.anchor_text or "").strip()).lower()
-        if anchor_key:
-            if anchor_key in seen_anchor_keys:
-                # 重複は適用しない
+        # ---- 新方式 / 旧方式の分岐 ----
+        if ANCHOR_MODE == "generated_line":
+            # 段落本文（安全ガード/重複/禁止領域チェック）
+            para_html = paragraphs[idx]
+            if _H_TAG.search(para_html) or _TOC_HINT.search(para_html):
+                res.skipped += 1
+                continue
+            # 同じURLが段落内に既にあるならスキップ（多重リンク回避）
+            if href in [h for (h, _) in _extract_links(para_html)]:
+                res.skipped += 1
+                continue
+
+            # 惹句テキスト（metaが無ければ生成）
+            anchor_text = (act.anchor_text or "").strip()
+            if not anchor_text:
+                try:
+                    # 文脈ヒント：当該段落のプレーンテキストを抜粋
+                    src_hint = _html_to_text(para_html)[:120]
+                    # 主要キーワード：plannerのmeta(dst_keywords)を最優先、無ければタイトルから抽出
+                    dst_kw_list = kw_meta_list
+                    if not dst_kw_list:
+                        try:
+                            dst_kw_list = [w for w in (title_tokens(tgt_title or "") or []) if w][:6]
+                        except Exception:
+                            dst_kw_list = []
+                    anchor_text = _generate_anchor_text_via_llm(
+                        dst_title=tgt_title or "",
+                        dst_keywords=dst_kw_list,
+                        src_hint=src_hint,
+                        user_id=None,  # user_id があれば渡せる
+                    )
+                except Exception as e:
+                    logger.warning(f"[GEN-ANCHOR] LLM failed: {e}")
+                    # フォールバックの定型（軽いCTA + タイトルの主要語）
+                    key = (tgt_title or "").strip()
+                    anchor_text = (f"{key}の詳しい解説はこちら。")[:80] if key else "詳しい解説はこちら。"
+
+            # NGアンカー最終チェック
+            if is_ng_anchor(anchor_text):
+                act.status = "skipped"
+                act.reason = "ng-anchor"
+                act.updated_at = datetime.utcnow()
+                res.skipped += 1
+                continue
+
+            # 記事内での重複抑止
+            anchor_key = nfkc_norm(anchor_text).lower()
+            if anchor_key and anchor_key in seen_anchor_keys:
                 act.status = "skipped"
                 act.reason = "duplicate-anchor-in-article"
                 act.updated_at = datetime.utcnow()
                 res.skipped += 1
                 continue
 
-        # 段落本文を先に取り出してから各種チェックを行う（未定義エラー対策）
-        para_html = paragraphs[idx]
+            # 1行で追記：段落末尾に <br> + アンカー（既存の青＆下線CSSを利用）
+            anchor_html = _emit_anchor_html(href, anchor_text)
+            paragraphs[idx] = para_html + "<br>" + anchor_html
 
-        # 見出し/目次の段落はスキップ（Wikipedia方針）
-        if _H_TAG.search(para_html) or _TOC_HINT.search(para_html):
-            res.skipped += 1
-            continue
-        # 同じURLが段落内に既にあるならスキップ
-        if href in [h for (h, _) in _extract_links(para_html)]:
-            res.skipped += 1
-            continue
-        # 最終NGチェック（保険）
-        if is_ng_anchor(act.anchor_text):
-            act.status = "skipped"
-            act.reason = "ng-anchor"
-            act.updated_at = datetime.utcnow()
-            res.skipped += 1
-            continue
-        # 段落内の最初の未リンク出現をリンク化（Wikipedia風）
-        new_para = _linkify_first_occurrence(para_html, act.anchor_text, href)
-        if not new_para:
-            # 見つからなければスキップ（このスロットの語句が無い）
-            res.skipped += 1
-            continue
-        paragraphs[idx] = new_para
-        act.status = "applied"
-        act.applied_at = datetime.utcnow()
-        res.applied += 1
-        inserted += 1
-        if anchor_key:
-            seen_anchor_keys.add(anchor_key)
+            # 状態更新
+            act.anchor_text = anchor_text  # 生成結果を保存（再試行時のキャッシュにもなる）
+            act.status = "applied"
+            act.applied_at = datetime.utcnow()
+            res.applied += 1
+            inserted += 1
+            if anchor_key:
+                seen_anchor_keys.add(anchor_key)
+            logger.info(f"[GEN-ANCHOR] p={idx} text='{anchor_text}' -> {href}")
+
+        else:
+            # ---- 旧方式：語句の最初の出現をリンク化（従来ロジックを維持） ----
+            # ★安全ガード（緩和版）：ターゲットタイトルへの部分一致
+            if nfkc_norm(act.anchor_text) not in nfkc_norm(tgt_title or ""):
+                act.status = "skipped"
+                act.reason = "skipped:anchor-not-in-target-title"
+                act.updated_at = datetime.utcnow()
+                res.skipped += 1
+                continue
+
+            # 重複抑止
+            anchor_key = nfkc_norm((act.anchor_text or "").strip()).lower()
+            if anchor_key and anchor_key in seen_anchor_keys:
+                act.status = "skipped"
+                act.reason = "duplicate-anchor-in-article"
+                act.updated_at = datetime.utcnow()
+                res.skipped += 1
+                continue
+
+            para_html = paragraphs[idx]
+            if _H_TAG.search(para_html) or _TOC_HINT.search(para_html):
+                res.skipped += 1
+                continue
+            if href in [h for (h, _) in _extract_links(para_html)]:
+                res.skipped += 1
+                continue
+            if is_ng_anchor(act.anchor_text):
+                act.status = "skipped"
+                act.reason = "ng-anchor"
+                act.updated_at = datetime.utcnow()
+                res.skipped += 1
+                continue
+            new_para = _linkify_first_occurrence(para_html, act.anchor_text, href)
+            if not new_para:
+                res.skipped += 1
+                continue
+            paragraphs[idx] = new_para
+            act.status = "applied"
+            act.applied_at = datetime.utcnow()
+            res.applied += 1
+            inserted += 1
+            if anchor_key:
+                seen_anchor_keys.add(anchor_key)
 
     # 2) swap候補：既存内部リンクがある & まだ余裕がない場合に置換を試みる
     #   （簡易ルール：scoreの低そうな既存リンクをひとつだけ差し替え）

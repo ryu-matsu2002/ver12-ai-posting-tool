@@ -578,15 +578,21 @@ def plan_links_for_post(
         logger.info("[Planner] src=%s no suitable paragraphs", src_post_id)
         return stats
 
-    # 6) ターゲット記事のタイトルを取得（アンカー生成用）
+   # 6) ターゲット記事のタイトル/URL/キーワードを取得（アンカー生成 & meta 用）
     tgt_rows = (
         ContentIndex.query
-        .with_entities(ContentIndex.wp_post_id, ContentIndex.title, ContentIndex.url)
+        .with_entities(ContentIndex.wp_post_id, ContentIndex.title, ContentIndex.url, ContentIndex.keywords)
         .filter(ContentIndex.site_id == site_id)
         .filter(ContentIndex.wp_post_id.in_(candidates[: len(slots)]))
         .all()
     )
-    tgt_map: Dict[int, Tuple[str, str]] = {int(pid): (title or "", url or "") for (pid, title, url) in tgt_rows}
+    def _csv_to_list(csv: Optional[str]) -> List[str]:
+        return [k.strip() for k in (csv or "").split(",") if k and k.strip()]
+    # pid -> (title, url, dst_keywords[])
+    tgt_map: Dict[int, Tuple[str, str, List[str]]] = {
+        int(pid): (title or "", url or "", _csv_to_list(kws))
+        for (pid, title, url, kws) in tgt_rows
+    }
 
     # 7) スロット×ターゲットで pending アクションを作成
     #    - 同一記事内で同じアンカー（キーワード）は1回までに制限
@@ -598,7 +604,7 @@ def plan_links_for_post(
         if slot_ptr >= len(slots):
             break
         slot_idx = slots[slot_ptr]
-        title, tgt_url = tgt_map.get(tgt_pid, ("", ""))
+        title, tgt_url, dst_kw_list = tgt_map.get(tgt_pid, ("", "", []))
         raw_para = paragraphs[slot_idx]
         para_text = _html_to_text(raw_para)
         if _H_TAG.search(raw_para) or _TOC_HINT.search(raw_para):
@@ -607,12 +613,13 @@ def plan_links_for_post(
         if (not title) or (not tgt_url):
             tr = (
                 ContentIndex.query
-                .with_entities(ContentIndex.title, ContentIndex.url)
+                .with_entities(ContentIndex.title, ContentIndex.url, ContentIndex.keywords)
                 .filter_by(site_id=site_id, wp_post_id=tgt_pid)
                 .one_or_none()
             )
             if tr:
                 title, tgt_url = tr[0] or "", tr[1] or ""
+                dst_kw_list = _csv_to_list(tr[2] or "")
         # ターゲット本文テキスト（部分一致の材料）
         tgt_body_text = ""
         try:
@@ -656,6 +663,13 @@ def plan_links_for_post(
         seen_anchor_keys.add(anchor_key)
 
         # 監査ログに pending で登録（position は 'p:{index}'）
+        # meta にはリンク先のタイトル/キーワード/URL を保存（applier が惹句生成に使用）
+        if not dst_kw_list:
+            # キーワードが空ならタイトルから代表語を抽出して補完
+            try:
+                dst_kw_list = [w for w in (title_tokens(title or "") or []) if w][:6]
+            except Exception:
+                dst_kw_list = []
         act = InternalLinkAction(
             site_id=site_id,
             post_id=src_post_id,
@@ -666,6 +680,11 @@ def plan_links_for_post(
             reason="plan:title_match",
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
+            meta={
+                "dst_title": title,
+                "dst_keywords": dst_kw_list,
+                "dst_url": tgt_url,
+            },
         )
         db.session.add(act)
         actions_made += 1
@@ -711,17 +730,18 @@ def plan_links_for_post(
                 if sc >= baseline + margin:
                     # 置換候補：最初の長め段落に提案（厳密位置は applier で精緻化）
                     slot_for_swap = slots[0] if slots else 0
-                    t_title, t_url = tgt_map.get(pid, ("", ""))
+                    t_title, t_url, t_kws = tgt_map.get(pid, ("", "", []))
                     if not t_title or not t_url:
                         # ない場合はContentIndexから再取得
                         tr = (
                             ContentIndex.query
-                            .with_entities(ContentIndex.title, ContentIndex.url)
+                            .with_entities(ContentIndex.title, ContentIndex.url, ContentIndex.keywords)
                             .filter_by(site_id=site_id, wp_post_id=pid)
                             .one_or_none()
                         )
                         if tr:
                             t_title, t_url = tr[0] or "", tr[1] or ""
+                            t_kws = _csv_to_list(tr[2] or "")
                     slot_para_raw = paragraphs[slot_for_swap] if 0 <= slot_for_swap < len(paragraphs) else ""
                     slot_para_text = _html_to_text(slot_para_raw)
                     # swap 候補のアンカー決定でも部分一致を利用
@@ -742,6 +762,11 @@ def plan_links_for_post(
                     if anc_key in seen_anchor_keys:
                         continue
                     seen_anchor_keys.add(anc_key)
+                    if not t_kws:
+                        try:
+                            t_kws = [w for w in (title_tokens(t_title or "") or []) if w][:6]
+                        except Exception:
+                            t_kws = []
                     db.session.add(InternalLinkAction(
                         site_id=site_id,
                         post_id=src_post_id,
@@ -752,6 +777,11 @@ def plan_links_for_post(
                         reason="swap_candidate:title_match",
                         created_at=datetime.utcnow(),
                         updated_at=datetime.utcnow(),
+                        meta={
+                            "dst_title": t_title,
+                            "dst_keywords": t_kws,
+                            "dst_url": t_url,
+                        },
                     ))
                     made_swaps += 1
             if made_swaps:
