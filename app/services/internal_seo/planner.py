@@ -623,22 +623,17 @@ def plan_links_for_post(
                 dst_kw_list = _csv_to_list(tr[2] or "")
         if not tgt_url:
             continue
-        # 監査ログに pending で登録（position は 'p:{index}'）
+        # pending を登録（position は 'p:{index}'）
         act = InternalLinkAction(
             site_id=site_id,
             post_id=src_post_id,
             target_post_id=tgt_pid,
-            anchor_text="",  # アンカー文は applier が生成
+            anchor_text="",  # アンカー文は applier が LLM 生成
             position=f"p:{slot_idx}",
             status="pending",
             reason="plan:generated",
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
-            meta={
-                "dst_title": title,
-                "dst_url": tgt_url,
-                "dst_keywords": dst_kw_list[:8],  # LLMへのヒントをコンパクトに
-            },
         )
         db.session.add(act)
         actions_made += 1
