@@ -623,31 +623,28 @@ def _apply_plan_to_html(
                 res.skipped += 1
                 continue
 
-            # 惹句テキスト（metaが無ければ生成）
-            anchor_text = (act.anchor_text or "").strip()
-            if not anchor_text:
-                try:
-                    # 文脈ヒント：当該段落のプレーンテキストを抜粋
-                    src_hint = _html_to_text(para_html)[:120]
-                    # 主要キーワード：plannerのmeta(dst_keywords)を最優先、無ければタイトルから抽出
-                    dst_kw_list = kw_meta_list
-                    if not dst_kw_list:
-                        try:
-                            dst_kw_list = [w for w in (title_tokens(tgt_title or "") or []) if w][:6]
-                        except Exception:
-                            dst_kw_list = []
-                    anchor_text = _generate_anchor_text_via_llm(
-                        dst_title=tgt_title or "",
-                        dst_keywords=dst_kw_list,
-                        src_hint=src_hint,
-                        user_id=None,  # user_id があれば渡せる
-                    )
-                except Exception as e:
-                    logger.warning(f"[GEN-ANCHOR] LLM failed: {e}")
-                    # フォールバックの定型（軽いCTA + タイトルの主要語）
-                    key = (tgt_title or "").strip()
-                    anchor_text = (f"{key}の詳しい解説はこちら。")[:80] if key else "詳しい解説はこちら。"
-
+            # 惹句テキスト：generated_line モードでは **毎回 LLM 生成**（plannerの anchor_text は使わない）
+            try:
+                # 文脈ヒント：当該段落のプレーンテキストを抜粋
+                src_hint = _html_to_text(para_html)[:120]
+                # 主要キーワード：plannerのmeta(dst_keywords)を最優先、無ければタイトルから抽出
+                dst_kw_list = kw_meta_list
+                if not dst_kw_list:
+                    try:
+                        dst_kw_list = [w for w in (title_tokens(tgt_title or "") or []) if w][:6]
+                    except Exception:
+                        dst_kw_list = []
+                anchor_text = _generate_anchor_text_via_llm(
+                    dst_title=tgt_title or "",
+                    dst_keywords=dst_kw_list,
+                    src_hint=src_hint,
+                    user_id=None,  # user_id があれば渡せる
+                )
+            except Exception as e:
+                logger.warning(f"[GEN-ANCHOR] LLM failed: {e}")
+                # フォールバックの定型（軽いCTA + タイトルの主要語）
+                key = (tgt_title or "").strip()
+                anchor_text = (f"{key}の詳しい解説はこちら。")[:80] if key else "詳しい解説はこちら。"
             # NGアンカー最終チェック
             if is_ng_anchor(anchor_text):
                 act.status = "skipped"
