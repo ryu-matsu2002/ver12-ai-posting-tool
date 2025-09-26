@@ -44,8 +44,8 @@ JP_TOKEN = re.compile(r"[一-龥ぁ-んァ-ンーA-Za-z0-9]{2,}")
 # アンカーテキストの推奨最大全角相当（長い文章リンクを避け、単語優先に）
 # 必要に応じて環境変数 INTERNAL_SEO_MAX_ANCHOR_LEN で調整可能（デフォルト18）
 MAX_ANCHOR_CHARS = int(os.getenv("INTERNAL_SEO_MAX_ANCHOR_LEN", "18"))
-# 同一段落に許容する最大リンク本数（不足時の救済用）
-MAX_LINKS_PER_PARA = int(os.getenv("INTERNAL_SEO_MAX_LINKS_PER_PARA", "2"))
+# 同一段落に許容する最大リンク本数（不足時の救済用：厳しめに既定=1）
+MAX_LINKS_PER_PARA = int(os.getenv("INTERNAL_SEO_MAX_LINKS_PER_PARA", "1"))
 
 # 追加：<style>タグが剥がれて“CSSテキストだけ”になっても本文扱いにしないための判定
 _CSS_LIKE_TEXT = re.compile(
@@ -57,11 +57,11 @@ _CSS_LIKE_TEXT = re.compile(
     r'(?:a\[href\^\=)'          # a[href^="..."] セレクタ
 , re.IGNORECASE | re.DOTALL)
 
-# 閾値はやや緩め。環境変数で再調整可。
-GENRE_JACCARD_MIN = float(os.getenv("INTERNAL_SEO_GENRE_JACCARD_MIN", "0.25"))
-TITLE_COSINE_MIN  = float(os.getenv("INTERNAL_SEO_TITLE_COSINE_MIN", "0.15"))
-# LinkGraph が十分強いときは同ジャンル判定を免除するスコア下限
-STRONG_LINKGRAPH_SCORE = float(os.getenv("INTERNAL_SEO_STRONG_LINKGRAPH_SCORE", "0.08"))
+# 類似判定は少しだけ厳しめ（必要なら環境変数で調整）
+GENRE_JACCARD_MIN = float(os.getenv("INTERNAL_SEO_GENRE_JACCARD_MIN", "0.30"))
+TITLE_COSINE_MIN  = float(os.getenv("INTERNAL_SEO_TITLE_COSINE_MIN", "0.20"))
+# LinkGraph が十分強いときのみ同ジャンル判定を免除するスコア下限（強め）
+STRONG_LINKGRAPH_SCORE = float(os.getenv("INTERNAL_SEO_STRONG_LINKGRAPH_SCORE", "0.10"))
 
 # 段落分割は applier と完全に同じ実装を使う（index不一致を避ける）
 # _split_paragraphs は applier から import 済み
@@ -414,9 +414,9 @@ def _pick_paragraph_slots(
 
     # 短い記事にも対応するため、閾値未満でも最終的にフォールバックで拾う
     eligible = [i for i, p in enumerate(paragraphs) if _is_ok_para(p)]
-    # ★不足時の段階的フォールバック（80→60→40→20 まで緩和）
+    # ★不足時の段階的フォールバック（base→70→60→50→40 まで。20 には下げない）
     if len(eligible) < need:
-        for relaxed in (60, 40, 20):
+        for relaxed in (70, 60, 50, 40):
             def _is_ok_relax(p: str) -> bool:
                 if _H_TAG.search(p) or _TOC_HINT.search(p) or _STYLE_BLOCK.search(p):
                     return False
@@ -465,18 +465,7 @@ def _pick_paragraph_slots(
         if i > need * max(1, len(eligible)) * max(1, max_per_para):
             break
     return slots[:need]
-    # それでも不足する場合は「同一段落を再利用」して本数を満たす（各段落2本まで）
-    if len(slots) < need and eligible:
-        cap_per_para = 2
-        reused = []
-        # 既存の slots を優先配列にし、足りない分は同じ index を重複許容で足す
-        i = 0
-        while len(slots) + len(reused) < need and i < len(eligible) * cap_per_para:
-            reused.append(eligible[i % len(eligible)])
-            i += 1
-        # 重複を許して返す（呼び出し側で順に消費）
-        return slots + reused[: max(0, need - len(slots))]
-    return slots[:need]
+    # ※ これ以上の緩和は行わない（関連性・可読性の担保）
 
 # ---------- 既存リンク抽出 & URL→post_id解決 ----------
 
@@ -604,19 +593,23 @@ def plan_links_for_post(
     #    - 自身は除外
     raw_candidates = _top_targets_for_source(site_id, src_post_id, topk=max_candidates, min_score=min_score)
     candidates: List[int] = []
+    strong_pass = 0
+    genre_pass  = 0
     for t, s in raw_candidates:
         if t == src_post_id:
             continue
         if t in existing_post_ids:
             continue
-        # ★LinkGraph が強ければ同ジャンル判定を免除
+        # ★LinkGraph が強ければ同ジャンル判定を免除（強い関連のみ）
         if s >= STRONG_LINKGRAPH_SCORE:
             candidates.append(t)
+            strong_pass += 1
             continue
         # それ以外は同ジャンル判定（keywords Jaccard or タイトル類似）
         try:
             if _same_genre_ok(site_id, src_post_id, t):
                 candidates.append(t)
+                genre_pass += 1
         except Exception:
             continue
     if not candidates:
@@ -627,10 +620,10 @@ def plan_links_for_post(
     need_max = min(4, int(getattr(cfg, "max_links_per_post", 4) or 4))
     need = min(max(need_min, 2), need_max)
 
-    # 5) 段落スロット選定（段階的に緩和 → それでも不足なら同段落2本まで許容）
+    # 5) 段落スロット選定（段階的に緩和 → それでも不足なら同段落 MAX_LINKS_PER_PARA 本まで許容）
     base_min_len = int(getattr(cfg, "min_paragraph_len", 80) or 80)
     # 厳しめ→緩め の順で試行（重複排除・ユニーク優先）
-    thresholds = sorted({base_min_len, 60, 40, 20}, reverse=True)
+    thresholds = sorted({base_min_len, 70, 60, 50, 40}, reverse=True)
     slots: List[int] = []
     for th in thresholds:
         slots = _pick_paragraph_slots(paragraphs, need=need, min_len=th)
@@ -650,8 +643,12 @@ def plan_links_for_post(
     if not slots:
         logger.info("[Planner] src=%s no suitable paragraphs", src_post_id)
         return stats
-    # デバッグ（必要に応じてコメントアウト可）
-    logger.debug("[Planner] src=%s slots=%s need=%s", src_post_id, slots, need)
+    # 診断ログ（INTERNAL_SEO_PLANNER_DIAG=1 のときだけ）
+    if os.getenv("INTERNAL_SEO_PLANNER_DIAG", "0") == "1":
+        logger.info(
+            "[PlannerDiag] src=%s paras=%s slots=%s need=%s strong_pass=%s genre_pass=%s raw=%s",
+            src_post_id, len(paragraphs), slots, need, strong_pass, genre_pass, len(raw_candidates)
+        )
 
    # 6) ターゲット記事のタイトル/URL/キーワードを取得（アンカー生成の補助用）
     tgt_rows = (
