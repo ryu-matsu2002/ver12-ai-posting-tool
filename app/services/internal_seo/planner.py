@@ -55,9 +55,11 @@ _CSS_LIKE_TEXT = re.compile(
     r'(?:a\[href\^\=)'          # a[href^="..."] セレクタ
 , re.IGNORECASE | re.DOTALL)
 
-# 閾値をやや緩め（関連候補を広く拾う）。必要なら環境変数で再調整。
+# 閾値はやや緩め。環境変数で再調整可。
 GENRE_JACCARD_MIN = float(os.getenv("INTERNAL_SEO_GENRE_JACCARD_MIN", "0.25"))
 TITLE_COSINE_MIN  = float(os.getenv("INTERNAL_SEO_TITLE_COSINE_MIN", "0.15"))
+# LinkGraph が十分強いときは同ジャンル判定を免除するスコア下限
+STRONG_LINKGRAPH_SCORE = float(os.getenv("INTERNAL_SEO_STRONG_LINKGRAPH_SCORE", "0.08"))
 
 # 段落分割は applier と完全に同じ実装を使う（index不一致を避ける）
 # _split_paragraphs は applier から import 済み
@@ -403,6 +405,19 @@ def _pick_paragraph_slots(paragraphs: List[str], need: int, min_len: int) -> Lis
 
     # 短い記事にも対応するため、閾値未満でも最終的にフォールバックで拾う
     eligible = [i for i, p in enumerate(paragraphs) if _is_ok_para(p)]
+    # ★不足時の段階的フォールバック（80→60→40→20 まで緩和）
+    if len(eligible) < need:
+        for relaxed in (60, 40, 20):
+            def _is_ok_relax(p: str) -> bool:
+                if _H_TAG.search(p) or _TOC_HINT.search(p) or _STYLE_BLOCK.search(p):
+                    return False
+                txt = _html_to_text(p)
+                if _CSS_LIKE_TEXT.search(txt or ""):
+                    return False
+                return bool(txt) and len(txt) >= relaxed
+            eligible = [i for i, p in enumerate(paragraphs) if _is_ok_relax(p)]
+            if len(eligible) >= need or eligible:
+                break
     if not eligible:
         # 1文でもある段落を対象にフォールバック（安全に末尾挿入）
         eligible = [
@@ -415,14 +430,26 @@ def _pick_paragraph_slots(paragraphs: List[str], need: int, min_len: int) -> Lis
     # 3ゾーンで均等抽出（必要数に応じて）
     zones = []
     n = len(eligible)
-    if need <= 3:
+    if need <= 3 and len(eligible) >= 1:
         zones = [0, n // 2, n - 1]
         zones = [eligible[min(max(z, 0), n - 1)] for z in zones][:need]
         return sorted(set(zones))[:need]
     # need > 3 の場合は等間隔サンプリング
-    step = max(1, n // need)
-    slots = [eligible[min(i * step, n - 1)] for i in range(need)]
-    return sorted(set(slots))[:need]
+    step = max(1, n // max(1, need))
+    slots = [eligible[min(i * step, n - 1)] for i in range(min(need, max(1, n)))]
+    slots = sorted(set(slots))
+    # それでも不足する場合は「同一段落を再利用」して本数を満たす（各段落2本まで）
+    if len(slots) < need and eligible:
+        cap_per_para = 2
+        reused = []
+        # 既存の slots を優先配列にし、足りない分は同じ index を重複許容で足す
+        i = 0
+        while len(slots) + len(reused) < need and i < len(eligible) * cap_per_para:
+            reused.append(eligible[i % len(eligible)])
+            i += 1
+        # 重複を許して返す（呼び出し側で順に消費）
+        return slots + reused[: max(0, need - len(slots))]
+    return slots[:need]
 
 # ---------- 既存リンク抽出 & URL→post_id解決 ----------
 
@@ -555,12 +582,15 @@ def plan_links_for_post(
             continue
         if t in existing_post_ids:
             continue
-        # ★同ジャンル判定（keywords Jaccard or タイトル類似）
+        # ★LinkGraph が強ければ同ジャンル判定を免除
+        if s >= STRONG_LINKGRAPH_SCORE:
+            candidates.append(t)
+            continue
+        # それ以外は同ジャンル判定（keywords Jaccard or タイトル類似）
         try:
             if _same_genre_ok(site_id, src_post_id, t):
                 candidates.append(t)
         except Exception:
-            # 判定に失敗した場合は安全側で除外
             continue
     if not candidates:
         logger.info("[Planner] src=%s no fresh candidates", src_post_id)
@@ -571,9 +601,8 @@ def plan_links_for_post(
     need = min(max(need_min, 2), need_max)
 
     # 5) 段落スロット選定
-    # 段落長の閾値をさらに緩和（最低 40 文字まで許容）
+    # 段落長の閾値はまず設定値を使い、不足時は _pick_paragraph_slots 側で段階的に緩和
     min_len = int(getattr(cfg, "min_paragraph_len", 80) or 80)
-    min_len = max(40, min_len)
     slots = _pick_paragraph_slots(paragraphs, need=need, min_len=min_len)
     if not slots:
         logger.info("[Planner] src=%s no suitable paragraphs", src_post_id)
@@ -605,7 +634,12 @@ def plan_links_for_post(
             break
         if tgt_pid in seen_target_pids:
             continue
-        slot_idx = slots[slot_ptr]
+        # slots が不足している場合は循環利用（同一段落に最大2本まで）
+        slot_idx = slots[slot_ptr % len(slots)]
+        # 1段落2本の上限を守る（同じ index が3回以上使われないようにする）
+        if slots.count(slot_idx) >= 2 and (slot_ptr // len(slots)) >= 2:
+            slot_ptr += 1
+            continue
         raw_para = paragraphs[slot_idx]
         if _H_TAG.search(raw_para) or _TOC_HINT.search(raw_para):
             continue  # 念のため
