@@ -55,8 +55,9 @@ _CSS_LIKE_TEXT = re.compile(
     r'(?:a\[href\^\=)'          # a[href^="..."] セレクタ
 , re.IGNORECASE | re.DOTALL)
 
-GENRE_JACCARD_MIN = float(os.getenv("INTERNAL_SEO_GENRE_JACCARD_MIN", "0.30"))
-TITLE_COSINE_MIN  = float(os.getenv("INTERNAL_SEO_TITLE_COSINE_MIN", "0.20"))
+# 閾値をやや緩め（関連候補を広く拾う）。必要なら環境変数で再調整。
+GENRE_JACCARD_MIN = float(os.getenv("INTERNAL_SEO_GENRE_JACCARD_MIN", "0.25"))
+TITLE_COSINE_MIN  = float(os.getenv("INTERNAL_SEO_TITLE_COSINE_MIN", "0.15"))
 
 # 段落分割は applier と完全に同じ実装を使う（index不一致を避ける）
 # _split_paragraphs は applier から import 済み
@@ -567,13 +568,12 @@ def plan_links_for_post(
     # 4) 本数決定（applier と揃える：最小2 / 最大4。サイト設定があれば尊重）
     need_min = max(2, int(getattr(cfg, "min_links_per_post", 2) or 2))
     need_max = min(4, int(getattr(cfg, "max_links_per_post", 4) or 4))
-    # need は必ず min〜max の範囲に収める
     need = min(max(need_min, 2), need_max)
 
     # 5) 段落スロット選定
-    # 段落長の閾値を緩和（最低 50 文字に下げる）
+    # 段落長の閾値をさらに緩和（最低 40 文字まで許容）
     min_len = int(getattr(cfg, "min_paragraph_len", 80) or 80)
-    min_len = max(50, min_len)
+    min_len = max(40, min_len)
     slots = _pick_paragraph_slots(paragraphs, need=need, min_len=min_len)
     if not slots:
         logger.info("[Planner] src=%s no suitable paragraphs", src_post_id)
@@ -596,20 +596,20 @@ def plan_links_for_post(
     }
 
     # 7) スロット×ターゲットで pending アクションを作成
-    #    - 同一記事内で同じアンカー（キーワード）は1回までに制限
-    #      → nfkc正規化＋小文字化でキー化して重複スキップ
+    #    ※ アンカー文は applier 側で LLM 生成するため、ここでは“メタ情報を丁寧に渡す”
     actions_made = 0
-    seen_anchor_keys = set()
     slot_ptr = 0
+    seen_target_pids = set()
     for tgt_pid in candidates:
         if slot_ptr >= len(slots):
             break
+        if tgt_pid in seen_target_pids:
+            continue
         slot_idx = slots[slot_ptr]
-        title, tgt_url, dst_kw_list = tgt_map.get(tgt_pid, ("", "", []))
         raw_para = paragraphs[slot_idx]
-        para_text = _html_to_text(raw_para)
         if _H_TAG.search(raw_para) or _TOC_HINT.search(raw_para):
             continue  # 念のため
+        title, tgt_url, dst_kw_list = tgt_map.get(tgt_pid, ("", "", []))
         # ContentIndexに無い候補はフォールバックで1回だけ取得
         if (not title) or (not tgt_url):
             tr = (
@@ -621,63 +621,29 @@ def plan_links_for_post(
             if tr:
                 title, tgt_url = tr[0] or "", tr[1] or ""
                 dst_kw_list = _csv_to_list(tr[2] or "")
-        # ターゲット本文テキスト（部分一致の材料）
-        tgt_body_text = ""
-        try:
-            _tgt = fetch_single_post(site, tgt_pid)
-            if _tgt and (_tgt.content_html or ""):
-                tgt_body_text = html_to_text(_tgt.content_html)
-        except Exception:
-            tgt_body_text = ""
-
-        # ★最優先：リンク先タイトル語 ∩ 段落 に限定
-        anchor = _pick_anchor_from_title_overlap(title, para_text)
-        # （安全フォールバック）共通keywordsや本文ベースの候補が出ても、
-        #   タイトルに載っていない語は採用しない（要件の厳格化）
-        if not anchor:
-            # 共通keywords経由でも “タイトルに存在する語” に限定して再チェック
-            cand_kw = _pick_anchor_from_common_keywords_single(site_id, src_post_id, tgt_pid, para_text)
-            if cand_kw and cand_kw in title_tokens(title):
-                anchor = cand_kw
-        # タイトル由来の厳密含有（従来の簡易版）
-        if not anchor:
-            anchor = _candidate_anchor_from(title, para_text)
-        # ★最後の砦：タイトルのみを材料にした部分一致フォールバック（正規化ゆれ救済）
-        #   ※ 要件「アンカーはタイトル語に含まれる」を守るため、target_body_text は使わない
-        if not anchor:
-            anchor = _candidate_anchor_by_partial(title, "", para_text)
-        # ※ _candidate_anchor_from_target_content / _candidate_anchor_by_partial は
-        #   タイトルに無い語を拾う可能性があるため、このフェーズでは使わない
-        if not anchor or not tgt_url:
+        if not tgt_url:
             continue
-        # 最終NGチェック（保険）
-        if is_ng_anchor(anchor):
-            continue
-
-        if not anchor or not tgt_url:
-            continue
-        # --- 重複アンカー抑止（同一記事内1回まで） ---
-        anchor_key = nfkc_norm(anchor or "").strip().lower()
-        if anchor_key in seen_anchor_keys:
-            # 同じスロットでもう一度候補を試したいので、slot_ptrは進めずに次の候補へ
-            continue
-        seen_anchor_keys.add(anchor_key)
-
         # 監査ログに pending で登録（position は 'p:{index}'）
         act = InternalLinkAction(
             site_id=site_id,
             post_id=src_post_id,
             target_post_id=tgt_pid,
-            anchor_text=anchor[:255],
+            anchor_text="",  # アンカー文は applier が生成
             position=f"p:{slot_idx}",
             status="pending",
-            reason="plan:title_match",
+            reason="plan:generated",
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
+            meta={
+                "dst_title": title,
+                "dst_url": tgt_url,
+                "dst_keywords": dst_kw_list[:8],  # LLMへのヒントをコンパクトに
+            },
         )
         db.session.add(act)
         actions_made += 1
         slot_ptr += 1
+        seen_target_pids.add(tgt_pid)
 
     if actions_made:
         db.session.commit()
@@ -686,6 +652,8 @@ def plan_links_for_post(
 
     # 8) 定期検診：swap候補の作成（既存リンクより適合度の高い新顔があれば提案）
     if mode_swap_check and existing_post_ids:
+        # swap 生成時に記事内重複アンカーを避けるための簡易セット
+        seen_anchor_keys = set()
         # 既存リンク先のスコアを取得
         exist_scores: Dict[int, float] = {}
         rows = (
