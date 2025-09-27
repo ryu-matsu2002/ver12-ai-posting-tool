@@ -625,12 +625,19 @@ def plan_links_for_post(
     if not candidates:
         logger.info("[Planner] src=%s no fresh candidates", src_post_id)
 
-    # 4) 本数決定（applier と揃える：最小2 / 最大4。サイト設定があれば尊重）
+    # 4) 本数決定（最低2本・最大4本を保証）
     need_min = max(2, int(getattr(cfg, "min_links_per_post", 2) or 2))
     need_max = min(4, int(getattr(cfg, "max_links_per_post", 4) or 4))
-    # ★トップアップ：既存内部リンクが 0〜1 本のときは最低3本を目標に（上限は need_max）
-    target_min = 3 if existing_internal_links_count <= 1 else need_min
-    need = min(max(target_min, 2), need_max)
+
+    # 既存内部リンク数が少なすぎる場合も「最低2本」保証、それ以上は最大4本に制限
+    target_min = need_min
+    if existing_internal_links_count <= 1 and need_min < 3:
+        target_min = 3
+
+    # 最終的に必要な本数を決定
+    need = max(target_min, need_min)
+    if need > need_max:
+        need = need_max
 
     # 5) 段落スロット選定（段階的に緩和 → それでも不足なら同段落 MAX_LINKS_PER_PARA 本まで許容）
     base_min_len = int(getattr(cfg, "min_paragraph_len", 80) or 80)
