@@ -501,6 +501,14 @@ def _url_to_post_id_map(site_id: int, urls: Iterable[str]) -> Dict[str, Optional
         m.setdefault(u, None)
     return m
 
+# 既存の本文内「内部リンク」本数を概算（URL→post_id が解決できたものを内部リンクとみなす）
+def _count_existing_internal_links(existing_links: List[Tuple[str, str]], url_to_pid: Dict[str, Optional[int]]) -> int:
+    cnt = 0
+    for href, _ in existing_links:
+        if url_to_pid.get(href):
+            cnt += 1
+    return cnt
+
 # ---------- 計画作成メイン ----------
 
 @dataclass
@@ -587,6 +595,8 @@ def plan_links_for_post(
     existing_urls = [u for (u, a) in existing_links]
     url_to_pid = _url_to_post_id_map(site_id, existing_urls)
     existing_post_ids = {pid for pid in url_to_pid.values() if pid}  # 既にリンクしているpost_id
+    # 本文に既に存在する内部リンク本数（概算）
+    existing_internal_links_count = _count_existing_internal_links(existing_links, url_to_pid)
 
     # 3) 候補ターゲットの収集（スコア順 → 同ジャンルでフィルタ）
     #    - 既存リンク先は優先度下げ（まずは新顔を入れたい）
@@ -618,7 +628,9 @@ def plan_links_for_post(
     # 4) 本数決定（applier と揃える：最小2 / 最大4。サイト設定があれば尊重）
     need_min = max(2, int(getattr(cfg, "min_links_per_post", 2) or 2))
     need_max = min(4, int(getattr(cfg, "max_links_per_post", 4) or 4))
-    need = min(max(need_min, 2), need_max)
+    # ★トップアップ：既存内部リンクが 0〜1 本のときは最低3本を目標に（上限は need_max）
+    target_min = 3 if existing_internal_links_count <= 1 else need_min
+    need = min(max(target_min, 2), need_max)
 
     # 5) 段落スロット選定（段階的に緩和 → それでも不足なら同段落 MAX_LINKS_PER_PARA 本まで許容）
     base_min_len = int(getattr(cfg, "min_paragraph_len", 80) or 80)
@@ -720,6 +732,80 @@ def plan_links_for_post(
         db.session.commit()
     stats.planned_actions = actions_made
     stats.posts_processed = 1
+
+    # === 5.5) ★救済パス：1本も計画できなかった場合に「厳しめ条件のまま」最低1本を狙う ===
+    #  - LinkGraph が強い or 同ジャンルOK の候補に限定
+    #  - 段落テキストに「共通keywordsの単語」または「タイトル語」が自然に実在することを必須に
+    if stats.planned_actions == 0:
+        rescue_candidates = []
+        for t, s in raw_candidates:
+            if t == src_post_id:
+                continue
+            if t in existing_post_ids:
+                continue
+            # 強いスコア or 同ジャンルOK のみ許容（緩めない）
+            ok = (s >= STRONG_LINKGRAPH_SCORE)
+            if not ok:
+                try:
+                    ok = _same_genre_ok(site_id, src_post_id, t)
+                except Exception:
+                    ok = False
+            if ok:
+                rescue_candidates.append((t, s))
+        # スコア降順でチェック
+        rescue_candidates.sort(key=lambda x: x[1], reverse=True)
+        if rescue_candidates and slots:
+            # 最も長めの段落（最後のスロット）を優先的に使う
+            slot_idx = slots[-1]
+            raw_para = paragraphs[slot_idx]
+            para_text = _html_to_text(raw_para)
+            if para_text:
+                for tgt_pid, sc in rescue_candidates[:5]:
+                    # アンカーは「共通keywordsの単語」＞「タイトル語 ∩ 段落」
+                    anc = None
+                    try:
+                        anc = _pick_anchor_from_common_keywords_single(site_id, src_post_id, tgt_pid, para_text)
+                    except Exception:
+                        anc = None
+                    if not anc:
+                        try:
+                            # タイトル語に限定（自然な位置のみ）
+                            tr = (
+                                ContentIndex.query
+                                .with_entities(ContentIndex.title)
+                                .filter_by(site_id=site_id, wp_post_id=tgt_pid)
+                                .one_or_none()
+                            )
+                            t_title = tr[0] if tr else ""
+                            anc = _pick_anchor_from_title_overlap(t_title, para_text)
+                        except Exception:
+                            anc = None
+                    if not anc:
+                        continue
+                    # URL 取得
+                    tr2 = (
+                        ContentIndex.query
+                        .with_entities(ContentIndex.url)
+                        .filter_by(site_id=site_id, wp_post_id=tgt_pid)
+                        .one_or_none()
+                    )
+                    t_url = (tr2[0] or "") if tr2 else ""
+                    if not t_url:
+                        continue
+                    db.session.add(InternalLinkAction(
+                        site_id=site_id,
+                        post_id=src_post_id,
+                        target_post_id=tgt_pid,
+                        anchor_text="",  # アンカー文は applier が LLM 生成（自然語抽出は上で担保）
+                        position=f"p:{slot_idx}",
+                        status="pending",
+                        reason="plan:rescue",
+                        created_at=datetime.utcnow(),
+                        updated_at=datetime.utcnow(),
+                    ))
+                    db.session.commit()
+                    stats.planned_actions += 1
+                    break
 
     # 8) 定期検診：swap候補の作成（既存リンクより適合度の高い新顔があれば提案）
     if mode_swap_check and existing_post_ids:
