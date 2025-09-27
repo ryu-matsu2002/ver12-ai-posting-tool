@@ -6,10 +6,17 @@ from html import unescape
 from dataclasses import dataclass
 from typing import List, Tuple, Dict, Optional
 
-# aタグ抽出
-_A_TAG = re.compile(r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a\s*>', re.I | re.S)
+# aタグ抽出（オープンタグ全体も捕捉：版情報属性を読み取るため）
+_A_TAG = re.compile(r'(<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>)(.*?)</a\s*>', re.I | re.S)
 _TAG_STRIP = re.compile(r"<[^>]+>")
 _WS = re.compile(r"\s+")
+
+# 版判定用：data-iseo="vX"（過去互換）、および直前コメント <!-- ai-internal-link:vX -->
+_DATA_ISEO_RE = re.compile(r'\bdata-iseo=["\']([^"\']+)["\']', re.I)
+_SPEC_COMMENT_TAIL_RE = re.compile(
+    r'(?:<br\s*/?>\s*)*<!--\s*ai-internal-link:([a-zA-Z0-9._\-]+)\s*-->\s*$',
+    re.I
+)
 
 def _html_to_text(s: Optional[str]) -> str:
     return _TAG_STRIP.sub(" ", unescape(s or "")).strip()
@@ -45,6 +52,7 @@ def _is_legacy(anchor: str, title: str) -> bool:
 def find_and_remove_legacy_links(
     html: str,
     url_to_title: Dict[str, str],
+    spec_version: Optional[str] = None,
 ) -> Tuple[str, List[Dict]]:
     """
     旧仕様リンク（アンカー=リンク先記事タイトルと厳密一致）を検出し、
@@ -64,14 +72,72 @@ def find_and_remove_legacy_links(
     last = 0
     match_idx = 0
 
+    # 直前コメントの判定では「マッチ直前のテキスト末尾」を見るため、
+    # 各マッチごとに html の一部を参照する
     for m in _A_TAG.finditer(html):
-        href = m.group(1) or ""
-        inner_html = m.group(2) or ""
+        open_tag = m.group(1) or ""
+        href = m.group(2) or ""
+        inner_html = m.group(3) or ""
         anchor_text = _html_to_text(inner_html)
 
         # 内部記事（＝マップにあるURL）のみ対象
         title = url_to_title.get(href)
         if not title:
+            continue
+        # --- 版情報の検出 ---
+        # 1) data-iseo 属性（旧来 or 他環境で付与済みの互換）
+        ver_in_attr: Optional[str] = None
+        m_attr = _DATA_ISEO_RE.search(open_tag)
+        if m_attr:
+            ver_in_attr = (m_attr.group(1) or "").strip().lower()
+        # 2) 直前コメント <!-- ai-internal-link:vX --> を末尾アンカーで判定
+        ver_in_tail: Optional[str] = None
+        prefix_tail = html[max(0, m.start() - 300): m.start()]  # 直前300文字をざっくり参照
+        m_cmt = _SPEC_COMMENT_TAIL_RE.search(prefix_tail)
+        if m_cmt:
+            ver_in_tail = (m_cmt.group(1) or "").strip().lower()
+
+        latest = (spec_version or "").strip().lower() if spec_version else None
+        # “最新版リンク”の条件：
+        # - spec_version が指定され、かつ data-iseo==最新版 もしくは 直前コメント==最新版
+        is_latest = False
+        if latest:
+            if (ver_in_attr and ver_in_attr == latest) or (ver_in_tail and ver_in_tail == latest):
+                is_latest = True
+
+        # “旧版リンク”の条件：
+        # - spec_version が指定され、かつ data-iseo が存在して **最新版と異なる**
+        #   もしくは 直前コメントが存在して **最新版と異なる**
+        # - または版情報が無いが、旧仕様（タイトル厳密一致アンカー）に該当
+        is_old_spec = False
+        old_reason = "legacy_old_spec"
+        if latest:
+            if (ver_in_attr and ver_in_attr != latest) or (ver_in_tail and ver_in_tail != latest):
+                is_old_spec = True
+        # 版情報が一切無い場合は、旧タイトルリンクの厳密一致のみを“旧仕様”とみなす
+        is_legacy_title = False
+        if not ver_in_attr and not ver_in_tail:
+            if _is_legacy(anchor_text, title):
+                is_legacy_title = True
+                old_reason = "legacy_title_anchor"
+
+        # 最新版は削除対象外
+        if is_latest:
+            match_idx += 1
+            continue
+
+        # 旧版（旧spec or 旧タイトル厳密一致）は削除
+        if is_old_spec or is_legacy_title:
+            out_parts.append(html[last:m.start()])
+            last = m.end()
+            removed.append(RemovedLink(
+                href=href,
+                anchor_text=anchor_text,
+                position=f"match:{match_idx}",
+                target_post_id=None,
+                reason=old_reason,
+            ))
+            match_idx += 1
             continue
 
         if _is_legacy(anchor_text, title):

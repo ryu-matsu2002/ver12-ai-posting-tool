@@ -85,6 +85,11 @@ _TOC_HINT = re.compile(
 _STYLE_BLOCK = re.compile(r"<style\b[^>]*>.*?</style\s*>", re.IGNORECASE | re.DOTALL)
 _AI_STYLE_MARK = "<!-- ai-internal-link-style:v2 -->"
 
+# ==== 内部SEO 仕様バージョン（新規） ====
+# <a> には一切属性を付けない方針。代替として直前コメントで版管理を行う。
+INTERNAL_SEO_SPEC_VERSION = "v3"
+INTERNAL_SEO_SPEC_MARK = f"<!-- ai-internal-link:{INTERNAL_SEO_SPEC_VERSION} -->"
+
 def _split_paragraphs(html: str) -> List[str]:
     if not html:
         return []
@@ -254,7 +259,9 @@ def _generate_anchor_text_via_llm(
 
 def _emit_anchor_html(href: str, text: str) -> str:
     text_safe = _TAG_STRIP.sub(" ", unescape(text or "")).strip()
-    return f'<a href="{href}" title="{text_safe}">{text_safe}</a>'
+    # 構造は維持（<a href ... title ...>）。版情報は直前コメントで表現。
+    return f'{INTERNAL_SEO_SPEC_MARK}<a href="{href}" title="{text_safe}">{text_safe}</a>'
+
 
 def _rejoin_paragraphs(paragraphs: List[str]) -> str:
     return "</p>".join(paragraphs)
@@ -340,8 +347,8 @@ def _linkify_first_occurrence(para_html: str, anchor_text: str, href: str) -> Op
     if (before and _is_word_char(before) and before not in SOFT_BOUNDARIES) and \
        (after  and _is_word_char(after)  and after  not in SOFT_BOUNDARIES):
         return None
-    # Wikipedia風：href + title のみ（class/style は付けない）
-    linked = f'<a href="{href}" title="{anchor_text}">{anchor_text}</a>'
+    # Wikipedia風：href + title（class/style なし）。版情報は直前コメントで表現。
+    linked = f'{INTERNAL_SEO_SPEC_MARK}<a href="{href}" title="{anchor_text}">{anchor_text}</a>'
     masked = masked.replace(anchor_text, linked, 1)
     return _unmask_existing_anchors(masked, ph)
 
@@ -458,6 +465,7 @@ def _add_attrs_to_first_anchor_with_href(html: str, href: str) -> str:
         # title が無ければ追加
         if not re.search(r'\btitle=["\']', start, re.IGNORECASE):
             start += ' title=""'
+            # data-iseo は使用しない（属性は追加しない）。コメントマークは別で扱う。
         return start + end
     # 最初の1件だけ注入
     return pat.sub(_repl, html, count=1)
@@ -567,6 +575,15 @@ def preview_apply_for_post(site_id: int, src_post_id: int) -> Tuple[str, ApplyRe
     # 1) 旧仕様削除（プレビュー：DBは触らない）
     url_title_map = _all_url_to_title_map(site_id)
     cleaned_html, deletions = find_and_remove_legacy_links(wp_post.content_html or "", url_title_map)
+    # 旧版→新版の自動移行のため、spec_version を渡す（旧シグネチャ互換）。
+    # cleaner 側の最新版判定は直前コメント <!-- ai-internal-link:v3 --> を利用。
+    try:
+        cleaned_html, deletions = find_and_remove_legacy_links(
+            wp_post.content_html or "", url_title_map, spec_version=INTERNAL_SEO_SPEC_VERSION
+        )
+    except TypeError:
+        # cleaner 未更新環境でも動くよう後方互換
+        cleaned_html, deletions = find_and_remove_legacy_links(wp_post.content_html or "", url_title_map)
 
     # 2) 新仕様の pending を取得
     actions = (
@@ -748,8 +765,8 @@ def _apply_plan_to_html(
                 res.skipped += 1
                 continue
 
-            # 1行で追記：段落末尾に <br> + アンカー（既存の青＆下線CSSを利用）
             anchor_html = _emit_anchor_html(href, anchor_text)
+            # 要求構造維持：<br><a ...> の形だが、版マークは直前コメントとして <a> の直前に置く
             paragraphs[idx] = para_html + "<br>" + anchor_html
 
             # 状態更新
@@ -891,6 +908,7 @@ def _apply_plan_to_html(
     # 本文を連結 → 既存の ai-ilink / inline-style を Wikipedia 風に正規化
     new_html = _rejoin_paragraphs(paragraphs)
     new_html = _normalize_existing_internal_links(new_html)
+    # 正規化で a をいじっても、直前コメント（INTERNAL_SEO_SPEC_MARK）は HTML と独立で残る想定
     return new_html, res
 
 # ---- パブリックAPI ----
@@ -931,6 +949,14 @@ def apply_actions_for_post(site_id: int, src_post_id: int, dry_run: bool = False
     url_title_map = _all_url_to_title_map(site_id)
     url_pid_map   = _all_url_to_pid_map(site_id)
     cleaned_html, deletions = find_and_remove_legacy_links(wp_post.content_html or "", url_title_map)
+    # 旧版→新版の自動移行のため、spec_version を渡す（旧シグネチャ互換）。
+    # cleaner 側では data-iseo ではなく直前コメント <!-- ai-internal-link:v3 --> を最新版判定に使えるようにする。
+    try:
+        cleaned_html, deletions = find_and_remove_legacy_links(
+            wp_post.content_html or "", url_title_map, spec_version=INTERNAL_SEO_SPEC_VERSION
+        )
+    except TypeError:
+        cleaned_html, deletions = find_and_remove_legacy_links(wp_post.content_html or "", url_title_map)
 
     # 2) 対象アクション（plan / swap_candidate）
     actions = (
