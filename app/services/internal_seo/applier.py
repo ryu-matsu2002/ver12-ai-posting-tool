@@ -252,9 +252,49 @@ def _generate_anchor_text_via_llm(
                 except Exception:
                     first_kw = ""
             text = f"{first_kw or (dst_title or '')[:20]}について詳しい解説はコチラ"
-    # 最終の文法崩れ再チェック
+    # --- ここから 追加の厳格バリデーション ---
     text = _clean_gpt_output(text)
     text = re.sub(r"[、。．.\s]+$", "", text)
+
+    # 主要キーワード候補（dst_keywords優先→無ければタイトル主要トークン）
+    kw_candidates: List[str] = []
+    if isinstance(dst_keywords, (list, tuple)):
+        kw_candidates = [str(k).strip() for k in dst_keywords if str(k).strip()]
+    if not kw_candidates:
+        try:
+            kw_candidates = [w for w in (title_tokens(dst_title or "") or []) if w][:6]
+        except Exception:
+            kw_candidates = []
+
+    def _norm(s: str) -> str:
+        return nfkc_norm((s or "").strip()).lower()
+
+    ntext = _norm(text)
+    nkeys = [_norm(k) for k in kw_candidates if _norm(k)]
+
+    # 1) 出力に主要キーワードが1語も含まれない → テンプレにフォールバック
+    has_kw = any((nk in ntext) for nk in nkeys) if nkeys else False
+
+    # 2) 冒頭の品質: 助詞・連用形だけ等の弱い始まりを弾く（よく出るNGの簡易検知）
+    BAD_START_PAT = re.compile(r"^(?:について|により|に関して|における|によって|に対して|向上させるため|成功させるため|選ぶため|知っておくべきこと|活用法|方法|ポイント)")
+    bad_start = bool(BAD_START_PAT.search(nfkc_norm(text)))
+
+    if (not has_kw) or bad_start:
+        first_kw = ""
+        if nkeys:
+            # なるべく長い語を優先
+            nkeys_sorted = sorted(nkeys, key=len, reverse=True)
+            first_kw = nkeys_sorted[0]
+        if not first_kw:
+            try:
+                tks = [w for w in (title_tokens(dst_title or "") or []) if w]
+                first_kw = _norm(tks[0]) if tks else ""
+            except Exception:
+                first_kw = ""
+        base = next((k for k in (kw_candidates or []) if _norm(k) == first_kw), "") or (dst_title or "")[:20]
+        text = f"{base}について詳しい解説はコチラ"
+        text = re.sub(r"[、。．.\s]+$", "", text)
+
     return text
 
 def _emit_anchor_html(href: str, text: str) -> str:
