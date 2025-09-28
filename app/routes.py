@@ -1926,7 +1926,29 @@ from sqlalchemy.orm import load_only, defer
 from sqlalchemy import text
 
 from app import db
-from app.models import Site, InternalSeoRun, InternalLinkAction, ContentIndex
+from app.models import (
+    Site,
+    InternalSeoRun,
+    InternalLinkAction,
+    ContentIndex,
+    User,
+    InternalSeoUserSchedule,
+    InternalSeoUserRun,
+)
+from sqlalchemy import func, and_, desc, text
+
+# 🆕 ユーザー単位スケジューラ（サービス層）
+try:
+    # 先に作成した app/services/internal_seo/user_scheduler.py
+    from app.services.internal_seo.user_scheduler import (
+        enqueue_user_tick,
+        run_user_tick,  # run_once 用
+    )
+except Exception:
+    # 開発中でも routes の import で落ちないように保険
+    enqueue_user_tick = None
+    run_user_tick = None
+
 JST = timezone(timedelta(hours=9))
 
 
@@ -2811,6 +2833,339 @@ def admin_internal_seo_logs():
             "created_at": r.get("created_at").astimezone(JST).isoformat(timespec="seconds"),
         })
     return jsonify({"logs": out})
+
+
+# ---------------------------------------------------------------------------
+# 🆕 管理UI: ユーザー別 内部SEOスケジュール 導線 & API
+#    パスは /admin/iseo/schedules/... に統一（既存の /admin/internal-seo/* と分離）
+# ---------------------------------------------------------------------------
+
+@admin_bp.route("/admin/iseo/schedules")
+@admin_required_effective
+def admin_iseo_user_schedules_page():
+    """
+    一覧ページ（テンプレートは別PRで用意）
+    """
+    return render_template("admin/iseo_user_schedules.html")  # テンプレが無ければ一旦 500 でもOK
+
+
+def _get_or_create_user_schedule(uid: int) -> InternalSeoUserSchedule:
+    sch = InternalSeoUserSchedule.query.filter_by(user_id=uid).one_or_none()
+    if not sch:
+        sch = InternalSeoUserSchedule(user_id=uid)
+        from app import db
+        db.session.add(sch)
+        db.session.commit()
+    return sch
+
+
+@admin_bp.route("/admin/iseo/schedules/status")
+@admin_required_effective
+def admin_iseo_user_schedules_status():
+    """
+    一覧テーブル用のJSON。pending件数・直近24hの applied/processed・last_error も返す。
+    """
+    from app import db
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import func, text
+    from app.models import User, Site, InternalSeoUserSchedule, InternalSeoUserRun
+    now_utc = datetime.now(timezone.utc)
+    since_24h = now_utc - timedelta(hours=24)
+    # 対象ユーザーは「サイトを1つ以上持つユーザー」を基本にする
+    user_rows = (
+        db.session.query(
+            User.id.label("user_id"),
+            User.username,
+            func.count(Site.id).label("site_cnt"),
+        )
+        .outerjoin(Site, Site.user_id == User.id)
+        .group_by(User.id, User.username)
+        .having(func.count(Site.id) > 0)
+        .all()
+    )
+
+    # スケジュール/直近ランの付帯情報
+    result = []
+    for u in user_rows:
+        sch = InternalSeoUserSchedule.query.filter_by(user_id=u.user_id).one_or_none()
+        last_run = (
+            InternalSeoUserRun.query
+            .filter_by(user_id=u.user_id)
+            .order_by(InternalSeoUserRun.started_at.desc(), InternalSeoUserRun.id.desc())
+            .first()
+        )
+        # pending 件数（ユーザー配下サイトの pending の distinct post_id）
+        pending_cnt = db.session.execute(
+            text("""
+                SELECT COUNT(*) FROM (
+                  SELECT DISTINCT a.post_id
+                    FROM internal_link_actions a
+                    JOIN site s ON s.id = a.site_id
+                   WHERE s.user_id = :uid
+                     AND a.status = 'pending'
+                ) t
+            """),
+            {"uid": u.user_id}
+        ).scalar() or 0
+        # 直近24hの集計
+        agg_24h = (
+            db.session.query(
+                func.coalesce(func.sum(InternalSeoUserRun.applied), 0),
+                func.coalesce(func.sum(InternalSeoUserRun.processed_posts), 0),
+            )
+            .filter(
+                InternalSeoUserRun.user_id == u.user_id,
+                InternalSeoUserRun.started_at >= since_24h
+            )
+            .one()
+        )
+        applied_24h = int(agg_24h[0] or 0)
+        processed_24h = int(agg_24h[1] or 0)
+        result.append({
+            "user_id": u.user_id,
+            "username": u.username,
+            "sites": int(u.site_cnt or 0),
+            "is_enabled": bool(getattr(sch, "is_enabled", False)),
+            "status": getattr(sch, "status", "idle") if sch else "idle",
+            "last_run_at": getattr(sch, "last_run_at", None).isoformat() if sch and sch.last_run_at else None,
+            "next_run_at": getattr(sch, "next_run_at", None).isoformat() if sch and sch.next_run_at else None,
+            "tick_interval_sec": getattr(sch, "tick_interval_sec", None) if sch else None,
+            "budget_per_tick": getattr(sch, "budget_per_tick", None) if sch else None,
+            "rate_limit_per_min": getattr(sch, "rate_limit_per_min", None) if sch else None,
+            "last_error": getattr(sch, "last_error", None) if sch else None,
+            "pending": int(pending_cnt),
+            "applied_24h": applied_24h,
+            "processed_24h": processed_24h,
+            "last_result": {
+                "status": getattr(last_run, "status", None) if last_run else None,
+                "applied": getattr(last_run, "applied", None) if last_run else None,
+                "processed_posts": getattr(last_run, "processed_posts", None) if last_run else None,
+                "finished_at": getattr(last_run, "finished_at", None).isoformat() if last_run and last_run.finished_at else None,
+            },
+        })
+    return jsonify({"items": result})
+
+
+def _parse_user_ids_from_request():
+    data = request.get_json(silent=True) or {}
+    ids = data.get("user_ids") or data.get("ids") or []
+    # フォームPOST対応
+    if not ids and "user_ids" in request.form:
+        ids = request.form.getlist("user_ids")
+    try:
+        return [int(x) for x in ids]
+    except Exception:
+        return []
+
+
+@admin_bp.route("/admin/iseo/schedules/bulk_enable", methods=["POST"])
+@admin_required_effective
+def admin_iseo_user_schedules_bulk_enable():
+    """
+    is_enabled=True, status=queued にして即時1tickを投入
+    """
+    from app import db
+    from flask import current_app
+    from app.services.internal_seo.user_scheduler import run_user_tick
+    app = current_app._get_current_object()
+    ids = _parse_user_ids_from_request()
+    if not ids:
+        return jsonify({"ok": False, "error": "user_ids required"}), 400
+    for uid in ids:
+        sch = _get_or_create_user_schedule(uid)
+        sch.is_enabled = True
+        sch.status = "queued"
+        db.session.add(sch)
+    db.session.commit()
+    # 即時に1回だけ同期 tick（軽量・安全）
+    for uid in ids:
+        try:
+            run_user_tick(app, uid, force=True)
+        except Exception:
+            current_app.logger.exception("[iseo] run_user_tick (bulk_enable) failed user_id=%s", uid)
+    return jsonify({"ok": True, "enabled": ids})
+
+
+@admin_bp.route("/admin/iseo/schedules/bulk_disable", methods=["POST"])
+@admin_required_effective
+def admin_iseo_user_schedules_bulk_disable():
+    """
+    完全停止：is_enabled=False, status=idle, next_run_at=NULL
+    """
+    from app import db
+    ids = _parse_user_ids_from_request()
+    if not ids:
+        return jsonify({"ok": False, "error": "user_ids required"}), 400
+    q = InternalSeoUserSchedule.query.filter(InternalSeoUserSchedule.user_id.in_(ids))
+    for sch in q.all():
+        sch.is_enabled = False
+        sch.status = "idle"
+        sch.next_run_at = None
+        db.session.add(sch)
+    db.session.commit()
+    return jsonify({"ok": True, "disabled": ids})
+
+
+@admin_bp.route("/admin/iseo/schedules/bulk_pause", methods=["POST"])
+@admin_required_effective
+def admin_iseo_user_schedules_bulk_pause():
+    """
+    一時停止：status=paused（is_enabledは保持）
+    """
+    from app import db
+    ids = _parse_user_ids_from_request()
+    if not ids:
+        return jsonify({"ok": False, "error": "user_ids required"}), 400
+    q = InternalSeoUserSchedule.query.filter(InternalSeoUserSchedule.user_id.in_(ids))
+    for sch in q.all():
+        sch.status = "paused"
+        db.session.add(sch)
+    db.session.commit()
+    return jsonify({"ok": True, "paused": ids})
+
+
+@admin_bp.route("/admin/iseo/schedules/bulk_resume", methods=["POST"])
+@admin_required_effective
+def admin_iseo_user_schedules_bulk_resume():
+    """
+    再開：status=queued に戻し、即時 tick を投入
+    """
+    from app import db
+    from flask import current_app
+    from app.services.internal_seo.user_scheduler import run_user_tick
+    app = current_app._get_current_object()
+    ids = _parse_user_ids_from_request()
+    if not ids:
+        return jsonify({"ok": False, "error": "user_ids required"}), 400
+    q = InternalSeoUserSchedule.query.filter(InternalSeoUserSchedule.user_id.in_(ids))
+    for sch in q.all():
+        sch.status = "queued"
+        db.session.add(sch)
+    db.session.commit()
+    # 即時に1回だけ同期 tick
+    for uid in ids:
+        try:
+            run_user_tick(app, uid, force=True)
+        except Exception:
+            current_app.logger.exception("[iseo] run_user_tick (bulk_resume) failed user_id=%s", uid)
+    return jsonify({"ok": True, "resumed": ids})
+
+
+@admin_bp.route("/admin/iseo/schedules/run_once", methods=["POST"])
+@admin_required_effective
+def admin_iseo_user_schedules_run_once():
+    """
+    即時に 1 tick 実行（is_enabled 無視で単発）
+    """
+    from flask import current_app
+    from app.services.internal_seo.user_scheduler import run_user_tick
+    app = current_app._get_current_object()
+    uid = (request.get_json(silent=True) or {}).get("user_id") or request.form.get("user_id")
+    try:
+        uid = int(uid)
+    except Exception:
+        return jsonify({"ok": False, "error": "user_id required"}), 400
+    # 同期実行（安全・即時）
+    try:
+        res = run_user_tick(app, uid, force=True)
+        # 実行直後の最新メトリクスを再集計して返す（UI即時反映用）
+        from app import db
+        from sqlalchemy import func, text
+        from app.models import InternalSeoUserRun, InternalSeoUserSchedule
+        from datetime import datetime, timedelta, timezone
+        now_utc = datetime.now(timezone.utc)
+        since_24h = now_utc - timedelta(hours=24)
+
+        pending_cnt = db.session.execute(
+            text("""
+                SELECT COUNT(*) FROM (
+                  SELECT DISTINCT a.post_id
+                    FROM internal_link_actions a
+                    JOIN site s ON s.id = a.site_id
+                   WHERE s.user_id = :uid
+                     AND a.status = 'pending'
+                ) t
+            """),
+            {"uid": uid}
+        ).scalar() or 0
+
+        agg_24h = (
+            db.session.query(
+                func.coalesce(func.sum(InternalSeoUserRun.applied), 0),
+                func.coalesce(func.sum(InternalSeoUserRun.processed_posts), 0),
+            )
+            .filter(
+                InternalSeoUserRun.user_id == uid,
+                InternalSeoUserRun.started_at >= since_24h
+            )
+            .one()
+        )
+        applied_24h = int(agg_24h[0] or 0)
+        processed_24h = int(agg_24h[1] or 0)
+
+        sch = InternalSeoUserSchedule.query.filter_by(user_id=uid).one_or_none()
+        last_error = getattr(sch, "last_error", None) if sch else None
+
+        return jsonify({
+            "ok": bool(res.get("ok", False)),
+            "result": res,
+            "pending": int(pending_cnt),
+            "applied_24h": applied_24h,
+            "processed_24h": processed_24h,
+            "last_error": last_error,
+        })
+    except Exception as e:
+        current_app.logger.exception("[iseo] run_user_tick failed: %s", e)
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@admin_bp.route("/admin/iseo/schedules/<int:user_id>/runs")
+@admin_required_effective
+def admin_iseo_user_runs(user_id: int):
+    """
+    直近のユーザー実行履歴（軽量JSON）
+    """
+    from app.models import InternalSeoUserRun
+    from sqlalchemy import func
+    from datetime import datetime, timedelta, timezone
+    now_utc = datetime.now(timezone.utc)
+    since_24h = now_utc - timedelta(hours=24)
+    q = (
+        InternalSeoUserRun.query
+        .filter_by(user_id=user_id)
+        .order_by(InternalSeoUserRun.started_at.desc(), InternalSeoUserRun.id.desc())
+        .limit(50)
+    )
+    items = [{
+        "id": r.id,
+        "status": r.status,
+        "started_at": r.started_at.isoformat() if r.started_at else None,
+        "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+        "applied": r.applied,
+        "swapped": r.swapped,
+        "skipped": r.skipped,
+        "processed_posts": r.processed_posts,
+    } for r in q.all()]
+    # 直近24hの合計も一緒に返す
+    agg = (
+        InternalSeoUserRun.query
+        .with_entities(
+            func.coalesce(func.sum(InternalSeoUserRun.applied), 0),
+            func.coalesce(func.sum(InternalSeoUserRun.processed_posts), 0)
+        )
+        .filter(
+            InternalSeoUserRun.user_id == user_id,
+            InternalSeoUserRun.started_at >= since_24h
+        )
+        .one()
+    )
+    return jsonify({
+        "user_id": user_id,
+        "items": items,
+        "applied_24h": int(agg[0] or 0),
+        "processed_24h": int(agg[1] or 0),
+    })
+
 
 
 # ────────────── キーワード ──────────────

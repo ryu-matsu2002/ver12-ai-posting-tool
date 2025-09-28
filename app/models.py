@@ -71,6 +71,22 @@ class User(db.Model, UserMixin):
     token_logs = db.relationship("TokenUsageLog", backref="user", lazy=True, cascade="all, delete-orphan")
     gsc_tokens = db.relationship("GSCAuthToken", backref="user", lazy=True, cascade="all, delete-orphan")
     site_quota_logs = db.relationship("SiteQuotaLog", backref="user", lazy=True, cascade="all, delete-orphan")
+    # app/models.py （class User 内のリレーション定義の末尾あたりに追記）
+    # 内部SEO スケジュール（ユーザー単位）
+    internal_seo_schedule = db.relationship(
+        "InternalSeoUserSchedule",
+        backref="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+        lazy=True,
+    )
+    internal_seo_user_runs = db.relationship(
+        "InternalSeoUserRun",
+        backref="user",
+        lazy="dynamic",
+        cascade="all, delete-orphan",
+    )
+
 
 
 # ──── サイトジャンル（ユーザーごとに管理可能） ────
@@ -687,9 +703,9 @@ class InternalSeoJobQueue(db.Model):
     status = db.Column(db.String(20), nullable=False, default="queued")            # queued / running / done / error
     message = db.Column(db.Text, nullable=True)
 
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
-    started_at = db.Column(db.DateTime, nullable=True)
-    ended_at   = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, index=True)
+    started_at = db.Column(DateTime(timezone=True), nullable=True)
+    ended_at   = db.Column(DateTime(timezone=True), nullable=True)
 
     site = db.relationship("Site", backref=db.backref("internal_seo_job_queue_items", lazy="dynamic"))
 
@@ -751,3 +767,68 @@ class ExternalSignupTask(db.Model):
 
     def __repr__(self) -> str:
         return f"<ExternalSignupTask token={self.token} status={self.status} provider={self.provider}>"
+
+# app/models.py （末尾に追加）
+
+class InternalSeoUserSchedule(db.Model):
+    """
+    ユーザー単位で内部SEOスケジュールを管理するスイッチ＆状態。
+    管理画面の「開始/停止/一時停止/再開」や、tick 間隔・1tickの処理件数を保持。
+    """
+    __tablename__ = "internal_seo_user_schedules"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, unique=True, index=True)
+
+    # 管理フラグ＆状態
+    is_enabled = db.Column(db.Boolean, nullable=False, default=False)                  # ON/OFF
+    status     = db.Column(db.String(20), nullable=False, default="idle")             # idle|queued|running|paused|error
+    last_error = db.Column(db.Text, nullable=True)
+
+    # スケジュール
+    last_run_at = db.Column(DateTime(timezone=True), nullable=True, index=True)
+    next_run_at = db.Column(DateTime(timezone=True), nullable=True, index=True)
+
+    # 実行パラメータ
+    tick_interval_sec = db.Column(db.Integer, nullable=False, default=90)             # 次tickまでの秒
+    budget_per_tick   = db.Column(db.Integer, nullable=False, default=50)             # 1tickで処理する最大ポスト数
+    rate_limit_per_min = db.Column(db.Integer, nullable=True)                         # ユーザー固有のレート（未指定ならapplier側のENV）
+
+    created_at = db.Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        db.Index("ix_iseo_user_sched_status_next", "status", "next_run_at"),
+    )
+
+
+class InternalSeoUserRun(db.Model):
+    """
+    ユーザー単位の実行履歴（1tick もしくは1バッチ）。
+    管理画面の進行状況サマリーに使用。
+    """
+    __tablename__ = "internal_seo_user_runs"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+
+    started_at  = db.Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, index=True)
+    finished_at = db.Column(DateTime(timezone=True), nullable=True, index=True)
+    status      = db.Column(db.String(20), nullable=False, default="running")         # running|success|failed|partial
+
+    # applier の戻り値を集計
+    applied         = db.Column(db.Integer, nullable=False, default=0)
+    swapped         = db.Column(db.Integer, nullable=False, default=0)
+    skipped         = db.Column(db.Integer, nullable=False, default=0)
+    processed_posts = db.Column(db.Integer, nullable=False, default=0)
+
+    notes = db.Column(SA_JSON, nullable=True)  # 補足メモ（サイト数/残件など）
+
+    created_at = db.Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.Index("ix_iseo_user_runs_user_started", "user_id", "started_at"),
+        db.Index("ix_iseo_user_runs_status", "status"),
+    )

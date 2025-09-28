@@ -1,0 +1,351 @@
+{% extends "base_admin.html" %}
+{% block title %}内部SEO ダッシュボード{% endblock %}
+
+{% block content %}
+<!-- templates/admin/iseo_user_schedules.html -->
+<div class="container-fluid py-4">
+  <h1 style="font-size:20px;margin:0 0 12px;">内部SEOスケジュール（ユーザー別）</h1>
+
+  <style>
+    :root{
+      --bd:#e5e7eb; --muted:#6b7280; --bg:#fafafa; --chip:#f1f5f9;
+      --ok:#137333; --okbg:#e6f4ea; --info:#1967d2; --infobg:#e8f0fe;
+      --warn:#7a5d00; --warnbg:#fff4ce; --idle:#444; --idleb:#f1f3f4;
+      --err:#c5221f; --errbg:#fde7e9;
+    }
+    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
+    .toolbar button { padding: 6px 10px; border: 1px solid var(--bd); background: #fff; border-radius: 6px; cursor: pointer; }
+    .toolbar button:hover { background:#f8fafc; }
+    .toolbar button:disabled { opacity: .5; cursor: not-allowed; }
+    .toolbar .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+    .search { padding: 6px 10px; border: 1px solid var(--bd); border-radius: 6px; width: 260px; }
+
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; background:#fff; border:1px solid var(--bd); border-radius: 10px; overflow: hidden; }
+    th, td { border-bottom: 1px solid #eee; padding: 8px 6px; text-align: left; font-size: 14px; vertical-align: top; }
+    th { background: #fafafa; position: sticky; top: 0; z-index: 1; }
+
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 12px; }
+    .s-running { background: var(--okbg); color: var(--ok); }
+    .s-queued  { background: var(--infobg); color: var(--info); }
+    .s-paused  { background: var(--warnbg); color: var(--warn); }
+    .s-idle    { background: var(--idleb); color: var(--idle); }
+    .s-error   { background: var(--errbg); color: var(--err); }
+
+    .muted { color: var(--muted); font-size: 12px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    .nowrap { white-space: nowrap; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .chip { display:inline-block; padding:2px 8px; border-radius:9999px; background:var(--chip); font-size:12px; }
+
+    /* 1行だけ省略表示（VS Code の警告対策で標準プロパティも併記） */
+    .truncate-1 {
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 1;
+      line-clamp: 1;            /* ← 標準プロパティを併記（対応ブラウザで有効） */
+      overflow: hidden;
+      max-width: 420px;
+    }
+
+    .kpis { display:grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap:8px; margin: 8px 0; }
+    .kpi { border:1px solid var(--bd); border-radius:10px; padding:10px; background:#fff;}
+    .kpi h3{margin:0; font-size:12px; color:var(--muted);}
+    .kpi .v{margin-top:6px; font-weight:700; font-size:20px;}
+    @media (max-width: 1100px){ .kpis{grid-template-columns: repeat(2,1fr);} }
+    @media (max-width: 640px){ .kpis{grid-template-columns: 1fr;} .truncate-1{max-width:220px;} }
+
+    .help { margin-top: 10px; font-size: 12px; color: #666; }
+  </style>
+
+  <!-- 簡易KPI（選択や検索に連動） -->
+  <div class="kpis" id="kpis">
+    <div class="kpi"><h3>対象ユーザー</h3><div class="v" id="k_users">-</div></div>
+    <div class="kpi"><h3>合計 Pending（distinct posts）</h3><div class="v" id="k_pending">-</div></div>
+    <div class="kpi"><h3>直近24h Applied</h3><div class="v" id="k_applied24">-</div></div>
+    <div class="kpi"><h3>直近24h Processed Posts</h3><div class="v" id="k_processed24">-</div></div>
+  </div>
+
+  <div class="toolbar">
+    <button id="btn-enable"  disabled>開始（有効化）</button>
+    <button id="btn-pause"   disabled>一時停止</button>
+    <button id="btn-resume"  disabled>再開</button>
+    <button id="btn-disable" disabled>停止（無効化）</button>
+    <div class="right">
+      <input id="search" class="search" type="search" placeholder="ユーザー名で絞り込み…" />
+      <label class="muted"><input type="checkbox" id="auto-refresh" checked> 自動更新（10秒）</label>
+      <button id="btn-refresh">更新</button>
+    </div>
+  </div>
+
+  <table id="table">
+    <thead>
+      <tr>
+        <th><input type="checkbox" id="check-all"></th>
+        <th>ユーザー</th>
+        <th class="num">サイト数</th>
+        <th>有効</th>
+        <th>状態</th>
+        <th class="num">Pending</th>
+        <th>最終実行</th>
+        <th>次回予定</th>
+        <th>直近結果</th>
+        <th>直近24h</th>
+        <th>設定</th>
+        <th>エラー</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody id="tbody">
+      <tr><td colspan="13" class="muted">読み込み中…</td></tr>
+    </tbody>
+  </table>
+
+  <div class="help">
+    <div>※ 「開始」は is_enabled=True / status=queued にして即時 tick を投入します（このUIは同期実行にフォールバック）。</div>
+    <div>※ 「停止」は is_enabled=False / status=idle / next_run_at=null にします。</div>
+    <div>※ 「今すぐ1tick」は有効状態に関係なく単発実行します（行の右端）。</div>
+  </div>
+
+  <script>
+    // ---- CSRF ヘルパ ----
+    function getMetaCsrf() {
+      const m = document.querySelector('meta[name="csrf-token"]');
+      return m ? m.getAttribute('content') : null;
+    }
+    function getCookie(name) {
+      return document.cookie.split('; ').reduce((prev, c) => {
+        const [k, v] = c.split('=');
+        return k === name ? decodeURIComponent(v) : prev;
+      }, null);
+    }
+    function csrfToken() {
+      return getMetaCsrf() || getCookie('csrf_token') || getCookie('csrf-token') || null;
+    }
+    function fetchJSON(url, opts = {}) {
+      const headers = Object.assign({'Content-Type': 'application/json'}, opts.headers || {});
+      const token = csrfToken();
+      if (token) headers['X-CSRFToken'] = token;
+      return fetch(url, Object.assign({}, opts, { headers }));
+    }
+
+    // ---- 状態 ----
+    let items = [];
+    let filtered = [];
+    let timer = null;
+
+    const tbody = document.getElementById('tbody');
+    const search = document.getElementById('search');
+    const btnRefresh = document.getElementById('btn-refresh');
+    const btnEnable = document.getElementById('btn-enable');
+    const btnPause = document.getElementById('btn-pause');
+    const btnResume = document.getElementById('btn-resume');
+    const btnDisable = document.getElementById('btn-disable');
+    const autoRefresh = document.getElementById('auto-refresh');
+    const checkAll = document.getElementById('check-all');
+
+    // KPI要素
+    const kUsers = document.getElementById('k_users');
+    const kPending = document.getElementById('k_pending');
+    const kApplied24 = document.getElementById('k_applied24');
+    const kProcessed24 = document.getElementById('k_processed24');
+
+    // ---- レンダリング ----
+    function fmtTime(s) {
+      if (!s) return '<span class="muted">-</span>';
+      try {
+        const d = new Date(s);
+        const z = d.toLocaleString('ja-JP', { hour12: false });
+        return `<span class="nowrap">${z}</span>`;
+      } catch { return s; }
+    }
+    function badge(status) {
+      const cls = {
+        running: 's-running',
+        queued:  's-queued',
+        paused:  's-paused',
+        idle:    's-idle',
+        error:   's-error',
+      }[status] || 's-idle';
+      return `<span class="badge ${cls}">${status || 'idle'}</span>`;
+    }
+    function esc(s){return String(s==null?'':s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));}
+
+    function renderKPIs(list){
+      const totalUsers = list.length;
+      const sumPending = list.reduce((a,b)=>a + (Number(b.pending||0)||0), 0);
+      const sumApplied24 = list.reduce((a,b)=>a + (Number(b.applied_24h||0)||0), 0);
+      const sumProcessed24 = list.reduce((a,b)=>a + (Number(b.processed_24h||0)||0), 0);
+      kUsers.textContent = totalUsers.toLocaleString();
+      kPending.textContent = sumPending.toLocaleString();
+      kApplied24.textContent = sumApplied24.toLocaleString();
+      kProcessed24.textContent = sumProcessed24.toLocaleString();
+    }
+
+    function render() {
+      const q = (search.value || '').toLowerCase();
+      filtered = items.filter(x => !q || (x.username || '').toLowerCase().includes(q));
+      renderKPIs(filtered);
+
+      const rows = filtered.map(x => {
+        const last = x.last_result || {};
+        const last24 = `applied:${x.applied_24h ?? 0} / posts:${x.processed_24h ?? 0}`;
+        const err = x.last_error ? `<div class="truncate-1 mono" title="${esc(x.last_error)}">${esc(x.last_error)}</div>` : '<span class="muted">-</span>';
+        return `
+          <tr data-id="${x.user_id}">
+            <td><input type="checkbox" class="row-check"></td>
+            <td class="nowrap"><span class="mono">#${x.user_id}</span> ${esc(x.username || '')}</td>
+            <td class="num">${x.sites || 0}</td>
+            <td>${x.is_enabled ? '<span class="chip">ON</span>' : '<span class="muted">OFF</span>'}</td>
+            <td>${badge(x.status)}</td>
+            <td class="num">${(x.pending ?? 0).toLocaleString()}</td>
+            <td>${fmtTime(x.last_run_at)}</td>
+            <td>${fmtTime(x.next_run_at)}</td>
+            <td class="mono">
+              ${last.status ? ('[' + esc(last.status) + '] ') : ''}
+              applied:${last.applied ?? '-'}
+              / posts:${last.processed_posts ?? '-'}
+              ${last.finished_at ? `<div class="muted">${fmtTime(last.finished_at)}</div>` : ''}
+            </td>
+            <td class="mono">${last24}</td>
+            <td class="mono">
+              tick:${x.tick_interval_sec ?? '-'}s
+              / budget:${x.budget_per_tick ?? '-'}
+              ${x.rate_limit_per_min ? `<div class="muted">rate:${x.rate_limit_per_min}/min</div>` : ''}
+            </td>
+            <td>${err}</td>
+            <td class="row-actions">
+              <button class="act-run-once">今すぐ1tick</button>
+              <button class="act-resume">再開</button>
+              <button class="act-pause">一時停止</button>
+              <button class="act-enable">開始</button>
+              <button class="act-disable">停止</button>
+            </td>
+          </tr>
+        `;
+      });
+      tbody.innerHTML = rows.length ? rows.join('') : `<tr><td colspan="13" class="muted">対象ユーザーがいません</td></tr>`;
+      wireRowActions();
+      updateToolbarState();
+    }
+
+    // ---- データ取得 ----
+    async function load() {
+      const res = await fetchJSON('/admin/iseo/schedules/status');
+      if (!res.ok) throw new Error('fetch failed');
+      const data = await res.json();
+      items = (data.items || []);
+      render();
+    }
+
+    // ---- ユーティリティ ----
+    function selectedUserIds() {
+      return Array.from(document.querySelectorAll('tbody .row-check:checked'))
+        .map(cb => parseInt(cb.closest('tr').dataset.id, 10))
+        .filter(n => !Number.isNaN(n));
+    }
+    function updateToolbarState() {
+      const hasSel = selectedUserIds().length > 0;
+      btnEnable.disabled  = !hasSel;
+      btnPause.disabled   = !hasSel;
+      btnResume.disabled  = !hasSel;
+      btnDisable.disabled = !hasSel;
+    }
+    function wireRowActions() {
+      tbody.querySelectorAll('.row-check').forEach(cb => {
+        cb.addEventListener('change', updateToolbarState);
+      });
+      tbody.querySelectorAll('.act-run-once').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          const tr = e.target.closest('tr');
+          const uid = parseInt(tr.dataset.id, 10);
+          await postJSON('/admin/iseo/schedules/run_once', { user_id: uid }, true);
+          await load();
+        });
+      });
+      tbody.querySelectorAll('.act-enable').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          const uid = parseInt(e.target.closest('tr').dataset.id, 10);
+          await postJSON('/admin/iseo/schedules/bulk_enable', { user_ids: [uid] });
+        });
+      });
+      tbody.querySelectorAll('.act-disable').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          const uid = parseInt(e.target.closest('tr').dataset.id, 10);
+          if (!confirm('このユーザーのスケジュールを停止します。よろしいですか？')) return;
+          await postJSON('/admin/iseo/schedules/bulk_disable', { user_ids: [uid] });
+        });
+      });
+      tbody.querySelectorAll('.act-pause').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          const uid = parseInt(e.target.closest('tr').dataset.id, 10);
+          await postJSON('/admin/iseo/schedules/bulk_pause', { user_ids: [uid] });
+        });
+      });
+      tbody.querySelectorAll('.act-resume').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          const uid = parseInt(e.target.closest('tr').dataset.id, 10);
+          await postJSON('/admin/iseo/schedules/bulk_resume', { user_ids: [uid] });
+        });
+      });
+    }
+    async function postJSON(url, body, noReloadOnOK = false) {
+      try {
+        const res = await fetchJSON(url, { method: 'POST', body: JSON.stringify(body || {}) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.ok === false) {
+          alert(`エラー: ${data.error || res.statusText}`);
+          return;
+        }
+        if (!noReloadOnOK) await load();
+      } catch (e) {
+        alert(`通信エラー: ${e}`);
+      }
+    }
+
+    // ---- バルク操作 ----
+    btnEnable.addEventListener('click', async () => {
+      const ids = selectedUserIds();
+      if (ids.length === 0) return;
+      await postJSON('/admin/iseo/schedules/bulk_enable', { user_ids: ids });
+    });
+    btnPause.addEventListener('click', async () => {
+      const ids = selectedUserIds();
+      if (ids.length === 0) return;
+      await postJSON('/admin/iseo/schedules/bulk_pause', { user_ids: ids });
+    });
+    btnResume.addEventListener('click', async () => {
+      const ids = selectedUserIds();
+      if (ids.length === 0) return;
+      await postJSON('/admin/iseo/schedules/bulk_resume', { user_ids: ids });
+    });
+    btnDisable.addEventListener('click', async () => {
+      const ids = selectedUserIds();
+      if (ids.length === 0) return;
+      if (!confirm('選択ユーザーのスケジュールを停止します。よろしいですか？')) return;
+      await postJSON('/admin/iseo/schedules/bulk_disable', { user_ids: ids });
+    });
+
+    // ---- その他UI ----
+    btnRefresh.addEventListener('click', load);
+    search.addEventListener('input', render);
+    autoRefresh.addEventListener('change', () => {
+      if (autoRefresh.checked) {
+        if (!timer) timer = setInterval(load, 10000);
+      } else if (timer) {
+        clearInterval(timer); timer = null;
+      }
+    });
+    checkAll.addEventListener('change', () => {
+      document.querySelectorAll('tbody .row-check').forEach(cb => cb.checked = checkAll.checked);
+      updateToolbarState();
+    });
+
+    // ---- 初期化 ----
+    (async function init(){
+      await load();
+      timer = setInterval(load, 10000);
+    })();
+  </script>
+</div>
+{% endblock %}

@@ -17,6 +17,10 @@ _SPEC_COMMENT_TAIL_RE = re.compile(
     r'(?:<br\s*/?>\s*)*<!--\s*ai-internal-link:([a-zA-Z0-9._\-]+)\s*-->\s*$',
     re.I
 )
+# 最新仕様のアンカー末尾（この形以外は削除対象）
+CTA_SUFFIX = "について詳しい解説はコチラ"
+_TRAILING_PUNCT = re.compile(r"[、。．.;；.!！?？\s]+$")  # 末尾の余計な記号/空白
+_CONTENT_CHARS = re.compile(r"[一-龥ぁ-んァ-ンーA-Za-z0-9]")
 
 def _html_to_text(s: Optional[str]) -> str:
     return _TAG_STRIP.sub(" ", unescape(s or "")).strip()
@@ -48,6 +52,29 @@ def _is_legacy(anchor: str, title: str) -> bool:
         return False
     return na == nt  # ← 部分一致は廃止し、厳密一致に限定
 
+def _is_cta_compliant(anchor_text: str) -> bool:
+    """
+    「…について詳しい解説はコチラ」で厳密に終わることを必須にし、
+    直前の本文部分が最低限の内容（“語”が複数）を持つかを簡易チェック。
+    例外：
+      - 末尾に句読点やセミコロンが付いている場合は不合格（旧仕様の名残りを排除）
+    """
+    if not anchor_text:
+        return False
+    text = anchor_text.strip()
+    # 末尾の余計な記号を除去して判定（「コチラ；」「コチラ。」などを不合格に）
+    if _TRAILING_PUNCT.search(text):
+        # 余計な記号が付いている＝不合格
+        return False
+    if not text.endswith(CTA_SUFFIX):
+        return False
+    head = text[: -len(CTA_SUFFIX)].strip()
+    # 前半が空や「について」で終わっている等は不完全とみなす
+    if not head or head.endswith("について"):
+        return False
+    # “内容文字”がある程度含まれるかを緩めに確認（不完全な「向上させるため」単語のみ等を弾く）
+    return len(_CONTENT_CHARS.findall(head)) >= 3
+
 
 def find_and_remove_legacy_links(
     html: str,
@@ -74,6 +101,7 @@ def find_and_remove_legacy_links(
 
     # 直前コメントの判定では「マッチ直前のテキスト末尾」を見るため、
     # 各マッチごとに html の一部を参照する
+    seen_internal_hrefs: set[str] = set()
     for m in _A_TAG.finditer(html):
         open_tag = m.group(1) or ""
         href = m.group(2) or ""
@@ -126,6 +154,43 @@ def find_and_remove_legacy_links(
             match_idx += 1
             continue
 
+        # --- CTA準拠チェック（最新版仕様） ---
+        is_cta_ok = _is_cta_compliant(anchor_text)
+
+        # 同一URLへの複数リンク（内部のみ）は2つ目以降を削除
+        # 先に“CTA不合格”を削除 → 後でCTA合格の方が残りやすい順序にする
+        if href in url_to_title:
+            if not is_cta_ok:
+                out_parts.append(html[last:m.start()])
+                last = m.end()
+                removed.append(RemovedLink(
+                    href=href,
+                    anchor_text=anchor_text,
+                    position=f"match:{match_idx}",
+                    target_post_id=None,
+                    reason="non_compliant_cta",
+                ))
+                match_idx += 1
+                continue
+            # CTA合格でも、同一hrefが既に出ていれば重複として削除
+            if href in seen_internal_hrefs:
+                out_parts.append(html[last:m.start()])
+                last = m.end()
+                removed.append(RemovedLink(
+                    href=href,
+                    anchor_text=anchor_text,
+                    position=f"match:{match_idx}",
+                    target_post_id=None,
+                    reason="duplicate_target_href",
+                ))
+                match_idx += 1
+                continue
+            else:
+                seen_internal_hrefs.add(href)
+
+        # 最新版“判定マーカー”があっても、CTAに適合していなければ削除対象。
+        # （CTAで足切り済みなので、ここでは is_latest は残存判定には用いない）
+
         # 旧版（旧spec or 旧タイトル厳密一致）は削除
         if is_old_spec or is_legacy_title:
             out_parts.append(html[last:m.start()])
@@ -140,18 +205,7 @@ def find_and_remove_legacy_links(
             match_idx += 1
             continue
 
-        if _is_legacy(anchor_text, title):
-            # 旧仕様 → aタグ全体を削除（本文から丸ごと取り除く）
-            out_parts.append(html[last:m.start()])
-            last = m.end()
-
-            removed.append(RemovedLink(
-                href=href,
-                anchor_text=anchor_text,
-                position=f"match:{match_idx}",
-                target_post_id=None,  # PIDは applier 側で URL→PID マップにより補完
-                reason="legacy_title_anchor",
-            ))
+        # ここまでで削除対象に当たらなければ保持
         match_idx += 1
 
     if removed:

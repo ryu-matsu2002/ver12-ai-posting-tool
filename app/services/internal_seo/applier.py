@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Tuple
 import os
 import time
 import random
+import math
 
 from app import db
 from app.models import (
@@ -68,7 +69,8 @@ ANCHOR_USER_PROMPT_TEMPLATE = (
     "【主要キーワード（重要度順）】{dst_keywords}\n"
     "【段落の要旨（文脈ヒント）】{src_hint}\n"
     "要件: 上記の仕様どおり、1文・40〜60字で、"
-    "【リンク先タイトル】のキーワードを自然に含め「〜について詳しい解説はコチラ」で結ぶアンカー文のみ出力。"
+    "【リンク先タイトル】の名詞系キーワードを必ず1語以上含め、「〜について詳しい解説はコチラ」で結ぶアンカー文のみ出力。"
+    "動詞や連体修飾だけで主語が無い文（例: 向上させるため…）は不可。"
 )
 
 _P_CLOSE = re.compile(r"</p\s*>", re.IGNORECASE)
@@ -297,6 +299,31 @@ def _generate_anchor_text_via_llm(
 
     return text
 
+def _is_anchor_quality_ok(text: str, dst_keywords: List[str], dst_title: str) -> bool:
+    """最低品質チェック：名詞系KWを1語以上含む／文頭が述語だけにならない／長さ"""
+    if not text:
+        return False
+    # 末尾は既に「について詳しい解説はコチラ」で正規化済み前提
+    body = re.sub(r"について詳しい解説はコチラ$", "", text).strip()
+    if not (24 <= len(text) <= ISEO_ANCHOR_MAX_CHARS):
+        return False
+    # 先頭が助詞・補助動詞・動詞語幹っぽい始まりはNG（簡易）
+    if re.match(r"^(について|により|に向け|のため|ために|向上させるため|改善するため|選ぶため|知るため)", body):
+        return False
+    # キーワードを必ず1語以上含む（title_tokensからも補完）
+    kw_pool = set(k for k in (dst_keywords or []) if k)
+    try:
+        kw_pool.update(title_tokens(dst_title or "") or [])
+    except Exception:
+        pass
+    # 2文字以上のキーワードに限定して含有判定
+    kw_pool = {k for k in kw_pool if len(k) >= 2}
+    if not kw_pool:
+        return True  # どうしても無い場合は通す（上位でテンプレに落とすため緩め）
+    normalized = body
+    hit = any(k in normalized for k in kw_pool)
+    return bool(hit)
+
 def _emit_anchor_html(href: str, text: str) -> str:
     text_safe = _TAG_STRIP.sub(" ", unescape(text or "")).strip()
     # 構造は維持（<a href ... title ...>）。版情報は直前コメントで表現。
@@ -318,6 +345,15 @@ def _is_internal_url(site_url: str, href: str) -> bool:
 
 def _extract_links(html: str) -> List[Tuple[str, str]]:
     return [(m.group(1) or "", _html_to_text(m.group(2) or "")) for m in _A_TAG.finditer(html or "")]
+
+def _collect_internal_hrefs(site: Site, html: str) -> set[str]:
+    """記事全体の内部リンク href セット（記事単位の重複抑止に使用）"""
+    site_prefix = (site.url or "").rstrip("/")
+    hrefs = set()
+    for h, _ in _extract_links(html or ""):
+        if h and site_prefix and h.startswith(site_prefix):
+            hrefs.add(h)
+    return hrefs
 
 _A_OPEN = re.compile(r"<a\b[^>]*>", re.IGNORECASE)
 _A_CLOSE = re.compile(r"</a\s*>", re.IGNORECASE)
@@ -355,7 +391,12 @@ def _unmask_existing_anchors(html: str, placeholders: Dict[str, str]) -> str:
         html = html.replace(k, v)
     return html
 
-def _linkify_first_occurrence(para_html: str, anchor_text: str, href: str) -> Optional[str]:
+def _linkify_first_occurrence(
+    para_html: str,
+    anchor_text: str,
+    href: str,
+    tgt_title: Optional[str] = None,
+) -> Optional[str]:
     """
     段落内の**未リンク領域**にある anchor_text の最初の出現を
     Wikipedia風の <a href="..." class="ai-ilink" title="...">anchor_text</a>
@@ -367,8 +408,8 @@ def _linkify_first_occurrence(para_html: str, anchor_text: str, href: str) -> Op
     # 見出し・TOC・STYLE ブロックは一律除外（本文以外は触らない）
     if _H_TAG.search(para_html) or _TOC_HINT.search(para_html) or _STYLE_BLOCK.search(para_html):
         return None
-    # NGアンカーは即中止
-    if is_ng_anchor(anchor_text):
+    # NGアンカーは即中止（タイトル関連性も考慮）
+    if is_ng_anchor(anchor_text, tgt_title):
         return None
     masked, ph = _mask_existing_anchors(para_html)
     # 生テキストで最初の一致を探す（HTMLタグは残るが <a> はマスク済み）
@@ -700,6 +741,10 @@ def _apply_plan_to_html(
     site_url = site.url.rstrip("/")
     # 既存内部リンクの個数
     existing_internal = _existing_internal_links_count(site, html)
+    # 記事全体で既に使われている内部href（重複抑止用）
+    article_href_set = _collect_internal_hrefs(site, html)
+    # 同一ターゲットPIDは記事内で1回まで
+    used_target_pids: set[int] = set()
 
     # 既定を 2〜4 に変更（サイト設定があればそれを優先）
     need_min = max(2, int(cfg.min_links_per_post or 2))
@@ -749,6 +794,39 @@ def _apply_plan_to_html(
         if not href:
             res.skipped += 1
             continue
+
+        # --- 自己リンク禁止（src_post_id == target_post_id の場合） ---
+        try:
+            if int(act.target_post_id) == int(src_post_id):
+                act.status = "skipped"
+                act.reason = "self-link"
+                act.updated_at = datetime.utcnow()
+                res.skipped += 1
+                continue
+        except Exception:
+            pass
+
+        # --- 不完全アンカー禁止（キーワードを含まず末尾が規定形でない場合） ---
+        if act.anchor_text:
+            norm_text = nfkc_norm((act.anchor_text or "")).lower()
+            norm_title = nfkc_norm((tgt_title or "")).lower()
+            if ("について詳しい解説はコチラ" not in act.anchor_text) or (not any(k in norm_text for k in norm_title.split())):
+                act.status = "skipped"
+                act.reason = "incomplete-anchor"
+                act.updated_at = datetime.utcnow()
+                res.skipped += 1
+                continue
+
+        # --- 同一URLへの重複アンカー禁止（既に同じhrefを別アンカーで使用している場合） ---
+        existing_links = [h for (h, atext) in _extract_links(_rejoin_paragraphs(paragraphs))]
+        if href in existing_links:
+            # ただし同一アンカーテキストなら既存を置換対象に回すのでOK
+            if act.anchor_text and not any(atext == act.anchor_text and h == href for (h, atext) in _extract_links(_rejoin_paragraphs(paragraphs))):
+                act.status = "skipped"
+                act.reason = "duplicate-href-anchor"
+                act.updated_at = datetime.utcnow()
+                res.skipped += 1
+                continue
         # ---- 新方式 / 旧方式の分岐 ----
         if ANCHOR_MODE == "generated_line":
             # 段落本文（安全ガード/重複/禁止領域チェック）
@@ -756,6 +834,24 @@ def _apply_plan_to_html(
             if _H_TAG.search(para_html) or _TOC_HINT.search(para_html):
                 res.skipped += 1
                 continue
+
+            # 記事全体で同一hrefが既に存在したらスキップ（段落をまたいだ重複防止）
+        if href in article_href_set:
+            act.status = "skipped"
+            act.reason = "duplicate-href-in-article"
+            act.updated_at = datetime.utcnow()
+            res.skipped += 1
+            continue
+        # 同一target_post_idは記事内で1回まで
+        try:
+            if int(act.target_post_id) in used_target_pids:
+                act.status = "skipped"
+                act.reason = "duplicate-target-in-article"
+                act.updated_at = datetime.utcnow()
+                res.skipped += 1
+                continue
+        except Exception:
+            pass
             # 同じURLが段落内に既にあるならスキップ（多重リンク回避）
             if href in [h for (h, _) in _extract_links(para_html)]:
                 res.skipped += 1
@@ -772,24 +868,32 @@ def _apply_plan_to_html(
                         dst_kw_list = [w for w in (title_tokens(tgt_title or "") or []) if w][:6]
                     except Exception:
                         dst_kw_list = []
-                if ANCHOR_STYLE == "template":
-                    # 完全固定テンプレ
-                    base = (dst_kw_list[0] if dst_kw_list else (tgt_title or "")[:20]).strip()
-                    anchor_text = f"{base}について詳しい解説はコチラ"
-                else:
-                    anchor_text = _generate_anchor_text_via_llm(
+                # 生成 → 品質チェック → 最大2回まで再生成、最後はテンプレで確定
+                def _gen_once() -> str:
+                    if ANCHOR_STYLE == "template":
+                        base = (dst_kw_list[0] if dst_kw_list else (tgt_title or "")[:20]).strip()
+                        return f"{base}について詳しい解説はコチラ"
+                    return _generate_anchor_text_via_llm(
                         dst_title=tgt_title or "",
                         dst_keywords=dst_kw_list,
                         src_hint=src_hint,
-                        user_id=None,  # user_id があれば渡せる
+                        user_id=None,
                     )
+                anchor_text = _gen_once()
+                tries = 0
+                while tries < 2 and not _is_anchor_quality_ok(anchor_text, dst_kw_list, tgt_title or ""):
+                    anchor_text = _gen_once()
+                    tries += 1
+                if not _is_anchor_quality_ok(anchor_text, dst_kw_list, tgt_title or ""):
+                    base = (dst_kw_list[0] if dst_kw_list else (tgt_title or "")[:20]).strip()
+                    anchor_text = f"{base}について詳しい解説はコチラ"
             except Exception as e:
                 logger.warning(f"[GEN-ANCHOR] LLM failed: {e}")
                 # フォールバックの定型（軽いCTA + タイトルの主要語）
                 key = (tgt_title or "").strip()
                 anchor_text = (f"{key}の詳しい解説はこちら。")[:80] if key else "詳しい解説はこちら。"
             # NGアンカー最終チェック
-            if is_ng_anchor(anchor_text):
+            if is_ng_anchor(anchor_text, tgt_title):
                 act.status = "skipped"
                 act.reason = "ng-anchor"
                 act.updated_at = datetime.utcnow()
@@ -808,6 +912,12 @@ def _apply_plan_to_html(
             anchor_html = _emit_anchor_html(href, anchor_text)
             # 要求構造維持：<br><a ...> の形だが、版マークは直前コメントとして <a> の直前に置く
             paragraphs[idx] = para_html + "<br>" + anchor_html
+            # 記事レベルの重複抑止セットを更新
+            article_href_set.add(href)
+            try:
+                used_target_pids.add(int(act.target_post_id))
+            except Exception:
+                pass
 
             # 状態更新
             act.anchor_text = anchor_text  # 生成結果を保存（再試行時のキャッシュにもなる）
@@ -845,17 +955,22 @@ def _apply_plan_to_html(
             if href in [h for (h, _) in _extract_links(para_html)]:
                 res.skipped += 1
                 continue
-            if is_ng_anchor(act.anchor_text):
+            if is_ng_anchor(act.anchor_text, tgt_title):
                 act.status = "skipped"
                 act.reason = "ng-anchor"
                 act.updated_at = datetime.utcnow()
                 res.skipped += 1
                 continue
-            new_para = _linkify_first_occurrence(para_html, act.anchor_text, href)
+            new_para = _linkify_first_occurrence(para_html, act.anchor_text, href, tgt_title)
             if not new_para:
                 res.skipped += 1
                 continue
             paragraphs[idx] = new_para
+            article_href_set.add(href)
+            try:
+                used_target_pids.add(int(act.target_post_id))
+            except Exception:
+                pass
             act.status = "applied"
             act.applied_at = datetime.utcnow()
             res.applied += 1
@@ -966,13 +1081,7 @@ def apply_actions_for_post(site_id: int, src_post_id: int, dry_run: bool = False
 
     site = Site.query.get(site_id)
     # ▼ topic スキップ（記事URLに 'topic' を含む場合は一切触らない）
-    try:
-        if os.getenv("INTERNAL_SEO_SKIP_TOPIC", "1") != "0":
-            src_url = _post_url(site_id, src_post_id) or ""
-            if "topic" in (src_url or "").lower():
-                return ApplyResult(message="skip-topic-page")
-    except Exception:
-        pass
+    # （重複ブロックを削除：上の分岐だけ残す
     # ▼ topic スキップ（記事URLに 'topic' を含む場合は一切触らない）
     try:
         if os.getenv("INTERNAL_SEO_SKIP_TOPIC", "1") != "0":
@@ -1130,4 +1239,116 @@ def apply_actions_for_site(site_id: int, limit_posts: Optional[int] = 50, dry_ru
                 logger.warning(f"[Applier] rate-limit sleep skipped due to error: {e}")
 
     logger.info("[Applier] site=%s result=%s", site_id, total)
+    return total
+
+# ==== 追加：ユーザー単位でサイト横断適用 ====
+def apply_actions_for_user(user_id: int, limit_posts: int = 50, dry_run: bool = False) -> Dict[str, object]:
+    """
+    指定ユーザーに紐づく全サイトを対象に、pending の内部リンク適用を実行する。
+    - `limit_posts`: この呼び出し（1 tick）で処理する「記事数」の総予算
+    - 予算はサイトごとの pending 件数を見て「水割り（均等＋余り前寄せ）」で配分
+
+    戻り値:
+      {
+        "applied": int,
+        "swapped": int,
+        "skipped": int,
+        "processed_posts": int,
+        "pending_total": int,         # 開始時点の「未処理記事」総数（distinct post_id）
+        "site_breakdown": [           # サイトごとの実行結果サマリ
+          {
+            "site_id": int,
+            "allocated_posts": int,   # 今回割り当てた記事数
+            "pending_posts": int,     # 開始時点のサイト内 pending 記事数
+            "result": {"applied":..,"swapped":..,"skipped":..,"processed_posts":..}
+          },
+          ...
+        ]
+      }
+    """
+    # 1) ユーザーのサイト抽出
+    sites = (
+        Site.query
+        .with_entities(Site.id)
+        .filter(Site.user_id == user_id)
+        .all()
+    )
+    site_ids = [int(sid) for (sid,) in sites]
+    if not site_ids:
+        return {
+            "applied": 0, "swapped": 0, "skipped": 0,
+            "processed_posts": 0, "pending_total": 0,
+            "site_breakdown": []
+        }
+
+    # 2) サイトごとの「pending のある投稿数（distinct post_id）」を集計
+    pending_rows = (
+        db.session.query(
+            InternalLinkAction.site_id,
+            db.func.count(db.func.distinct(InternalLinkAction.post_id)).label("pending_posts")
+        )
+        .filter(InternalLinkAction.site_id.in_(site_ids),
+                InternalLinkAction.status == "pending")
+        .group_by(InternalLinkAction.site_id)        
+        .all()
+    )
+    pending_map = {int(sid): int(cnt) for (sid, cnt) in pending_rows}
+
+    # pending がゼロなら何もしない
+    pending_total = sum(pending_map.values())
+    if pending_total == 0 or (limit_posts or 0) <= 0:
+        return {
+            "applied": 0, "swapped": 0, "skipped": 0,
+            "processed_posts": 0, "pending_total": pending_total,
+            "site_breakdown": [
+                {"site_id": sid, "allocated_posts": 0, "pending_posts": pending_map.get(sid, 0), "result": {"applied":0,"swapped":0,"skipped":0,"processed_posts":0}}
+                for sid in site_ids
+            ]
+        }
+
+    # 3) 予算配分（均等割り＋余りを pending が多いサイトから加算）
+    targets = [sid for sid in site_ids if pending_map.get(sid, 0) > 0]
+    if not targets:
+        targets = []  # 念のため
+    n = len(targets)
+    budget = max(0, int(limit_posts or 0))
+    base = budget // n if n else 0
+    rem  = budget % n if n else 0
+
+    # 余りは pending 多い順に +1
+    targets_sorted = sorted(targets, key=lambda sid: pending_map.get(sid, 0), reverse=True)
+    allocation = {sid: 0 for sid in site_ids}
+    for sid in targets_sorted:
+        allocation[sid] = base
+    for i in range(rem):
+        allocation[targets_sorted[i]] += 1
+
+    # 4) サイトごとに実行（上限は pending_posts を超えない）
+    total = {"applied": 0, "swapped": 0, "skipped": 0, "processed_posts": 0}
+    breakdown: List[Dict[str, object]] = []
+    for sid in site_ids:
+        pending_posts = pending_map.get(sid, 0)
+        alloc = min(allocation.get(sid, 0), pending_posts)
+        if alloc <= 0:
+            breakdown.append({
+                "site_id": sid,
+                "allocated_posts": 0,
+                "pending_posts": pending_posts,
+                "result": {"applied":0,"swapped":0,"skipped":0,"processed_posts":0}
+            })
+            continue
+        res = apply_actions_for_site(sid, limit_posts=alloc, dry_run=dry_run)
+        # 集計
+        total["applied"] += int(res.get("applied", 0))
+        total["swapped"] += int(res.get("swapped", 0))
+        total["skipped"] += int(res.get("skipped", 0))
+        total["processed_posts"] += int(res.get("processed_posts", 0))
+        breakdown.append({
+            "site_id": sid,
+            "allocated_posts": alloc,
+            "pending_posts": pending_posts,
+            "result": res
+        })
+
+    total.update({"pending_total": pending_total, "site_breakdown": breakdown})
     return total

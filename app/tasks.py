@@ -42,6 +42,7 @@ from app.services.internal_seo.indexer import sync_site_content_index
 from app.services.internal_seo.link_graph import build_link_graph_for_site
 from app.services.internal_seo.planner import plan_links_for_site
 from app.services.internal_seo.applier import apply_actions_for_site
+from app.services.internal_seo import user_scheduler  # 🆕 追加
 import os
 from math import inf
 from typing import List, Dict, Set, Tuple, Optional
@@ -838,7 +839,7 @@ def init_scheduler(app):
         max_instances=1
     )
 
-    # ✅ 内部SEO ナイトリー実行（環境変数でON/OFF可能）
+    # ✅ 内部SEO ナイトリー実行（環境変数でON/OFF可能／レガシー運用）
     #   - デフォルト: 毎日 18:15 UTC = JST 03:15
     if os.getenv("INTERNAL_SEO_ENABLED", "1") == "1":
         utc_hour = int(os.getenv("INTERNAL_SEO_UTC_HOUR", "18"))
@@ -855,7 +856,8 @@ def init_scheduler(app):
         )
         app.logger.info(f"Scheduler started: internal_seo_job daily at {utc_hour:02d}:{utc_min:02d} UTC")
     else:
-        app.logger.info("Scheduler skipped: internal_seo_job (INTERNAL_SEO_ENABLED!=1)")
+        # 明示的にレガシーナイトリーを停止していることを起動ログに残す
+        app.logger.info("legacy internal-seo nightly OFF (INTERNAL_SEO_ENABLED!=1): skipping internal_seo_job")
 
     # ✅ 内部SEO ワーカー（キュー消化）※毎分
     if os.getenv("INTERNAL_SEO_WORKER_ENABLED", "1") == "1":
@@ -870,7 +872,22 @@ def init_scheduler(app):
         )
         app.logger.info("Scheduler started: internal_seo_worker_tick every minute")
     else:
-        app.logger.info("Scheduler skipped: internal_seo_worker_tick (INTERNAL_SEO_WORKER_ENABLED!=1)")    
+        app.logger.info("Scheduler skipped: internal_seo_worker_tick (INTERNAL_SEO_WORKER_ENABLED!=1)")
+
+    # ✅ 内部SEO ユーザーごとの自動ジョブ（ENVでON/OFF可能）
+    if os.getenv("INTERNAL_SEO_USER_ENABLED", "1") == "1":
+        scheduler.add_job(
+            func=user_scheduler.user_scheduler_tick,
+            trigger="interval",
+            minutes=int(os.getenv("INTERNAL_SEO_USER_INTERVAL_MIN", "1")),
+            args=[app],
+            id="internal_seo_user_scheduler_job",
+            replace_existing=True,
+            max_instances=1,
+        )
+        app.logger.info("Scheduler started: internal_seo_user_scheduler_job (user-scope tick)")
+    else:
+        app.logger.info("Scheduler skipped: internal_seo_user_scheduler_job (INTERNAL_SEO_USER_ENABLED!=1)")        
  
 
 

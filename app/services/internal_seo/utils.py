@@ -83,13 +83,12 @@ _KANA_ONLY = re.compile(r"^[ぁ-んァ-ンー]+$")
 # 有意文字の判定：英数・漢字に加えて「かな（ひら/カタカナ/長音）」も許可
 _CJK_OR_WORD = re.compile(r"[A-Za-z0-9一-龥ぁ-んァ-ンー]")
 
-def is_ng_anchor(s: str | None) -> bool:
+def is_ng_anchor(s: str | None, target_title: str | None = None) -> bool:
     """
-    “ダメなアンカー”判定（短すぎ/指示語/機能語/不自然な語）。
-    - 正規化して STOPWORDS に入っていればNG
-    - 長さが短すぎ（正規化3未満）はNG
-    - かなだけで短い（4未満）はNG
-    - 記号しかない/有意な文字が無い場合もNG
+    “ダメなアンカー”判定。
+    - STOPWORDSに含まれる/短すぎ/かなだけ/記号だけ → NG
+    - さらに target_title が与えられた場合、
+      タイトル語がアンカーに全く含まれなければ NG
     """
     if not s:
         return True
@@ -102,9 +101,15 @@ def is_ng_anchor(s: str | None) -> bool:
         return True
     if _KANA_ONLY.match(n) and len(n) < 4:
         return True
-    # 有意な文字（英数/漢字/かな）が1つも含まれない場合はNG
     if not _CJK_OR_WORD.search(s):
         return True
+
+    if target_title:
+        anchor_norm = nfkc_norm(s)
+        tks = [nfkc_norm(tok) for tok in title_tokens(target_title)]
+        if not any(tok and tok in anchor_norm for tok in tks):
+            return True
+
     return False
 
 

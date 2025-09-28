@@ -10,6 +10,8 @@ from app.services.internal_seo.indexer import sync_site_content_index
 from app.services.internal_seo.link_graph import build_link_graph_for_site
 from app.services.internal_seo.planner import plan_links_for_site
 from app.services.internal_seo.applier import apply_actions_for_site
+from app.models import User, InternalSeoUserSchedule
+from flask.cli import with_appcontext
 
 
 def register_cli(app):
@@ -35,6 +37,38 @@ def register_cli(app):
             incremental=incremental,
             job_kind=job_kind,
         )
+
+    # === 🆕 ユーザースケジューラ 初期化 ===
+    @app.cli.command("iseo-init-schedules")
+    @click.option("--all-users", is_flag=True, help="未作成ユーザーに InternalSeoUserSchedule を一括作成")
+    @with_appcontext
+    def init_schedules(all_users):
+        """
+        既存ユーザーのうち、まだ InternalSeoUserSchedule が存在しないユーザーに
+        既定値でレコードを作成する。
+        """
+        if not all_users:
+            click.echo("⚠️ Use --all-users to target all users.")
+            return
+
+        users = User.query.all()
+        created = 0
+        for u in users:
+            exists = InternalSeoUserSchedule.query.filter_by(user_id=u.id).first()
+            if exists:
+                continue
+            sch = InternalSeoUserSchedule(
+                user_id=u.id,
+                is_enabled=False,
+                status="idle",
+                tick_interval_sec=60,
+                budget_per_tick=20,
+                rate_limit_per_min=None,
+            )
+            db.session.add(sch)
+            created += 1
+        db.session.commit()
+        click.echo(f"✅ Created {created} schedules.")
 
     @with_db_retry(max_retries=4, backoff=1.6)
     def run_pipeline(site_id, pages, per_page, min_score, max_k, limit_sources, limit_posts, incremental):
