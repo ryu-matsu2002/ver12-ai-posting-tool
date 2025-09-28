@@ -319,6 +319,27 @@ def _postprocess_anchor_text(text: str) -> str:
             s = s + "について詳しい解説はコチラ"
     return s
 
+def _safe_anchor_from_keywords(dst_kw_list: List[str], dst_title: str) -> str:
+    """
+    NG時のセーフフォールバック用に、主要KWから安全テンプレを生成。
+    ・KWが無い場合はタイトル主要語
+    ・「留学in◯◯」→「◯◯留学」に正規化
+    """
+    base = ""
+    pool = [k for k in (dst_kw_list or []) if k]
+    if not pool:
+        try:
+            pool = [w for w in (title_tokens(dst_title or "") or []) if w]
+        except Exception:
+            pool = []
+    if pool:
+        # より一般的で長めの語を優先
+        pool = sorted(set(pool), key=len, reverse=True)
+        base = pool[0]
+    base = re.sub(r"留学in([一-龥ぁ-んァ-ンA-Za-z0-9ー]+)", r"\\1留学", base or "")
+    base = (base or (dst_title or "")[:20]).strip()
+    return f"{base}について詳しい解説はコチラ"
+
 def _is_anchor_quality_ok(text: str, dst_keywords: List[str], dst_title: str) -> bool:
     """最低品質チェック：名詞系KWを1語以上含む／文頭が述語だけにならない／長さ"""
     if not text:
@@ -912,11 +933,23 @@ def _apply_plan_to_html(
 
             # NGアンカー最終チェック（最低限）
             if is_ng_anchor(anchor_text, tgt_title):
-                act.status = "skipped"
-                act.reason = "ng-anchor"
-                act.updated_at = datetime.utcnow()
-                res.skipped += 1
-                continue
+                # --- ★リカバリ1：安全テンプレ再構成 → 日本語補正 → 再判定
+                fallback = _safe_anchor_from_keywords(dst_kw_list, tgt_title or "")
+                fallback = _postprocess_anchor_text(fallback)
+                # 長すぎる場合の丸め（語尾を保つ）
+                if len(fallback) > ISEO_ANCHOR_MAX_CHARS:
+                    fallback = fallback[:ISEO_ANCHOR_MAX_CHARS]
+                    fallback = re.sub(r"[、。．.\\s]+$", "", fallback)
+                    if not fallback.endswith("について詳しい解説はコチラ"):
+                        fallback = _safe_anchor_from_keywords(dst_kw_list, tgt_title or "")
+                if not is_ng_anchor(fallback, tgt_title):
+                    anchor_text = fallback
+                else:
+                    act.status = "skipped"
+                    act.reason = "ng-anchor"
+                    act.updated_at = datetime.utcnow()
+                    res.skipped += 1
+                    continue
 
             # 直前段落がすでに内部リンクで終わっていれば（版マークあり）連続行を回避
             if idx - 1 >= 0:
