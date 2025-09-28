@@ -729,7 +729,13 @@ def plan_links_for_post(
             reason="plan:generated",
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
-        )
+            # ★applier が優先的に参照するメタ情報を付与
+            meta={
+                "dst_url": tgt_url or "",
+                "dst_title": title or "",
+                "dst_keywords": dst_kw_list or [],
+            },
+        )        
         db.session.add(act)
         actions_made += 1
         slot_ptr += 1

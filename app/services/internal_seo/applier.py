@@ -806,16 +806,7 @@ def _apply_plan_to_html(
         except Exception:
             pass
 
-        # --- 不完全アンカー禁止（キーワードを含まず末尾が規定形でない場合） ---
-        if act.anchor_text:
-            norm_text = nfkc_norm((act.anchor_text or "")).lower()
-            norm_title = nfkc_norm((tgt_title or "")).lower()
-            if ("について詳しい解説はコチラ" not in act.anchor_text) or (not any(k in norm_text for k in norm_title.split())):
-                act.status = "skipped"
-                act.reason = "incomplete-anchor"
-                act.updated_at = datetime.utcnow()
-                res.skipped += 1
-                continue
+        # （緩和）planner 由来の anchor_text は使わず、generated_line では LLM で毎回生成する
 
         # --- 同一URLへの重複アンカー禁止（既に同じhrefを別アンカーで使用している場合） ---
         existing_links = [h for (h, atext) in _extract_links(_rejoin_paragraphs(paragraphs))]
@@ -829,14 +820,103 @@ def _apply_plan_to_html(
                 continue
         # ---- 新方式 / 旧方式の分岐 ----
         if ANCHOR_MODE == "generated_line":
-            # 段落本文（安全ガード/重複/禁止領域チェック）
+            # 段落本文（安全ガード/禁止領域チェック）
             para_html = paragraphs[idx]
             if _H_TAG.search(para_html) or _TOC_HINT.search(para_html):
                 res.skipped += 1
                 continue
-
             # 記事全体で同一hrefが既に存在したらスキップ（段落をまたいだ重複防止）
-        if href in article_href_set:
+            if href in article_href_set:
+                act.status = "skipped"
+                act.reason = "duplicate-href-in-article"
+                act.updated_at = datetime.utcnow()
+                res.skipped += 1
+                continue
+            # 同一target_post_idは記事内で1回まで
+            try:
+                if int(act.target_post_id) in used_target_pids:
+                    act.status = "skipped"
+                    act.reason = "duplicate-target-in-article"
+                    act.updated_at = datetime.utcnow()
+                    res.skipped += 1
+                    continue
+            except Exception:
+                pass
+            # 同一段落に同じhrefが既にあるなら多重リンク回避
+            if href in [h for (h, _) in _extract_links(para_html)]:
+                res.skipped += 1
+                continue
+
+            # --- 惹句テキスト：LLM 生成（緩和版：プロンプト準拠・最低限の整形のみ） ---
+            try:
+                src_hint = _html_to_text(para_html)[:120]
+                dst_kw_list = kw_meta_list or []
+                if not dst_kw_list:
+                    try:
+                        dst_kw_list = [w for w in (title_tokens(tgt_title or "") or []) if w][:6]
+                    except Exception:
+                        dst_kw_list = []
+                if ANCHOR_STYLE == "template":
+                    base = (dst_kw_list[0] if dst_kw_list else (tgt_title or "")[:20]).strip()
+                    anchor_text = f"{base}について詳しい解説はコチラ"
+                else:
+                    anchor_text = _generate_anchor_text_via_llm(
+                        dst_title=tgt_title or "",
+                        dst_keywords=dst_kw_list,
+                        src_hint=src_hint,
+                        user_id=None,
+                    )
+                # 最低限の整形：末尾句統一＆最大長
+                anchor_text = _clean_gpt_output(anchor_text)
+                anchor_text = re.sub(r"[、。．.\s]+$", "", anchor_text)
+                if not anchor_text.endswith("について詳しい解説はコチラ"):
+                    anchor_text = re.sub(r"(について.*)$", "について詳しい解説はコチラ", anchor_text)
+                    if not anchor_text.endswith("について詳しい解説はコチラ"):
+                        base = (dst_kw_list[0] if dst_kw_list else (tgt_title or "")[:20]).strip()
+                        anchor_text = f"{base}について詳しい解説はコチラ"
+                if len(anchor_text) > ISEO_ANCHOR_MAX_CHARS:
+                    anchor_text = anchor_text[:ISEO_ANCHOR_MAX_CHARS]
+                    anchor_text = re.sub(r"[、。．.\s]+$", "", anchor_text)
+                    if not anchor_text.endswith("について詳しい解説はコチラ"):
+                        base = (dst_kw_list[0] if dst_kw_list else (tgt_title or "")[:20]).strip()
+                        anchor_text = f"{base}について詳しい解説はコチラ"
+            except Exception as e:
+                logger.warning(f"[GEN-ANCHOR] LLM failed: {e}")
+                key = (tgt_title or "").strip()
+                anchor_text = (f"{key}について詳しい解説はコチラ")[:ISEO_ANCHOR_MAX_CHARS] if key else "内部リンクについて詳しい解説はコチラ"
+
+            # NGアンカー最終チェック（最低限）
+            if is_ng_anchor(anchor_text, tgt_title):
+                act.status = "skipped"
+                act.reason = "ng-anchor"
+                act.updated_at = datetime.utcnow()
+                res.skipped += 1
+                continue
+
+            # 記事内でのアンカーテキスト重複抑止
+            anchor_key = nfkc_norm(anchor_text).lower()
+            if anchor_key and anchor_key in seen_anchor_keys:
+                act.status = "skipped"
+                act.reason = "duplicate-anchor-in-article"
+                act.updated_at = datetime.utcnow()
+                res.skipped += 1
+                continue
+
+            anchor_html = _emit_anchor_html(href, anchor_text)
+            paragraphs[idx] = para_html + "<br>" + anchor_html
+            article_href_set.add(href)
+            try:
+                used_target_pids.add(int(act.target_post_id))
+            except Exception:
+                pass
+            act.anchor_text = anchor_text
+            act.status = "applied"
+            act.applied_at = datetime.utcnow()
+            res.applied += 1
+            inserted += 1
+            if anchor_key:
+                seen_anchor_keys.add(anchor_key)
+            logger.info(f"[GEN-ANCHOR] p={idx} text='{anchor_text}' -> {href}")
             act.status = "skipped"
             act.reason = "duplicate-href-in-article"
             act.updated_at = datetime.utcnow()
@@ -1087,7 +1167,7 @@ def apply_actions_for_post(site_id: int, src_post_id: int, dry_run: bool = False
         if os.getenv("INTERNAL_SEO_SKIP_TOPIC", "1") != "0":
             src_url = _post_url(site_id, src_post_id) or ""
             if "topic" in (src_url or "").lower():
-                return "", ApplyResult(message="skip-topic-page"), []
+                return ApplyResult(message="skip-topic-page")
     except Exception:
         pass
     wp_post = fetch_single_post(site, src_post_id)
