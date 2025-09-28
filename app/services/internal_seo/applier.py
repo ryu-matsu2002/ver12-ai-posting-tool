@@ -299,6 +299,26 @@ def _generate_anchor_text_via_llm(
 
     return text
 
+def _postprocess_anchor_text(text: str) -> str:
+    """
+    生成後の日本語を軽く整形:
+      - 「得られますについて」→「について」
+      - 「留学in〇〇」→「〇〇留学」
+      - 末尾の句読点・空白除去
+    """
+    s = _clean_gpt_output(text)
+    s = re.sub(r"得られますについて", "について", s)
+    s = re.sub(r"得られる?について", "について", s)
+    # 留学inスウェーデン → スウェーデン留学（一般化: 留学inXXXX → XXXX留学）
+    s = re.sub(r"留学in([一-龥ぁ-んァ-ンA-Za-z0-9ー]+)", r"\1留学", s)
+    s = re.sub(r"[、。．.\s]+$", "", s)
+    # 終止句の統一（壊れていたら付け直す）
+    if not s.endswith("について詳しい解説はコチラ"):
+        s = re.sub(r"(について.*)$", "について詳しい解説はコチラ", s)
+        if not s.endswith("について詳しい解説はコチラ"):
+            s = s + "について詳しい解説はコチラ"
+    return s
+
 def _is_anchor_quality_ok(text: str, dst_keywords: List[str], dst_title: str) -> bool:
     """最低品質チェック：名詞系KWを1語以上含む／文頭が述語だけにならない／長さ"""
     if not text:
@@ -345,6 +365,15 @@ def _is_internal_url(site_url: str, href: str) -> bool:
 
 def _extract_links(html: str) -> List[Tuple[str, str]]:
     return [(m.group(1) or "", _html_to_text(m.group(2) or "")) for m in _A_TAG.finditer(html or "")]
+
+def _extract_anchor_text_set(html: str) -> set[str]:
+    """記事中に既に存在する <a>…</a> のテキスト（正規化済み）集合"""
+    out = set()
+    for _, atext in _extract_links(html or ""):
+        key = nfkc_norm((atext or "").strip()).lower()
+        if key:
+            out.add(key)
+    return out
 
 def _collect_internal_hrefs(site: Site, html: str) -> set[str]:
     """記事全体の内部リンク href セット（記事単位の重複抑止に使用）"""
@@ -743,6 +772,8 @@ def _apply_plan_to_html(
     existing_internal = _existing_internal_links_count(site, html)
     # 記事全体で既に使われている内部href（重複抑止用）
     article_href_set = _collect_internal_hrefs(site, html)
+    # 記事全体で既に使われているアンカーテキスト（重複抑止用）
+    existing_anchor_text_set = _extract_anchor_text_set(html)
     # 同一ターゲットPIDは記事内で1回まで
     used_target_pids: set[int] = set()
 
@@ -866,14 +897,8 @@ def _apply_plan_to_html(
                         src_hint=src_hint,
                         user_id=None,
                     )
-                # 最低限の整形：末尾句統一＆最大長
-                anchor_text = _clean_gpt_output(anchor_text)
-                anchor_text = re.sub(r"[、。．.\s]+$", "", anchor_text)
-                if not anchor_text.endswith("について詳しい解説はコチラ"):
-                    anchor_text = re.sub(r"(について.*)$", "について詳しい解説はコチラ", anchor_text)
-                    if not anchor_text.endswith("について詳しい解説はコチラ"):
-                        base = (dst_kw_list[0] if dst_kw_list else (tgt_title or "")[:20]).strip()
-                        anchor_text = f"{base}について詳しい解説はコチラ"
+                # 事後整形（日本語の不自然さを軽減）
+                anchor_text = _postprocess_anchor_text(anchor_text)
                 if len(anchor_text) > ISEO_ANCHOR_MAX_CHARS:
                     anchor_text = anchor_text[:ISEO_ANCHOR_MAX_CHARS]
                     anchor_text = re.sub(r"[、。．.\s]+$", "", anchor_text)
@@ -893,11 +918,28 @@ def _apply_plan_to_html(
                 res.skipped += 1
                 continue
 
-            # 記事内でのアンカーテキスト重複抑止
+            # 直前段落がすでに内部リンクで終わっていれば（版マークあり）連続行を回避
+            if idx - 1 >= 0:
+                prev_tail = paragraphs[idx - 1][-200:]
+                if INTERNAL_SEO_SPEC_MARK in prev_tail:
+                    act.status = "skipped"
+                    act.reason = "avoid-consecutive-link-paragraphs"
+                    act.updated_at = datetime.utcnow()
+                    res.skipped += 1
+                    continue
+
+            # 記事内でのアンカーテキスト重複抑止（既存＋今回実行内）
             anchor_key = nfkc_norm(anchor_text).lower()
             if anchor_key and anchor_key in seen_anchor_keys:
                 act.status = "skipped"
                 act.reason = "duplicate-anchor-in-article"
+                act.updated_at = datetime.utcnow()
+                res.skipped += 1
+                continue
+
+            if anchor_key and anchor_key in existing_anchor_text_set:
+                act.status = "skipped"
+                act.reason = "duplicate-anchor-existing"
                 act.updated_at = datetime.utcnow()
                 res.skipped += 1
                 continue
@@ -916,11 +958,8 @@ def _apply_plan_to_html(
             inserted += 1
             if anchor_key:
                 seen_anchor_keys.add(anchor_key)
+                existing_anchor_text_set.add(anchor_key)
             logger.info(f"[GEN-ANCHOR] p={idx} text='{anchor_text}' -> {href}")
-            act.status = "skipped"
-            act.reason = "duplicate-href-in-article"
-            act.updated_at = datetime.utcnow()
-            res.skipped += 1
             continue
         # 同一target_post_idは記事内で1回まで
         try:

@@ -447,6 +447,17 @@ def _pick_paragraph_slots(
     step = max(1, n // max(1, need))
     uniq_slots = [eligible[min(i * step, n - 1)] for i in range(min(need, n))]
     uniq_slots = sorted(set(uniq_slots))[:min(need, n)]
+    # --- 追加: 最小ギャップ=1（隣接 index を避ける） ---
+    def _apply_min_gap(slots: List[int], gap: int = 1) -> List[int]:
+        if not slots:
+            return []
+        kept: List[int] = []
+        for s in sorted(slots):
+            if not kept or (s - kept[-1] > gap):
+                kept.append(s)
+        return kept
+
+    uniq_slots = _apply_min_gap(uniq_slots, gap=1)
     if (not allow_repeat) or (len(uniq_slots) >= need):
         return uniq_slots
     # ここから救済：同一段落に複数本（max_per_para）まで許容して need を満たす
@@ -457,6 +468,7 @@ def _pick_paragraph_slots(
     i = 0
     while len(slots) < need and eligible:
         idx = eligible[i % len(eligible)]
+        # 追加: 直前に使った段落の「隣接」は避ける
         if counts[idx] < max_per_para:
             slots.append(idx)
             counts[idx] += 1
@@ -464,6 +476,8 @@ def _pick_paragraph_slots(
         # 念のためセーフガード
         if i > need * max(1, len(eligible)) * max(1, max_per_para):
             break
+    # 最終的にも最小ギャップを適用して返す（不足はそのまま）
+    slots = _apply_min_gap(sorted(slots), gap=1)
     return slots[:need]
     # ※ これ以上の緩和は行わない（関連性・可読性の担保）
 
