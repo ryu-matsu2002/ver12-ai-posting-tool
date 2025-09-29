@@ -26,6 +26,22 @@ from app.services.internal_seo.utils import nfkc_norm, is_ng_anchor, title_token
 
 logger = logging.getLogger(__name__)
 
+_GEN_SUFFIX = "について詳しい解説はコチラ"
+
+def _is_ng_anchor_generated_line(text: str, tgt_title: str | None = None) -> bool:
+    """
+    V4の“文スタイル”アンカー用のNG判定ラッパ。
+    固定終止句「〜について詳しい解説はコチラ」を外した“コア語”でNGを判定する。
+    """
+    if not text:
+        return True
+    core = re.sub(rf"{re.escape(_GEN_SUFFIX)}$", "", text).strip()
+    # コアが消えてしまう（=固定句だけ）なら安全テンプレ扱いでNGにしない
+    if not core:
+        return False
+    return is_ng_anchor(core, tgt_title)
+
+
 # ---- HTMLユーティリティ ----
 
 # ====== 新方式：ファイル内完結の設定・モデル・プロンプト ======
@@ -919,14 +935,14 @@ def _apply_plan_to_html(
                 anchor_text = (f"{key}について詳しい解説はコチラ")[:58] if key else "内部リンクについて詳しい解説はコチラ"
 
             # 最低品質/NGチェックとフォールバック
-            if is_ng_anchor(anchor_text, tgt_title):
+            if _is_ng_anchor_generated_line(anchor_text, tgt_title):
                 fb = _postprocess_anchor_text(_safe_anchor_from_keywords(dst_kw_list, tgt_title or ""))
                 if len(fb) > ISEO_ANCHOR_MAX_CHARS:
                     fb = re.sub(r"[、。．.\s]+$", "", fb[:ISEO_ANCHOR_MAX_CHARS])
                     if not fb.endswith("について詳しい解説はコチラ"):
                         fb = _safe_anchor_from_keywords(dst_kw_list, tgt_title or "")
                         fb = _postprocess_anchor_text(fb)
-                if is_ng_anchor(fb, tgt_title):
+                if _is_ng_anchor_generated_line(fb, tgt_title):
                     act.status = "skipped"; act.reason = "ng-anchor"
                     act.updated_at = datetime.utcnow(); res.skipped += 1; continue
                 anchor_text = fb
@@ -1086,7 +1102,7 @@ def _apply_plan_to_html(
                 anchor_text = (f"{key}について詳しい解説はコチラ")[:ISEO_ANCHOR_MAX_CHARS] if key else "内部リンクについて詳しい解説はコチラ"
 
             # NGアンカー最終チェック（最低限）
-            if is_ng_anchor(anchor_text, tgt_title):
+            if _is_ng_anchor_generated_line(anchor_text, tgt_title):
                 # --- ★リカバリ1：安全テンプレ再構成 → 日本語補正 → 再判定
                 fallback = _safe_anchor_from_keywords(dst_kw_list, tgt_title or "")
                 fallback = _postprocess_anchor_text(fallback)
@@ -1096,7 +1112,7 @@ def _apply_plan_to_html(
                     fallback = re.sub(r"[、。．.\\s]+$", "", fallback)
                     if not fallback.endswith("について詳しい解説はコチラ"):
                         fallback = _safe_anchor_from_keywords(dst_kw_list, tgt_title or "")
-                if not is_ng_anchor(fallback, tgt_title):
+                if not _is_ng_anchor_generated_line(fallback, tgt_title):
                     anchor_text = fallback
                 else:
                     act.status = "skipped"
