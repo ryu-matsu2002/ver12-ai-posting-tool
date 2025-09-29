@@ -82,8 +82,10 @@ def find_and_remove_legacy_links(
     spec_version: Optional[str] = None,
 ) -> Tuple[str, List[Dict]]:
     """
-    旧仕様リンク（アンカー=リンク先記事タイトルと厳密一致）を検出し、
-    <a>〜</a> を **丸ごと削除** する（＝追加されたタイトル文言ごと除去）。
+    旧仕様リンク（V1〜V3、または“タイトル厳密一致リンク”）だけを削除する。
+    版情報が無い「普通の内部リンク」は**残す**。
+    内部SEO由来（data-iseo or 直前コメントの版マークがある）リンクに限り、
+    CTA適合や重複hrefの整理も行う。
     引数:
       - html: 記事本文HTML
       - url_to_title: {URL: タイトル} の辞書（公開記事のみ）
@@ -99,9 +101,12 @@ def find_and_remove_legacy_links(
     last = 0
     match_idx = 0
 
-    # 直前コメントの判定では「マッチ直前のテキスト末尾」を見るため、
-    # 各マッチごとに html の一部を参照する
-    seen_internal_hrefs: set[str] = set()
+    # 直前コメントの判定では「マッチ直前のテキスト末尾」を見るため、各マッチごとに html の一部を参照
+    # 重複hrefチェックは「内部SEO由来リンク」にのみ適用する
+    seen_seo_hrefs: set[str] = set()
+
+    # 既定の最新版（未指定なら v4 を最新版として扱う）
+    latest = (spec_version or "v4").strip().lower()
     for m in _A_TAG.finditer(html):
         open_tag = m.group(1) or ""
         href = m.group(2) or ""
@@ -112,55 +117,51 @@ def find_and_remove_legacy_links(
         title = url_to_title.get(href)
         if not title:
             continue
-        # --- 版情報の検出 ---
-        # 1) data-iseo 属性（旧来 or 他環境で付与済みの互換）
+        
+        
+        # --- 版情報の検出（内部SEO由来の識別） ---
+        # 1) data-iseo 属性（旧来 or 互換）
         ver_in_attr: Optional[str] = None
         m_attr = _DATA_ISEO_RE.search(open_tag)
         if m_attr:
             ver_in_attr = (m_attr.group(1) or "").strip().lower()
-        # 2) 直前コメント <!-- ai-internal-link:vX --> を末尾アンカーで判定
+        # 2) 直前コメント <!-- ai-internal-link:vX -->
         ver_in_tail: Optional[str] = None
-        prefix_tail = html[max(0, m.start() - 300): m.start()]  # 直前300文字をざっくり参照
+        prefix_tail = html[max(0, m.start() - 300): m.start()]  # 直前300文字程度を参照
         m_cmt = _SPEC_COMMENT_TAIL_RE.search(prefix_tail)
         if m_cmt:
             ver_in_tail = (m_cmt.group(1) or "").strip().lower()
 
-        latest = (spec_version or "").strip().lower() if spec_version else None
-        # “最新版リンク”の条件：
-        # - spec_version が指定され、かつ data-iseo==最新版 もしくは 直前コメント==最新版
-        is_latest = False
-        if latest:
-            if (ver_in_attr and ver_in_attr == latest) or (ver_in_tail and ver_in_tail == latest):
-                is_latest = True
+        # 内部SEO由来か？（いずれかの版マークが付いている）
+        is_seo_link = bool(ver_in_attr or ver_in_tail)
+        # 当該リンクの「判定された版」
+        detected_ver = ver_in_attr or ver_in_tail  # どちらかが入っていればその値
 
-        # “旧版リンク”の条件：
-        # - spec_version が指定され、かつ data-iseo が存在して **最新版と異なる**
-        #   もしくは 直前コメントが存在して **最新版と異なる**
-        # - または版情報が無いが、旧仕様（タイトル厳密一致アンカー）に該当
-        is_old_spec = False
-        old_reason = "legacy_old_spec"
-        if latest:
-            if (ver_in_attr and ver_in_attr != latest) or (ver_in_tail and ver_in_tail != latest):
-                is_old_spec = True
-        # 版情報が一切無い場合は、旧タイトルリンクの厳密一致のみを“旧仕様”とみなす
-        is_legacy_title = False
-        if not ver_in_attr and not ver_in_tail:
-            if _is_legacy(anchor_text, title):
-                is_legacy_title = True
-                old_reason = "legacy_title_anchor"
+        # --- 削除・保持の判定方針 ---
+        # 1) 内部SEO由来リンクのみ以下を適用
+        #    - 旧版（detected_ver != latest）→ 削除
+        #    - CTA不適合 → 削除
+        #    - 同一hrefの重複（SEOリンク内で）→ 2本目以降を削除
+        # 2) 版情報が無い普通の内部リンクは原則保持
+        #    - 例外：旧仕様の“タイトル厳密一致リンク”は削除
 
-        # 最新版は削除対象外
-        if is_latest:
-            match_idx += 1
-            continue
+        if is_seo_link:
+            # 旧版（v1〜v3 など） → 削除
+            if detected_ver and detected_ver != latest:
+                out_parts.append(html[last:m.start()])
+                last = m.end()
+                removed.append(RemovedLink(
+                    href=href,
+                    anchor_text=anchor_text,
+                    position=f"match:{match_idx}",
+                    target_post_id=None,
+                    reason="old_spec",
+                ))
+                match_idx += 1
+                continue
 
-        # --- CTA準拠チェック（最新版仕様） ---
-        is_cta_ok = _is_cta_compliant(anchor_text)
-
-        # 同一URLへの複数リンク（内部のみ）は2つ目以降を削除
-        # 先に“CTA不合格”を削除 → 後でCTA合格の方が残りやすい順序にする
-        if href in url_to_title:
-            if not is_cta_ok:
+            # 最新版でも CTA 不適合は削除（SEO由来のみ）
+            if not _is_cta_compliant(anchor_text):
                 out_parts.append(html[last:m.start()])
                 last = m.end()
                 removed.append(RemovedLink(
@@ -172,8 +173,9 @@ def find_and_remove_legacy_links(
                 ))
                 match_idx += 1
                 continue
-            # CTA合格でも、同一hrefが既に出ていれば重複として削除
-            if href in seen_internal_hrefs:
+
+            # 重複hrefは2本目以降を削除（SEO由来のみ）
+            if href in seen_seo_hrefs:
                 out_parts.append(html[last:m.start()])
                 last = m.end()
                 removed.append(RemovedLink(
@@ -186,24 +188,22 @@ def find_and_remove_legacy_links(
                 match_idx += 1
                 continue
             else:
-                seen_internal_hrefs.add(href)
+                seen_seo_hrefs.add(href)
 
-        # 最新版“判定マーカー”があっても、CTAに適合していなければ削除対象。
-        # （CTAで足切り済みなので、ここでは is_latest は残存判定には用いない）
-
-        # 旧版（旧spec or 旧タイトル厳密一致）は削除
-        if is_old_spec or is_legacy_title:
-            out_parts.append(html[last:m.start()])
-            last = m.end()
-            removed.append(RemovedLink(
-                href=href,
-                anchor_text=anchor_text,
-                position=f"match:{match_idx}",
-                target_post_id=None,
-                reason=old_reason,
-            ))
-            match_idx += 1
-            continue
+        else:
+            # 版情報なし：普通の内部リンクは保持。ただし“タイトル厳密一致”は旧仕様として削除。
+            if _is_legacy(anchor_text, title):
+                out_parts.append(html[last:m.start()])
+                last = m.end()
+                removed.append(RemovedLink(
+                    href=href,
+                    anchor_text=anchor_text,
+                    position=f"match:{match_idx}",
+                    target_post_id=None,
+                    reason="legacy_title_anchor",
+                ))
+                match_idx += 1
+                continue
 
         # ここまでで削除対象に当たらなければ保持
         match_idx += 1
@@ -249,7 +249,8 @@ def clean_legacy_links(site_id: int, post_id: int, html: str) -> Tuple[str, List
         .all()
     )
     url_to_title = { (u or ""): (t or "") for (u, t) in rows if u }
-    cleaned, deletions = find_and_remove_legacy_links(html, url_to_title)
+    # 既定で v4 を最新版として扱う
+    cleaned, deletions = find_and_remove_legacy_links(html, url_to_title, spec_version="v4")
     # dict → RemovedLink へ戻す（呼び出し側が旧型を期待する場合のため）
     removed_objs = [
         RemovedLink(

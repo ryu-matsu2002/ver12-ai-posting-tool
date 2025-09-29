@@ -22,7 +22,7 @@ from app.models import (
 )
 from app.wp_client import fetch_single_post, update_post_content
 from app.services.internal_seo.legacy_cleaner import find_and_remove_legacy_links
-from app.services.internal_seo.utils import nfkc_norm, is_ng_anchor, title_tokens
+from app.services.internal_seo.utils import nfkc_norm, is_ng_anchor, title_tokens, extract_h2_sections
 
 logger = logging.getLogger(__name__)
 
@@ -89,8 +89,9 @@ _AI_STYLE_MARK = "<!-- ai-internal-link-style:v2 -->"
 
 # ==== 内部SEO 仕様バージョン（新規） ====
 # <a> には一切属性を付けない方針。代替として直前コメントで版管理を行う。
-INTERNAL_SEO_SPEC_VERSION = "v3"
+INTERNAL_SEO_SPEC_VERSION = "v4"
 INTERNAL_SEO_SPEC_MARK = f"<!-- ai-internal-link:{INTERNAL_SEO_SPEC_VERSION} -->"
+ILINK_BOX_MARK = "<!-- ai-internal-link-box:v1 -->"
 
 def _split_paragraphs(html: str) -> List[str]:
     if not html:
@@ -369,6 +370,20 @@ def _emit_anchor_html(href: str, text: str) -> str:
     text_safe = _TAG_STRIP.sub(" ", unescape(text or "")).strip()
     # 構造は維持（<a href ... title ...>）。版情報は直前コメントで表現。
     return f'{INTERNAL_SEO_SPEC_MARK}<a href="{href}" title="{text_safe}">{text_safe}</a>'
+
+def _emit_recommend_box() -> str:
+    """
+    「この記事を読んでる方がよく読んでる記事」を黒地・白文字の囲みで出力。
+    ※リンクは入れない（直下に別途 <a> を置く）。
+    """
+    return (
+        f'{ILINK_BOX_MARK}'
+        '<div class="ai-relbox" '
+        'style="margin:1.2em 0 0.4em; padding:10px 12px; border-radius:8px; '
+        'background:#111; color:#fff; font-weight:600;">'
+        'この記事を読んでる方がよく読んでる記事'
+        '</div>'
+    )
 
 
 def _rejoin_paragraphs(paragraphs: List[str]) -> str:
@@ -707,7 +722,7 @@ def preview_apply_for_post(site_id: int, src_post_id: int) -> Tuple[str, ApplyRe
     url_title_map = _all_url_to_title_map(site_id)
     cleaned_html, deletions = find_and_remove_legacy_links(wp_post.content_html or "", url_title_map)
     # 旧版→新版の自動移行のため、spec_version を渡す（旧シグネチャ互換）。
-    # cleaner 側の最新版判定は直前コメント <!-- ai-internal-link:v3 --> を利用。
+    # cleaner 側の最新版判定は直前コメント <!-- ai-internal-link:v4 --> を利用。
     try:
         cleaned_html, deletions = find_and_remove_legacy_links(
             wp_post.content_html or "", url_title_map, spec_version=INTERNAL_SEO_SPEC_VERSION
@@ -783,18 +798,18 @@ def _apply_plan_to_html(
         res.message = "empty-html"
         return html, res
 
-    paragraphs = _split_paragraphs(html)
-    if not paragraphs:
-        res.message = "no-paragraphs"
-        return html, res
+    # 以降、H2末尾に直接挿入するため、段落分割は後段（swap等）で都度再計算する
+    paragraphs = _split_paragraphs(html) or [html]
 
     site_url = site.url.rstrip("/")
+    # 作業用の本文
+    html_work = html
     # 既存内部リンクの個数
-    existing_internal = _existing_internal_links_count(site, html)
+    existing_internal = _existing_internal_links_count(site, html_work)
     # 記事全体で既に使われている内部href（重複抑止用）
-    article_href_set = _collect_internal_hrefs(site, html)
+    article_href_set = _collect_internal_hrefs(site, html_work)
     # 記事全体で既に使われているアンカーテキスト（重複抑止用）
-    existing_anchor_text_set = _extract_anchor_text_set(html)
+    existing_anchor_text_set = _extract_anchor_text_set(html_work)
     # 同一ターゲットPIDは記事内で1回まで
     used_target_pids: set[int] = set()
 
@@ -811,7 +826,146 @@ def _apply_plan_to_html(
     inserted = 0
     # 記事内で同一キーワード（アンカーテキスト）は1回まで
     seen_anchor_keys = set()
-    for act in plan_actions:
+    # --- 新仕様: H2末尾に挿入するアクションを分離 ---
+    h2_actions = [a for a in plan_actions if (a.position or "").startswith("h2:")]
+    p_actions  = [a for a in plan_actions if (a.position or "").startswith("p:")]
+
+    # 1-A) H2末尾への挿入（同じ記事内での位置ずれを避けるため “末尾座標の降順” で処理）
+    if h2_actions:
+        # 現在の本文から H2 セクション座標を取得
+        sections = extract_h2_sections(html_work)
+        # (tail_pos, act, h2_idx) を作る（-1 は本文末尾）
+        h2_plan: List[Tuple[int, InternalLinkAction, int]] = []
+        for act in h2_actions:
+            try:
+                h2_idx = int((act.position or "h2:-1").split(":")[1])
+            except Exception:
+                h2_idx = -1
+            if h2_idx >= 0 and sections and 0 <= h2_idx < len(sections):
+                tail_pos = int(sections[h2_idx]["tail_insert_pos"])
+            else:
+                tail_pos = len(html_work)
+                h2_idx = -1
+            h2_plan.append((tail_pos, act, h2_idx))
+        # 末尾から処理（挿入による以後位置のシフトを回避）
+        h2_plan.sort(key=lambda x: x[0], reverse=True)
+
+        for tail_pos, act, h2_idx in h2_plan:
+            if existing_internal + inserted >= need_max:
+                break
+            # --- meta優先でリンク先情報を取得 ---
+            meta_obj = getattr(act, "meta", None)
+            _meta: dict = meta_obj if isinstance(meta_obj, dict) else {}
+            href0, tgt_title0 = target_meta_map.get(act.target_post_id, ("", ""))
+            href_meta  = (_meta.get("dst_url") or "").strip()
+            title_meta = (_meta.get("dst_title") or "").strip()
+            kw_meta = _meta.get("dst_keywords")
+            if isinstance(kw_meta, str):
+                kw_meta_list = [k.strip() for k in kw_meta.split(",") if k.strip()]
+            elif isinstance(kw_meta, (list, tuple)):
+                kw_meta_list = [str(k).strip() for k in kw_meta if str(k).strip()]
+            else:
+                kw_meta_list = []
+            href = href_meta or href0
+            tgt_title = title_meta or tgt_title0
+            if not href:
+                act.status = "skipped"
+                act.updated_at = datetime.utcnow()
+                res.skipped += 1
+                continue
+            # 自己リンク禁止
+            try:
+                if int(act.target_post_id) == int(src_post_id):
+                    act.status = "skipped"
+                    act.reason = "self-link"
+                    act.updated_at = datetime.utcnow()
+                    res.skipped += 1
+                    continue
+            except Exception:
+                pass
+            # 同一URL重複・同一PID重複
+            if href in article_href_set:
+                act.status = "skipped"; act.reason = "duplicate-href-in-article"
+                act.updated_at = datetime.utcnow(); res.skipped += 1; continue
+            try:
+                if int(act.target_post_id) in used_target_pids:
+                    act.status = "skipped"; act.reason = "duplicate-target-in-article"
+                    act.updated_at = datetime.utcnow(); res.skipped += 1; continue
+            except Exception:
+                pass
+
+            # セクション本文末尾近傍のテキストをヒントに LLM 生成
+            if h2_idx >= 0 and sections and 0 <= h2_idx < len(sections):
+                s = sections[h2_idx]
+                ctx = _html_to_text(html_work[s["h2_end"]:s["tail_insert_pos"]])[:120]
+            else:
+                ctx = _html_to_text(html_work[-4000:])[:120]
+            try:
+                dst_kw_list = kw_meta_list or [w for w in (title_tokens(tgt_title or "") or []) if w][:6]
+            except Exception:
+                dst_kw_list = kw_meta_list or []
+            try:
+                if ANCHOR_STYLE == "template":
+                    base = (dst_kw_list[0] if dst_kw_list else (tgt_title or "")[:20]).strip()
+                    anchor_text = f"{base}について詳しい解説はコチラ"
+                else:
+                    anchor_text = _generate_anchor_text_via_llm(
+                        dst_title=tgt_title or "", dst_keywords=dst_kw_list, src_hint=ctx, user_id=None
+                    )
+                anchor_text = _postprocess_anchor_text(anchor_text)
+            except Exception as e:
+                logger.warning(f"[GEN-ANCHOR:H2] LLM failed: {e}")
+                key = (tgt_title or "").strip()
+                anchor_text = (f"{key}について詳しい解説はコチラ")[:58] if key else "内部リンクについて詳しい解説はコチラ"
+
+            # 最低品質/NGチェックとフォールバック
+            if is_ng_anchor(anchor_text, tgt_title):
+                fb = _postprocess_anchor_text(_safe_anchor_from_keywords(dst_kw_list, tgt_title or ""))
+                if len(fb) > ISEO_ANCHOR_MAX_CHARS:
+                    fb = re.sub(r"[、。．.\s]+$", "", fb[:ISEO_ANCHOR_MAX_CHARS])
+                    if not fb.endswith("について詳しい解説はコチラ"):
+                        fb = _safe_anchor_from_keywords(dst_kw_list, tgt_title or "")
+                        fb = _postprocess_anchor_text(fb)
+                if is_ng_anchor(fb, tgt_title):
+                    act.status = "skipped"; act.reason = "ng-anchor"
+                    act.updated_at = datetime.utcnow(); res.skipped += 1; continue
+                anchor_text = fb
+
+            # アンカーテキスト重複抑止
+            anchor_key = nfkc_norm(anchor_text).lower()
+            if anchor_key and (anchor_key in seen_anchor_keys or anchor_key in existing_anchor_text_set):
+                act.status = "skipped"; act.reason = "duplicate-anchor-in-article"
+                act.updated_at = datetime.utcnow(); res.skipped += 1; continue
+
+            # 生成HTML（囲みボックス → 改行 → <a>）
+            box_html = _emit_recommend_box()
+            a_html   = _emit_anchor_html(href, anchor_text)
+            insert_html = box_html + "<br>" + a_html
+
+            # 実挿入
+            html_work = html_work[:tail_pos] + insert_html + html_work[tail_pos:]
+            # 追跡セット更新
+            article_href_set.add(href)
+            if anchor_key:
+                seen_anchor_keys.add(anchor_key)
+                existing_anchor_text_set.add(anchor_key)
+            try:
+                used_target_pids.add(int(act.target_post_id))
+            except Exception:
+                pass
+            # 状態更新
+            act.anchor_text = anchor_text
+            act.status = "applied"
+            act.applied_at = datetime.utcnow()
+            res.applied += 1
+            inserted += 1
+
+            # 次のH2位置計算がずれないよう、必要なら再抽出
+            sections = extract_h2_sections(html_work)
+
+    # 1-B) 旧互換：p:{idx} 指定が残っている場合は従来どおり段落末に <br><a> で追加
+    paragraphs = _split_paragraphs(html_work) or [html_work]
+    for act in p_actions:
         if existing_internal + inserted >= need_max:
             break
         # 位置指定 'p:{idx}'
@@ -978,6 +1132,7 @@ def _apply_plan_to_html(
                 continue
 
             anchor_html = _emit_anchor_html(href, anchor_text)
+            # p: では囲みボックスは使わない（新仕様は h2: のみ）
             paragraphs[idx] = para_html + "<br>" + anchor_html
             article_href_set.add(href)
             try:
@@ -1130,11 +1285,13 @@ def _apply_plan_to_html(
             if anchor_key:
                 seen_anchor_keys.add(anchor_key)
 
-    # 2) swap候補：既存内部リンクがある & まだ余裕がない場合に置換を試みる
+    # h2/p 適用後の本文を連結
+    new_html_mid = _rejoin_paragraphs(paragraphs)
     #   （簡易ルール：scoreの低そうな既存リンクをひとつだけ差し替え）
+    # 2) swap候補：既存内部リンクがある & まだ余裕がない場合に置換を試みる
     if swaps and (existing_internal + inserted) >= need_min:
         # 既存リンク列挙
-        existing = _extract_links(_rejoin_paragraphs(paragraphs))
+        existing = _extract_links(new_html_mid)
         # 既存 internal のうちスコアが低いものを特定
         # URL -> post_id
         url_to_pid = {}
@@ -1251,7 +1408,7 @@ def apply_actions_for_post(site_id: int, src_post_id: int, dry_run: bool = False
     url_pid_map   = _all_url_to_pid_map(site_id)
     cleaned_html, deletions = find_and_remove_legacy_links(wp_post.content_html or "", url_title_map)
     # 旧版→新版の自動移行のため、spec_version を渡す（旧シグネチャ互換）。
-    # cleaner 側では data-iseo ではなく直前コメント <!-- ai-internal-link:v3 --> を最新版判定に使えるようにする。
+    # cleaner 側では data-iseo ではなく直前コメント <!-- ai-internal-link:v4 --> を最新版判定に使えるようにする。
     try:
         cleaned_html, deletions = find_and_remove_legacy_links(
             wp_post.content_html or "", url_title_map, spec_version=INTERNAL_SEO_SPEC_VERSION

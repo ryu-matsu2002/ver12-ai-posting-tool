@@ -12,6 +12,8 @@ _PUNCT = re.compile(r"[、。・,.!！?？:：;；\"'“”‘’()\[\]（）【
 _JP_TOKEN = re.compile(r"[一-龥ぁ-んァ-ンーA-Za-z0-9]{2,}")
 _PAREN_AROUND = re.compile(r"[（(][^）)]{0,12}$")  # 直前が開き括弧付近
 _PAREN_INSIDE = re.compile(r"^[^（)]{0,12}[）)]")  # 直後が閉じ括弧付近
+_H2_BLOCK = re.compile(r"(?is)<h2\b[^>]*>(.*?)</h2>")
+_H2_OPEN  = re.compile(r"(?is)<h2\b[^>]*>")
 
 def html_to_text(s: str | None) -> str:
     return _TAG.sub(" ", unescape(s or "")).strip()
@@ -198,3 +200,78 @@ def is_natural_span(context: str, anchor: str) -> bool:
     if _PAREN_AROUND.search(left) or _PAREN_INSIDE.search(right):
         return False
     return True
+
+# ===== H2 セクション抽出 & 末尾フォールバック =====
+def extract_h2_sections(html: str) -> list[dict]:
+    """
+    記事HTMLから H2 セクションを抽出し、各セクションの
+    - h2_text: H2見出しテキスト（タグ除去・unescape済み）
+    - h2_start: <h2> 開始インデックス
+    - h2_end:   </h2> 終了インデックス（閉じタグの直後）
+    - tail_insert_pos: 次の <h2> の直前インデックス（= このセクション末尾）
+                       次の <h2> が無ければ len(html)
+    を返す。貼り付け位置は「H2の文章の一番下＝次のH2のすぐ上」を意図。
+    """
+    if not html:
+        return []
+
+    sections: list[dict] = []
+    # まず </h2> まで含むブロックを列挙
+    matches = list(_H2_BLOCK.finditer(html))
+    if not matches:
+        return []
+
+    # 次の <h2> 開始位置を求めるため、全文から <h2> の開始位置も列挙
+    h2_opens = [m.start() for m in _H2_OPEN.finditer(html)]
+    h2_opens.sort()
+
+    def _next_h2_after(pos: int) -> int | None:
+        # pos 以降で最初に現れる <h2> の開始位置
+        lo, hi = 0, len(h2_opens)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if h2_opens[mid] <= pos:
+                lo = mid + 1
+            else:
+                hi = mid
+        return h2_opens[lo] if 0 <= lo < len(h2_opens) else None
+
+    for i, m in enumerate(matches):
+        h2_start = m.start()
+        h2_end   = m.end()  # </h2> の直後
+        # 次セクションの開始 <h2> を tail とする
+        nxt = _next_h2_after(h2_end - 1)
+        tail_insert_pos = nxt if nxt is not None else len(html)
+        h2_text = html_to_text(m.group(1))
+        sections.append({
+            "h2_text": h2_text,
+            "h2_start": h2_start,
+            "h2_end": h2_end,
+            "tail_insert_pos": tail_insert_pos,
+        })
+    return sections
+
+def find_fallback_body_tail(html: str) -> int:
+    """
+    H2 が存在しない場合に、本文末尾直前へ挿入するためのフォールバック位置を返す。
+    できるだけフッター/署名/関連記事等の直前で止める軽量ヒューリスティクス。
+    見つからなければ len(html)。
+    """
+    if not html:
+        return 0
+    # 末尾から近い“締め”候補をいくつか探して、その先頭位置を返す
+    # （できるだけ本文の終端に近い位置を選ぶ）
+    markers = [
+        r"</article\b", r"<footer\b", r"</footer\b",
+        r"<div\b[^>]*class=[\"'][^\"']*(post-footer|entry-footer|article-footer)[^\"']*[\"']",
+        r"<aside\b", r"</main\b", r"<section\b[^>]*class=[\"'][^\"']*(related|recommend)[^\"']*[\"']",
+    ]
+    best = None
+    for pat in markers:
+        m = re.search(pat, html, flags=re.IGNORECASE)
+        if m:
+            idx = m.start()
+            # 末尾に近い（大きい）ものを優先
+            if best is None or idx > best:
+                best = idx
+    return best if best is not None else len(html)

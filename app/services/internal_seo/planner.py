@@ -16,6 +16,7 @@ from app.services.internal_seo.utils import (
     html_to_text,
     nfkc_norm,
     extract_terms_for_partial,
+    extract_h2_sections,
     is_ng_anchor,
     STOPWORDS_N,
     title_tokens,
@@ -25,7 +26,7 @@ from app.services.internal_seo.utils import (
     is_natural_span,
 )
 
-from app.services.internal_seo.applier import _H_TAG, _TOC_HINT, _mask_existing_anchors, _split_paragraphs  # 再利用  # 再利用
+from app.services.internal_seo.applier import _H_TAG, _TOC_HINT, _mask_existing_anchors, _split_paragraphs  # 再利用  # 既存互換のため残置（本改修では段落スロットは使用しない）
 
 
 from app.wp_client import fetch_single_post  # 現在のHTMLを読む用（swap判定で使用）
@@ -599,10 +600,11 @@ def plan_links_for_post(
         logger.info("[Planner] skip src=%s (fetch failed or excluded)", src_post_id)
         return stats
 
-    paragraphs = _split_paragraphs(wp_post.content_html or "")
-    if not paragraphs:
-        logger.info("[Planner] skip src=%s (no paragraphs)", src_post_id)
-        return stats
+    html = wp_post.content_html or ""
+    # H2 セクション抽出（H2の“末尾＝次H2直前”に挿入するための座標を得る）
+    sections = extract_h2_sections(html)
+    # H2 が全く無い記事は本文末尾へのフォールバック（applier 側で解釈する position を使用）
+    has_h2 = bool(sections)
 
     # 2) 既存の内部リンク抽出（swap用 & 重複抑制）
     existing_links = _extract_existing_links(wp_post.content_html)
@@ -639,56 +641,47 @@ def plan_links_for_post(
     if not candidates:
         logger.info("[Planner] src=%s no fresh candidates", src_post_id)
 
-    # 4) 本数決定（最低2本・最大4本を保証）
+    # 4) 本数決定（最低2本・最大4本を保証。H2が少なければ H2 数まで）
     need_min = max(2, int(getattr(cfg, "min_links_per_post", 2) or 2))
     need_max = min(4, int(getattr(cfg, "max_links_per_post", 4) or 4))
 
-    # 既存内部リンク数が少なすぎる場合も「最低2本」保証、それ以上は最大4本に制限
+    # 既存内部リンク数が少ない場合の底上げ
     target_min = need_min
     if existing_internal_links_count <= 1 and need_min < 3:
         target_min = 3
 
-    # 最終的に必要な本数を決定
+    # 最終必要本数
     need = max(target_min, need_min)
-    if need > need_max:
-        need = need_max
+    need = min(need, need_max)
+    if has_h2:
+        need = min(need, len(sections))  # H2数を超えない
 
-    # 5) 段落スロット選定（段階的に緩和 → それでも不足なら同段落 MAX_LINKS_PER_PARA 本まで許容）
-    base_min_len = int(getattr(cfg, "min_paragraph_len", 80) or 80)
-    # 厳しめ→緩め の順で試行（重複排除・ユニーク優先）
-    thresholds = sorted({base_min_len, 70, 60, 50, 40}, reverse=True)
-    slots: List[int] = []
-    for th in thresholds:
-        slots = _pick_paragraph_slots(paragraphs, need=need, min_len=th)
-        if len(slots) >= min(need, 2):  # まずは2本分以上確保できたらOK
-            break
-    if len(slots) < need:
-        # 同一段落に複数本まで入れて必要数を満たす（MAX_LINKS_PER_PARA で上限管理）
-        # 最後に試した閾値(thresholds[-1]＝最も緩い条件)で再度取得し直してから埋める
-        th = thresholds[-1]
-        slots = _pick_paragraph_slots(
-            paragraphs,
-            need=need,
-            min_len=th,
-            allow_repeat=True,
-            max_per_para=max(1, MAX_LINKS_PER_PARA),
-        )
-    if not slots:
-        logger.info("[Planner] src=%s no suitable paragraphs", src_post_id)
-        return stats
-    # 診断ログ（INTERNAL_SEO_PLANNER_DIAG=1 のときだけ）
-    if os.getenv("INTERNAL_SEO_PLANNER_DIAG", "0") == "1":
-        logger.info(
-            "[PlannerDiag] src=%s paras=%s slots=%s need=%s strong_pass=%s genre_pass=%s raw=%s",
-            src_post_id, len(paragraphs), slots, need, strong_pass, genre_pass, len(raw_candidates)
-        )
+    # 5) H2インデックスの分散選定（同じ位置に偏らないよう等間隔抽出＋最小ギャップ1）
+    chosen_h2_idx: List[int] = []
+    if has_h2 and need > 0:
+        n = len(sections)
+        if need == 1:
+            chosen_h2_idx = [min(n - 1, max(0, n // 2))]
+        else:
+            step = max(1, n // need)
+            picked = [min(i * step, n - 1) for i in range(need)]
+            # 最小ギャップ=1 を適用
+            kept: List[int] = []
+            for s in sorted(set(picked)):
+                if not kept or (s - kept[-1] > 0):
+                    kept.append(s)
+            chosen_h2_idx = kept[:need]
+    elif not has_h2 and need > 0:
+        # H2が無い場合は本文末尾に 1〜2 本（仕様に合わせて最大2）
+        need = min(need, 2)
+        chosen_h2_idx = [-1] * need  # applier 側で "body_tail" として扱う
 
-   # 6) ターゲット記事のタイトル/URL/キーワードを取得（アンカー生成の補助用）
+    # 6) ターゲット記事のタイトル/URL/キーワードを取得（アンカー生成の補助用）
     tgt_rows = (
         ContentIndex.query
         .with_entities(ContentIndex.wp_post_id, ContentIndex.title, ContentIndex.url, ContentIndex.keywords)
         .filter(ContentIndex.site_id == site_id)
-        .filter(ContentIndex.wp_post_id.in_(candidates[: len(slots)]))
+        .filter(ContentIndex.wp_post_id.in_(candidates[: max(0, len(chosen_h2_idx))]))
         .all()
     )
     def _csv_to_list(csv: Optional[str]) -> List[str]:
@@ -699,25 +692,17 @@ def plan_links_for_post(
         for (pid, title, url, kws) in tgt_rows
     }
 
-    # 7) スロット×ターゲットで pending アクションを作成
-    #    ※ アンカー文は applier 側で LLM 生成するため、ここでは“メタ情報を丁寧に渡す”
+    # 7) H2スロット×ターゲットで pending アクションを作成
+    #    ※ アンカー文は applier 側で生成／整形。ここでは「位置＝H2末尾」を示す。
     actions_made = 0
-    slot_ptr = 0
+    pos_ptr = 0
     seen_target_pids = set()
     for tgt_pid in candidates:
-        if slot_ptr >= len(slots):
+        if pos_ptr >= len(chosen_h2_idx):
             break
         if tgt_pid in seen_target_pids:
             continue
-        # slots が不足している場合は循環利用（同一段落に最大2本まで）
-        slot_idx = slots[slot_ptr % len(slots)]
-        # 1段落2本の上限を守る（同じ index が3回以上使われないようにする）
-        if slots.count(slot_idx) >= 2 and (slot_ptr // len(slots)) >= 2:
-            slot_ptr += 1
-            continue
-        raw_para = paragraphs[slot_idx]
-        if _H_TAG.search(raw_para) or _TOC_HINT.search(raw_para):
-            continue  # 念のため
+        chosen = chosen_h2_idx[pos_ptr % max(1, len(chosen_h2_idx))]
         title, tgt_url, dst_kw_list = tgt_map.get(tgt_pid, ("", "", []))
         # ContentIndexに無い候補はフォールバックで1回だけ取得
         if (not title) or (not tgt_url):
@@ -732,13 +717,13 @@ def plan_links_for_post(
                 dst_kw_list = _csv_to_list(tr[2] or "")
         if not tgt_url:
             continue
-        # pending を登録（position は 'p:{index}'）
+        # pending を登録（position は 'h2:{index}'。H2なしは 'h2:-1' を本文末尾扱い）
         act = InternalLinkAction(
             site_id=site_id,
             post_id=src_post_id,
             target_post_id=tgt_pid,
             anchor_text="",  # アンカー文は applier が LLM 生成
-            position=f"p:{slot_idx}",
+            position=f"h2:{int(chosen)}",
             status="pending",
             reason="plan:generated",
             created_at=datetime.utcnow(),
@@ -746,7 +731,7 @@ def plan_links_for_post(
         )        
         db.session.add(act)
         actions_made += 1
-        slot_ptr += 1
+        pos_ptr += 1
         seen_target_pids.add(tgt_pid)
 
     if actions_made:
@@ -754,9 +739,9 @@ def plan_links_for_post(
     stats.planned_actions = actions_made
     stats.posts_processed = 1
 
-    # === 5.5) ★救済パス：1本も計画できなかった場合に「厳しめ条件のまま」最低1本を狙う ===
+    # === 5.5) ★救済パス：1本も計画できなかった場合に「厳しめ条件のまま」最低1本を狙う（H2ベース）
     #  - LinkGraph が強い or 同ジャンルOK の候補に限定
-    #  - 段落テキストに「共通keywordsの単語」または「タイトル語」が自然に実在することを必須に
+    #  - セクション末尾の直前テキスト（=H2の本文末尾付近）に「共通keywordsの単語」または「タイトル語」が自然に実在することを必須に
     if stats.planned_actions == 0:
         rescue_candidates = []
         for t, s in raw_candidates:
@@ -775,17 +760,23 @@ def plan_links_for_post(
                 rescue_candidates.append((t, s))
         # スコア降順でチェック
         rescue_candidates.sort(key=lambda x: x[1], reverse=True)
-        if rescue_candidates and slots:
-            # 最も長めの段落（最後のスロット）を優先的に使う
-            slot_idx = slots[-1]
-            raw_para = paragraphs[slot_idx]
-            para_text = _html_to_text(raw_para)
-            if para_text:
+        if rescue_candidates:
+            # 最後のH2セクション（または本文末尾）を優先して使う
+            if has_h2 and sections:
+                sec_idx = max(0, len(sections) - 1)
+                s = sections[sec_idx]
+                # H2本文部分（h2_end〜tail_insert_pos）のテキスト
+                sec_text = _html_to_text(html[s["h2_end"]:s["tail_insert_pos"]])
+                pos_str = f"h2:{sec_idx}"
+            else:
+                sec_text = _html_to_text(html[-4000:])  # 末尾近辺
+                pos_str = "h2:-1"
+            if sec_text:
                 for tgt_pid, sc in rescue_candidates[:5]:
                     # アンカーは「共通keywordsの単語」＞「タイトル語 ∩ 段落」
                     anc = None
                     try:
-                        anc = _pick_anchor_from_common_keywords_single(site_id, src_post_id, tgt_pid, para_text)
+                        anc = _pick_anchor_from_common_keywords_single(site_id, src_post_id, tgt_pid, sec_text)
                     except Exception:
                         anc = None
                     if not anc:
@@ -798,7 +789,7 @@ def plan_links_for_post(
                                 .one_or_none()
                             )
                             t_title = tr[0] if tr else ""
-                            anc = _pick_anchor_from_title_overlap(t_title, para_text)
+                            anc = _pick_anchor_from_title_overlap(t_title, sec_text)
                         except Exception:
                             anc = None
                     if not anc:
@@ -818,7 +809,7 @@ def plan_links_for_post(
                         post_id=src_post_id,
                         target_post_id=tgt_pid,
                         anchor_text="",  # アンカー文は applier が LLM 生成（自然語抽出は上で担保）
-                        position=f"p:{slot_idx}",
+                        position=pos_str,
                         status="pending",
                         reason="plan:rescue",
                         created_at=datetime.utcnow(),
@@ -863,8 +854,14 @@ def plan_links_for_post(
                 if pid in existing_post_ids:
                     continue
                 if sc >= baseline + margin:
-                    # 置換候補：最初の長め段落に提案（厳密位置は applier で精緻化）
-                    slot_for_swap = slots[0] if slots else 0
+                    # 置換候補：先頭のH2セクション末尾に提案（厳密位置は applier で精緻化）
+                    if has_h2 and sections:
+                        sec_idx = 0
+                        sec_text = _html_to_text(html[sections[sec_idx]["h2_end"]:sections[sec_idx]["tail_insert_pos"]])
+                        pos_str = f"h2:{sec_idx}"
+                    else:
+                        sec_text = _html_to_text(html[:4000])
+                        pos_str = "h2:-1"
                     t_title, t_url, t_kws = tgt_map.get(pid, ("", "", []))
                     if not t_title or not t_url:
                         # ない場合はContentIndexから再取得
@@ -877,18 +874,8 @@ def plan_links_for_post(
                         if tr:
                             t_title, t_url = tr[0] or "", tr[1] or ""
                             t_kws = _csv_to_list(tr[2] or "")
-                    slot_para_raw = paragraphs[slot_for_swap] if 0 <= slot_for_swap < len(paragraphs) else ""
-                    slot_para_text = _html_to_text(slot_para_raw)
-                    # swap 候補のアンカー決定でも部分一致を利用
-                    tgt_body_for_swap = ""
-                    try:
-                        _t = fetch_single_post(Site.query.get(site_id), pid)
-                        if _t and (_t.content_html or ""):
-                            tgt_body_for_swap = html_to_text(_t.content_html)
-                    except Exception:
-                        tgt_body_for_swap = ""
-                    # swapでも「タイトル語 ∩ 段落」を厳守
-                    anc = _pick_anchor_from_title_overlap(t_title, slot_para_text) or _candidate_anchor_from(t_title, slot_para_text)
+                     # swapでも「タイトル語 ∩ セクション本文末尾近傍」を厳守
+                    anc = _pick_anchor_from_title_overlap(t_title, sec_text) or _candidate_anchor_from(t_title, sec_text)
 
                     if not anc or not t_url:
                         continue
@@ -902,7 +889,7 @@ def plan_links_for_post(
                         post_id=src_post_id,
                         target_post_id=pid,
                         anchor_text=anc[:255],
-                        position=f"p:{slot_for_swap}",
+                        position=pos_str,
                         status="pending",
                         reason="swap_candidate:title_match",
                         created_at=datetime.utcnow(),
