@@ -107,7 +107,7 @@ _AI_STYLE_MARK = "<!-- ai-internal-link-style:v2 -->"
 # <a> には一切属性を付けない方針。代替として直前コメントで版管理を行う。
 INTERNAL_SEO_SPEC_VERSION = "v5"
 INTERNAL_SEO_SPEC_MARK = f"<!-- ai-internal-link:{INTERNAL_SEO_SPEC_VERSION} -->"
-ILINK_BOX_MARK = "<!-- ai-internal-link-box:v1 -->"
+ILINK_BOX_MARK = "<!-- ai-internal-link-box:v5 -->"
 
 def _split_paragraphs(html: str) -> List[str]:
     if not html:
@@ -396,7 +396,7 @@ def _emit_recommend_box() -> str:
         f'{ILINK_BOX_MARK}'
         '<div class="ai-relbox" '
         'style="margin:1.2em auto 0.4em; padding:6px 12px; border-radius:6px; '
-        'background:#c8e6c9; color:#000; font-weight:600; '
+        'background:#dff0d8; color:#000; font-weight:600; '
         'display:inline-block;">'
         '関連・注目記事'
         '</div>'

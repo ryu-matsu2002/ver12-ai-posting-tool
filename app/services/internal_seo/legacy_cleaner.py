@@ -17,6 +17,13 @@ _SPEC_COMMENT_TAIL_RE = re.compile(
     r'(?:<br\s*/?>\s*)*<!--\s*ai-internal-link:([a-zA-Z0-9._\-]+)\s*-->\s*$',
     re.I
 )
+# 旧ボックス(v1)のコメント＆直後のボックス本体、黒ボックスの検出
+_BOX_COMMENT_V1_RE = re.compile(r'<!--\s*ai-internal-link-box:v1\s*-->\s*', re.I)
+_RELBOX_BLOCK_RE   = re.compile(r'<div[^>]*class=["\']ai-relbox[^>]*>.*?</div>', re.I | re.S)
+_RELBOX_BLACK_RE   = re.compile(
+    r'<div[^>]*class=["\']ai-relbox[^>]*style=["\'][^"\']*background\s*:\s*#111[^"\']*["\'][^>]*>.*?</div>',
+    re.I | re.S
+)
 # 最新仕様のアンカー末尾（この形以外は削除対象）
 CTA_SUFFIX = "について詳しい解説はコチラ"
 _TRAILING_PUNCT = re.compile(r"[、。．.;；.!！?？\s]+$")  # 末尾の余計な記号/空白
@@ -105,6 +112,36 @@ def find_and_remove_legacy_links(
     # 重複hrefチェックは「内部SEO由来リンク」にのみ適用する
     seen_seo_hrefs: set[str] = set()
 
+    # --- 事前クリーンアップ：旧ボックスの除去 -----------------------------
+    # 1) v1コメント直後の ai-relbox を丸ごと削除
+    #    （<!-- ai-internal-link-box:v1 --> の直後にある .ai-relbox を対象）
+    def _drop_v1_box_blocks(text: str) -> str:
+        pos = 0
+        chunks = []
+        while True:
+            m = _BOX_COMMENT_V1_RE.search(text, pos)
+            if not m:
+                chunks.append(text[pos:])
+                break
+            # コメント以降で最初に現れる ai-relbox を探す
+            after = m.end()
+            mbox = _RELBOX_BLOCK_RE.search(text, after)
+            if mbox and mbox.start() == after or mbox and text[after:mbox.start()].strip() == "":
+                # コメント〜ボックス終端までを削除
+                chunks.append(text[pos:m.start()])
+                pos = mbox.end()
+            else:
+                # コメントだけ見つかった場合はコメントのみ削除
+                chunks.append(text[pos:m.start()])
+                pos = m.end()
+        return "".join(chunks)
+
+    # 2) 黒ボックス（background:#111 を含む .ai-relbox）を無条件で削除
+    def _drop_black_boxes(text: str) -> str:
+        return _RELBOX_BLACK_RE.sub("", text)
+
+    html = _drop_black_boxes(_drop_v1_box_blocks(html))
+
     # 既定の最新版（未指定なら v5 を最新版として扱う）
     latest = (spec_version or "v5").strip().lower()
     for m in _A_TAG.finditer(html):
@@ -146,7 +183,7 @@ def find_and_remove_legacy_links(
         #    - 例外：旧仕様の“タイトル厳密一致リンク”は削除
 
         if is_seo_link:
-            # 旧版（v1〜v4 など） → 削除（黒背景の ai-relbox も同時に消す）
+            # 旧版（v1〜v4 など） → 削除（直前に残っているボックスがあれば近傍も削除）
             if detected_ver and detected_ver != latest:
                 # 直前にある ai-relbox をまとめて削除
                 prefix = html[max(0, m.start()-500):m.start()]
