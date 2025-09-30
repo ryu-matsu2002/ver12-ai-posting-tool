@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, UTC
 from html import unescape
 from typing import Dict, List, Optional, Tuple
 import os
@@ -886,7 +886,7 @@ def _apply_plan_to_html(
             tgt_title = title_meta or tgt_title0
             if not href:
                 act.status = "skipped"
-                act.updated_at = datetime.utcnow()
+                act.updated_at = datetime.now(UTC)
                 res.skipped += 1
                 continue
             # 自己リンク禁止
@@ -894,7 +894,7 @@ def _apply_plan_to_html(
                 if int(act.target_post_id) == int(src_post_id):
                     act.status = "skipped"
                     act.reason = "self-link"
-                    act.updated_at = datetime.utcnow()
+                    act.updated_at = datetime.now(UTC)
                     res.skipped += 1
                     continue
             except Exception:
@@ -902,11 +902,11 @@ def _apply_plan_to_html(
             # 同一URL重複・同一PID重複
             if href in article_href_set:
                 act.status = "skipped"; act.reason = "duplicate-href-in-article"
-                act.updated_at = datetime.utcnow(); res.skipped += 1; continue
+                act.updated_at = datetime.now(UTC); res.skipped += 1; continue
             try:
                 if int(act.target_post_id) in used_target_pids:
                     act.status = "skipped"; act.reason = "duplicate-target-in-article"
-                    act.updated_at = datetime.utcnow(); res.skipped += 1; continue
+                    act.updated_at = datetime.now(UTC); res.skipped += 1; continue
             except Exception:
                 pass
 
@@ -944,14 +944,14 @@ def _apply_plan_to_html(
                         fb = _postprocess_anchor_text(fb)
                 if _is_ng_anchor_generated_line(fb, tgt_title):
                     act.status = "skipped"; act.reason = "ng-anchor"
-                    act.updated_at = datetime.utcnow(); res.skipped += 1; continue
+                    act.updated_at = datetime.now(UTC); res.skipped += 1; continue
                 anchor_text = fb
 
             # アンカーテキスト重複抑止
             anchor_key = nfkc_norm(anchor_text).lower()
             if anchor_key and (anchor_key in seen_anchor_keys or anchor_key in existing_anchor_text_set):
                 act.status = "skipped"; act.reason = "duplicate-anchor-in-article"
-                act.updated_at = datetime.utcnow(); res.skipped += 1; continue
+                act.updated_at = datetime.now(UTC); res.skipped += 1; continue
 
             # 生成HTML（囲みボックス → 改行 → <a>）
             box_html = _emit_recommend_box()
@@ -972,7 +972,7 @@ def _apply_plan_to_html(
             # 状態更新
             act.anchor_text = anchor_text
             act.status = "applied"
-            act.applied_at = datetime.utcnow()
+            act.applied_at = datetime.now(UTC)
             res.applied += 1
             inserted += 1
 
@@ -1022,7 +1022,7 @@ def _apply_plan_to_html(
             if int(act.target_post_id) == int(src_post_id):
                 act.status = "skipped"
                 act.reason = "self-link"
-                act.updated_at = datetime.utcnow()
+                act.updated_at = datetime.now(UTC)
                 res.skipped += 1
                 continue
         except Exception:
@@ -1037,7 +1037,7 @@ def _apply_plan_to_html(
             if act.anchor_text and not any(atext == act.anchor_text and h == href for (h, atext) in _extract_links(_rejoin_paragraphs(paragraphs))):
                 act.status = "skipped"
                 act.reason = "duplicate-href-anchor"
-                act.updated_at = datetime.utcnow()
+                act.updated_at = datetime.now(UTC)
                 res.skipped += 1
                 continue
         # ---- 新方式 / 旧方式の分岐 ----
@@ -1051,7 +1051,7 @@ def _apply_plan_to_html(
             if href in article_href_set:
                 act.status = "skipped"
                 act.reason = "duplicate-href-in-article"
-                act.updated_at = datetime.utcnow()
+                act.updated_at = datetime.now(UTC)
                 res.skipped += 1
                 continue
             # 同一target_post_idは記事内で1回まで
@@ -1059,7 +1059,7 @@ def _apply_plan_to_html(
                 if int(act.target_post_id) in used_target_pids:
                     act.status = "skipped"
                     act.reason = "duplicate-target-in-article"
-                    act.updated_at = datetime.utcnow()
+                    act.updated_at = datetime.now(UTC)
                     res.skipped += 1
                     continue
             except Exception:
@@ -1117,7 +1117,7 @@ def _apply_plan_to_html(
                 else:
                     act.status = "skipped"
                     act.reason = "ng-anchor"
-                    act.updated_at = datetime.utcnow()
+                    act.updated_at = datetime.now(UTC)
                     res.skipped += 1
                     continue
 
@@ -1127,7 +1127,7 @@ def _apply_plan_to_html(
                 if INTERNAL_SEO_SPEC_MARK in prev_tail:
                     act.status = "skipped"
                     act.reason = "avoid-consecutive-link-paragraphs"
-                    act.updated_at = datetime.utcnow()
+                    act.updated_at = datetime.now(UTC)
                     res.skipped += 1
                     continue
 
@@ -1136,14 +1136,14 @@ def _apply_plan_to_html(
             if anchor_key and anchor_key in seen_anchor_keys:
                 act.status = "skipped"
                 act.reason = "duplicate-anchor-in-article"
-                act.updated_at = datetime.utcnow()
+                act.updated_at = datetime.now(UTC)
                 res.skipped += 1
                 continue
 
             if anchor_key and anchor_key in existing_anchor_text_set:
                 act.status = "skipped"
                 act.reason = "duplicate-anchor-existing"
-                act.updated_at = datetime.utcnow()
+                act.updated_at = datetime.now(UTC)
                 res.skipped += 1
                 continue
 
@@ -1157,7 +1157,7 @@ def _apply_plan_to_html(
                 pass
             act.anchor_text = anchor_text
             act.status = "applied"
-            act.applied_at = datetime.utcnow()
+            act.applied_at = datetime.now(UTC)
             res.applied += 1
             inserted += 1
             if anchor_key:
@@ -1170,7 +1170,7 @@ def _apply_plan_to_html(
             if int(act.target_post_id) in used_target_pids:
                 act.status = "skipped"
                 act.reason = "duplicate-target-in-article"
-                act.updated_at = datetime.utcnow()
+                act.updated_at = datetime.now(UTC)
                 res.skipped += 1
                 continue
         except Exception:
@@ -1219,7 +1219,7 @@ def _apply_plan_to_html(
             if is_ng_anchor(anchor_text, tgt_title):
                 act.status = "skipped"
                 act.reason = "ng-anchor"
-                act.updated_at = datetime.utcnow()
+                act.updated_at = datetime.now(UTC)
                 res.skipped += 1
                 continue
 
@@ -1228,7 +1228,7 @@ def _apply_plan_to_html(
             if anchor_key and anchor_key in seen_anchor_keys:
                 act.status = "skipped"
                 act.reason = "duplicate-anchor-in-article"
-                act.updated_at = datetime.utcnow()
+                act.updated_at = datetime.now(UTC)
                 res.skipped += 1
                 continue
 
@@ -1245,7 +1245,7 @@ def _apply_plan_to_html(
             # 状態更新
             act.anchor_text = anchor_text  # 生成結果を保存（再試行時のキャッシュにもなる）
             act.status = "applied"
-            act.applied_at = datetime.utcnow()
+            act.updated_at = datetime.now(UTC)
             res.applied += 1
             inserted += 1
             if anchor_key:
@@ -1258,7 +1258,7 @@ def _apply_plan_to_html(
             if nfkc_norm(act.anchor_text) not in nfkc_norm(tgt_title or ""):
                 act.status = "skipped"
                 act.reason = "skipped:anchor-not-in-target-title"
-                act.updated_at = datetime.utcnow()
+                act.updated_at = datetime.now(UTC)
                 res.skipped += 1
                 continue
 
@@ -1267,7 +1267,7 @@ def _apply_plan_to_html(
             if anchor_key and anchor_key in seen_anchor_keys:
                 act.status = "skipped"
                 act.reason = "duplicate-anchor-in-article"
-                act.updated_at = datetime.utcnow()
+                act.updated_at = datetime.now(UTC)
                 res.skipped += 1
                 continue
 
@@ -1281,7 +1281,7 @@ def _apply_plan_to_html(
             if is_ng_anchor(act.anchor_text, tgt_title):
                 act.status = "skipped"
                 act.reason = "ng-anchor"
-                act.updated_at = datetime.utcnow()
+                act.updated_at = datetime.now(UTC)
                 res.skipped += 1
                 continue
             new_para = _linkify_first_occurrence(para_html, act.anchor_text, href, tgt_title)
@@ -1382,7 +1382,7 @@ def _apply_plan_to_html(
                 if replaced:                    
                     s_act.status = "applied"
                     s_act.reason = "swap"  # 採用された置換
-                    s_act.applied_at = datetime.utcnow()
+                    s_act.applied_at = datetime.now(UTC)
                     res.swapped += 1
 
     # 本文を連結 → 既存の ai-ilink / inline-style を Wikipedia 風に正規化
@@ -1478,7 +1478,7 @@ def apply_actions_for_post(site_id: int, src_post_id: int, dry_run: bool = False
 
     # 5) 旧仕様削除ログを保存（1削除=1行、status='legacy_deleted'）
     if deletions:
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         for d in deletions:
             anchor_text = (d.get("anchor_text") or "")
             href        = (d.get("href") or "")
