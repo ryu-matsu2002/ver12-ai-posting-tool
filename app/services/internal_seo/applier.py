@@ -396,7 +396,7 @@ def _emit_recommend_box() -> str:
         f'{ILINK_BOX_MARK}'
         '<div class="ai-relbox" '
         'style="margin:1.2em auto 0.4em; padding:6px 12px; border-radius:6px; '
-        'background:#dff0d8; color:#000; font-weight:600; '
+        'background:#dff0d8 !important; color:#000 !important; font-weight:600; '
         'display:inline-block;">'
         '関連・注目記事'
         '</div>'
