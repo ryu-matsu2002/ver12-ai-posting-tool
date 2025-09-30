@@ -1295,7 +1295,7 @@ def _apply_plan_to_html(
             except Exception:
                 pass
             act.status = "applied"
-            act.applied_at = datetime.utcnow()
+            act.applied_at = datetime.now(UTC)
             res.applied += 1
             inserted += 1
             if anchor_key:
@@ -1474,7 +1474,7 @@ def apply_actions_for_post(site_id: int, src_post_id: int, dry_run: bool = False
         else:
             # 適用されなかった pending はスキップへ
             a.status = a.status if a.status == "applied" else "skipped"
-            a.updated_at = datetime.utcnow()
+            a.updated_at = datetime.now(UTC)
 
     # 5) 旧仕様削除ログを保存（1削除=1行、status='legacy_deleted'）
     if deletions:
