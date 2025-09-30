@@ -28,6 +28,7 @@ from app.services.internal_seo.utils import (
 
 from app.services.internal_seo.applier import _H_TAG, _TOC_HINT, _mask_existing_anchors, _split_paragraphs  # 再利用  # 既存互換のため残置（本改修では段落スロットは使用しない）
 
+from datetime import datetime, UTC
 
 from app.wp_client import fetch_single_post  # 現在のHTMLを読む用（swap判定で使用）
 
@@ -726,8 +727,8 @@ def plan_links_for_post(
             position=f"h2:{int(chosen)}",
             status="pending",
             reason="plan:generated",
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
         )        
         db.session.add(act)
         actions_made += 1
@@ -812,8 +813,8 @@ def plan_links_for_post(
                         position=pos_str,
                         status="pending",
                         reason="plan:rescue",
-                        created_at=datetime.utcnow(),
-                        updated_at=datetime.utcnow(),
+                        created_at=datetime.now(UTC),
+                        updated_at=datetime.now(UTC),
                     ))
                     db.session.commit()
                     stats.planned_actions += 1
@@ -892,8 +893,8 @@ def plan_links_for_post(
                         position=pos_str,
                         status="pending",
                         reason="swap_candidate:title_match",
-                        created_at=datetime.utcnow(),
-                        updated_at=datetime.utcnow(),
+                        created_at=datetime.now(UTC),
+                        updated_at=datetime.now(UTC),
                     ))
                     made_swaps += 1
             if made_swaps:
