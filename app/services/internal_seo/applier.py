@@ -729,7 +729,7 @@ def preview_apply_for_post(site_id: int, src_post_id: int) -> Tuple[str, ApplyRe
         db.session.add(cfg)
         db.session.commit()
 
-    site = Site.query.get(site_id)
+    site = db.session.get(Site, site_id)
     wp_post = fetch_single_post(site, src_post_id)
     if not wp_post:
         return "", ApplyResult(message="fetch-failed-or-excluded"), []
@@ -1404,7 +1404,7 @@ def apply_actions_for_post(site_id: int, src_post_id: int, dry_run: bool = False
         db.session.add(cfg)
         db.session.commit()
 
-    site = Site.query.get(site_id)
+    site = db.session.get(Site, site_id)
     # ▼ topic スキップ（記事URLに 'topic' を含む場合は一切触らない）
     # （重複ブロックを削除：上の分岐だけ残す
     # ▼ topic スキップ（記事URLに 'topic' を含む場合は一切触らない）
