@@ -734,11 +734,8 @@ def preview_apply_for_post(site_id: int, src_post_id: int) -> Tuple[str, ApplyRe
     if not wp_post:
         return "", ApplyResult(message="fetch-failed-or-excluded"), []
     
-    # 1) 旧仕様削除（プレビュー：DBは触らない）
+    # 1) 旧仕様削除（プレビュー：DBは触らない）— 新シグネチャ優先、未対応環境はフォールバック
     url_title_map = _all_url_to_title_map(site_id)
-    cleaned_html, deletions = find_and_remove_legacy_links(wp_post.content_html or "", url_title_map)
-    # 旧版→新版の自動移行のため、spec_version を渡す（旧シグネチャ互換）。
-    # cleaner 側の最新版判定は直前コメント <!-- ai-internal-link:v4 --> を利用。
     try:
         cleaned_html, deletions = find_and_remove_legacy_links(
             wp_post.content_html or "", url_title_map, spec_version=INTERNAL_SEO_SPEC_VERSION
@@ -1419,12 +1416,9 @@ def apply_actions_for_post(site_id: int, src_post_id: int, dry_run: bool = False
     if not wp_post:
         return ApplyResult(message="fetch-failed-or-excluded")
 
-    # 1) 旧仕様削除（apply：後で削除ログを保存）
+    # 1) 旧仕様削除（apply：後で削除ログを保存）— 新シグネチャ優先、未対応環境はフォールバック
     url_title_map = _all_url_to_title_map(site_id)
     url_pid_map   = _all_url_to_pid_map(site_id)
-    cleaned_html, deletions = find_and_remove_legacy_links(wp_post.content_html or "", url_title_map)
-    # 旧版→新版の自動移行のため、spec_version を渡す（旧シグネチャ互換）。
-    # cleaner 側では data-iseo ではなく直前コメント <!-- ai-internal-link:v4 --> を最新版判定に使えるようにする。
     try:
         cleaned_html, deletions = find_and_remove_legacy_links(
             wp_post.content_html or "", url_title_map, spec_version=INTERNAL_SEO_SPEC_VERSION

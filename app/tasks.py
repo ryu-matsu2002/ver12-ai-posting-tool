@@ -47,6 +47,9 @@ import os
 from math import inf
 from typing import List, Dict, Set, Tuple, Optional
 import json
+from app.models import InternalLinkAction  # 🆕 refill 集計で使用
+from sqlalchemy import func  # 🆕 集計で使用
+from app.services.internal_seo.enqueue import enqueue_refill_for_site  # 🆕 refill投入API
 
 # ────────────────────────────────────────────────
 # APScheduler ＋ スレッドプール
@@ -514,6 +517,112 @@ def _pending_regenerator_job(app):
         except Exception as e:
             current_app.logger.exception(f"[pending-regenerator] job failed: {e}")
 
+# --------------------------------------------------------------------------- #
+# 🆕 Internal SEO Refill Job（A案）— ユーザー別に“弾（pending）”を補充するだけ
+# --------------------------------------------------------------------------- #
+def _internal_seo_user_refill_job(app):
+    """
+    目的:
+      - ユーザー単位で pending（InternalLinkAction.status='pending'）の“distinct post_id 数”を集計
+      - しきい値(INTERNAL_SEO_REFILL_TARGET)を下回るユーザーに対して、
+        そのユーザーのサイトから重複無く internal_seo_job_queue へ job_kind='refill' を投入
+      - refill ジョブは limit_posts=0 を強制し、Applier を実質スキップ（＝補給専用）
+      - 適用（apply）は user_scheduler 側が回す想定
+    """
+    with app.app_context():
+        try:
+            # ENV（安全な既定値付き）
+            enabled = os.getenv("INTERNAL_SEO_REFILL_ENABLED", "1") != "0"
+            if not enabled:
+                current_app.logger.info("[refill] disabled by env")
+                return
+            target = int(os.getenv("INTERNAL_SEO_REFILL_TARGET", "50"))  # ユーザーごとの目標 pending 記事数
+            per_user_cap = int(os.getenv("INTERNAL_SEO_REFILL_MAX_ENQUEUE_PER_USER", "2"))  # 1tickあたり投入上限/ユーザー
+
+            # Planner用のボリューム（未指定時は既存ENVに素直に従う）
+            pages         = int(os.getenv("INTERNAL_SEO_REFILL_PAGES",         os.getenv("INTERNAL_SEO_PAGES", "10")))
+            per_page      = int(os.getenv("INTERNAL_SEO_REFILL_PER_PAGE",      os.getenv("INTERNAL_SEO_PER_PAGE", "100")))
+            min_score     = float(os.getenv("INTERNAL_SEO_REFILL_MIN_SCORE",   os.getenv("INTERNAL_SEO_MIN_SCORE", "0.05")))
+            max_k         = int(os.getenv("INTERNAL_SEO_REFILL_MAX_K",         os.getenv("INTERNAL_SEO_MAX_K", "80")))
+            limit_sources = int(os.getenv("INTERNAL_SEO_REFILL_LIMIT_SOURCES", os.getenv("INTERNAL_SEO_LIMIT_SOURCES", "200")))
+            # refill は Applier を回さないため 0 強制
+            limit_posts   = 0
+
+            # 1) ユーザーごとの pending 記事数（distinct post_id）を集計
+            #    FROM internal_link_actions → JOIN site （安全に明示）
+            pend_rows = (
+                db.session.query(
+                    Site.user_id.label("user_id"),
+                    func.count(func.distinct(InternalLinkAction.post_id)).label("pending_posts"),
+                )
+                .select_from(InternalLinkAction)
+                .join(Site, Site.id == InternalLinkAction.site_id)
+                .filter(InternalLinkAction.status == "pending")
+                .group_by(Site.user_id)
+                .all()
+            )
+            pending_map = {int(r.user_id): int(r.pending_posts) for r in pend_rows}
+
+            # 2) 全ユーザーを列挙（pending が 0 のユーザーも対象にするため Site テーブルから）
+            user_rows = db.session.query(Site.user_id).group_by(Site.user_id).all()
+            all_user_ids = [int(u[0]) for u in user_rows]
+            if not all_user_ids:
+                current_app.logger.info("[refill] no users found (no sites)")
+                return
+
+            # 3) しきい値を下回るユーザーを対象に、未キューのサイトへ 'refill' を投入
+            enq_total = 0
+            skipped_locked = 0
+            for uid in all_user_ids:
+                cur = pending_map.get(uid, 0)
+                if cur >= target:
+                    continue  # 目標に達している
+
+                # このユーザーの対象サイト（既に queued/running が無いサイトを抽出）
+                rows = db.session.execute(text("""
+                    SELECT s.id
+                      FROM site s
+                 LEFT JOIN internal_seo_job_queue q
+                        ON q.site_id = s.id AND q.status IN ('queued','running')
+                     WHERE s.user_id = :uid
+                       AND q.site_id IS NULL
+                """), {"uid": uid}).fetchall()
+                site_ids = [int(r[0]) for r in rows]
+                if not site_ids:
+                    continue
+
+                need = min(per_user_cap, max(1, (target - cur + 1) // 2))  # 欠乏度に応じて控えめに投入
+                picked = site_ids[:need]
+
+                # 4) enqueue API を使用（内部で重複チェック＆commit 済み）
+                for sid in picked:
+                    res = enqueue_refill_for_site(
+                        sid,
+                        pages=pages,
+                        per_page=per_page,
+                        min_score=min_score,
+                        max_k=max_k,
+                        limit_sources=limit_sources,
+                        incremental=True,
+                        job_kind="refill",
+                    )
+                    if res.get("enqueued"):
+                        enq_total += 1
+                    else:
+                        # 既に queued/running など
+                        if res.get("reason") == "already-queued-or-running":
+                            skipped_locked += 1
+
+            current_app.logger.info(
+                f"[refill] enqueued={enq_total} skipped_locked={skipped_locked} "
+                f"target={target} cap/u={per_user_cap} params={{pages:{pages}, per_page:{per_page}, "
+                f"min_score:{min_score}, max_k:{max_k}, limit_sources:{limit_sources}}}"
+            )
+        except Exception as e:
+            db.session.rollback()
+            current_app.logger.exception(f"[refill] job failed: {e}")
+
+
 
 # app/tasks.py どこでも OK ですが _run_external_seo_job の直前あたりが読みやすい
 def _run_livedoor_signup(app, site_id: int) -> None:
@@ -888,15 +997,29 @@ def init_scheduler(app):
         app.logger.info("Scheduler started: internal_seo_user_scheduler_job (user-scope tick)")
     else:
         app.logger.info("Scheduler skipped: internal_seo_user_scheduler_job (INTERNAL_SEO_USER_ENABLED!=1)")        
+
+    # 🆕 Internal SEO Refill Job（ユーザー別の“弾補給”専用）※ENVでON/OFF
+    if os.getenv("INTERNAL_SEO_REFILL_ENABLED", "1") == "1":
+        scheduler.add_job(
+            func=_internal_seo_user_refill_job,
+            trigger="interval",
+            minutes=int(os.getenv("INTERNAL_SEO_REFILL_INTERVAL_MIN", "10")),
+            args=[app],
+            id="internal_seo_user_refill_job",
+            replace_existing=True,
+            max_instances=1,
+        )
+        app.logger.info("Scheduler started: internal_seo_user_refill_job (user refill)")
+    else:
+        app.logger.info("Scheduler skipped: internal_seo_user_refill_job (INTERNAL_SEO_REFILL_ENABLED!=1)")    
  
-
-
     scheduler.start()
     app.logger.info("Scheduler started: auto_post_job every 3 minutes")
     app.logger.info("Scheduler started: external_post_job every 10 minutes")
     app.logger.info("Scheduler started: gsc_metrics_job daily at 0:00")
     app.logger.info(f"Scheduler started: gsc_autogen_daily_job daily at {gsc_utc_hour:02d}:{gsc_utc_min:02d} UTC")
     app.logger.info("Scheduler started: pending_regenerator_job every 40 minutes")
+    app.logger.info("Scheduler maybe started: internal_seo_user_refill_job (see env)")
 
     
 # ────────────────────────────────────────────────

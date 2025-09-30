@@ -16,6 +16,12 @@ from typing import Optional, Dict, Any
 
 
 TICK_JOB_ID = "internal_seo_user_tick"
+DEFAULT_TICK_SEC = int(os.getenv("INTERNAL_SEO_USER_TICK_SEC", "60"))
+DEFAULT_BUDGET   = int(os.getenv("INTERNAL_SEO_USER_BUDGET", "20"))
+ERROR_BACKOFF    = int(os.getenv("INTERNAL_SEO_USER_ERROR_BACKOFF_SEC", "300"))
+# pending=0 のときに次回 tick を先送りする待機秒数（空振り防止）
+# 例: 15分（900秒）
+DEFAULT_IDLE_BACKOFF = int(os.getenv("INTERNAL_SEO_USER_IDLE_BACKOFF_SEC", "900"))
 
 
 # ------------------------------------------------------------
@@ -32,7 +38,7 @@ def _count_user_pending_posts(user_id: int) -> int:
           SELECT DISTINCT a.post_id
             FROM internal_link_actions a
             JOIN site s ON s.id = a.site_id
-           WHERE s.owner_user_id = :uid
+           WHERE s.user_id = :uid
              AND a.status = 'pending'
         ) t
         """
@@ -99,13 +105,28 @@ def run_user_tick(app, user_id: int, *, force: bool = False) -> Dict[str, Any]:
         if not sched:
             current_app.logger.warning("[iseo-user] schedule missing and cannot create (user=%s)", user_id)
             return {"ok": False, "reason": "schedule-missing"}
+        
+        # 参照系の軽いメトリクス（ログ用）：tick前の pending 記事数
+        remain_before = _count_user_pending_posts(user_id)
+        current_app.logger.info(
+            "[iseo-user] tick start user=%s force=%s sched(is_enabled=%s, status=%s, next=%s) remain_before=%s",
+            user_id, bool(force), bool(sched.is_enabled), sched.status, 
+            sched.next_run_at.isoformat() if sched.next_run_at else None,
+            remain_before,
+        )
 
         if not force:
             if not sched.is_enabled:
+                current_app.logger.info("[iseo-user] skip user=%s reason=disabled remain=%s", user_id, remain_before)
                 return {"ok": False, "reason": "disabled"}
             if sched.status == "paused":
+                current_app.logger.info("[iseo-user] skip user=%s reason=paused remain=%s", user_id, remain_before)
                 return {"ok": False, "reason": "paused"}
             if sched.next_run_at and sched.next_run_at > now_utc:
+                current_app.logger.info(
+                    "[iseo-user] skip user=%s reason=not-due next=%s remain=%s",
+                    user_id, sched.next_run_at.isoformat(), remain_before
+                )
                 return {"ok": False, "reason": "not-due"}
 
         lock_key = f"iseo:user:{user_id}:lock"
@@ -113,6 +134,7 @@ def run_user_tick(app, user_id: int, *, force: bool = False) -> Dict[str, Any]:
 
         with redis_lock(lock_key, ttl=lock_ttl, wait=True, wait_timeout=5.0) as acquired:
             if not acquired:
+                current_app.logger.info("[iseo-user] skip user=%s reason=locked remain=%s", user_id, remain_before)
                 return {"ok": False, "reason": "locked"}
 
             sched.status = "running"
@@ -132,8 +154,13 @@ def run_user_tick(app, user_id: int, *, force: bool = False) -> Dict[str, Any]:
             notes: Dict[str, Any] = {}
 
             try:
-                budget = int(sched.budget_per_tick or int(os.getenv("INTERNAL_SEO_USER_BUDGET", "20")))
-                with _with_rate_limit_override(sched.rate_limit_per_min):
+                budget = int(sched.budget_per_tick or DEFAULT_BUDGET)
+                rlim   = sched.rate_limit_per_min  # None の可能性あり
+                current_app.logger.info(
+                    "[iseo-user] run user=%s budget=%s rate_limit_per_min=%s",
+                    user_id, budget, rlim if rlim is not None else "(default)"
+                )
+                with _with_rate_limit_override(rlim):
                     result = apply_actions_for_user(user_id=user_id, limit_posts=budget, dry_run=False)
 
                 applied   = int(result.get("applied", 0) or 0)
@@ -150,18 +177,33 @@ def run_user_tick(app, user_id: int, *, force: bool = False) -> Dict[str, Any]:
                 run.processed_posts = processed
                 run.finished_at = datetime.now(timezone.utc)
 
-                remain = _count_user_pending_posts(user_id)
-                interval = int(sched.tick_interval_sec or int(os.getenv("INTERNAL_SEO_USER_TICK_SEC", "60")))
-                if sched.is_enabled and remain > 0:
-                    sched.status = "running"
-                    sched.next_run_at = datetime.now(timezone.utc) + timedelta(seconds=interval)
+                # 次回スケジュール決定（pending=0 でも先送りして空振りループを防止）
+                remain       = _count_user_pending_posts(user_id)
+                interval_sec = int(sched.tick_interval_sec or DEFAULT_TICK_SEC)
+                idle_backoff = DEFAULT_IDLE_BACKOFF
+                if sched.is_enabled:
+                    if remain > 0:
+                        # まだ弾がある＝通常の tick 間隔で回す
+                        sched.status     = "running"
+                        sched.next_run_at = now_utc + timedelta(seconds=interval_sec)
+                    else:
+                        # 弾が枯渇している＝アイドル待機（やや長め）で再チェック
+                        sched.status     = "idle"
+                        sched.next_run_at = now_utc + timedelta(seconds=idle_backoff)
                 else:
-                    sched.status = "idle"
+                    # 明示的に無効化中は次回未設定
+                    sched.status     = "idle"
                     sched.next_run_at = None
 
                 run.status = "success"
                 run.notes = notes or {}
                 db.session.commit()
+                current_app.logger.info(
+                    "[iseo-user] done user=%s applied=%s swapped=%s skipped=%s processed_posts=%s "
+                    "remain_after=%s next=%s",
+                    user_id, applied, swapped, skipped, processed, remain,
+                    (sched.next_run_at.isoformat() if sched.next_run_at else None)
+                )
 
                 return {
                     "ok": True,
@@ -178,7 +220,7 @@ def run_user_tick(app, user_id: int, *, force: bool = False) -> Dict[str, Any]:
                 current_app.logger.exception("[iseo-user] tick failed (user=%s): %s", user_id, e)
                 run.status = "failed"
                 run.finished_at = datetime.now(timezone.utc)
-                backoff = int(os.getenv("INTERNAL_SEO_USER_ERROR_BACKOFF_SEC", "300"))
+                backoff = ERROR_BACKOFF
                 sched.status = "error"
                 sched.last_error = str(e)[:1000]
                 sched.next_run_at = datetime.now(timezone.utc) + timedelta(seconds=backoff)
@@ -212,7 +254,9 @@ def user_scheduler_tick(app) -> None:
                         InternalSeoUserSchedule.next_run_at <= now_utc))
             .order_by(InternalSeoUserSchedule.next_run_at.asc().nullsfirst())
         )
-        rows = q.limit(int(os.getenv("INTERNAL_SEO_USER_SCAN_LIMIT", "50"))).all()
+        scan_limit = int(os.getenv("INTERNAL_SEO_USER_SCAN_LIMIT", "50"))
+        rows = q.limit(scan_limit).all()
+        current_app.logger.info("[iseo-user-scheduler] due_users=%s scan_limit=%s", len(rows), scan_limit)
         if not rows:
             current_app.logger.info("[iseo-user-scheduler] no due users")
             return
@@ -220,7 +264,20 @@ def user_scheduler_tick(app) -> None:
         for sched in rows:
             try:
                 res = run_user_tick(app, sched.user_id)
-                current_app.logger.info("[iseo-user-scheduler] user=%s result=%s", sched.user_id, res)
+                # 重要指標のみを抜粋してログを簡潔に
+                if res.get("ok"):
+                    current_app.logger.info(
+                        "[iseo-user-scheduler] user=%s ok applied=%s swapped=%s skipped=%s processed=%s remain=%s next=%s",
+                        sched.user_id,
+                        res.get("applied"), res.get("swapped"), res.get("skipped"),
+                        res.get("processed_posts"), res.get("remain_posts"),
+                        res.get("next_run_at"),
+                    )
+                else:
+                    current_app.logger.info(
+                        "[iseo-user-scheduler] user=%s skip_or_error reason=%s",
+                        sched.user_id, res.get("reason")
+                    )
             except Exception as e:
                 current_app.logger.exception("[iseo-user-scheduler] run_user_tick error (user=%s): %s", sched.user_id, e)
         db.session.close()
