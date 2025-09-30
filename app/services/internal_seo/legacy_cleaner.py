@@ -105,8 +105,8 @@ def find_and_remove_legacy_links(
     # 重複hrefチェックは「内部SEO由来リンク」にのみ適用する
     seen_seo_hrefs: set[str] = set()
 
-    # 既定の最新版（未指定なら v4 を最新版として扱う）
-    latest = (spec_version or "v4").strip().lower()
+    # 既定の最新版（未指定なら v5 を最新版として扱う）
+    latest = (spec_version or "v5").strip().lower()
     for m in _A_TAG.finditer(html):
         open_tag = m.group(1) or ""
         href = m.group(2) or ""
@@ -249,8 +249,8 @@ def clean_legacy_links(site_id: int, post_id: int, html: str) -> Tuple[str, List
         .all()
     )
     url_to_title = { (u or ""): (t or "") for (u, t) in rows if u }
-    # 既定で v4 を最新版として扱う
-    cleaned, deletions = find_and_remove_legacy_links(html, url_to_title, spec_version="v4")
+    # 既定で v5 を最新版として扱う
+    cleaned, deletions = find_and_remove_legacy_links(html, url_to_title, spec_version="v5")
     # dict → RemovedLink へ戻す（呼び出し側が旧型を期待する場合のため）
     removed_objs = [
         RemovedLink(

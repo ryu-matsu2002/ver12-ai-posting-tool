@@ -105,7 +105,7 @@ _AI_STYLE_MARK = "<!-- ai-internal-link-style:v2 -->"
 
 # ==== 内部SEO 仕様バージョン（新規） ====
 # <a> には一切属性を付けない方針。代替として直前コメントで版管理を行う。
-INTERNAL_SEO_SPEC_VERSION = "v4"
+INTERNAL_SEO_SPEC_VERSION = "v5"
 INTERNAL_SEO_SPEC_MARK = f"<!-- ai-internal-link:{INTERNAL_SEO_SPEC_VERSION} -->"
 ILINK_BOX_MARK = "<!-- ai-internal-link-box:v1 -->"
 
@@ -389,15 +389,16 @@ def _emit_anchor_html(href: str, text: str) -> str:
 
 def _emit_recommend_box() -> str:
     """
-    「この記事を読んでる方がよく読んでる記事」を黒地・白文字の囲みで出力。
+    「関連・注目記事」を薄緑背景＋黒文字の囲みで出力。
     ※リンクは入れない（直下に別途 <a> を置く）。
     """
     return (
         f'{ILINK_BOX_MARK}'
         '<div class="ai-relbox" '
-        'style="margin:1.2em 0 0.4em; padding:10px 12px; border-radius:8px; '
-        'background:#111; color:#fff; font-weight:600;">'
-        'この記事を読んでる方がよく読んでる記事'
+        'style="margin:1.2em auto 0.4em; padding:6px 12px; border-radius:6px; '
+        'background:#dff0d8; color:#000; font-weight:600; '
+        'display:inline-block;">'
+        '関連・注目記事'
         '</div>'
     )
 
