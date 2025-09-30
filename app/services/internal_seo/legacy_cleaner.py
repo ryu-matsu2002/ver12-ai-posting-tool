@@ -146,10 +146,20 @@ def find_and_remove_legacy_links(
         #    - 例外：旧仕様の“タイトル厳密一致リンク”は削除
 
         if is_seo_link:
-            # 旧版（v1〜v3 など） → 削除
+            # 旧版（v1〜v4 など） → 削除（黒背景の ai-relbox も同時に消す）
             if detected_ver and detected_ver != latest:
-                out_parts.append(html[last:m.start()])
-                last = m.end()
+                # 直前にある ai-relbox をまとめて削除
+                prefix = html[max(0, m.start()-500):m.start()]
+                relbox_match = re.search(r'<div[^>]*class=["\']ai-relbox[^>]*>.*?</div>', prefix, re.I|re.S)
+                if relbox_match:
+                    # relbox 開始位置から削除
+                    relbox_start = prefix.rfind("<div", 0, relbox_match.end())
+                    if relbox_start != -1:
+                        out_parts.append(html[last:m.start()-len(prefix)+relbox_start])
+                        last = m.end()
+                else:
+                    out_parts.append(html[last:m.start()])
+                    last = m.end()
                 removed.append(RemovedLink(
                     href=href,
                     anchor_text=anchor_text,
