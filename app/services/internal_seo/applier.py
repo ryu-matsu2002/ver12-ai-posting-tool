@@ -105,9 +105,9 @@ _AI_STYLE_MARK = "<!-- ai-internal-link-style:v2 -->"
 
 # ==== 内部SEO 仕様バージョン（新規） ====
 # <a> には一切属性を付けない方針。代替として直前コメントで版管理を行う。
-INTERNAL_SEO_SPEC_VERSION = "v5"
+INTERNAL_SEO_SPEC_VERSION = "v6"
 INTERNAL_SEO_SPEC_MARK = f"<!-- ai-internal-link:{INTERNAL_SEO_SPEC_VERSION} -->"
-ILINK_BOX_MARK = "<!-- ai-internal-link-box:v5 -->"
+ILINK_BOX_MARK = "<!-- ai-internal-link-box:v6 -->"
 
 def _split_paragraphs(html: str) -> List[str]:
     if not html:
@@ -389,15 +389,15 @@ def _emit_anchor_html(href: str, text: str) -> str:
 
 def _emit_recommend_box() -> str:
     """
-    「関連・注目記事」を薄緑背景＋黒文字の囲みで出力。
+    「関連・注目記事」を薄緑背景＋黒枠＋通常ウェイトで出力。
     ※リンクは入れない（直下に別途 <a> を置く）。
     """
     return (
         f'{ILINK_BOX_MARK}'
         '<div class="ai-relbox" '
         'style="margin:1.2em auto 0.4em; padding:6px 12px; border-radius:6px; '
-        'background:#8AC75A !important; color:#000 !important; font-weight:600; '
-        'display:inline-block;">'
+        'background:#D1F7B0 !important; color:#000 !important; font-weight:400; '
+        'border:1px solid #000; display:inline-block;">'
         '関連・注目記事'
         '</div>'
     )

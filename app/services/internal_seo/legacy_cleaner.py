@@ -296,8 +296,8 @@ def clean_legacy_links(site_id: int, post_id: int, html: str) -> Tuple[str, List
         .all()
     )
     url_to_title = { (u or ""): (t or "") for (u, t) in rows if u }
-    # 既定で v5 を最新版として扱う
-    cleaned, deletions = find_and_remove_legacy_links(html, url_to_title, spec_version="v5")
+    # 既定で v6 を最新版として扱う
+    cleaned, deletions = find_and_remove_legacy_links(html, url_to_title, spec_version="v6")
     # dict → RemovedLink へ戻す（呼び出し側が旧型を期待する場合のため）
     removed_objs = [
         RemovedLink(
