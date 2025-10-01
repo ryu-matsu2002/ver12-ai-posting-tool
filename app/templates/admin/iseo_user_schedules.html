@@ -16,20 +16,16 @@
     }
 
     .toolbar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin:14px 0; }
-    .toolbar .btn { padding:8px 12px; border-radius:8px; border:1px solid var(--bd); background:#fff; color:var(--txt); cursor:pointer; }
-    .toolbar .btn:hover { background:#fff; box-shadow:0 1px 0 rgba(0,0,0,.04); }
-    .toolbar .btn:disabled { opacity:.55; cursor:not-allowed; }
-    .toolbar .btn-primary    { background:var(--primary); color:#fff; border-color:var(--primary); }
-    .toolbar .btn-danger     { background:#ef4444; color:#fff; border-color:#ef4444; }
-    .toolbar .btn-warning    { background:#fbbf24; color:#111827; border-color:#f59e0b; }
-    .toolbar .btn-success    { background:var(--accent); color:#fff; border-color:var(--accent); }
-    .toolbar .btn-ghost      { background:var(--primary-ghost); color:var(--primary); border-color:#bfdbfe; }
     .toolbar .right { margin-left:auto; display:flex; gap:8px; align-items:center; }
     .search { padding:8px 12px; border:1px solid var(--bd); border-radius:8px; width:280px; background:#fff; }
+    .btn { padding:8px 12px; border-radius:8px; border:1px solid var(--bd); background:#fff; color:var(--txt); cursor:pointer; }
+    .btn:hover { background:#fff; box-shadow:0 1px 0 rgba(0,0,0,.04); }
+    .btn:disabled { opacity:.55; cursor:not-allowed; }
+    .btn-primary { background:var(--primary); color:#fff; border-color:var(--primary); }
 
     table { width:100%; border-collapse:separate; border-spacing:0; margin-top:8px; background:#fff; border:1px solid var(--bd); border-radius:12px; overflow:hidden; }
     th, td { border-bottom:1px solid #f1f5f9; padding:10px 8px; text-align:left; font-size:14px; vertical-align:top; }
-    th { background:#fafafa; position:sticky; top:0; z-index:1; }
+    th { background:#fafafa; position:sticky; top:0; z-index:1; white-space:nowrap; } /* ヘッダーは常に1行 */
     tr:last-child td { border-bottom:0; }
 
     .badge { display:inline-block; padding:2px 10px; border-radius:9999px; font-size:12px; font-weight:600; }
@@ -63,15 +59,11 @@
     @media (max-width: 1100px){ .kpis{grid-template-columns: repeat(2,1fr);} }
     @media (max-width: 640px){ .kpis{grid-template-columns: 1fr;} .truncate-1{max-width:220px;} }
 
-    .help { margin-top: 10px; font-size: 12px; color: #666; }
     .btn-mini { padding:6px 10px; border-radius:8px; border:1px solid var(--bd); background:#fff; cursor:pointer; }
     .btn-mini.primary { background:var(--primary); color:#fff; border-color:var(--primary); }
-    .btn-mini.warn { background:#f59e0b; color:#111827; border-color:#d97706; }
-    .btn-mini.danger { background:#ef4444; color:#fff; border-color:#ef4444; }
-    .btn-mini.ghost { background:#eef2ff; color:#3730a3; border-color:#c7d2fe; }
   </style>
 
-  <!-- KPI（選択や検索に連動） -->
+  <!-- KPI -->
   <div class="kpis" id="kpis">
     <div class="kpi"><h3>対象ユーザー数</h3><div class="v" id="k_users">-</div></div>
     <div class="kpi"><h3>保留記事数（記事単位の合計）</h3><div class="v" id="k_pending">-</div></div>
@@ -79,14 +71,10 @@
     <div class="kpi"><h3>直近24時間の処理記事数</h3><div class="v" id="k_processed24">-</div></div>
   </div>
 
+  <!-- 上部の操作ボタン群は削除：検索と更新のみ -->
   <div class="toolbar">
-    <button id="btn-enable"  class="btn btn-success"  disabled>開始（有効化）</button>
-    <button id="btn-pause"   class="btn btn-warning"  disabled>一時停止</button>
-    <button id="btn-resume"  class="btn btn-ghost"    disabled>再開</button>
-    <button id="btn-disable" class="btn btn-danger"   disabled>停止（無効化）</button>
-
     <div class="right">
-      <input id="search" class="search" type="search" placeholder="名前で絞り込み…" />
+      <input id="search" class="search" type="search" placeholder="名前で絞り込み…"/>
       <label class="muted"><input type="checkbox" id="auto-refresh" checked> 自動更新（10秒）</label>
       <button id="btn-refresh" class="btn btn-primary">最新表示に更新</button>
     </div>
@@ -115,15 +103,8 @@
     </tbody>
   </table>
 
-  <div class="help">
-    <div>・「開始」は <strong>有効化 + 直ちに1回実行</strong> を行います。</div>
-    <div>・「停止」は <strong>無効化 + 次回予定クリア</strong> を行います。</div>
-    <div>・「今すぐ1回実行」は有効/無効に関係なく<strong>単発実行</strong>します（テストに便利）。</div>
-    <div>・スケジュール設定は「間隔（秒）/1回あたりの処理記事数/1分あたりの最大更新数（レート制限）」を示します。</div>
-  </div>
-
   <script>
-    // ---- CSRF ヘルパ ----
+    // ---- CSRF ----
     function getMetaCsrf() {
       const m = document.querySelector('meta[name="csrf-token"]');
       return m ? m.getAttribute('content') : null;
@@ -152,10 +133,6 @@
     const tbody = document.getElementById('tbody');
     const search = document.getElementById('search');
     const btnRefresh = document.getElementById('btn-refresh');
-    const btnEnable = document.getElementById('btn-enable');
-    const btnPause = document.getElementById('btn-pause');
-    const btnResume = document.getElementById('btn-resume');
-    const btnDisable = document.getElementById('btn-disable');
     const autoRefresh = document.getElementById('auto-refresh');
     const checkAll = document.getElementById('check-all');
 
@@ -175,23 +152,14 @@
       } catch { return s; }
     }
     function badgeJa(status) {
-      const map = {
-        running: '実行中',
-        queued:  '待機中',
-        paused:  '一時停止',
-        idle:    '待機',
-        error:   'エラー',
-      };
+      const map = { running:'実行中', queued:'待機中', paused:'一時停止', idle:'待機', error:'エラー' };
       const cls = {
-        running: 's-running',
-        queued:  's-queued',
-        paused:  's-paused',
-        idle:    's-idle',
-        error:   's-error',
+        running:'s-running', queued:'s-queued', paused:'s-paused', idle:'s-idle', error:'s-error'
       }[status] || 's-idle';
       return `<span class="badge ${cls}">${map[status] || '待機'}</span>`;
     }
     function esc(s){return String(s==null?'':s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));}
+    function badgeLabel(s){ return ({running:'実行中', queued:'待機中', paused:'一時停止', idle:'待機', error:'エラー'})[s] || s || '-'; }
 
     function renderKPIs(list){
       const totalUsers = list.length;
@@ -207,7 +175,7 @@
     function render() {
       const q = (search.value || '').toLowerCase();
 
-      // フィルタ → ユーザーID昇順ソート
+      // 名前でフィルタ → ユーザーID昇順
       filtered = items
         .filter(x => !q || (x.username || '').toLowerCase().includes(q))
         .sort((a,b) => (a.user_id||0) - (b.user_id||0));
@@ -220,6 +188,12 @@
         const err = x.last_error ? `<div class="truncate-1 mono" title="${esc(x.last_error)}">${esc(x.last_error)}</div>` : '<span class="muted">-</span>';
         const enabled = x.is_enabled ? '<span class="chip">ON</span>' : '<span class="muted">OFF</span>';
         const rate = x.rate_limit_per_min ? `${x.rate_limit_per_min}/分` : '-';
+
+        // 操作ボタン：開始のみ。実行中はdisabledで「実行中」表示
+        const running = (x.status === 'running');
+        const buttonHtml = running
+          ? `<button class="btn-mini primary act-start" data-running="1" disabled>実行中</button>`
+          : `<button class="btn-mini primary act-start" data-running="0">開始</button>`;
 
         return `
           <tr data-id="${x.user_id}">
@@ -234,9 +208,7 @@
             <td>${fmtTime(x.last_run_at)}</td>
             <td>${fmtTime(x.next_run_at)}</td>
             <td class="mono">
-              ${last.status ? ('[' + esc(badgeLabel(last.status)) + '] ') : ''}
-              適用:${last.applied ?? '-'}
-              / 記事:${last.processed_posts ?? '-'}
+              ${last.status ? ('[' + esc(badgeLabel(last.status)) + '] ') : ''}適用:${last.applied ?? '-'} / 記事:${last.processed_posts ?? '-'}
               ${last.finished_at ? `<div class="muted">${fmtTime(last.finished_at)}</div>` : ''}
             </td>
             <td class="mono">${last24}</td>
@@ -247,23 +219,13 @@
             </td>
             <td>${err}</td>
             <td class="row-actions">
-              <button class="btn-mini primary act-run-once">今すぐ1回実行</button>
-              <button class="btn-mini ghost act-resume">再開</button>
-              <button class="btn-mini warn act-pause">一時停止</button>
-              <button class="btn-mini act-enable">開始</button>
-              <button class="btn-mini danger act-disable">停止</button>
+              ${buttonHtml}
             </td>
           </tr>
         `;
       });
       tbody.innerHTML = rows.length ? rows.join('') : `<tr><td colspan="13" class="muted">対象ユーザーがいません</td></tr>`;
       wireRowActions();
-      updateToolbarState();
-    }
-
-    // 直近実行ステータスの日本語化（セル内で使用）
-    function badgeLabel(s){
-      return ({running:'実行中', queued:'待機中', paused:'一時停止', idle:'待機', error:'エラー'})[s] || s || '-';
     }
 
     // ---- データ取得 ----
@@ -275,93 +237,38 @@
       render();
     }
 
-    // ---- ユーティリティ ----
-    function selectedUserIds() {
-      return Array.from(document.querySelectorAll('tbody .row-check:checked'))
-        .map(cb => parseInt(cb.closest('tr').dataset.id, 10))
-        .filter(n => !Number.isNaN(n));
-    }
-    function updateToolbarState() {
-      const hasSel = selectedUserIds().length > 0;
-      btnEnable.disabled  = !hasSel;
-      btnPause.disabled   = !hasSel;
-      btnResume.disabled  = !hasSel;
-      btnDisable.disabled = !hasSel;
-    }
+    // ---- 行操作（開始のみ） ----
     function wireRowActions() {
-      tbody.querySelectorAll('.row-check').forEach(cb => {
-        cb.addEventListener('change', updateToolbarState);
-      });
-      tbody.querySelectorAll('.act-run-once').forEach(btn => {
+      tbody.querySelectorAll('.act-start').forEach(btn => {
         btn.addEventListener('click', async (e) => {
-          const tr = e.target.closest('tr');
+          const b = e.currentTarget;
+          if (b.dataset.running === '1' || b.disabled) return; // すでに実行中
+          const tr = b.closest('tr');
           const uid = parseInt(tr.dataset.id, 10);
-          await postJSON('/admin/iseo/schedules/run_once', { user_id: uid }, true);
-          await load();
-        });
-      });
-      tbody.querySelectorAll('.act-enable').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
-          const uid = parseInt(e.target.closest('tr').dataset.id, 10);
-          await postJSON('/admin/iseo/schedules/bulk_enable', { user_ids: [uid] });
-        });
-      });
-      tbody.querySelectorAll('.act-disable').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
-          const uid = parseInt(e.target.closest('tr').dataset.id, 10);
-          if (!confirm('このユーザーのスケジュールを停止します。よろしいですか？')) return;
-          await postJSON('/admin/iseo/schedules/bulk_disable', { user_ids: [uid] });
-        });
-      });
-      tbody.querySelectorAll('.act-pause').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
-          const uid = parseInt(e.target.closest('tr').dataset.id, 10);
-          await postJSON('/admin/iseo/schedules/bulk_pause', { user_ids: [uid] });
-        });
-      });
-      tbody.querySelectorAll('.act-resume').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
-          const uid = parseInt(e.target.closest('tr').dataset.id, 10);
-          await postJSON('/admin/iseo/schedules/bulk_resume', { user_ids: [uid] });
+          // 楽観更新：すぐに実行中表示にして押せないように
+          const oldText = b.textContent;
+          b.textContent = '実行中';
+          b.disabled = true;
+          b.dataset.running = '1';
+          try {
+            const res = await fetchJSON('/admin/iseo/schedules/bulk_enable', {
+              method: 'POST',
+              body: JSON.stringify({ user_ids: [uid] })
+            });
+            const data = await res.json().catch(()=>({}));
+            if (!res.ok || data.ok === false) throw new Error(data.error || res.statusText);
+            // 成功 → 状態を再取得
+            await load();
+          } catch (err) {
+            // 失敗 → 元に戻す
+            alert(`開始に失敗しました: ${err}`);
+            b.textContent = oldText;
+            b.disabled = false;
+            b.dataset.running = '0';
+          }
         });
       });
     }
-    async function postJSON(url, body, noReloadOnOK = false) {
-      try {
-        const res = await fetchJSON(url, { method: 'POST', body: JSON.stringify(body || {}) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || data.ok === false) {
-          alert(`エラー: ${data.error || res.statusText}`);
-          return;
-        }
-        if (!noReloadOnOK) await load();
-      } catch (e) {
-        alert(`通信エラー: ${e}`);
-      }
-    }
-
-    // ---- バルク操作 ----
-    btnEnable.addEventListener('click', async () => {
-      const ids = selectedUserIds();
-      if (ids.length === 0) return;
-      await postJSON('/admin/iseo/schedules/bulk_enable', { user_ids: ids });
-    });
-    btnPause.addEventListener('click', async () => {
-      const ids = selectedUserIds();
-      if (ids.length === 0) return;
-      await postJSON('/admin/iseo/schedules/bulk_pause', { user_ids: ids });
-    });
-    btnResume.addEventListener('click', async () => {
-      const ids = selectedUserIds();
-      if (ids.length === 0) return;
-      await postJSON('/admin/iseo/schedules/bulk_resume', { user_ids: ids });
-    });
-    btnDisable.addEventListener('click', async () => {
-      const ids = selectedUserIds();
-      if (ids.length === 0) return;
-      if (!confirm('選択ユーザーのスケジュールを停止します。よろしいですか？')) return;
-      await postJSON('/admin/iseo/schedules/bulk_disable', { user_ids: ids });
-    });
 
     // ---- その他UI ----
     btnRefresh.addEventListener('click', load);
@@ -375,7 +282,6 @@
     });
     checkAll.addEventListener('change', () => {
       document.querySelectorAll('tbody .row-check').forEach(cb => cb.checked = checkAll.checked);
-      updateToolbarState();
     });
 
     // ---- 初期化 ----
