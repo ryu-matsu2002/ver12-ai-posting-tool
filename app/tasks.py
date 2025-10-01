@@ -48,6 +48,7 @@ from math import inf
 from typing import List, Dict, Set, Tuple, Optional
 import json
 from app.models import InternalLinkAction  # 🆕 refill 集計で使用
+from app.models import InternalSeoUserSchedule  # 🆕 ユーザースケジュール確認用
 from sqlalchemy import func  # 🆕 集計で使用
 from app.services.internal_seo.enqueue import enqueue_refill_for_site  # 🆕 refill投入API
 
@@ -574,6 +575,17 @@ def _internal_seo_user_refill_job(app):
             enq_total = 0
             skipped_locked = 0
             for uid in all_user_ids:
+                # 🛡 ユーザースケジュールの有効性チェック（開始ボタン未押下/一時停止/スケジュール無しは補給しない）
+                sched = InternalSeoUserSchedule.query.filter_by(user_id=uid).one_or_none()
+                if not sched:
+                    current_app.logger.info("[refill] skip uid=%s (no user schedule)", uid)
+                    continue
+                if not sched.is_enabled:
+                    current_app.logger.info("[refill] skip uid=%s (user schedule disabled)", uid)
+                    continue
+                if getattr(sched, "status", None) == "paused":
+                    current_app.logger.info("[refill] skip uid=%s (user schedule paused)", uid)
+                    continue
                 cur = pending_map.get(uid, 0)
                 if cur >= target:
                     continue  # 目標に達している
@@ -1121,10 +1133,14 @@ def _internal_seo_run_one(site_id: int,
                                          min_score=min_score, max_candidates=max_k)
         current_app.logger.info(f"[Planner] -> {stats_plan}")
 
-        # Applier
-        current_app.logger.info(f"[Applier] site={site_id} limit_posts={limit_posts}")
-        res_apply = apply_actions_for_site(site_id, limit_posts=limit_posts, dry_run=False)
-        current_app.logger.info(f"[Applier] -> {res_apply}")
+        # Applier（refill など limit_posts<=0 の場合は完全スキップ）
+        if int(limit_posts) <= 0:
+            res_apply = {"applied": 0, "swapped": 0, "skipped": 0, "processed_posts": 0, "note": "applier skipped (limit_posts<=0)"}
+            current_app.logger.info(f"[Applier] skipped (limit_posts<=0) site={site_id}")
+        else:
+            current_app.logger.info(f"[Applier] site={site_id} limit_posts={limit_posts}")
+            res_apply = apply_actions_for_site(site_id, limit_posts=limit_posts, dry_run=False)
+            current_app.logger.info(f"[Applier] -> {res_apply}")
 
         # 成功で確定
         run.status = "success"

@@ -69,6 +69,34 @@
     .btn-mini.warn { background:#f59e0b; color:#111827; border-color:#d97706; }
     .btn-mini.danger { background:#ef4444; color:#fff; border-color:#ef4444; }
     .btn-mini.ghost { background:#eef2ff; color:#3730a3; border-color:#c7d2fe; }
+
+    /* 統合ダッシュボードのスタイル（旧ページから移植、ID衝突回避） */
+    .iseo-dash{--bd:#e6e8ef;--muted:#6b7280}
+    .iseo-dash .kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+    .iseo-dash .kpi{background:#fff;border:1px solid var(--bd);border-radius:14px;padding:16px;box-shadow:0 4px 14px rgba(20,20,40,.05)}
+    .iseo-dash .kpi h4{font-size:13px;margin:0;color:#6b7280;letter-spacing:.2px}
+    .iseo-dash .kpi .v{font-size:28px;font-weight:800;margin-top:6px;color:#111827}
+    .iseo-dash .section{margin-top:24px}
+    .iseo-dash .card{background:#fff;border:1px solid var(--bd);border-radius:14px;padding:16px;box-shadow:0 4px 14px rgba(20,20,40,.05)}
+    .iseo-dash .muted{color:#6b7280}
+    .iseo-dash .table{width:100%;border-collapse:separate;border-spacing:0}
+    .iseo-dash .table th,.iseo-dash .table td{padding:10px 12px;border-bottom:1px solid #eef1f6;font-size:14px;vertical-align:middle}
+    .iseo-dash .tag{display:inline-block;font-size:12px;border-radius:999px;padding:2px 10px;border:1px solid #e5e7eb}
+    .iseo-dash .tag.idle{background:#fafafa}
+    .iseo-dash .tag.queued{background:#fff7ed;border-color:#fed7aa}
+    .iseo-dash .tag.running{background:#ecfeff;border-color:#a5f3fc}
+    .iseo-dash .logs{max-height:520px;overflow:auto}
+    .iseo-dash .log-item{display:grid;grid-template-columns:140px 140px 1fr 110px 110px 110px;gap:10px;padding:10px 0;border-bottom:1px solid #f1f5f9}
+    .iseo-dash .log-item .ts{font-variant-numeric:tabular-nums}
+    .iseo-dash .toolbar{gap:8px}
+    @media (max-width: 1200px){
+      .iseo-dash .kpi-grid{grid-template-columns:repeat(2,1fr)}
+      .iseo-dash .log-item{grid-template-columns:140px 120px 1fr 90px 90px 90px}
+    }
+    @media (max-width: 700px){
+      .iseo-dash .kpi-grid{grid-template-columns:1fr}
+      .iseo-dash .log-item{grid-template-columns:1fr;row-gap:4px}
+    }
   </style>
 
   <!-- KPI（選択や検索に連動） -->
@@ -121,6 +149,93 @@
     <div>・「今すぐ1回実行」は有効/無効に関係なく<strong>単発実行</strong>します（テストに便利）。</div>
     <div>・スケジュール設定は「間隔（秒）/1回あたりの処理記事数/1分あたりの最大更新数（レート制限）」を示します。</div>
   </div>
+
+  <!-- ============ ここから：旧ダッシュボード統合（KPI / 進捗 / ログ） ============ -->
+  <hr style="margin:24px 0">
+  <h2 style="font-size:20px;margin:0 0 12px;">内部SEO ダッシュボード（統合）</h2>
+
+  <div class="iseo-dash">
+    <div class="d-flex align-items-center justify-content-between mb-3">
+      <div class="d-flex align-items-center toolbar">
+        <label class="me-2 muted">期間:</label>
+        <select id="dash_days" class="form-select d-inline-block" style="width:auto">
+          <option value="7">過去7日</option>
+          <option value="14">過去14日</option>
+          <option value="30">過去30日</option>
+        </select>
+        <button id="dash_reloadAll" class="btn btn-outline-primary btn-sm">再読み込み</button>
+      </div>
+    </div>
+
+    <!-- KPI -->
+    <div class="kpi-grid">
+      <div class="kpi"><h4>登録サイト数</h4><div class="v" id="dash_k_total">-</div></div>
+      <div class="kpi"><h4>キュー中</h4><div class="v" id="dash_k_queued">-</div></div>
+      <div class="kpi"><h4>実行中</h4><div class="v" id="dash_k_running">-</div></div>
+      <div class="kpi"><h4>本日の適用リンク数</h4><div class="v" id="dash_k_applied_today">-</div></div>
+    </div>
+
+    <!-- 期間合計 -->
+    <div class="section card">
+      <div class="row">
+        <div class="col-md-6">
+          <div class="muted">Hタグ内リンク除去（期間合計）</div>
+          <div class="v" id="dash_k_removed_h">-</div>
+        </div>
+        <div class="col-md-6">
+          <div class="muted">旧仕様リンク削除（期間合計）</div>
+          <div class="v" id="dash_k_legacy_removed">-</div>
+        </div>
+      </div>
+      <div class="muted mt-2">※ 期間は上部セレクタで切替（デフォルト7日）</div>
+    </div>
+
+    <!-- 進捗 -->
+    <div class="section card">
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <h4 class="mb-0">ユーザー別 × サイト別 進捗</h4>
+        <input id="dash_progressSearch" type="search" class="form-control" placeholder="ユーザー/サイトで絞り込み" style="max-width:280px">
+      </div>
+      <div class="table-responsive">
+        <table class="table" id="dash_progressTable">
+          <thead>
+            <tr>
+              <th style="width:180px">ユーザー</th>
+              <th style="width:260px">サイト</th>
+              <th style="width:160px">直近実行</th>
+              <th style="width:130px;text-align:right">適用リンク</th>
+              <th style="width:130px;text-align:right">スキップ</th>
+              <th style="width:160px;text-align:right">H内除去</th>
+              <th style="width:160px;text-align:right">旧仕様削除</th>
+              <th style="width:110px">状態</th>
+            </tr>
+          </thead>
+          <tbody id="dash_progressTbody">
+            <tr><td class="muted" colspan="8">読み込み中...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- リアルタイムログ -->
+    <div class="section card">
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <h4 class="mb-0">リアルタイムログ</h4>
+        <div class="d-flex align-items-center" style="gap:8px">
+          <label class="muted">自動更新:</label>
+          <select id="dash_autoInterval" class="form-select" style="width:auto">
+            <option value="0">停止</option>
+            <option value="3000" selected>3秒</option>
+            <option value="5000">5秒</option>
+            <option value="10000">10秒</option>
+          </select>
+          <button id="dash_refreshLogs" class="btn btn-outline-secondary btn-sm">今すぐ更新</button>
+        </div>
+      </div>
+      <div class="logs" id="dash_logs"></div>
+    </div>
+  </div>
+  <!-- ============ ここまで：旧ダッシュボード統合 ============ -->
 
   <script>
     // ---- CSRF ヘルパ ----
@@ -383,6 +498,168 @@
       await load();
       timer = setInterval(load, 10000);
     })();
+  </script>
+
+  <!-- 旧ダッシュボードJS（dash_プレフィックスで統合） -->
+  <script>
+  (function(){
+    const $  = (s)=>document.querySelector(s);
+    const $$ = (s)=>Array.from(document.querySelectorAll(s));
+    const daysSel = $("#dash_days");
+    const reloadAllBtn = $("#dash_reloadAll");
+    const progressSearch = $("#dash_progressSearch");
+    const logsBox = $("#dash_logs");
+    const refreshLogsBtn = $("#dash_refreshLogs");
+    const autoSel = $("#dash_autoInterval");
+
+    // URL ?days= の初期値をセレクタへ反映（無ければ7日）
+    const urlDays = Number(new URL(location.href).searchParams.get("days") || "7");
+    if ([7,14,30].includes(urlDays)) {
+      daysSel.value = String(urlDays);
+    }
+
+    let logsLatestISO = null; // 直近ログの created_at（JST ISO）
+    let autoTimer = null;
+    let progressCache = [];   // フロント側フィルタ用
+
+    daysSel.addEventListener("change", ()=>{
+      const u = new URL(location.href);
+      u.searchParams.set("days", daysSel.value);
+      history.replaceState(null, "", u.toString());
+      loadAll(true);
+    });
+    reloadAllBtn.addEventListener("click", ()=> loadAll(true));
+    refreshLogsBtn.addEventListener("click", ()=> loadLogs(true));
+    autoSel.addEventListener("change", ()=>{
+      if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+      const ms = parseInt(autoSel.value, 10);
+      if(ms>0){ autoTimer = setInterval(()=> loadLogs(false), ms); }
+    });
+
+    progressSearch.addEventListener("input", ()=>{
+      renderProgress(progressCache, progressSearch.value.trim().toLowerCase());
+    });
+
+    async function loadKpis(){
+      const d = daysSel.value || "7";
+      const r = await fetch(`/admin/internal-seo/kpis?days=${encodeURIComponent(d)}`);
+      const j = await r.json();
+      $("#dash_k_total").textContent          = (j.total_sites||0).toLocaleString();
+      $("#dash_k_queued").textContent         = (j.queued_sites||0).toLocaleString();
+      $("#dash_k_running").textContent        = (j.running_sites||0).toLocaleString();
+      $("#dash_k_applied_today").textContent  = (j.applied_today||0).toLocaleString();
+      $("#dash_k_removed_h").textContent      = (j.removed_in_h_total||0).toLocaleString();
+      $("#dash_k_legacy_removed").textContent = (j.legacy_removed_total||0).toLocaleString();
+    }
+
+    async function loadProgress(){
+      const d = daysSel.value || "7";
+      const r = await fetch(`/admin/internal-seo/progress?days=${encodeURIComponent(d)}`);
+      const j = await r.json();
+      progressCache = j.rows || [];
+      renderProgress(progressCache, progressSearch.value.trim().toLowerCase());
+    }
+
+    function renderProgress(rows, q){
+      const tb = $("#dash_progressTbody");
+      tb.innerHTML = "";
+      let filtered = rows;
+      if(q){
+        filtered = rows.filter(r =>
+          (r.username||"").toLowerCase().includes(q) ||
+          (r.site_name||"").toLowerCase().includes(q)
+        );
+      }
+      if(filtered.length===0){
+        tb.innerHTML = `<tr><td class="muted" colspan="8">該当データがありません</td></tr>`;
+        return;
+      }
+      for(const r of filtered){
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${escapeHtml(r.username||"-")}</td>
+          <td>${escapeHtml(r.site_name||"-")}</td>
+          <td>${r.last_run_at ? `<span class="ts">${escapeHtml(r.last_run_at)}</span>` : '<span class="muted">-</span>'}</td>
+          <td style="text-align:right">${(r.applied_links||0).toLocaleString()}</td>
+          <td style="text-align:right">${(r.skipped_count||0).toLocaleString()}</td>
+          <td style="text-align:right">${(r.removed_in_headings||0).toLocaleString()}</td>
+          <td style="text-align:right">${(r.legacy_removed||0).toLocaleString()}</td>
+          <td>${renderStatusTag(r.queue_status)}</td>
+        `;
+        tb.appendChild(tr);
+      }
+    }
+
+    function renderStatusTag(st){
+      const s = (st||"idle").toLowerCase();
+      return `<span class="tag ${s}">${s}</span>`;
+    }
+
+    async function loadLogs(forceFull){
+      const params = new URLSearchParams();
+      params.set("limit", forceFull || !logsLatestISO ? "80" : "80");
+      if(!forceFull && logsLatestISO){
+        params.set("since", logsLatestISO);
+      }
+      const r = await fetch(`/admin/internal-seo/logs?${params.toString()}`);
+      const j = await r.json();
+      const logs = j.logs || [];
+      if(logs.length===0) return;
+
+      // 新しいものから返る前提。画面では上に積む。
+      const frag = document.createDocumentFragment();
+      for(const it of logs){
+        const div = document.createElement("div");
+        div.className = "log-item";
+        div.innerHTML = `
+          <div class="ts">${escapeHtml(it.created_at)}</div>
+          <div>${escapeHtml(it.username||"-")}</div>
+          <div><strong>${escapeHtml(it.site_name||"-")}</strong><br><span class="muted">${escapeHtml(it.status||"")}${it.reason?`：${escapeHtml(it.reason)}`:""}</span></div>
+          <div>適用 ${Number(it.applied_links||0).toLocaleString()}</div>
+          <div>H除去 ${Number(it.removed_in_headings||0).toLocaleString()}</div>
+          <div>旧削除 ${Number(it.legacy_removed||0).toLocaleString()}</div>
+        `;
+        frag.appendChild(div);
+      }
+      logsBox.prepend(frag);
+
+      // 最新時刻を記録（次回は増分取得）
+      logsLatestISO = logs[0].created_at;
+
+      // 古すぎる表示は刈り込み（2,000件）
+      const MAX_NODES = 2000;
+      const nodes = logsBox.children;
+      if(nodes.length > MAX_NODES){
+        for(let i=MAX_NODES;i<nodes.length;i++){
+          nodes[i].remove();
+        }
+      }
+    }
+
+    function escapeHtml(s){
+      if(s==null) return "";
+      return String(s).replace(/[&<>"']/g, m => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+      }[m]));
+    }
+
+    async function loadAll(forceFull){
+      await Promise.all([
+        loadKpis(),
+        loadProgress(),
+        loadLogs(forceFull)
+      ]);
+    }
+
+    // 初期ロード
+    loadAll(true).then(()=>{
+      // 自動更新（ログのみ）
+      const ms = parseInt(autoSel.value,10);
+      if(ms>0){
+        autoTimer = setInterval(()=> loadLogs(false), ms);
+      }
+    });
+  })();
   </script>
 </div>
 {% endblock %}

@@ -128,6 +128,35 @@ def run_user_tick(app, user_id: int, *, force: bool = False) -> Dict[str, Any]:
                     user_id, sched.next_run_at.isoformat(), remain_before
                 )
                 return {"ok": False, "reason": "not-due"}
+            
+        # ── 追加: 無弾（pending=0）の早期リターン（効率化・挙動不変）
+        # ここではスケジュールを idle にし、アイドル待機(backoff)だけを更新する。
+        # ※ is_enabled=False や paused の場合は上で既に return 済み
+        remain_peek = remain_before
+        if remain_peek == 0 and not force:
+            # 次回スケジュールだけ決めて即終了（ロック/適用を走らせない）
+            interval_sec = int(sched.tick_interval_sec or DEFAULT_TICK_SEC)
+            idle_backoff = DEFAULT_IDLE_BACKOFF
+            now_utc = datetime.now(timezone.utc)
+            sched.status = "idle"
+            sched.next_run_at = now_utc + timedelta(seconds=idle_backoff)
+            sched.last_run_at = now_utc
+            sched.last_error = None
+            db.session.commit()
+            current_app.logger.info(
+                "[iseo-user] early-idle user=%s (no pending) next=%s",
+                user_id,
+                (sched.next_run_at.isoformat() if sched.next_run_at else None),
+            )
+            return {
+                "ok": True,
+                "applied": 0,
+                "swapped": 0,
+                "skipped": 0,
+                "processed_posts": 0,
+                "remain_posts": 0,
+                "next_run_at": sched.next_run_at.isoformat() if sched.next_run_at else None,
+            }
 
         lock_key = f"iseo:user:{user_id}:lock"
         lock_ttl = int(os.getenv("INTERNAL_SEO_USER_LOCK_TTL_SEC", "900"))  # 15分

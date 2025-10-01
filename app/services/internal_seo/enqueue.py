@@ -3,7 +3,7 @@ import os
 from typing import Optional, Dict, Any
 from sqlalchemy import text
 from app import db
-from app.models import Site
+from app.models import Site, InternalSeoUserSchedule
 try:
     from flask import current_app  # ログ出力に使う（任意）
 except Exception:
@@ -85,6 +85,15 @@ def enqueue_new_site(site_id: int,
     site = Site.query.get(site_id)
     if not site:
         return {"ok": False, "enqueued": False, "reason": "site-not-found"}
+    
+    # 🛡 ユーザー単位スケジュールの有効性チェック
+    sched = InternalSeoUserSchedule.query.filter_by(user_id=site.user_id).one_or_none()
+    if not sched:
+        return {"ok": False, "enqueued": False, "reason": "user-schedule-missing"}
+    if not sched.is_enabled:
+        return {"ok": True, "enqueued": False, "reason": "user-schedule-disabled"}
+    if getattr(sched, "status", None) == "paused":
+        return {"ok": True, "enqueued": False, "reason": "user-schedule-paused"}
 
     # 既存の queued/running を確認（重複投入の防止）
     exists = db.session.execute(text("""
@@ -280,8 +289,8 @@ def enqueue_refill_for_site(
     try:
         if current_app:
             current_app.logger.info(
-                "[internal-seo enqueue REFILL] site=%s kind=%s params=%s",
-                site_id, job_kind, {k: v for k, v in params.items() if k != "site_id"}
+                "[internal-seo enqueue REFILL] user=%s site=%s kind=%s params=%s",
+                site.user_id, site_id, job_kind, {k: v for k, v in params.items() if k != "site_id"}
             )
     except Exception:
         pass
