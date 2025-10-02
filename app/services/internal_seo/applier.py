@@ -544,16 +544,24 @@ def _ensure_inline_underline_style(site: Site, html: str) -> str:
     import os
     if os.getenv("INTERNAL_SEO_EMBED_STYLE", "1") == "0":
         return html
-    # 旧/新マーカー付きの既存ブロックを一旦取り除いてから v8 を入れる
+    # 旧/新マーカー付きの既存ブロックを一旦除去（v番号や空白の揺れに強い正規表現）
+    # ① <p><!-- ai-internal-link-style:vN --></p> の直後に <style> が続くパターン
     html = re.sub(
-        r'<!-- ai-internal-link-style:v[0-9]+ -->\s*<style>.*?</style>',
+        r'<p>\s*<!--\s*ai-internal-link-style:v\d+\s*-->\s*</p>\s*<style\b[^>]*>.*?</style\s*>',
         '',
         html,
         flags=re.IGNORECASE | re.DOTALL
     )
-    # ★追加: コメントだけの空<p> を削除して空白行を防ぐ
+    # ② コメント直後に <style> が続く素のパターン
     html = re.sub(
-        r'<p>\s*<!--\s*ai-internal-link-style:v[0-9]+\s*-->\s*</p>',
+        r'<!--\s*ai-internal-link-style:v\d+\s*-->\s*<style\b[^>]*>.*?</style\s*>',
+        '',
+        html,
+        flags=re.IGNORECASE | re.DOTALL
+    )
+    # ③ コメントだけの空<p> を削除（style が別場所に移動しても空行を防止）
+    html = re.sub(
+        r'<p>\s*<!--\s*ai-internal-link-style:v\d+\s*-->\s*</p>',
         '',
         html,
         flags=re.IGNORECASE | re.DOTALL
