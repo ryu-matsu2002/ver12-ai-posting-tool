@@ -102,13 +102,15 @@ _TOC_HINT = re.compile(
     re.IGNORECASE
 )
 _STYLE_BLOCK = re.compile(r"<style\b[^>]*>.*?</style\s*>", re.IGNORECASE | re.DOTALL)
-_AI_STYLE_MARK = f"<!-- ai-internal-link-style:{INTERNAL_SEO_SPEC_VERSION} -->"
 
 # ==== 内部SEO 仕様バージョン（新規） ====
 # <a> には一切属性を付けない方針。代替として直前コメントで版管理を行う。
 INTERNAL_SEO_SPEC_VERSION = "v8"
-INTERNAL_SEO_SPEC_MARK = f"<!-- ai-internal-link:{INTERNAL_SEO_SPEC_VERSION} -->"
-ILINK_BOX_MARK = "<!-- ai-internal-link-box:v8 -->"
+INTERNAL_SEO_SPEC_MARK    = f"<!-- ai-internal-link:{INTERNAL_SEO_SPEC_VERSION} -->"
+ILINK_BOX_MARK            = f"<!-- ai-internal-link-box:{INTERNAL_SEO_SPEC_VERSION} -->"
+
+# スタイルマーカーも必ず同じバージョンに同期させる
+_AI_STYLE_MARK = f"<!-- ai-internal-link-style:{INTERNAL_SEO_SPEC_VERSION} -->"
 
 def _link_version_int() -> int:
     """
