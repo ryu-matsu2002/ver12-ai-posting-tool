@@ -549,6 +549,13 @@ def _ensure_inline_underline_style(site: Site, html: str) -> str:
         html,
         flags=re.IGNORECASE | re.DOTALL
     )
+    # ★追加: コメントだけの空<p> を削除して空白行を防ぐ
+    html = re.sub(
+        r'<p>\s*<!--\s*ai-internal-link-style:v[0-9]+\s*-->\s*</p>',
+        '',
+        html,
+        flags=re.IGNORECASE | re.DOTALL
+    )
     site_url = site.url.rstrip("/")
 
     css = f'''{_AI_STYLE_MARK}<style>
