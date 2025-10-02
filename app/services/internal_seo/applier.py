@@ -106,13 +106,13 @@ _AI_STYLE_MARK = "<!-- ai-internal-link-style:v2 -->"
 
 # ==== 内部SEO 仕様バージョン（新規） ====
 # <a> には一切属性を付けない方針。代替として直前コメントで版管理を行う。
-INTERNAL_SEO_SPEC_VERSION = "v7"
+INTERNAL_SEO_SPEC_VERSION = "v8"
 INTERNAL_SEO_SPEC_MARK = f"<!-- ai-internal-link:{INTERNAL_SEO_SPEC_VERSION} -->"
-ILINK_BOX_MARK = "<!-- ai-internal-link-box:v7 -->"
+ILINK_BOX_MARK = "<!-- ai-internal-link-box:v8 -->"
 
 def _link_version_int() -> int:
     """
-    INTERNAL_SEO_SPEC_VERSION (例: 'v7') を整数版に正規化して返す。
+    INTERNAL_SEO_SPEC_VERSION (例: 'v8') を整数版に正規化して返す。
     マイグレーションで link_version が NOT NULL なので、ログ挿入時に必ず使用。
     """
     try:
@@ -409,7 +409,7 @@ def _emit_recommend_box() -> str:
         '<div class="ai-relbox" '
         'style="margin:1.2em auto 0.4em; padding:6px 12px; border-radius:6px; '
         'background:#a7d398 !important; color:#000 !important; font-weight:400; '
-        'border:1px solid #000; display:inline-block; font-size:0.875em;">'
+        'border:1px solid #000; display:inline-block; font-size:0.6875em;">'
         '関連・注目記事'
         '</div>'
     )
@@ -542,7 +542,7 @@ def _ensure_inline_underline_style(site: Site, html: str) -> str:
     import os
     if os.getenv("INTERNAL_SEO_EMBED_STYLE", "1") == "0":
         return html
-    # 旧/新マーカー付きの既存ブロックを一旦取り除いてから v2 を入れる
+    # 旧/新マーカー付きの既存ブロックを一旦取り除いてから v8 を入れる
     html = re.sub(
         r'<!-- ai-internal-link-style:v[0-9]+ -->\s*<style>.*?</style>',
         '',
@@ -584,21 +584,26 @@ def _normalize_existing_internal_links(html: str) -> str:
     """
     if not html:
         return html
-    # a タグの属性部（前後）と href、内側HTMLを分離
+    # a タグをすべて列挙して重複を整理
     pat = re.compile(
         r'<a\b([^>]*)\bhref=["\']([^"\']+)["\']([^>]*)>(.*?)</a\s*>',
         re.IGNORECASE | re.DOTALL
     )
+    seen_hrefs: set[str] = set()
     def _repl(m: re.Match) -> str:
         attrs_all = (m.group(1) or "") + (m.group(3) or "")
-        href      = m.group(2) or ""
+        href      = (m.group(2) or "").strip()
         inner     = m.group(4) or ""
         attrs_lc  = attrs_all.lower()
-        # 既存の ai-ilink または inline style を含む a のみ正規化対象
-        if ("ai-ilink" not in attrs_lc) and ("style=" not in attrs_lc):
-            return m.group(0)
-        text = _TAG_STRIP.sub(" ", unescape(inner)).strip()
-        return f'<a href="{href}" title="{text}">{inner}</a>'
+        # 既に同じ href が登場していたら削除（空文字返す）
+        if href in seen_hrefs:
+            return ""
+        seen_hrefs.add(href)
+        # 正規化：ai-ilinkやstyle付きは削除して Wikipedia 風に
+        if ("ai-ilink" in attrs_lc) or ("style=" in attrs_lc):
+            text = _TAG_STRIP.sub(" ", unescape(inner)).strip()
+            return f'<a href="{href}" title="{text}">{inner}</a>'
+        return m.group(0)
     return pat.sub(_repl, html)
 
 def _add_attrs_to_first_anchor_with_href(html: str, href: str) -> str:

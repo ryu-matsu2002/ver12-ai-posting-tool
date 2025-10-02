@@ -202,8 +202,8 @@ def find_and_remove_legacy_links(
 
     html = _drop_black_boxes(_drop_v1_box_blocks(html))
 
-    # 既定の最新版（未指定なら v5 を最新版として扱う）
-    latest = (spec_version or "v5").strip().lower()
+    # 既定の最新版（未指定なら v8 を最新版として扱う）
+    latest = (spec_version or "v8").strip().lower()
     for m in _A_TAG.finditer(html):
         open_tag = m.group(1) or ""
         href = m.group(2) or ""
@@ -213,6 +213,12 @@ def find_and_remove_legacy_links(
         # 内部記事（＝マップにあるURL）のみ対象
         title = url_to_title.get(href)
         if not title:
+            continue
+
+        # --- topicページへのリンクは絶対に削除・変更しない ---
+        # href に "topic" を含む場合は完全スキップ
+        if "topic" in href.lower():
+            match_idx += 1
             continue
         
         
@@ -390,8 +396,8 @@ def clean_legacy_links(site_id: int, post_id: int, html: str) -> Tuple[str, List
         .all()
     )
     url_to_title = { (u or ""): (t or "") for (u, t) in rows if u }
-    # 既定で v7 を最新版として扱う
-    cleaned, deletions = find_and_remove_legacy_links(html, url_to_title, spec_version="v7")
+    # 既定で v8 を最新版として扱う
+    cleaned, deletions = find_and_remove_legacy_links(html, url_to_title, spec_version="v8")
     # dict → RemovedLink へ戻す（呼び出し側が旧型を期待する場合のため）
     removed_objs = [
         RemovedLink(
