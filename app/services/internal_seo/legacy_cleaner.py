@@ -30,6 +30,7 @@ _TRAILING_PUNCT = re.compile(r"[、。．.;；.!！?？\s]+$")  # 末尾の余�
 _CONTENT_CHARS = re.compile(r"[一-龥ぁ-んァ-ンーA-Za-z0-9]")
 _H_OPEN_NEAR = re.compile(r"<h([1-6])\b[^>]*>", re.I)
 _H_CLOSE_NEAR = re.compile(r"</h[1-6]\s*>", re.I)
+_P_BLOCK = re.compile(r"(<p\b[^>]*>)(.*?)(</p\s*>)", re.I | re.S)
 
 def _html_to_text(s: Optional[str]) -> str:
     return _TAG_STRIP.sub(" ", unescape(s or "")).strip()
@@ -111,6 +112,36 @@ def _inside_heading(html: str, a_start: int, a_end: int) -> bool:
     right = html[a_end:min(len(html), a_end+200)]
     return bool(_H_OPEN_NEAR.search(left) and _H_CLOSE_NEAR.search(right))
 
+def _find_enclosing_p(html: str, a_start: int, a_end: int) -> Optional[Tuple[int,int,str,str,str]]:
+    """
+    aタグを内包している直近の<p>...</p>ブロックを返す。
+    戻り値: (p_start, p_end, open_p, inner, close_p) / 無ければ None
+    """
+    # 直前の <p> を探す
+    p_open_pos = html.rfind("<p", 0, a_start)
+    if p_open_pos == -1:
+        return None
+    # その位置から最初の </p> を探す
+    m = _P_BLOCK.search(html, p_open_pos)
+    if not m:
+        return None
+    p_start, p_end = m.start(), m.end()
+    if not (p_start <= a_start and a_end <= p_end):
+        return None
+    return (p_start, p_end, m.group(1) or "", m.group(2) or "", m.group(3) or "")
+
+def _is_anchor_only_paragraph(inner_html: str) -> bool:
+    """
+    <p> の中身が「改行/空白 +（装飾を含む）a要素 だけ」で構成されているかを判定。
+    aの中身テキスト以外に有意味テキストが無ければ True。
+    """
+    # a をプレースホルダ化して残滓を確認
+    tmp = re.sub(r"<a\b[^>]*>.*?</a\s*>", "__A__", inner_html, flags=re.I|re.S)
+    # a以外のタグは消す
+    tmp = _TAG_STRIP.sub(" ", tmp)
+    tmp = _WS.sub(" ", tmp).strip()
+    # 「__A__」のみ（±前後に何もない）ならアンカー単独段落
+    return tmp == "__A__"
 
 def find_and_remove_legacy_links(
     html: str,
@@ -276,16 +307,24 @@ def find_and_remove_legacy_links(
             #  - “タイトル厳密一致”リンク → a だけ剥がす（テキストは残す）
             #  - “意味のないアンカー”（では/まず/こちら.../1〜2文字）→ a だけ剥がす
             if _is_legacy(anchor_text, title) or _is_meaningless_anchor(anchor_text):
-                out_parts.append(html[last:m.start()])
-                # aタグを「アンリンク」：中身のテキストだけ残す
-                out_parts.append(inner_html)
-                last = m.end()
+                # 直近の <p> … </p> が “アンカー単独段落”なら段落ごと削除
+                p = _find_enclosing_p(html, m.start(), m.end())
+                if p and _is_anchor_only_paragraph(p[3]):
+                    out_parts.append(html[last:p[0]])  # <p>開始までを残す
+                    last = p[1]                        # </p>の次から再開
+                    reason = "drop_anchor_only_paragraph"
+                else:
+                    # aだけ剥がして中身テキストは残す
+                    out_parts.append(html[last:m.start()])
+                    out_parts.append(inner_html)
+                    last = m.end()
+                    reason = "unlink_legacy_or_meaningless"
                 removed.append(RemovedLink(
                     href=href,
                     anchor_text=anchor_text,
                     position=f"match:{match_idx}",
                     target_post_id=None,
-                    reason="unlink_legacy_or_meaningless",
+                    reason=reason,
                 ))
                 match_idx += 1
                 continue
