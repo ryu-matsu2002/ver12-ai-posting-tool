@@ -566,6 +566,20 @@ def _ensure_inline_underline_style(site: Site, html: str) -> str:
         html,
         flags=re.IGNORECASE | re.DOTALL
     )
+    # ④ WP によって中身が剥がされ残留する「空<style>」を全域で除去
+    html = re.sub(
+        r'<style\b[^>]*>\s*</style\s*>',
+        '',
+        html,
+        flags=re.IGNORECASE | re.DOTALL
+    )
+    # ⑤ 記事先頭に溜まった「空<p> / 空<style>」の束を丸ごと剥がす
+    html = re.sub(
+        r'^(?:\s*(?:<p>\s*</p>|<style\b[^>]*>\s*</style\s*>))+',
+        '',
+        html,
+        flags=re.IGNORECASE | re.DOTALL
+    )
     site_url = site.url.rstrip("/")
 
     css = f'''{_AI_STYLE_MARK}<style>
