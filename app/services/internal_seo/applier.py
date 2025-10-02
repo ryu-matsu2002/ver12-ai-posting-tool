@@ -544,43 +544,51 @@ def _ensure_inline_underline_style(site: Site, html: str) -> str:
     import os
     if os.getenv("INTERNAL_SEO_EMBED_STYLE", "1") == "0":
         return html
-    # 旧/新マーカー付きの既存ブロックを一旦除去（v番号や空白の揺れに強い正規表現）
-    # ① <p><!-- ai-internal-link-style:vN --></p> の直後に <style> が続くパターン
+    # ------- 既存の“下線用スタイル”関連ガベージを徹底除去 -------
+    site_url = site.url.rstrip("/")
+    site_url_re = re.escape(site_url)
+
+    # ① <p><!-- … --></p> の直後に <style>…</style> が続く（WP がコメントを <p> に包むケース）
     html = re.sub(
         r'<p>\s*<!--\s*ai-internal-link-style:v\d+\s*-->\s*</p>\s*<style\b[^>]*>.*?</style\s*>',
         '',
-        html,
-        flags=re.IGNORECASE | re.DOTALL
+        html, flags=re.IGNORECASE | re.DOTALL
     )
     # ② コメント直後に <style> が続く素のパターン
     html = re.sub(
         r'<!--\s*ai-internal-link-style:v\d+\s*-->\s*<style\b[^>]*>.*?</style\s*>',
         '',
-        html,
-        flags=re.IGNORECASE | re.DOTALL
+        html, flags=re.IGNORECASE | re.DOTALL
     )
-    # ③ コメントだけの空<p> を削除（style が別場所に移動しても空行を防止）
+    # ③ コメント単体（どこにあっても）を除去
     html = re.sub(
-        r'<p>\s*<!--\s*ai-internal-link-style:v\d+\s*-->\s*</p>',
+        r'<!--\s*ai-internal-link-style:v\d+\s*-->',
         '',
-        html,
-        flags=re.IGNORECASE | re.DOTALL
+        html, flags=re.IGNORECASE
     )
-    # ④ WP によって中身が剥がされ残留する「空<style>」を全域で除去
+    # ④ コメントだけを含む <p> も除去（空白行の発生を防ぐ）
+    html = re.sub(
+        r'<p>\s*</p>',
+        '',
+        html, flags=re.IGNORECASE | re.DOTALL
+    )
+    # ⑤ 空の <style></style> を全域で除去
     html = re.sub(
         r'<style\b[^>]*>\s*</style\s*>',
         '',
-        html,
-        flags=re.IGNORECASE | re.DOTALL
+        html, flags=re.IGNORECASE | re.DOTALL
     )
-    # ⑤ 記事先頭に溜まった「空<p> / 空<style>」の束を丸ごと剥がす
+    # ⑥ マーカーが剥がれ“中身が我々のCSS”な <style> をヒューリスティックで除去
+    #    条件: a[href^="{site_url}"] を含み、0645ad を含み、.entry-content 等の本文セレクタを含む
+    pattern_ours = rf'<style\b[^>]*>(?:(?:(?!</style).))*:where\([^)]*\)\s*a\[href\^\="{site_url_re}"\][^<]*0645ad(?:(?:(?!</style).))*</style\s*>'
+    html = re.sub(pattern_ours, '', html, flags=re.IGNORECASE | re.DOTALL)
+    # ⑦ 先頭に溜まった空要素（空<p>/空<style>）の束をまとめて剥がす
     html = re.sub(
         r'^(?:\s*(?:<p>\s*</p>|<style\b[^>]*>\s*</style\s*>))+',
         '',
-        html,
-        flags=re.IGNORECASE | re.DOTALL
+        html, flags=re.IGNORECASE | re.DOTALL
     )
-    site_url = site.url.rstrip("/")
+    
 
     css = f'''{_AI_STYLE_MARK}<style>
 /* 本文に限定：内部リンクは下線＋青(#0645ad)（テーマに勝てるよう !important） */
