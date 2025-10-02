@@ -102,7 +102,7 @@ _TOC_HINT = re.compile(
     re.IGNORECASE
 )
 _STYLE_BLOCK = re.compile(r"<style\b[^>]*>.*?</style\s*>", re.IGNORECASE | re.DOTALL)
-_AI_STYLE_MARK = "<!-- ai-internal-link-style:v2 -->"
+_AI_STYLE_MARK = f"<!-- ai-internal-link-style:{INTERNAL_SEO_SPEC_VERSION} -->"
 
 # ==== 内部SEO 仕様バージョン（新規） ====
 # <a> には一切属性を付けない方針。代替として直前コメントで版管理を行う。
