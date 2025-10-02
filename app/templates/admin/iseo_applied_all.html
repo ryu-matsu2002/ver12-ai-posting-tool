@@ -1,0 +1,270 @@
+{% extends "admin/layout.html" %}
+{% block title %}内部SEO｜適用済み記事一覧{% endblock %}
+{% block content %}
+<div class="container my-4">
+  <h2 class="mb-3">内部SEO｜適用済み記事一覧</h2>
+
+  <!-- Filters -->
+  <form id="frm-filter" class="row g-2 mb-3">
+    <div class="col-auto">
+      <label class="form-label mb-0 small">User ID</label>
+      <input type="number" class="form-control form-control-sm" name="user_id" placeholder="任意">
+    </div>
+    <div class="col-auto">
+      <label class="form-label mb-0 small">Site ID</label>
+      <input type="number" class="form-control form-control-sm" name="site_id" placeholder="任意">
+    </div>
+    <div class="col-auto">
+      <label class="form-label mb-0 small">Version</label>
+      <input type="number" class="form-control form-control-sm" name="version" placeholder="任意">
+    </div>
+    <div class="col-auto">
+      <label class="form-label mb-0 small">From</label>
+      <input type="date" class="form-control form-control-sm" name="date_from">
+    </div>
+    <div class="col-auto">
+      <label class="form-label mb-0 small">To</label>
+      <input type="date" class="form-control form-control-sm" name="date_to">
+    </div>
+    <div class="col-auto">
+      <label class="form-label mb-0 small">&nbsp;</label>
+      <button class="btn btn-sm btn-primary w-100" type="submit">検索</button>
+    </div>
+  </form>
+
+  <div id="msg" class="alert d-none" role="alert"></div>
+
+  <div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span>記事×Version サマリ</span>
+      <small class="text-muted">並び順：最終適用日時 desc → version desc</small>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle mb-0" id="tbl">
+        <thead>
+          <tr>
+            <th style="width:140px">最終適用</th>
+            <th>User</th>
+            <th>Site</th>
+            <th>記事</th>
+            <th style="width:90px" class="text-end">リンク数</th>
+            <th style="width:80px">Version</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card-footer d-flex justify-content-between">
+      <button class="btn btn-sm btn-outline-secondary" id="btn-prev" disabled>← Prev</button>
+      <button class="btn btn-sm btn-outline-secondary" id="btn-next" disabled>Next →</button>
+    </div>
+  </div>
+</div>
+
+<!-- 明細モーダル -->
+<div class="modal fade" id="detailModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">リンク明細</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="small text-muted mb-2" id="detail-meta"></div>
+        <div class="table-responsive">
+          <table class="table table-sm table-striped" id="tbl-detail">
+            <thead>
+              <tr>
+                <th style="width:25%">target_url</th>
+                <th style="width:20%">anchor_text</th>
+                <th style="width:15%">position</th>
+                <th style="width:20%">applied_at</th>
+                <th>status</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-light" data-bs-dismiss="modal">閉じる</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ★ Linter 対策：テンプレ式は「文字列」で埋め込み
+  const API_LIST   = "{{ url_for('admin.admin_iseo_applied_all_data') }}";
+  const API_DETAIL = "{{ url_for('admin.admin_iseo_applied_details') }}";
+
+  const tbody   = document.querySelector("#tbl tbody");
+  const msg     = document.getElementById("msg");
+  const btnPrev = document.getElementById("btn-prev");
+  const btnNext = document.getElementById("btn-next");
+  const frm     = document.getElementById("frm-filter");
+
+  // カーソルページング
+  let nextCursor = null;     // サーバーから返ってくる next_cursor
+  let hasMore    = false;    // サーバーから返ってくる has_more
+  const cursorStack = [];    // 前ページ復元用に、直前のカーソルを積む
+
+  function csrfHeader() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    return meta ? { "X-CSRFToken": meta.content } : {};
+  }
+
+  function showMsg(ok, text) {
+    msg.classList.remove("d-none", "alert-success", "alert-danger");
+    msg.classList.add(ok ? "alert-success" : "alert-danger");
+    msg.textContent = text;
+  }
+
+  function formQuery(form) {
+    // Object.fromEntries は十分新しいブラウザで動作
+    return Object.fromEntries(new FormData(form).entries());
+  }
+
+  function rowHtml(r) {
+    const u  = r.src_url || "#";
+    const dt = r.last_applied_at ? new Date(r.last_applied_at).toLocaleString() : "-";
+    const user = r.user_name || ("#" + r.user_id);
+    const site = "#" + r.site_id + (r.site_name ? " " + r.site_name : "");
+    const title = r.src_title || "(no title)";
+    const count = (typeof r.link_count === "number") ? r.link_count : (r.link_count || "");
+    const ver = (typeof r.link_version === "number") ? r.link_version : (r.link_version || "");
+    return (
+      '<tr data-site="' + r.site_id + '" data-post="' + r.post_id + '" data-version="' + r.link_version + '">' +
+        "<td>" + dt + "</td>" +
+        "<td>" + user + "</td>" +
+        "<td>" + site + "</td>" +
+        '<td><a href="' + u + '" target="_blank" rel="noopener">' + title + "</a></td>" +
+        '<td class="text-end">' + count + "</td>" +
+        '<td><span class="badge text-bg-secondary">V' + ver + "</span></td>" +
+      "</tr>"
+    );
+  }
+
+  async function load(first) {
+    if (first === true) {
+      // 先頭ページから再検索
+      nextCursor = null;
+      cursorStack.length = 0;
+    }
+
+    const params = formQuery(frm);
+    if (nextCursor) params.cursor = nextCursor;
+
+    const url = API_LIST + "?" + new URLSearchParams(params).toString();
+    const res = await fetch(url, { headers: { ...csrfHeader() } });
+    let js = {};
+    try { js = await res.json(); } catch (e) { js = {}; }
+
+    if (!res.ok || !js.ok) {
+      showMsg(false, js.error || res.statusText || "取得に失敗しました");
+      return;
+    }
+
+    const rows = Array.isArray(js.rows) ? js.rows : [];
+    tbody.innerHTML = rows.length
+      ? rows.map(rowHtml).join("")
+      : '<tr><td colspan="6" class="text-center text-muted py-4">データがありません</td></tr>';
+
+    // 行クリックで明細
+    tbody.querySelectorAll("tr").forEach(function (tr) {
+      tr.addEventListener("click", function () { openDetail(tr); });
+    });
+
+    // ページング制御
+    hasMore = !!js.has_more;
+    if (hasMore) {
+      // 次ページあり：今の next を保存して、ボタンON
+      nextCursor = js.next_cursor || null;
+    } else {
+      nextCursor = null;
+    }
+
+    btnNext.disabled = !hasMore;
+    btnPrev.disabled = cursorStack.length === 0;
+  }
+
+  async function openDetail(tr) {
+    const site_id = tr.getAttribute("data-site");
+    const post_id = tr.getAttribute("data-post");
+    const version = tr.getAttribute("data-version");
+    const qs = new URLSearchParams({ site_id: site_id, post_id: post_id, version: version }).toString();
+    const url = API_DETAIL + "?" + qs;
+
+    const res = await fetch(url, { headers: { ...csrfHeader() } });
+    let js = {};
+    try { js = await res.json(); } catch (e) { js = {}; }
+
+    if (!res.ok || !js.ok) {
+      showMsg(false, js.error || res.statusText || "明細取得に失敗しました");
+      return;
+    }
+
+    const meta = document.getElementById("detail-meta");
+    meta.textContent = "site_id=" + site_id + " / post_id=" + post_id + " / version=V" + version;
+
+    const tbodyD = document.querySelector("#tbl-detail tbody");
+    const items = Array.isArray(js.items) ? js.items : [];
+    if (!items.length) {
+      tbodyD.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">明細なし</td></tr>';
+    } else {
+      tbodyD.innerHTML = items.map(function (it) {
+        const turl = it.target_url || "";
+        const atxt = it.anchor_text || "";
+        const pos  = it.position || "";
+        const apAt = it.applied_at ? new Date(it.applied_at).toLocaleString() : "";
+        const st   = it.status || "";
+        return (
+          "<tr>" +
+            '<td><a href="' + turl + '" target="_blank" rel="noopener">' + turl + "</a></td>" +
+            "<td>" + atxt + "</td>" +
+            "<td><code>" + pos + "</code></td>" +
+            "<td>" + apAt + "</td>" +
+            "<td>" + st + "</td>" +
+          "</tr>"
+        );
+      }).join("");
+    }
+
+    // Bootstrap 5 Modal
+    var modalEl = document.getElementById("detailModal");
+    var m = bootstrap.Modal.getOrCreateInstance(modalEl);
+    m.show();
+  }
+
+  // 検索ボタン
+  frm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    load(true);
+  });
+
+  // ページング：Next
+  btnNext.addEventListener("click", function () {
+    if (btnNext.disabled) return;
+    // 今のカーソル状態をスタックしてから次へ
+    cursorStack.push(nextCursor);
+    load(false);
+  });
+
+  // ページング：Prev（実装簡易のため、サーバ側 prev は使わず再検索）
+  btnPrev.addEventListener("click", function () {
+    if (btnPrev.disabled) return;
+    // ひとつ戻る：直前のカーソルを捨てて、先頭から再ロード
+    cursorStack.pop();
+    nextCursor = null;
+    load(true);
+  });
+
+  // 初期ロード
+  load(true);
+})();
+</script>
+{% endblock %}

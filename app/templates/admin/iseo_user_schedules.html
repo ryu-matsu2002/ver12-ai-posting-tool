@@ -95,11 +95,13 @@
         <th>直近24時間の実績</th>
         <th>スケジュール設定</th>
         <th>直近のエラー</th>
+        <th>Preview</th>
         <th>操作</th>
       </tr>
     </thead>
     <tbody id="tbody">
-      <tr><td colspan="13" class="muted">読み込み中…</td></tr>
+      <!-- 初期表示：列数14に合わせたプレースホルダを1行だけ表示 -->
+      <tr><td colspan="14" class="muted">読み込み中…</td></tr>
     </tbody>
   </table>
 
@@ -195,6 +197,10 @@
           ? `<button class="btn-mini primary act-start" data-running="1" disabled>実行中</button>`
           : `<button class="btn-mini primary act-start" data-running="0">開始</button>`;
 
+          /* 追加: 適用済み記事一覧(タスク3)への遷移ボタン */
+        const previewBtn =
+          `<a class="btn-mini" href="{{ url_for('admin.admin_iseo_applied_all_page') }}?user_id=${x.user_id}" target="_blank" rel="noopener">Preview</a>`;
+
         return `
           <tr data-id="${x.user_id}">
             <td><input type="checkbox" class="row-check"></td>
@@ -218,13 +224,18 @@
               レート上限:${rate}
             </td>
             <td>${err}</td>
+            <!-- 追加: Preview 列 -->
+            <td class="row-actions">
+              ${previewBtn}
+            </td>
+            <!-- ここまで -->
             <td class="row-actions">
               ${buttonHtml}
             </td>
           </tr>
         `;
       });
-      tbody.innerHTML = rows.length ? rows.join('') : `<tr><td colspan="13" class="muted">対象ユーザーがいません</td></tr>`;
+      tbody.innerHTML = rows.length ? rows.join('') : `<tr><td colspan="14" class="muted">対象ユーザーがいません</td></tr>`;
       wireRowActions();
     }
 

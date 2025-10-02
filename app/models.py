@@ -3,6 +3,7 @@
 from datetime import datetime
 from flask_login import UserMixin
 from sqlalchemy import DateTime
+from typing import Tuple
 from . import db
 from app import db
 from sqlalchemy import Text
@@ -615,10 +616,26 @@ class InternalLinkGraph(db.Model):
         db.Index("ix_ilg_site_src_score", "site_id", "source_post_id", "score"),
     )
 
+# === 内部リンクのステータス定義（アプリ内参照用。DB制約は設けない） ===
+# pending       : 未適用
+# applied       : 本文へ適用済み（現行の有効リンク）
+# reverted      : 手動またはロールバックで取り消し
+# skipped       : 今回の適用対象から除外
+# legacy_deleted: 旧仕様リンクの自動削除ログ（監査用）
+# superseded    : 再ビルド等により“上書き置換”され、旧バージョンとしてクローズ
+INTERNAL_LINK_STATUS_CHOICES: Tuple[str, ...] = (
+    "pending",
+    "applied",
+    "reverted",
+    "skipped",
+    "legacy_deleted",
+    "superseded",
+)
 
 class InternalLinkAction(db.Model):
     """
     適用/差し戻しなどの監査ログ（本文内/関連記事ブロック/置換も含む）
+    置換によるクローズは 'superseded' を用いて 'reverted' と区別する。
     """
     __tablename__ = "internal_link_actions"
     id = db.Column(db.Integer, primary_key=True)
@@ -627,9 +644,14 @@ class InternalLinkAction(db.Model):
     post_id = db.Column(db.Integer, nullable=False, index=True)         # ソースのWP post id
     target_post_id = db.Column(db.Integer, nullable=False, index=True)  # ターゲットのWP post id
 
+    # 内部リンクの“世代”を明示する。置き換え（全差し替え）時に +1 する運用。
+    link_version = db.Column(db.Integer, nullable=False, default=1, index=True)
+
     anchor_text = db.Column(db.String(255), nullable=False)
     position = db.Column(db.String(50), nullable=False)  # 'p:3'（段落3）/ 'related_block' など
     status = db.Column(db.String(20), nullable=False, default="pending")  # pending/applied/reverted/skipped
+    # status は INTERNAL_LINK_STATUS_CHOICES を参照
+    status = db.Column(db.String(20), nullable=False, default="pending")  # pending/applied/reverted/skipped/legacy_deleted/superseded
 
     applied_at = db.Column(db.DateTime, nullable=True, index=True)
     reverted_at = db.Column(db.DateTime, nullable=True, index=True)
@@ -646,6 +668,8 @@ class InternalLinkAction(db.Model):
 
     __table_args__ = (
         db.Index("ix_ila_site_post_status", "site_id", "post_id", "status"),
+        # 記事×バージョンでの集計・検索を高速化
+        db.Index("ix_ila_site_post_version", "site_id", "post_id", "link_version"),
     )
 
 class InternalSeoRun(db.Model):

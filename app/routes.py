@@ -1937,6 +1937,15 @@ from app.models import (
 )
 from sqlalchemy import func, and_, desc, text
 
+# 🆕 内部SEOサービス（planner / applier）
+from app.services.internal_seo.applier import (
+    preview_apply_for_post,
+    apply_actions_for_post,
+)
+from app.services.internal_seo.planner import (
+    plan_links_for_post,
+)
+
 # 🆕 ユーザー単位スケジューラ（サービス層）
 try:
     # 先に作成した app/services/internal_seo/user_scheduler.py
@@ -2059,6 +2068,201 @@ def admin_internal_seo_preview():
         )
     else:
         return jsonify({"ok": False, "error": "unsupported format"}), 400
+    
+# ---- 🆕 現役バージョン / 世代集計（ポスト単位） ----
+@admin_bp.route("/admin/internal-seo/post/<int:post_id>/versions", methods=["GET"])
+@admin_required_effective
+def admin_internal_seo_post_versions(post_id: int):
+    """
+    現在の post_id について、link_version の分布と現役（max applied）を返す。
+    """
+    site_row = (
+        ContentIndex.query
+        .with_entities(ContentIndex.site_id)
+        .filter(ContentIndex.wp_post_id == post_id)
+        .one_or_none()
+    )
+    if not site_row:
+        return jsonify({"ok": False, "error": "post not found"}), 404
+    site_id = int(site_row[0])
+
+    # バージョン分布
+    dist_rows = (
+        db.session.query(
+            InternalLinkAction.link_version,
+            InternalLinkAction.status,
+            func.count(InternalLinkAction.id),
+        )
+        .filter(
+            InternalLinkAction.site_id == site_id,
+            InternalLinkAction.post_id == post_id,
+        )
+        .group_by(InternalLinkAction.link_version, InternalLinkAction.status)
+        .all()
+    )
+    dist = {}
+    for ver, st, cnt in dist_rows:
+        v = int(ver or 0)
+        dist.setdefault(v, {})
+        dist[v][st] = int(cnt or 0)
+
+    # 現役（applied の最大 version）
+    current_row = (
+        db.session.query(func.max(InternalLinkAction.link_version))
+        .filter(
+            InternalLinkAction.site_id == site_id,
+            InternalLinkAction.post_id == post_id,
+            InternalLinkAction.status == "applied",
+        )
+        .one()
+    )
+    current_version = int(current_row[0] or 0)
+    return jsonify({"ok": True, "site_id": site_id, "post_id": post_id, "current_version": current_version, "distribution": dist})
+
+
+# ---- 🆕 再ビルド（計画のみ） ----
+@admin_bp.route("/admin/internal-seo/rebuild/plan", methods=["POST"])
+@admin_required_effective
+def admin_internal_seo_rebuild_plan():
+    """
+    全置換ルール:
+      - 旧 max(link_version) を特定
+      - 旧 'applied' を 'reverted' + reverted_at=now に更新（履歴保持）
+      - 新規 'pending' を作成し、link_version = 旧max + 1 を付与（plannerで生成後に付与）
+    返却: 新規 pending 件数と新version
+    """
+    post_id = request.form.get("post_id", type=int) or (request.get_json(silent=True) or {}).get("post_id")
+    if not post_id:
+        return jsonify({"ok": False, "error": "post_id required"}), 400
+
+    # post から site_id を解決
+    ci = (
+        ContentIndex.query
+        .with_entities(ContentIndex.site_id)
+        .filter(ContentIndex.wp_post_id == post_id)
+        .one_or_none()
+    )
+    if not ci:
+        return jsonify({"ok": False, "error": "post not found"}), 404
+    site_id = int(ci[0])
+
+    now = datetime.utcnow()
+    # 旧 max バージョン
+    old_max_row = (
+        db.session.query(func.max(InternalLinkAction.link_version))
+        .filter(
+            InternalLinkAction.site_id == site_id,
+            InternalLinkAction.post_id == post_id,
+            InternalLinkAction.status.in_(["applied", "skipped", "pending", "reverted", "legacy_deleted"]),
+        )
+        .one()
+    )
+    old_max = int(old_max_row[0] or 0)
+    new_version = old_max + 1
+
+    # 既存 applied を reverted に（履歴は残す）
+    db.session.query(InternalLinkAction)\
+        .filter(
+            InternalLinkAction.site_id == site_id,
+            InternalLinkAction.post_id == post_id,
+            InternalLinkAction.status == "applied",
+        )\
+        .update(
+            {
+                InternalLinkAction.status: "reverted",
+                InternalLinkAction.reverted_at: now,
+                InternalLinkAction.updated_at: now,
+            },
+            synchronize_session=False,
+        )
+    # 既存 pending は一旦掃除（完全置換のため）
+    db.session.query(InternalLinkAction)\
+        .filter(
+            InternalLinkAction.site_id == site_id,
+            InternalLinkAction.post_id == post_id,
+            InternalLinkAction.status == "pending",
+        ).delete(synchronize_session=False)
+    db.session.commit()
+
+    # planner で新規 pending を作成（位置は h2:* 仕様）
+    st = plan_links_for_post(
+        site_id=site_id,
+        src_post_id=post_id,
+        mode_swap_check=False,  # 再ビルド時は swap 候補は不要
+    )
+
+    # 直近作成の pending に新 version を付与
+    pending_q = (
+        db.session.query(InternalLinkAction)
+        .filter(
+            InternalLinkAction.site_id == site_id,
+            InternalLinkAction.post_id == post_id,
+            InternalLinkAction.status == "pending",
+        )
+    )
+    new_pending = pending_q.all()
+    for a in new_pending:
+        a.link_version = new_version
+        a.updated_at = now
+    db.session.commit()
+
+    return jsonify({
+        "ok": True,
+        "site_id": site_id,
+        "post_id": post_id,
+        "planned": int(st.planned_actions or 0),
+        "new_version": new_version,
+    })
+
+
+# ---- 🆕 再ビルド（適用まで一気に） ----
+@admin_bp.route("/admin/internal-seo/rebuild/apply", methods=["POST"])
+@admin_required_effective
+def admin_internal_seo_rebuild_apply():
+    """
+    plan と同じ手順で世代を進めた上で、applier を実行。
+    フラグ apply=true の簡易版として分離。
+    """
+    post_id = request.form.get("post_id", type=int) or (request.get_json(silent=True) or {}).get("post_id")
+    if not post_id:
+        return jsonify({"ok": False, "error": "post_id required"}), 400
+
+    # まず plan（上の関数を内部呼び出ししてもいいが、同ロジックを軽く再実装）
+    plan_resp = admin_internal_seo_rebuild_plan()
+    if isinstance(plan_resp, tuple):
+        payload, code = plan_resp
+        if code != 200:
+            return plan_resp
+        plan_data = payload.get_json() if hasattr(payload, "get_json") else {}
+    else:
+        plan_data = plan_resp.get_json() if hasattr(plan_resp, "get_json") else {}
+    if not (plan_data or {}).get("ok"):
+        return plan_resp
+
+    # site_id 解決
+    ci = (
+        ContentIndex.query
+        .with_entities(ContentIndex.site_id)
+        .filter(ContentIndex.wp_post_id == post_id)
+        .one_or_none()
+    )
+    site_id = int(ci[0]) if ci else None
+    if not site_id:
+        return jsonify({"ok": False, "error": "post not found"}), 404
+
+    # applier 実行
+    res = apply_actions_for_post(site_id, post_id, dry_run=False)
+    return jsonify({
+        "ok": True,
+        "site_id": site_id,
+        "post_id": post_id,
+        "applied": int(res.applied or 0),
+        "swapped": int(res.swapped or 0),
+        "skipped": int(res.skipped or 0),
+        "legacy_deleted": int(getattr(res, "legacy_deleted", 0) or 0),
+        "message": res.message or "",
+        "new_version": plan_data.get("new_version"),
+    })    
     
 
 # ---- 進捗（ユーザー × サイト） ----
@@ -3166,6 +3370,161 @@ def admin_iseo_user_runs(user_id: int):
         "processed_24h": int(agg[1] or 0),
     })
 
+# ---- 🆕 適用済み記事一覧（ページ本体） ----
+@admin_bp.route("/admin/iseo/applied_all", methods=["GET"])
+@admin_required_effective
+def admin_iseo_applied_all_page():
+    return render_template("admin/iseo_applied_all.html")
+
+# ---- 🆕 適用済み記事一覧：集計データ（記事×version） ----
+@admin_bp.route("/admin/iseo/applied_all/data", methods=["GET"])
+@admin_required_effective
+def admin_iseo_applied_all_data():
+    # フィルタ
+    user_id = request.args.get("user_id", type=int)
+    site_id = request.args.get("site_id", type=int)
+    version = request.args.get("version", type=int)
+    date_from = request.args.get("date_from")
+    date_to   = request.args.get("date_to")
+    limit = min(max(request.args.get("limit", default=50, type=int), 1), 200)
+
+    # カーソル（last_applied_at, link_version の複合）
+    cursor = request.args.get("cursor")  # "ISO8601.VER"
+    cur_ts = None
+    cur_ver = None
+    if cursor:
+        try:
+            ts_s, ver_s = cursor.rsplit(".", 1)
+            cur_ts = datetime.fromisoformat(ts_s.replace("Z", "+00:00"))
+            cur_ver = int(ver_s)
+        except Exception:
+            cur_ts = None
+            cur_ver = None
+
+    # 動的WHERE
+    where = ["ila.status = 'applied'"]
+    params = {}
+
+    if user_id is not None:
+        where.append("u.id = :user_id")
+        params["user_id"] = user_id
+    if site_id is not None:
+        where.append("s.id = :site_id")
+        params["site_id"] = site_id
+    if version is not None:
+        where.append("ila.link_version = :version")
+        params["version"] = version
+    if date_from:
+        where.append("ila.applied_at >= :date_from")
+        params["date_from"] = datetime.fromisoformat(f"{date_from}T00:00:00+00:00")
+    if date_to:
+        where.append("ila.applied_at < :date_to")
+        params["date_to"] = datetime.fromisoformat(f"{date_to}T23:59:59.999999+00:00")
+
+    # カーソル: (last_applied_at desc, link_version desc) の keyset
+    if cur_ts is not None and cur_ver is not None:
+        where.append("(MAX(ila.applied_at) < :cur_ts OR (MAX(ila.applied_at) = :cur_ts AND ila.link_version < :cur_ver))")
+        params["cur_ts"] = cur_ts
+        params["cur_ver"] = cur_ver
+
+    where_sql = " AND ".join(where) if where else "1=1"
+
+    sql = text(f"""
+      SELECT
+        u.id             AS user_id,
+        COALESCE(u.username, (u.last_name || u.first_name)) AS user_name,
+        s.id             AS site_id,
+        s.name           AS site_name,
+        ci.wp_post_id    AS post_id,
+        ci.title         AS src_title,
+        ci.url           AS src_url,
+        ila.link_version AS link_version,
+        COUNT(*)         AS link_count,
+        MAX(ila.applied_at) AS last_applied_at
+      FROM internal_link_actions ila
+      JOIN site s   ON s.id = ila.site_id
+      JOIN "user" u ON u.id = s.user_id
+      LEFT JOIN content_index ci
+        ON ci.site_id = ila.site_id
+       AND ci.wp_post_id = ila.post_id
+      WHERE {where_sql}
+      GROUP BY u.id, user_name, s.id, s.name, ci.wp_post_id, ci.title, ci.url, ila.link_version
+      ORDER BY last_applied_at DESC, ila.link_version DESC
+      LIMIT :limit
+    """)
+    params["limit"] = limit
+    rows = db.session.execute(sql, params).mappings().all() or []
+
+    def _row(r):
+        return dict(
+            user_id=r.get("user_id"),
+            user_name=r.get("user_name"),
+            site_id=r.get("site_id"),
+            site_name=r.get("site_name"),
+            post_id=r.get("post_id"),
+            src_title=r.get("src_title"),
+            src_url=r.get("src_url"),
+            link_version=int(r.get("link_version") or 0),
+            link_count=int(r.get("link_count") or 0),
+            last_applied_at=(r.get("last_applied_at").isoformat() if r.get("last_applied_at") else None),
+        )
+
+    out_rows = [_row(r) for r in rows]
+    # 次カーソル
+    next_cursor = None
+    has_more = len(out_rows) == limit
+    if has_more:
+        last = out_rows[-1]
+        next_cursor = f"{last['last_applied_at']}.{last['link_version']}"
+
+    return jsonify({"ok": True, "rows": out_rows, "next_cursor": next_cursor, "has_more": has_more})
+
+# ---- 🆕 明細：記事×version のリンク一覧 ----
+@admin_bp.route("/admin/iseo/applied_details", methods=["GET"])
+@admin_required_effective
+def admin_iseo_applied_details():
+    site_id = request.args.get("site_id", type=int)
+    post_id = request.args.get("post_id", type=int)
+    version = request.args.get("version", type=int)
+    if not (site_id and post_id and version is not None):
+        return jsonify({"ok": False, "error": "site_id, post_id, version required"}), 400
+
+    q = (
+        InternalLinkAction.query
+        .with_entities(
+            InternalLinkAction.target_post_id,
+            InternalLinkAction.anchor_text,
+            InternalLinkAction.position,
+            InternalLinkAction.applied_at,
+            InternalLinkAction.status,
+        )
+        .filter_by(site_id=site_id, post_id=post_id, link_version=version)
+        .filter(InternalLinkAction.status == "applied")
+        .order_by(InternalLinkAction.applied_at.desc(), InternalLinkAction.id.desc())
+    )
+    rows = q.limit(500).all()
+
+    # target_url 解決
+    tgt_ids = [r[0] for r in rows if r[0]]
+    url_map = {}
+    if tgt_ids:
+        for pid, url in (
+            db.session.query(ContentIndex.wp_post_id, ContentIndex.url)
+            .filter(ContentIndex.wp_post_id.in_(tgt_ids))
+            .all()
+        ):
+            url_map[int(pid)] = url or ""
+
+    items = []
+    for tpid, atext, pos, ap_at, st in rows:
+        items.append({
+            "target_url": url_map.get(tpid, ""),
+            "anchor_text": atext or "",
+            "position": pos or "",
+            "applied_at": ap_at.isoformat() if ap_at else None,
+            "status": st or "",
+        })
+    return jsonify({"ok": True, "items": items})
 
 
 # ────────────── キーワード ──────────────

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from sqlalchemy import and_
 import re
 from dataclasses import dataclass
 from datetime import datetime, UTC
@@ -108,6 +109,17 @@ _AI_STYLE_MARK = "<!-- ai-internal-link-style:v2 -->"
 INTERNAL_SEO_SPEC_VERSION = "v7"
 INTERNAL_SEO_SPEC_MARK = f"<!-- ai-internal-link:{INTERNAL_SEO_SPEC_VERSION} -->"
 ILINK_BOX_MARK = "<!-- ai-internal-link-box:v7 -->"
+
+def _link_version_int() -> int:
+    """
+    INTERNAL_SEO_SPEC_VERSION (例: 'v7') を整数版に正規化して返す。
+    マイグレーションで link_version が NOT NULL なので、ログ挿入時に必ず使用。
+    """
+    try:
+        m = re.search(r"(\d+)", INTERNAL_SEO_SPEC_VERSION)
+        return int(m.group(1)) if m else 0
+    except Exception:
+        return 0
 
 def _split_paragraphs(html: str) -> List[str]:
     if not html:
@@ -1435,6 +1447,41 @@ def apply_actions_for_post(site_id: int, src_post_id: int, dry_run: bool = False
         .all()
     )
 
+    # --- ★同記事内リビルド時の旧版クローズ（監査ログの整合性確保） ---
+    # ルール:
+    #  - 今回適用対象（pending）の link_version を基準とする（未設定は spec の整数版）
+    #  - すでに 'applied' の行で、基準より古い link_version は 'superseded' に更新
+    #  - HTML の削除は行わない（既存の重複抑止で二重適用は回避）
+    if actions:
+        try:
+            # pending に含まれる最大 link_version（無ければ spec 由来に統一）
+            pending_versions = [int(getattr(a, "link_version") or 0) for a in actions]
+            target_link_version = max(max(pending_versions), _link_version_int())
+        except Exception:
+            target_link_version = _link_version_int()
+
+        if not dry_run:
+            now = datetime.now(UTC)
+            # 同一記事で “古い版” の applied を一括クローズ
+            old_applied = (
+                InternalLinkAction.query
+                .filter(
+                    and_(
+                        InternalLinkAction.site_id == site_id,
+                        InternalLinkAction.post_id == src_post_id,
+                        InternalLinkAction.status == "applied",
+                        InternalLinkAction.link_version < target_link_version,
+                    )
+                ).all()
+            )
+            for oa in old_applied:
+                oa.status = "superseded"
+                oa.reverted_at = now
+                oa.reason = (oa.reason or "rebuild")  # 由来を簡易マーク
+                oa.updated_at = now
+    else:
+        target_link_version = _link_version_int()
+
     meta_map = _action_targets_meta(site_id, actions)
 
     # 3) 差分作成（旧仕様削除済みの本文に新仕様を適用）
@@ -1461,9 +1508,13 @@ def apply_actions_for_post(site_id: int, src_post_id: int, dry_run: bool = False
     before_excerpt = _html_to_text(wp_post.content_html)[:280]
     after_excerpt = _html_to_text(new_html)[:280]
 
-    # 4) DB更新（監査ログの抜粋）
+    #    新しく適用された pending は、今回の target_link_version に統一して記録
     for a in actions:
         if a.status == "applied":
+            try:
+                a.link_version = int(target_link_version)
+            except Exception:
+                a.link_version = _link_version_int()
             a.diff_before_excerpt = before_excerpt
             a.diff_after_excerpt = after_excerpt
         else:
@@ -1494,10 +1545,12 @@ def apply_actions_for_post(site_id: int, src_post_id: int, dry_run: bool = False
                 position=position,
                 reason="legacy_cleanup",
                 status="legacy_deleted",
+                link_version=_link_version_int(),
                 created_at=now,
                 updated_at=now,
                 diff_before_excerpt=before_excerpt,
                 diff_after_excerpt=after_excerpt,
+                # link_version は既に _link_version_int() を明示セット
             )
             db.session.add(ila)        
     db.session.commit()

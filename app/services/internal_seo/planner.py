@@ -26,7 +26,9 @@ from app.services.internal_seo.utils import (
     is_natural_span,
 )
 
-from app.services.internal_seo.applier import _H_TAG, _TOC_HINT, _mask_existing_anchors, _split_paragraphs  # 再利用  # 既存互換のため残置（本改修では段落スロットは使用しない）
+from app.services.internal_seo.applier import (
+    _H_TAG, _TOC_HINT, _mask_existing_anchors, _split_paragraphs, _link_version_int
+)  # 再利用  # 既存互換のため残置（本改修では段落スロットは使用しない）
 
 from datetime import datetime, UTC
 
@@ -602,6 +604,20 @@ def plan_links_for_post(
         return stats
 
     html = wp_post.content_html or ""
+    # --- ★同記事再ビルド用：今回の計画で使用する link_version を決定
+    # ルール：
+    #   - 過去の InternalLinkAction(link_version) の最大値 + 1 を基本とする
+    #   - ただし仕様由来の整数版(_link_version_int)より小さくはしない
+    try:
+        prev_max_ver = (
+            db.session.query(db.func.max(InternalLinkAction.link_version))
+            .filter(InternalLinkAction.site_id == site_id,
+                    InternalLinkAction.post_id == src_post_id)
+            .scalar()
+        ) or 0
+    except Exception:
+        prev_max_ver = 0
+    target_link_version = max(int(prev_max_ver) + 1, int(_link_version_int()))
     # H2 セクション抽出（H2の“末尾＝次H2直前”に挿入するための座標を得る）
     sections = extract_h2_sections(html)
     # H2 が全く無い記事は本文末尾へのフォールバック（applier 側で解釈する position を使用）
@@ -727,6 +743,7 @@ def plan_links_for_post(
             position=f"h2:{int(chosen)}",
             status="pending",
             reason="plan:generated",
+            link_version=int(target_link_version),
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
         )        
@@ -813,6 +830,7 @@ def plan_links_for_post(
                         position=pos_str,
                         status="pending",
                         reason="plan:rescue",
+                        link_version=int(target_link_version),
                         created_at=datetime.now(UTC),
                         updated_at=datetime.now(UTC),
                     ))
@@ -893,6 +911,7 @@ def plan_links_for_post(
                         position=pos_str,
                         status="pending",
                         reason="swap_candidate:title_match",
+                        link_version=int(target_link_version),
                         created_at=datetime.now(UTC),
                         updated_at=datetime.now(UTC),
                     ))
