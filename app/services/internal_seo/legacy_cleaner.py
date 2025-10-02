@@ -28,6 +28,8 @@ _RELBOX_BLACK_RE   = re.compile(
 CTA_SUFFIX = "について詳しい解説はコチラ"
 _TRAILING_PUNCT = re.compile(r"[、。．.;；.!！?？\s]+$")  # 末尾の余計な記号/空白
 _CONTENT_CHARS = re.compile(r"[一-龥ぁ-んァ-ンーA-Za-z0-9]")
+_H_OPEN_NEAR = re.compile(r"<h([1-6])\b[^>]*>", re.I)
+_H_CLOSE_NEAR = re.compile(r"</h[1-6]\s*>", re.I)
 
 def _html_to_text(s: Optional[str]) -> str:
     return _TAG_STRIP.sub(" ", unescape(s or "")).strip()
@@ -81,6 +83,33 @@ def _is_cta_compliant(anchor_text: str) -> bool:
         return False
     # “内容文字”がある程度含まれるかを緩めに確認（不完全な「向上させるため」単語のみ等を弾く）
     return len(_CONTENT_CHARS.findall(head)) >= 3
+
+# 追加: “意味のないアンカー”を判定
+_MEANINGLESS_WORDS = {
+    "では", "まず", "こちら", "ここ", "そこ", "あそこ",
+    "これ", "それ", "あれ", "この", "その", "あの",
+}
+def _is_meaningless_anchor(anchor_text: str) -> bool:
+    t = _norm(anchor_text)
+    if not t:
+        return False
+    if t in _MEANINGLESS_WORDS:
+        return True
+    # 1〜2文字や、指示語＋助詞系（例: こちらへ/こちらに）
+    if len(t) <= 2:
+        return True
+    if t.startswith("こちら") or t in {"くわしくはこちら", "詳しくはこちら", "詳細はこちら"}:
+        return True
+    return False
+
+def _inside_heading(html: str, a_start: int, a_end: int) -> bool:
+    """
+    aタグの前後をざっくり見て、見出し(H1〜H6)内にあるっぽければ True。
+    （保守的に判定：直前200字内に<h..>があり、直後200字内に</h..>がある）
+    """
+    left = html[max(0, a_start-200):a_start]
+    right = html[a_end:min(len(html), a_end+200)]
+    return bool(_H_OPEN_NEAR.search(left) and _H_CLOSE_NEAR.search(right))
 
 
 def find_and_remove_legacy_links(
@@ -182,6 +211,11 @@ def find_and_remove_legacy_links(
         # 2) 版情報が無い普通の内部リンクは原則保持
         #    - 例外：旧仕様の“タイトル厳密一致リンク”は削除
 
+        # 見出し内は一切触らない
+        if _inside_heading(html, m.start(), m.end()):
+            match_idx += 1
+            continue
+
         if is_seo_link:
             # 旧版（v1〜v4 など） → 削除（直前に残っているボックスがあれば近傍も削除）
             if detected_ver and detected_ver != latest:
@@ -238,16 +272,20 @@ def find_and_remove_legacy_links(
                 seen_seo_hrefs.add(href)
 
         else:
-            # 版情報なし：普通の内部リンクは保持。ただし“タイトル厳密一致”は旧仕様として削除。
-            if _is_legacy(anchor_text, title):
+            # 版情報なし：原則保持。ただし
+            #  - “タイトル厳密一致”リンク → a だけ剥がす（テキストは残す）
+            #  - “意味のないアンカー”（では/まず/こちら.../1〜2文字）→ a だけ剥がす
+            if _is_legacy(anchor_text, title) or _is_meaningless_anchor(anchor_text):
                 out_parts.append(html[last:m.start()])
+                # aタグを「アンリンク」：中身のテキストだけ残す
+                out_parts.append(inner_html)
                 last = m.end()
                 removed.append(RemovedLink(
                     href=href,
                     anchor_text=anchor_text,
                     position=f"match:{match_idx}",
                     target_post_id=None,
-                    reason="legacy_title_anchor",
+                    reason="unlink_legacy_or_meaningless",
                 ))
                 match_idx += 1
                 continue
@@ -270,7 +308,7 @@ def find_and_remove_legacy_links(
                 "position": r.position,
                 # target_post_id は None（applier で URL→PID により補完）
                 "target_post_id": r.target_post_id,
-                "reason": r.reason,
+                "reason": r.reason,  # old_spec / non_compliant_cta / duplicate_target_href / unlink_legacy_or_meaningless
             }
             for r in removed
         ]
