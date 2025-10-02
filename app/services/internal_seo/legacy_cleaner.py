@@ -258,10 +258,19 @@ def find_and_remove_legacy_links(
                     relbox_start = prefix.rfind("<div", 0, relbox_match.end())
                     if relbox_start != -1:
                         out_parts.append(html[last:m.start()-len(prefix)+relbox_start])
-                        last = m.end()
+                        # 段落ごと落とせるなら優先して落とす
+                        p = _find_enclosing_p(html, m.start(), m.end())
+                        if p and _is_anchor_only_paragraph(p[3]):
+                            last = p[1]
+                        else:
+                            last = m.end()
                 else:
                     out_parts.append(html[last:m.start()])
-                    last = m.end()
+                    p = _find_enclosing_p(html, m.start(), m.end())
+                    if p and _is_anchor_only_paragraph(p[3]):
+                        last = p[1]
+                    else:
+                        last = m.end()
                 removed.append(RemovedLink(
                     href=href,
                     anchor_text=anchor_text,
@@ -275,7 +284,11 @@ def find_and_remove_legacy_links(
             # 最新版でも CTA 不適合は削除（SEO由来のみ）
             if not _is_cta_compliant(anchor_text):
                 out_parts.append(html[last:m.start()])
-                last = m.end()
+                p = _find_enclosing_p(html, m.start(), m.end())
+                if p and _is_anchor_only_paragraph(p[3]):
+                    last = p[1]
+                else:
+                    last = m.end()
                 removed.append(RemovedLink(
                     href=href,
                     anchor_text=anchor_text,
@@ -289,7 +302,11 @@ def find_and_remove_legacy_links(
             # 重複hrefは2本目以降を削除（SEO由来のみ）
             if href in seen_seo_hrefs:
                 out_parts.append(html[last:m.start()])
-                last = m.end()
+                p = _find_enclosing_p(html, m.start(), m.end())
+                if p and _is_anchor_only_paragraph(p[3]):
+                    last = p[1]
+                else:
+                    last = m.end()
                 removed.append(RemovedLink(
                     href=href,
                     anchor_text=anchor_text,
