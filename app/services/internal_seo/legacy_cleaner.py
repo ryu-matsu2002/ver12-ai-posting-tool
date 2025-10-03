@@ -28,10 +28,10 @@ _RELBOX_BLACK_RE   = re.compile(
 def _drop_standalone_placeholders(text: str) -> str:
     """
     <p><!-- ai-internal-link... --> のみで構成される空段落を全て削除する。
-    v0〜v99（実質すべて）までの内部リンク/ボックスを対象。
+    v0〜v13 まで（＝最新版 v14 以降は残す）。
     """
     return re.sub(
-        r'<p\b[^>]*>\s*(?:<br\s*/?>\s*)*<!--\s*ai-internal-link(?:-box)?:v\d+\s*-->\s*</p\s*>',
+        r'<p\b[^>]*>\s*(?:<br\s*/?>\s*)*<!--\s*ai-internal-link(?:-box)?:v(?:[0-9]|1[0-3])\s*-->\s*</p\s*>',
         '',
         text,
         flags=re.I | re.S
@@ -451,17 +451,34 @@ def find_and_remove_legacy_links(
             }
             for r in removed
         ]
-        # 後処理：a を処理した後でも残りうる “孤立マーカー（最新版含む）” を最終掃除
-        #  - <p><!-- ai-internal-link(-box):vN --></p> が単独で並んでいるだけなら削除
-        cleaned = _P_LINK_MARK_RE.sub("", cleaned)
-        cleaned = _P_BOX_MARK_RE.sub("", cleaned)
+        # 後処理：孤立マーカーの掃除（ただし最新版 latest は残す）
+        def _drop_orphan_marks_latest_safe(text: str, latest: str) -> str:
+            def _repl_link(m: re.Match) -> str:
+                ver = (m.group(1) or "").strip().lower()
+                return "" if ver != latest else m.group(0)
+            def _repl_box(m: re.Match) -> str:
+                ver = (m.group(1) or "").strip().lower()
+                return "" if ver != latest else m.group(0)
+            text = _P_LINK_MARK_RE.sub(_repl_link, text)
+            text = _P_BOX_MARK_RE.sub(_repl_box,  text)
+            return text
+        cleaned = _drop_orphan_marks_latest_safe(cleaned, latest)
         # マーク削除で生じた空<p> の束を軽く整理
         cleaned = _ANY_EMPTY_P_RE.sub("", cleaned)
         return cleaned, deletions
     else:
-        # 本処理で削除が無くても、孤立マーカーは落として返す
-        cleaned = _P_LINK_MARK_RE.sub("", html)
-        cleaned = _P_BOX_MARK_RE.sub("", cleaned)
+        # 本処理で削除が無くても、旧版の孤立マーカーのみ落とし最新版は残す
+        def _drop_only_old_marks(text: str, latest: str) -> str:
+            def _repl_link(m: re.Match) -> str:
+                ver = (m.group(1) or "").strip().lower()
+                return "" if ver != latest else m.group(0)
+            def _repl_box(m: re.Match) -> str:
+                ver = (m.group(1) or "").strip().lower()
+                return "" if ver != latest else m.group(0)
+            text = _P_LINK_MARK_RE.sub(_repl_link, text)
+            text = _P_BOX_MARK_RE.sub(_repl_box,  text)
+            return text
+        cleaned = _drop_only_old_marks(html, latest)
         cleaned = _ANY_EMPTY_P_RE.sub("", cleaned)
         return cleaned, []
 
