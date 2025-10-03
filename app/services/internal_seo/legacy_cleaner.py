@@ -28,19 +28,19 @@ _RELBOX_BLACK_RE   = re.compile(
 def _drop_standalone_placeholders(text: str) -> str:
     """
     <p><!-- ai-internal-link... --> のみで構成される空段落を全て削除する。
-    v0〜v9 までの内部リンク/ボックスを対象。
+    v0〜v10 までの内部リンク/ボックスを対象。
     """
     return re.sub(
-        r'<p\b[^>]*>\s*(?:<br\s*/?>\s*)*<!--\s*ai-internal-link(?:-box)?:v[0-9]\s*-->\s*</p\s*>',
+        r'<p\b[^>]*>\s*(?:<br\s*/?>\s*)*<!--\s*ai-internal-link(?:-box)?:v[0-10]\s*-->\s*</p\s*>',
         '',
         text,
         flags=re.I | re.S
     )
 # vX コメント（リンク用/ボックス用）と “<p>…</p> で空行化されたマーカー” の検出
-_LINK_MARK_RE      = re.compile(r'<!--\s*ai-internal-link:([a-z0-9._\-]+)\s*-->', re.I)
-_BOX_MARK_RE       = re.compile(r'<!--\s*ai-internal-link-box:([a-z0-9._\-]+)\s*-->', re.I)
-_P_LINK_MARK_RE    = re.compile(r'(?:<p[^>]*>\s*)<!--\s*ai-internal-link:([a-z0-9._\-]+)\s*-->\s*(?:</p\s*>)', re.I)
-_P_BOX_MARK_RE     = re.compile(r'(?:<p[^>]*>\s*)<!--\s*ai-internal-link-box:([a-z0-9._\-]+)\s*-->\s*(?:</p\s*>)', re.I)
+_LINK_MARK_RE      = re.compile(r'<!--\s*ai-internal-link:([a-z0-10._\-]+)\s*-->', re.I)
+_BOX_MARK_RE       = re.compile(r'<!--\s*ai-internal-link-box:([a-z0-10._\-]+)\s*-->', re.I)
+_P_LINK_MARK_RE    = re.compile(r'(?:<p[^>]*>\s*)<!--\s*ai-internal-link:([a-z0-10._\-]+)\s*-->\s*(?:</p\s*>)', re.I)
+_P_BOX_MARK_RE     = re.compile(r'(?:<p[^>]*>\s*)<!--\s*ai-internal-link-box:([a-z0-10._\-]+)\s*-->\s*(?:</p\s*>)', re.I)
 _ANY_EMPTY_P_RE    = re.compile(r'(?:<p[^>]*>\s*</p\s*>)', re.I)
 # 最新仕様のアンカー末尾（この形以外は削除対象）
 CTA_SUFFIX = "について詳しい解説はコチラ"
@@ -221,10 +221,10 @@ def find_and_remove_legacy_links(
     html = _drop_black_boxes(_drop_v1_box_blocks(html))
     html = _drop_standalone_placeholders(html)
 
-    # 既定の最新版（未指定なら v10 として扱う）
-    latest = (spec_version or "v10").strip().lower()
+    # 既定の最新版（未指定なら v11 として扱う）
+    latest = (spec_version or "v11").strip().lower()
 
-    # 1) 旧版ボックス印（コメント）＋直後の .ai-relbox を丸ごと除去（v1〜v9 等を網羅）
+    # 1) 旧版ボックス印（コメント）＋直後の .ai-relbox を丸ごと除去（v1〜v10 等を網羅）
     #    - <p><!-- ai-internal-link-box:vN --></p> 形式も対象
     def _drop_old_box_marks(text: str) -> str:
         pos = 0
@@ -483,8 +483,8 @@ def clean_legacy_links(site_id: int, post_id: int, html: str) -> Tuple[str, List
         .all()
     )
     url_to_title = { (u or ""): (t or "") for (u, t) in rows if u }
-    # 既定で v10 を最新版として扱う
-    cleaned, deletions = find_and_remove_legacy_links(html, url_to_title, spec_version="v10")
+    # 既定で v11 を最新版として扱う
+    cleaned, deletions = find_and_remove_legacy_links(html, url_to_title, spec_version="v11")
     # dict → RemovedLink へ戻す（呼び出し側が旧型を期待する場合のため）
     removed_objs = [
         RemovedLink(

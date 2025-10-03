@@ -105,7 +105,7 @@ _STYLE_BLOCK = re.compile(r"<style\b[^>]*>.*?</style\s*>", re.IGNORECASE | re.DO
 
 # ==== 内部SEO 仕様バージョン（新規） ====
 # <a> には一切属性を付けない方針。代替として直前コメントで版管理を行う。
-INTERNAL_SEO_SPEC_VERSION = "v10"
+INTERNAL_SEO_SPEC_VERSION = "v11"
 INTERNAL_SEO_SPEC_MARK    = f"<!-- ai-internal-link:{INTERNAL_SEO_SPEC_VERSION} -->"
 ILINK_BOX_MARK            = f"<!-- ai-internal-link-box:{INTERNAL_SEO_SPEC_VERSION} -->"
 
@@ -114,7 +114,7 @@ _AI_STYLE_MARK = f"<!-- ai-internal-link-style:{INTERNAL_SEO_SPEC_VERSION} -->"
 
 def _link_version_int() -> int:
     """
-    INTERNAL_SEO_SPEC_VERSION (例: 'v10') を整数版に正規化して返す。
+    INTERNAL_SEO_SPEC_VERSION (例: 'v11') を整数版に正規化して返す。
     マイグレーションで link_version が NOT NULL なので、ログ挿入時に必ず使用。
     """
     try:
@@ -413,13 +413,13 @@ def _emit_recommend_box() -> str:
     return (
         f'{ILINK_BOX_MARK}'
         '<div class="ai-relbox" '
-        'style="margin:1.2em auto 0.4em; padding:6px 12px; border-radius:6px; '
+        'style="margin:0.9em auto 0.3em; padding:4px 9px; border-radius:6px; '
         'background:#6fba2c !important; color:#fff !important; '
-        'font-weight:600; display:inline-flex; align-items:center; gap:6px; '
-        'font-size:0.95em;">'
+        'font-weight:400; display:inline-flex; align-items:center; gap:6px; '
+        'font-size:1.2em;">'
         '<i class="fa-solid fa-list" aria-hidden="true" '
         'style="display:inline-block;"></i>'
-        '<span>関連・注目記事</span>'
+        '<span>🧾関連・注目記事</span>'
         '</div>'
     )
 
