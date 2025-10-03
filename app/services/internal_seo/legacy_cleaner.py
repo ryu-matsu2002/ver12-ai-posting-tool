@@ -24,6 +24,18 @@ _RELBOX_BLACK_RE   = re.compile(
     r'<div[^>]*class=["\']ai-relbox[^>]*style=["\'][^"\']*background\s*:\s*#111[^"\']*["\'][^>]*>.*?</div>',
     re.I | re.S
 )
+# --- 追加クリーンアップ: 空のプレースホルダ段落の削除 ---
+def _drop_standalone_placeholders(text: str) -> str:
+    """
+    <p><!-- ai-internal-link... --> のみで構成される空段落を全て削除する。
+    v0〜v7 までの内部リンク/ボックスを対象。
+    """
+    return re.sub(
+        r'<p\b[^>]*>\s*(?:<br\s*/?>\s*)*<!--\s*ai-internal-link(?:-box)?:v[0-7]\s*-->\s*</p\s*>',
+        '',
+        text,
+        flags=re.I | re.S
+    )
 # vX コメント（リンク用/ボックス用）と “<p>…</p> で空行化されたマーカー” の検出
 _LINK_MARK_RE      = re.compile(r'<!--\s*ai-internal-link:([a-z0-9._\-]+)\s*-->', re.I)
 _BOX_MARK_RE       = re.compile(r'<!--\s*ai-internal-link-box:([a-z0-9._\-]+)\s*-->', re.I)
@@ -207,6 +219,7 @@ def find_and_remove_legacy_links(
         return _RELBOX_BLACK_RE.sub("", text)
 
     html = _drop_black_boxes(_drop_v1_box_blocks(html))
+    html = _drop_standalone_placeholders(html)
 
     # 既定の最新版（未指定なら v8 として扱う）
     latest = (spec_version or "v8").strip().lower()
