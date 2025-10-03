@@ -3888,6 +3888,7 @@ from sqlalchemy import case, func  # ← func を追加
 from flask import g
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone  # ← JST計算のため
+from urllib.parse import urlparse
 
 @bp.route("/<username>/dashboard")
 @login_required
@@ -3992,6 +3993,47 @@ def dashboard(username):
             .all()
         )
 
+    # ─────────── GSC未登録サイトの軽量判定（表示用）
+    # 速度最優先：APIは叩かず、キャッシュ済みのプロパティURL集合だけを参照
+    # 例）日次ジョブなどで cache_set_json("gsc:property_urls", [...]) を更新しておく
+    def _norm_domain(u: str) -> str:
+        try:
+            p = urlparse(u)
+            host = (p.netloc or "").lower()
+            if host.startswith("www."):
+                host = host[4:]
+            return host
+        except Exception:
+            return u.lower().replace("www.", "")
+
+    # キャッシュからプロパティ一覧（無ければ空＝表示しない）
+    gsc_props: list[str] = cache_get_json("gsc:property_urls") or []
+    gsc_domains = set()
+    for su in gsc_props:
+        # su 例: https://example.com/, http://www.example.com/, sc-domain:example.com
+        if su.startswith("sc-domain:"):
+            gsc_domains.add(su.split("sc-domain:", 1)[1].strip().lower())
+        else:
+            gsc_domains.add(_norm_domain(su))
+
+    # ユーザーのサイトだけ1回で取得（必要カラムのみ）
+    user_sites = (
+        db.session.query(Site.id, Site.name, Site.url)
+        .filter(Site.user_id == user.id)
+        .all()
+    )
+
+    missing_gsc_sites = []
+    if gsc_domains:
+        for sid, sname, surl in user_sites:
+            d = _norm_domain(surl or "")
+            # sc-domain または https/http いずれかで一致すれば「登録あり」とみなす
+            if d and d not in gsc_domains:
+                missing_gsc_sites.append({"id": sid, "name": sname, "url": surl})
+    else:
+        # キャッシュが無い場合は判定不可＝何も表示しない（パフォーマンス優先）
+        missing_gsc_sites = []    
+
 
     return render_template(
         "dashboard.html",
@@ -4007,6 +4049,8 @@ def dashboard(username):
         # ▼ ランキング用（テンプレのタブから使用）
         rank_impr_28d=rank_impr_28d,
         rank_clicks_28d=rank_clicks_28d,
+        # ▼ GSC未登録の警告表示（常時）
+        missing_gsc_sites=missing_gsc_sites,
     )
 
 

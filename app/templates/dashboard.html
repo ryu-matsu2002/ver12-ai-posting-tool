@@ -10,6 +10,39 @@
   </div>
 </div>
 
+{# 🔴 GSC未登録サイトの常時警告（軽量レンダリング） #}
+{% if missing_gsc_sites and missing_gsc_sites|length > 0 %}
+  {% set mc = missing_gsc_sites|length %}
+  <div class="mx-6 mb-4">
+    <div class="bg-red-50 border border-red-200 text-red-900 rounded p-4 shadow-sm">
+      <div class="flex items-start gap-3">
+        <div class="text-xl leading-none">⚠️</div>
+        <div class="flex-1">
+          <p class="font-semibold mb-2">
+            Google Search Console に未登録のサイトが {{ mc }} 件あります。登録されるまで表示回数・クリック数は取得できません。
+          </p>
+          <ul class="list-disc pl-5 space-y-1">
+            {% for s in missing_gsc_sites[:8] %}
+              <li><a href="{{ s.url }}" target="_blank" rel="noopener" class="underline text-blue-700">{{ s.url }}</a></li>
+            {% endfor %}
+          </ul>
+          {% if mc > 8 %}
+            <details class="mt-2">
+              <summary class="cursor-pointer underline text-blue-700">残り {{ mc - 8 }} 件を表示</summary>
+              <ul class="list-disc pl-5 mt-2 space-y-1">
+                {% for s in missing_gsc_sites[8:] %}
+                  <li><a href="{{ s.url }}" target="_blank" rel="noopener" class="underline text-blue-700">{{ s.url }}</a></li>
+                {% endfor %}
+              </ul>
+            </details>
+          {% endif %}
+          <p class="text-xs text-gray-600 mt-2">※ GSCにプロパティ追加＆権限付与後は日次ジョブで自動反映されます。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endif %}
+
 <!-- 📊 投稿数カード -->
 <div class="grid md:grid-cols-4 gap-6 justify-center mt-8 mb-16 px-6">
   <div class="bg-white shadow rounded p-6 text-center">
