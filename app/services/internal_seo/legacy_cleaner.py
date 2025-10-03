@@ -28,10 +28,10 @@ _RELBOX_BLACK_RE   = re.compile(
 def _drop_standalone_placeholders(text: str) -> str:
     """
     <p><!-- ai-internal-link... --> のみで構成される空段落を全て削除する。
-    v0〜v7 までの内部リンク/ボックスを対象。
+    v0〜v8 までの内部リンク/ボックスを対象。
     """
     return re.sub(
-        r'<p\b[^>]*>\s*(?:<br\s*/?>\s*)*<!--\s*ai-internal-link(?:-box)?:v[0-7]\s*-->\s*</p\s*>',
+        r'<p\b[^>]*>\s*(?:<br\s*/?>\s*)*<!--\s*ai-internal-link(?:-box)?:v[0-8]\s*-->\s*</p\s*>',
         '',
         text,
         flags=re.I | re.S
@@ -221,8 +221,8 @@ def find_and_remove_legacy_links(
     html = _drop_black_boxes(_drop_v1_box_blocks(html))
     html = _drop_standalone_placeholders(html)
 
-    # 既定の最新版（未指定なら v8 として扱う）
-    latest = (spec_version or "v8").strip().lower()
+    # 既定の最新版（未指定なら v9 として扱う）
+    latest = (spec_version or "v9").strip().lower()
 
     # 1) 旧版ボックス印（コメント）＋直後の .ai-relbox を丸ごと除去（v1〜v7 等を網羅）
     #    - <p><!-- ai-internal-link-box:vN --></p> 形式も対象
@@ -483,8 +483,8 @@ def clean_legacy_links(site_id: int, post_id: int, html: str) -> Tuple[str, List
         .all()
     )
     url_to_title = { (u or ""): (t or "") for (u, t) in rows if u }
-    # 既定で v8 を最新版として扱う
-    cleaned, deletions = find_and_remove_legacy_links(html, url_to_title, spec_version="v8")
+    # 既定で v9 を最新版として扱う
+    cleaned, deletions = find_and_remove_legacy_links(html, url_to_title, spec_version="v9")
     # dict → RemovedLink へ戻す（呼び出し側が旧型を期待する場合のため）
     removed_objs = [
         RemovedLink(

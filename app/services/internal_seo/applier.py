@@ -105,7 +105,7 @@ _STYLE_BLOCK = re.compile(r"<style\b[^>]*>.*?</style\s*>", re.IGNORECASE | re.DO
 
 # ==== 内部SEO 仕様バージョン（新規） ====
 # <a> には一切属性を付けない方針。代替として直前コメントで版管理を行う。
-INTERNAL_SEO_SPEC_VERSION = "v8"
+INTERNAL_SEO_SPEC_VERSION = "v9"
 INTERNAL_SEO_SPEC_MARK    = f"<!-- ai-internal-link:{INTERNAL_SEO_SPEC_VERSION} -->"
 ILINK_BOX_MARK            = f"<!-- ai-internal-link-box:{INTERNAL_SEO_SPEC_VERSION} -->"
 
@@ -114,7 +114,7 @@ _AI_STYLE_MARK = f"<!-- ai-internal-link-style:{INTERNAL_SEO_SPEC_VERSION} -->"
 
 def _link_version_int() -> int:
     """
-    INTERNAL_SEO_SPEC_VERSION (例: 'v8') を整数版に正規化して返す。
+    INTERNAL_SEO_SPEC_VERSION (例: 'v9') を整数版に正規化して返す。
     マイグレーションで link_version が NOT NULL なので、ログ挿入時に必ず使用。
     """
     try:
@@ -411,7 +411,7 @@ def _emit_recommend_box() -> str:
         '<div class="ai-relbox" '
         'style="margin:1.2em auto 0.4em; padding:6px 12px; border-radius:6px; '
         'background:#a7d398 !important; color:#000 !important; font-weight:400; '
-        'border:1px solid #000; display:inline-block; font-size:0.6875em;">'
+        'border:1px solid #000; display:inline-block; font-size:0.4583em;">'
         '関連・注目記事'
         '</div>'
     )
