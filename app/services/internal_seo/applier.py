@@ -105,7 +105,7 @@ _STYLE_BLOCK = re.compile(r"<style\b[^>]*>.*?</style\s*>", re.IGNORECASE | re.DO
 
 # ==== 内部SEO 仕様バージョン（新規） ====
 # <a> には一切属性を付けない方針。代替として直前コメントで版管理を行う。
-INTERNAL_SEO_SPEC_VERSION = "v11"
+INTERNAL_SEO_SPEC_VERSION = "v12"
 INTERNAL_SEO_SPEC_MARK    = f"<!-- ai-internal-link:{INTERNAL_SEO_SPEC_VERSION} -->"
 ILINK_BOX_MARK            = f"<!-- ai-internal-link-box:{INTERNAL_SEO_SPEC_VERSION} -->"
 
@@ -114,7 +114,7 @@ _AI_STYLE_MARK = f"<!-- ai-internal-link-style:{INTERNAL_SEO_SPEC_VERSION} -->"
 
 def _link_version_int() -> int:
     """
-    INTERNAL_SEO_SPEC_VERSION (例: 'v11') を整数版に正規化して返す。
+    INTERNAL_SEO_SPEC_VERSION (例: 'v12') を整数版に正規化して返す。
     マイグレーションで link_version が NOT NULL なので、ログ挿入時に必ず使用。
     """
     try:
@@ -404,19 +404,19 @@ def _emit_anchor_html(href: str, text: str) -> str:
 def _emit_recommend_box() -> str:
     """
     「関連・注目記事」ラベル（Font Awesome のリストアイコン付き）を出力。
-    ・ボックスの margin/padding/radius は従来どおり
+    ・ボックスの margin/padding/radius も含め全体を約1/2に縮小
     ・背景色を #6fba2c、文字色を白に
     ・黒フチの border を廃止
     ・アイコン＋文字を横並び中央揃え
-    ・文字はボックス内で見やすいサイズに拡大
+    ・文字サイズは従来の半分に縮小
     """
     return (
         f'{ILINK_BOX_MARK}'
         '<div class="ai-relbox" '
-        'style="margin:0.9em auto 0.3em; padding:4px 9px; border-radius:6px; '
+        'style="margin:0.45em auto 0.15em; padding:2px 5px; border-radius:3px; '
         'background:#6fba2c !important; color:#fff !important; '
-        'font-weight:400; display:inline-flex; align-items:center; gap:6px; '
-        'font-size:1.2em;">'
+        'font-weight:400; display:inline-flex; align-items:center; gap:3px; '
+        'font-size:0.6em;">'
         '<i class="fa-solid fa-list" aria-hidden="true" '
         'style="display:inline-block;"></i>'
         '<span>🧾関連・注目記事</span>'
