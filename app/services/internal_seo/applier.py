@@ -411,7 +411,7 @@ def _emit_recommend_box() -> str:
     ・文字サイズは従来の半分に縮小
     """
     return (
-        f'{ILINK_BOX_MARK}'
+        f'<p>{ILINK_BOX_MARK}</p>'
         '<div class="ai-relbox" '
         'style="margin:0.45em auto 0.15em; padding:2px 3px; border-radius:3px; '
         'background:#6fba2c !important; color:#fff !important; '
