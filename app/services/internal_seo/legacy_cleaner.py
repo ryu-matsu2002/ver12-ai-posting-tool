@@ -24,6 +24,12 @@ _RELBOX_BLACK_RE   = re.compile(
     r'<div[^>]*class=["\']ai-relbox[^>]*style=["\'][^"\']*background\s*:\s*#111[^"\']*["\'][^>]*>.*?</div>',
     re.I | re.S
 )
+# vX コメント（リンク用/ボックス用）と “<p>…</p> で空行化されたマーカー” の検出
+_LINK_MARK_RE      = re.compile(r'<!--\s*ai-internal-link:([a-z0-9._\-]+)\s*-->', re.I)
+_BOX_MARK_RE       = re.compile(r'<!--\s*ai-internal-link-box:([a-z0-9._\-]+)\s*-->', re.I)
+_P_LINK_MARK_RE    = re.compile(r'(?:<p[^>]*>\s*)<!--\s*ai-internal-link:([a-z0-9._\-]+)\s*-->\s*(?:</p\s*>)', re.I)
+_P_BOX_MARK_RE     = re.compile(r'(?:<p[^>]*>\s*)<!--\s*ai-internal-link-box:([a-z0-9._\-]+)\s*-->\s*(?:</p\s*>)', re.I)
+_ANY_EMPTY_P_RE    = re.compile(r'(?:<p[^>]*>\s*</p\s*>)', re.I)
 # 最新仕様のアンカー末尾（この形以外は削除対象）
 CTA_SUFFIX = "について詳しい解説はコチラ"
 _TRAILING_PUNCT = re.compile(r"[、。．.;；.!！?？\s]+$")  # 末尾の余計な記号/空白
@@ -172,7 +178,7 @@ def find_and_remove_legacy_links(
     # 重複hrefチェックは「内部SEO由来リンク」にのみ適用する
     seen_seo_hrefs: set[str] = set()
 
-    # --- 事前クリーンアップ：旧ボックスの除去 -----------------------------
+    # --- 事前クリーンアップ：旧ボックス/孤立コメントの除去 -----------------
     # 1) v1コメント直後の ai-relbox を丸ごと削除
     #    （<!-- ai-internal-link-box:v1 --> の直後にある .ai-relbox を対象）
     def _drop_v1_box_blocks(text: str) -> str:
@@ -202,8 +208,66 @@ def find_and_remove_legacy_links(
 
     html = _drop_black_boxes(_drop_v1_box_blocks(html))
 
-    # 既定の最新版（未指定なら v8 を最新版として扱う）
+    # 既定の最新版（未指定なら v8 として扱う）
     latest = (spec_version or "v8").strip().lower()
+
+    # 1) 旧版ボックス印（コメント）＋直後の .ai-relbox を丸ごと除去（v1〜v7 等を網羅）
+    #    - <p><!-- ai-internal-link-box:vN --></p> 形式も対象
+    def _drop_old_box_marks(text: str) -> str:
+        pos = 0
+        out = []
+        while True:
+            m = _BOX_MARK_RE.search(text, pos)
+            if not m:
+                out.append(text[pos:])
+                break
+            ver = (m.group(1) or "").strip().lower()
+            if ver == latest:
+                # 最新版のマークは保持
+                out.append(text[pos:m.end()])
+                pos = m.end()
+                continue
+            # 直前に <p>…> がある場合はそこから、無ければマーク開始から削る
+            start = m.start()
+            # 直前の <p> を探して「マークだけの段落」ならそこから落とす
+            p_open = text.rfind("<p", 0, start)
+            if p_open != -1:
+                pm = _P_BOX_MARK_RE.search(text, p_open)
+                if pm and pm.start() <= start <= pm.end():
+                    start = p_open
+            # 直後に ai-relbox が続いていればそれも含めて除去
+            after = m.end()
+            mbox = _RELBOX_BLOCK_RE.match(text, after)
+            if mbox:
+                end = mbox.end()
+            else:
+                end = after
+            out.append(text[pos:start])
+            pos = end
+        return "".join(out)
+
+    # 2) 旧版 “リンク用” マーカーのうち、**直後に <a> が無い孤立行** を除去
+    #    （<p><!-- ai-internal-link:vN --></p> / 連打しているだけの残骸を掃除）
+    def _drop_orphan_old_link_marks(text: str) -> str:
+        # <p>…</p> 形式
+        def repl_p(m: re.Match) -> str:
+            ver = (m.group(1) or "").strip().lower()
+            return "" if ver != latest else m.group(0)  # 最新は維持（後段で a が続かない場面は後処理で落とす）
+        text = _P_LINK_MARK_RE.sub(repl_p, text)
+        # コメント素の形式（ただし直後に <a> が来ないものだけ）
+        def _repl_plain(m: re.Match) -> str:
+            ver = (m.group(1) or "").strip().lower()
+            tail = text[m.end(): m.end()+200]
+            has_next_a = bool(re.match(r'\s*(?:<br\s*/?>\s*)*<a\b', tail, re.I))
+            if (ver != latest) and (not has_next_a):
+                return ""
+            return m.group(0)
+        return _LINK_MARK_RE.sub(_repl_plain, text)
+
+    html = _drop_old_box_marks(html)
+    html = _drop_orphan_old_link_marks(html)
+
+    # 以降は aタグ単位の本処理
     for m in _A_TAG.finditer(html):
         open_tag = m.group(1) or ""
         href = m.group(2) or ""
@@ -374,9 +438,19 @@ def find_and_remove_legacy_links(
             }
             for r in removed
         ]
+        # 後処理：a を処理した後でも残りうる “孤立マーカー（最新版含む）” を最終掃除
+        #  - <p><!-- ai-internal-link(-box):vN --></p> が単独で並んでいるだけなら削除
+        cleaned = _P_LINK_MARK_RE.sub("", cleaned)
+        cleaned = _P_BOX_MARK_RE.sub("", cleaned)
+        # マーク削除で生じた空<p> の束を軽く整理
+        cleaned = _ANY_EMPTY_P_RE.sub("", cleaned)
         return cleaned, deletions
     else:
-        return html, []
+        # 本処理で削除が無くても、孤立マーカーは落として返す
+        cleaned = _P_LINK_MARK_RE.sub("", html)
+        cleaned = _P_BOX_MARK_RE.sub("", cleaned)
+        cleaned = _ANY_EMPTY_P_RE.sub("", cleaned)
+        return cleaned, []
 
 # ---- 互換ラッパー（旧API）。必要な場合のみDBからマップを構築して呼び出す ----
 def clean_legacy_links(site_id: int, post_id: int, html: str) -> Tuple[str, List[RemovedLink]]:
