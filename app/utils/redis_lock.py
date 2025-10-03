@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import time
 import uuid
+import random
 from typing import Optional
 
 import redis
@@ -58,7 +59,11 @@ class redis_lock:
 
     def acquire_once(self) -> bool:
         token = uuid.uuid4().hex
-        ok = self._r.set(self.key, token, nx=True, ex=self.ttl)
+        try:
+            ok = self._r.set(self.key, token, nx=True, ex=self.ttl)
+        except Exception:
+            # 接続断などは「取得失敗」として扱い、上位でスキップさせる
+            ok = False
         if ok:
             self._token = token
             return True
@@ -89,15 +94,24 @@ class redis_lock:
 
     def __enter__(self) -> bool:
         if not self.wait:
-            return self.acquire_once()
+            try:
+                return self.acquire_once()
+            except Exception:
+                return False
         # wait モード：タイムアウトまでポーリング
         deadline = time.time() + max(0.0, self.wait_timeout)
         while True:
-            if self.acquire_once():
-                return True
+            try:
+                if self.acquire_once():
+                    return True
+            except Exception:
+                # 取得試行時の一時エラーは待機継続（deadline 管理）
+                pass
             if time.time() >= deadline:
                 return False
-            time.sleep(self.poll_interval)
+            # 微小ジッタを入れてスパイク回避
+            jitter = random.uniform(0.0, max(0.0, self.poll_interval * 0.2))
+            time.sleep(max(0.01, self.poll_interval) + jitter)
 
     def __exit__(self, exc_type, exc, tb):
         try:

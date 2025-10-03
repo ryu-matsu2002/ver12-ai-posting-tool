@@ -41,7 +41,7 @@ from app.utils.db_retry import with_db_retry
 from app.services.internal_seo.indexer import sync_site_content_index
 from app.services.internal_seo.link_graph import build_link_graph_for_site
 from app.services.internal_seo.planner import plan_links_for_site
-from app.services.internal_seo.applier import apply_actions_for_site
+from app.services.internal_seo.applier import apply_actions_for_site, apply_actions_for_user
 from app.services.internal_seo import user_scheduler  # 🆕 追加
 import os
 from math import inf
@@ -83,6 +83,30 @@ def _unlock_site(site_id: int) -> None:
         db.session.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": k})
     except Exception:
         pass
+
+# ────────────────────────────────────────────────
+# 内部SEO：ユーザーごとの軽量ロック（PostgreSQL advisory lock）
+# ────────────────────────────────────────────────
+def _user_lock_key(user_id: int) -> int:
+    # 別名前空間（site用と衝突しない係数）
+    return 91338_00000 + int(user_id)
+
+def _try_lock_user(user_id: int) -> bool:
+    k = _user_lock_key(user_id)
+    try:
+        got = db.session.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": k}).scalar()
+        return bool(got)
+    except Exception:
+        # 非PostgreSQLでも落ちないよう、ロック無しで前進
+        current_app.logger.warning("[ISEO-USER] advisory lock unsupported; continue without lock (user=%s)", user_id)
+        return True
+
+def _unlock_user(user_id: int) -> None:
+    k = _user_lock_key(user_id)
+    try:
+        db.session.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": k})
+    except Exception:
+        pass    
 
 # --------------------------------------------------------------------------- #
 # 1) WordPress 自動投稿ジョブ
@@ -1008,7 +1032,22 @@ def init_scheduler(app):
         )
         app.logger.info("Scheduler started: internal_seo_user_scheduler_job (user-scope tick)")
     else:
-        app.logger.info("Scheduler skipped: internal_seo_user_scheduler_job (INTERNAL_SEO_USER_ENABLED!=1)")        
+        app.logger.info("Scheduler skipped: internal_seo_user_scheduler_job (INTERNAL_SEO_USER_ENABLED!=1)")
+
+    # 🆕 内部SEO ユーザー適用ループ（“開始ボタンを押したユーザーだけ”適用を回す）
+    if os.getenv("INTERNAL_SEO_USER_APPLY_ENABLED", "1") == "1":
+        scheduler.add_job(
+            func=_internal_seo_user_apply_tick,
+            trigger="interval",
+            minutes=int(os.getenv("INTERNAL_SEO_USER_APPLY_INTERVAL_MIN", "3")),
+            args=[app],
+            id="internal_seo_user_apply_tick",
+            replace_existing=True,
+            max_instances=1,
+        )
+        app.logger.info("Scheduler started: internal_seo_user_apply_tick (user apply loop)")
+    else:
+        app.logger.info("Scheduler skipped: internal_seo_user_apply_tick (INTERNAL_SEO_USER_APPLY_ENABLED!=1)")            
 
     # 🆕 Internal SEO Refill Job（ユーザー別の“弾補給”専用）※ENVでON/OFF
     if os.getenv("INTERNAL_SEO_REFILL_ENABLED", "1") == "1":
@@ -1312,3 +1351,73 @@ def _internal_seo_nightly_job(app):
             f"max_k:{max_k}, limit_sources:{limit_sources}, limit_posts:{limit_posts}, "
             f"incremental:{incremental}, job_kind:{job_kind}}}"
         )
+
+# ────────────────────────────────────────────────
+# 🆕 内部SEO ユーザー適用ティック（巡回ループ本体）
+#   - 条件: InternalSeoUserSchedule.is_enabled=True かつ status<>'paused'
+#   - そのユーザーに対して apply_actions_for_user() を実行
+#   - 1ティックの総予算＆ユーザー上限は ENV で制御
+# ────────────────────────────────────────────────
+def _internal_seo_user_apply_tick(app):
+    with app.app_context():
+        try:
+            if os.getenv("INTERNAL_SEO_USER_APPLY_ENABLED", "1") != "1":
+                return
+
+            # ✅ 1ティックの総処理記事数（全ユーザー合算の上限）
+            total_budget = int(os.getenv("INTERNAL_SEO_USER_APPLY_BUDGET", "200"))
+            # ✅ 1ユーザーあたりの上限
+            per_user_cap = int(os.getenv("INTERNAL_SEO_USER_APPLY_PER_USER", "50"))
+            if total_budget <= 0 or per_user_cap <= 0:
+                current_app.logger.info("[ISEO-USER] apply disabled by zero budget/cap")
+                return
+
+            # 対象ユーザー（開始ボタンON & 一時停止でない）
+            rows = (InternalSeoUserSchedule.query
+                    .filter(InternalSeoUserSchedule.is_enabled == True)  # noqa: E712
+                    .filter((InternalSeoUserSchedule.status.is_(None)) | (InternalSeoUserSchedule.status != "paused"))
+                    .order_by(InternalSeoUserSchedule.user_id.asc())
+                    .all())
+            if not rows:
+                current_app.logger.info("[ISEO-USER] no eligible users")
+                return
+
+            remaining = total_budget
+            picked = 0
+            for sched in rows:
+                if remaining <= 0:
+                    break
+                uid = int(sched.user_id)
+                # ユーザーロック（多重実行防止）
+                if not _try_lock_user(uid):
+                    current_app.logger.info("[ISEO-USER] skip (locked) user=%s", uid)
+                    continue
+                try:
+                    quota = min(per_user_cap, remaining)
+                    if quota <= 0:
+                        break
+                    # applier: ユーザーの全サイトに均等配分して pending を実反映
+                    res = apply_actions_for_user(user_id=uid, limit_posts=quota, dry_run=False)
+                    # 実際に処理できた記事数で予算を減らす
+                    processed = int(res.get("processed_posts", 0) or 0)
+                    remaining -= max(0, processed)
+                    picked += 1
+                    current_app.logger.info(
+                        "[ISEO-USER] uid=%s processed=%s applied=%s swapped=%s skipped=%s pending_total=%s remaining_budget=%s",
+                        uid,
+                        processed,
+                        int(res.get("applied", 0) or 0),
+                        int(res.get("swapped", 0) or 0),
+                        int(res.get("skipped", 0) or 0),
+                        int(res.get("pending_total", 0) or 0),
+                        remaining
+                    )
+                except Exception as e:
+                    current_app.logger.exception("[ISEO-USER] apply failed uid=%s: %s", uid, e)
+                finally:
+                    _unlock_user(uid)
+
+            current_app.logger.info("[ISEO-USER] tick done: users=%s total_budget=%s remaining=%s",
+                                    picked, total_budget, remaining)
+        except Exception as e:
+            current_app.logger.exception("[ISEO-USER] tick error: %s", e)
