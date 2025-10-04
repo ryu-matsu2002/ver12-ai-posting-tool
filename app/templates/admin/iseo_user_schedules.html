@@ -197,9 +197,9 @@
           ? `<button class="btn-mini primary act-start" data-running="1" disabled>実行中</button>`
           : `<button class="btn-mini primary act-start" data-running="0">開始</button>`;
 
-          /* 追加: 適用済み記事一覧(タスク3)への遷移ボタン */
+          /* 追加: 適用済み記事一覧への遷移ボタン（ユーザー固定表示） */
         const previewBtn =
-          `<a class="btn-mini" href="{{ url_for('admin.admin_iseo_applied_all_page') }}?user_id=${x.user_id}" target="_blank" rel="noopener">Preview</a>`;
+          `<a class="btn-mini" href="${"{{ url_for('admin.admin_iseo_applied_all_page') }}"}?user_id=${x.user_id}" target="_blank" rel="noopener">Preview</a>`;
 
         return `
           <tr data-id="${x.user_id}">

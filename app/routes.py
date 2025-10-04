@@ -3374,7 +3374,10 @@ def admin_iseo_user_runs(user_id: int):
 @admin_bp.route("/admin/iseo/applied_all", methods=["GET"])
 @admin_required_effective
 def admin_iseo_applied_all_page():
-    return render_template("admin/iseo_applied_all.html")
+    # 一覧ページは user_id を受け取り、テンプレ側で持ち回す
+    # ※ 未指定でも描画自体は行う（データAPI側で必須化）
+    user_id = request.args.get("user_id", type=int)
+    return render_template("admin/iseo_applied_all.html", current_user_id=user_id)
 
 # ---- 🆕 適用済み記事一覧：集計データ（記事×version） ----
 @admin_bp.route("/admin/iseo/applied_all/data", methods=["GET"])
@@ -3387,6 +3390,10 @@ def admin_iseo_applied_all_data():
     date_from = request.args.get("date_from")
     date_to   = request.args.get("date_to")
     limit = min(max(request.args.get("limit", default=50, type=int), 1), 200)
+
+    # user_id は必須。未指定なら 400
+    if user_id is None:
+        return jsonify({"ok": False, "error": "user_id required"}), 400
 
     # カーソル（last_applied_at, link_version の複合）
     cursor = request.args.get("cursor")  # "ISO8601.VER"
@@ -3405,9 +3412,9 @@ def admin_iseo_applied_all_data():
     where = ["ila.status = 'applied'"]
     params = {}
 
-    if user_id is not None:
-        where.append("u.id = :user_id")
-        params["user_id"] = user_id
+    # ここまでに user_id None は弾いているため、必ず user 絞り込みを入れる
+    where.append("u.id = :user_id")
+    params["user_id"] = user_id
     if site_id is not None:
         where.append("s.id = :site_id")
         params["site_id"] = site_id

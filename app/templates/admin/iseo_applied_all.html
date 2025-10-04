@@ -6,9 +6,13 @@
 
   <!-- Filters -->
   <form id="frm-filter" class="row g-2 mb-3">
-    <div class="col-auto">
-      <label class="form-label mb-0 small">User ID</label>
-      <input type="number" class="form-control form-control-sm" name="user_id" placeholder="任意">
+    <!-- user_id は hidden で固定 -->
+    <input type="hidden" name="user_id" value="{{ current_user_id }}">
+
+    <div class="col-12 mb-2">
+      <span class="badge bg-info text-dark">
+        表示中ユーザー: {{ current_user_id if current_user_id else "未指定" }}
+      </span>
     </div>
     <div class="col-auto">
       <label class="form-label mb-0 small">Site ID</label>
