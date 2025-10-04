@@ -66,6 +66,10 @@ GENRE_JACCARD_MIN = float(os.getenv("INTERNAL_SEO_GENRE_JACCARD_MIN", "0.30"))
 TITLE_COSINE_MIN  = float(os.getenv("INTERNAL_SEO_TITLE_COSINE_MIN", "0.20"))
 # LinkGraph が十分強いときのみ同ジャンル判定を免除するスコア下限（強め）
 STRONG_LINKGRAPH_SCORE = float(os.getenv("INTERNAL_SEO_STRONG_LINKGRAPH_SCORE", "0.10"))
+# 1記事あたりの計画上限（H2数や内部設定より更に上限を被せられる）
+PLAN_MAX_PER_POST = int(os.getenv("INTERNAL_SEO_PLAN_MAX_PER_POST", "4"))
+# topicページの計画スキップ（applierと同方針）
+SKIP_TOPIC = os.getenv("INTERNAL_SEO_SKIP_TOPIC", "1") != "0"
 
 # 段落分割は applier と完全に同じ実装を使う（index不一致を避ける）
 # _split_paragraphs は applier から import 済み
@@ -602,6 +606,21 @@ def plan_links_for_post(
     if not wp_post:
         logger.info("[Planner] skip src=%s (fetch failed or excluded)", src_post_id)
         return stats
+    
+    # topicページはスキップ（ContentIndex.url を参照）
+    if SKIP_TOPIC:
+        try:
+            row_url = (
+                ContentIndex.query
+                .with_entities(ContentIndex.url)
+                .filter_by(site_id=site_id, wp_post_id=src_post_id)
+                .one_or_none()
+            )
+            if row_url and "topic" in ((row_url[0] or "").lower()):
+                logger.info("[Planner] skip src=%s (topic page)", src_post_id)
+                return stats
+        except Exception:
+            pass
 
     html = wp_post.content_html or ""
     # --- ★同記事再ビルド用：今回の計画で使用する link_version を決定
@@ -631,6 +650,21 @@ def plan_links_for_post(
     # 本文に既に存在する内部リンク本数（概算）
     existing_internal_links_count = _count_existing_internal_links(existing_links, url_to_pid)
 
+    # 2.5) 未適用の “pending/swap_candidate” も除外（HTML未反映の重複計画を防ぐ）
+    try:
+        pending_targets = {
+            int(r[0]) for r in (
+                db.session.query(InternalLinkAction.target_post_id)
+                .filter(InternalLinkAction.site_id == site_id,
+                        InternalLinkAction.post_id == src_post_id,
+                        InternalLinkAction.status.in_(["pending", "swap_candidate"]))
+                .all()
+            )
+            if r and r[0] is not None
+        }
+    except Exception:
+        pending_targets = set()
+
     # 3) 候補ターゲットの収集（スコア順 → 同ジャンルでフィルタ）
     #    - 既存リンク先は優先度下げ（まずは新顔を入れたい）
     #    - 自身は除外
@@ -641,7 +675,8 @@ def plan_links_for_post(
     for t, s in raw_candidates:
         if t == src_post_id:
             continue
-        if t in existing_post_ids:
+        # 既に本文でリンク済み or 既に pending/swap で計画済みのターゲットは除外
+        if (t in existing_post_ids) or (t in pending_targets):
             continue
         # ★LinkGraph が強ければ同ジャンル判定を免除（強い関連のみ）
         if s >= STRONG_LINKGRAPH_SCORE:
@@ -660,7 +695,9 @@ def plan_links_for_post(
 
     # 4) 本数決定（最低2本・最大4本を保証。H2が少なければ H2 数まで）
     need_min = max(2, int(getattr(cfg, "min_links_per_post", 2) or 2))
-    need_max = min(4, int(getattr(cfg, "max_links_per_post", 4) or 4))
+    need_max_cfg = int(getattr(cfg, "max_links_per_post", 4) or 4)
+    # 設定値とENV上限の両方を適用
+    need_max = min(need_max_cfg, PLAN_MAX_PER_POST)
 
     # 既存内部リンク数が少ない場合の底上げ
     target_min = need_min

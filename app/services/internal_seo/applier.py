@@ -1432,6 +1432,32 @@ def _apply_plan_to_html(
 
 # ---- パブリックAPI ----
 
+def _update_with_retry(site: Site, post_id: int, new_html: str) -> bool:
+    """
+    WP 更新のリトライラッパ（指数バックオフ）
+    環境変数:
+      ISEO_WP_RETRY_MAX      ... 最大リトライ回数（既定 3）
+      ISEO_WP_RETRY_BASE_MS  ... 初期待機ミリ秒（既定 400）
+    """
+    try:
+        max_retry = int(os.getenv("ISEO_WP_RETRY_MAX", "3"))
+        base_ms   = int(os.getenv("ISEO_WP_RETRY_BASE_MS", "400"))
+    except Exception:
+        max_retry, base_ms = 3, 400
+
+    attempt = 0
+    while True:
+        ok = update_post_content(site, post_id, new_html)
+        if ok:
+            return True
+        if attempt >= max_retry:
+            return False
+        # 2^attempt * base_ms （±20% のゆらぎ）
+        delay = (base_ms * (2 ** attempt)) / 1000.0
+        delay *= random.uniform(0.8, 1.2)
+        time.sleep(delay)
+        attempt += 1
+
 def apply_actions_for_post(site_id: int, src_post_id: int, dry_run: bool = False) -> ApplyResult:
     """
     1記事分の pending を読み込んで差分適用（WP更新）。
@@ -1582,6 +1608,17 @@ def apply_actions_for_post(site_id: int, src_post_id: int, dry_run: bool = False
 
     # WPへ反映
     ok = update_post_content(site, src_post_id, new_html)
+    # --- No-Op 早期終了：本文に実質差分が無い & 何も適用していない場合は WP 更新を省略 ---
+    #   ※ 旧仕様の削除もなく、applied / swapped が 0 のときだけスキップ
+    if (res.applied == 0 and res.swapped == 0 and res.legacy_deleted == 0):
+        orig_norm = (wp_post.content_html or "").strip()
+        new_norm  = (new_html or "").strip()
+        if orig_norm == new_norm:
+            logger.info("[Applier] no-op skip (no diff & no actions) site=%s post=%s", site_id, src_post_id)
+            return res
+
+    # WPへ反映（リトライ付き）
+    ok = _update_with_retry(site, src_post_id, new_html)
     if not ok:
         # 反映失敗時はロールバック扱いにしておく（applied→skipped）
         for a in actions:

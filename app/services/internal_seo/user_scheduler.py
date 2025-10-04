@@ -17,11 +17,14 @@ from typing import Optional, Dict, Any
 
 TICK_JOB_ID = "internal_seo_user_tick"
 DEFAULT_TICK_SEC = int(os.getenv("INTERNAL_SEO_USER_TICK_SEC", "60"))
-DEFAULT_BUDGET   = int(os.getenv("INTERNAL_SEO_USER_BUDGET", "20"))
+DEFAULT_BUDGET   = int(os.getenv("INTERNAL_SEO_USER_BUDGET",
+                         os.getenv("INTERNAL_SEO_USER_APPLY_BUDGET", "20")))
 ERROR_BACKOFF    = int(os.getenv("INTERNAL_SEO_USER_ERROR_BACKOFF_SEC", "300"))
 # pending=0 のときに次回 tick を先送りする待機秒数（空振り防止）
 # 例: 15分（900秒）
 DEFAULT_IDLE_BACKOFF = int(os.getenv("INTERNAL_SEO_USER_IDLE_BACKOFF_SEC", "900"))
+# refill投入後は「短め」に再チェックする（デフォルト3分）
+DEFAULT_REFILL_RECHECK = int(os.getenv("INTERNAL_SEO_USER_REFILL_RECHECK_SEC", "180"))
 
 
 # ------------------------------------------------------------
@@ -63,6 +66,36 @@ def _with_rate_limit_override(rate_limit_per_min: Optional[int]):
             else:
                 os.environ["INTERNAL_SEO_RATE_LIMIT_PER_MIN"] = self._prev
     return _Ctx()
+
+# ------------------------------------------------------------
+# 補給（refill）ユーティリティ
+# ------------------------------------------------------------
+def _enqueue_refill_for_user_sites(user_id: int) -> int:
+    """
+    ユーザー配下の全サイトに対して refill ジョブを投入する。
+    enqueue_refill_for_site 側で重複は弾かれるため安全。
+    戻り値: enqueued の件数
+    """
+    try:
+        from app.models import Site
+        from app.services.internal_seo.enqueue import enqueue_refill_for_site
+    except Exception:
+        # 読み込みに失敗した場合は 0 とする（ログのみ）
+        current_app.logger.exception("[iseo-user] failed to import refill helpers (user=%s)", user_id)
+        return 0
+
+    cnt = 0
+    sites = Site.query.filter_by(user_id=user_id).all()
+    for s in sites:
+        try:
+            res = enqueue_refill_for_site(s.id)
+            if res and res.get("enqueued"):
+                cnt += 1
+        except Exception as e:
+            current_app.logger.warning("[iseo-user] refill enqueue failed user=%s site=%s: %s", user_id, s.id, e)
+    if cnt:
+        current_app.logger.info("[iseo-user] refill enqueued user=%s sites=%s", user_id, cnt)
+    return cnt
 
 
 # ------------------------------------------------------------
@@ -129,14 +162,16 @@ def run_user_tick(app, user_id: int, *, force: bool = False) -> Dict[str, Any]:
                 )
                 return {"ok": False, "reason": "not-due"}
             
-        # ── 追加: 無弾（pending=0）の早期リターン（効率化・挙動不変）
-        # ここではスケジュールを idle にし、アイドル待機(backoff)だけを更新する。
+        # ── 追加: 無弾（pending=0）の早期リターン
+        # ここではスケジュールを idle にし、まず補給(refill)を全サイトへ投入。
+        # その上で「短縮リチェック（DEFAULT_REFILL_RECHECK）」を設定して早めに再確認する。
         # ※ is_enabled=False や paused の場合は上で既に return 済み
         remain_peek = remain_before
         if remain_peek == 0 and not force:
-            # 次回スケジュールだけ決めて即終了（ロック/適用を走らせない）
-            interval_sec = int(sched.tick_interval_sec or DEFAULT_TICK_SEC)
-            idle_backoff = DEFAULT_IDLE_BACKOFF
+            # まず補給を投入（重複はenqueue側で防止）
+            enq_cnt = _enqueue_refill_for_user_sites(user_id)
+            # 補給を入れたら短めに再チェック、入れられなければ従来どおり長めに待機
+            idle_backoff = DEFAULT_REFILL_RECHECK if enq_cnt > 0 else DEFAULT_IDLE_BACKOFF
             now_utc = datetime.now(timezone.utc)
             sched.status = "idle"
             sched.next_run_at = now_utc + timedelta(seconds=idle_backoff)
@@ -144,8 +179,8 @@ def run_user_tick(app, user_id: int, *, force: bool = False) -> Dict[str, Any]:
             sched.last_error = None
             db.session.commit()
             current_app.logger.info(
-                "[iseo-user] early-idle user=%s (no pending) next=%s",
-                user_id,
+                "[iseo-user] early-idle user=%s (no pending) refill_enqueued=%s next=%s",
+                user_id, enq_cnt,
                 (sched.next_run_at.isoformat() if sched.next_run_at else None),
             )
             return {
@@ -155,6 +190,7 @@ def run_user_tick(app, user_id: int, *, force: bool = False) -> Dict[str, Any]:
                 "skipped": 0,
                 "processed_posts": 0,
                 "remain_posts": 0,
+                "refill_enqueued": enq_cnt,
                 "next_run_at": sched.next_run_at.isoformat() if sched.next_run_at else None,
             }
 
@@ -183,7 +219,7 @@ def run_user_tick(app, user_id: int, *, force: bool = False) -> Dict[str, Any]:
             notes: Dict[str, Any] = {}
 
             try:
-                budget = int(sched.budget_per_tick or DEFAULT_BUDGET)
+                budget = max(1, int(sched.budget_per_tick or DEFAULT_BUDGET))
                 rlim   = sched.rate_limit_per_min  # None の可能性あり
                 current_app.logger.info(
                     "[iseo-user] run user=%s budget=%s rate_limit_per_min=%s",
@@ -206,19 +242,21 @@ def run_user_tick(app, user_id: int, *, force: bool = False) -> Dict[str, Any]:
                 run.processed_posts = processed
                 run.finished_at = datetime.now(timezone.utc)
 
-                # 次回スケジュール決定（pending=0 でも先送りして空振りループを防止）
+                # 次回スケジュール決定
                 remain       = _count_user_pending_posts(user_id)
                 interval_sec = int(sched.tick_interval_sec or DEFAULT_TICK_SEC)
                 idle_backoff = DEFAULT_IDLE_BACKOFF
+                refill_enq = 0
                 if sched.is_enabled:
                     if remain > 0:
-                        # まだ弾がある＝通常の tick 間隔で回す
-                        sched.status     = "running"
+                        sched.status      = "idle"
                         sched.next_run_at = now_utc + timedelta(seconds=interval_sec)
                     else:
-                        # 弾が枯渇している＝アイドル待機（やや長め）で再チェック
-                        sched.status     = "idle"
-                        sched.next_run_at = now_utc + timedelta(seconds=idle_backoff)
+                        # 弾が枯渇＝補給(refill)を投入し、短縮リチェックで再確認
+                        refill_enq = _enqueue_refill_for_user_sites(user_id)
+                        backoff = DEFAULT_REFILL_RECHECK if refill_enq > 0 else idle_backoff
+                        sched.status      = "idle"
+                        sched.next_run_at = now_utc + timedelta(seconds=backoff)
                 else:
                     # 明示的に無効化中は次回未設定
                     sched.status     = "idle"
@@ -229,8 +267,8 @@ def run_user_tick(app, user_id: int, *, force: bool = False) -> Dict[str, Any]:
                 db.session.commit()
                 current_app.logger.info(
                     "[iseo-user] done user=%s applied=%s swapped=%s skipped=%s processed_posts=%s "
-                    "remain_after=%s next=%s",
-                    user_id, applied, swapped, skipped, processed, remain,
+                    "remain_after=%s refill_enqueued=%s next=%s",
+                    user_id, applied, swapped, skipped, processed, remain, refill_enq,
                     (sched.next_run_at.isoformat() if sched.next_run_at else None)
                 )
 
@@ -241,12 +279,15 @@ def run_user_tick(app, user_id: int, *, force: bool = False) -> Dict[str, Any]:
                     "skipped": skipped,
                     "processed_posts": processed,
                     "remain_posts": remain,
+                    "refill_enqueued": refill_enq,
                     "next_run_at": sched.next_run_at.isoformat() if sched.next_run_at else None,
                 }
 
             except Exception as e:
                 db.session.rollback()
-                current_app.logger.exception("[iseo-user] tick failed (user=%s): %s", user_id, e)
+                current_app.logger.exception(
+                    "[iseo-user] tick failed (user=%s): %s (backoff=%ss)", user_id, e, ERROR_BACKOFF
+                )
                 run.status = "failed"
                 run.finished_at = datetime.now(timezone.utc)
                 backoff = ERROR_BACKOFF
