@@ -3529,7 +3529,28 @@ def admin_iseo_applied_all_data():
         last = out_rows[-1]
         next_cursor = f"{last['last_applied_at']}.{last['link_version']}"
 
-    return jsonify({"ok": True, "rows": out_rows, "next_cursor": next_cursor, "has_more": has_more})
+    # サイトごとにグループ化（ドロップ開閉式用）
+    site_grouped = {}
+    for r in out_rows:
+        sid = r["site_id"]
+        if sid not in site_grouped:
+            site_grouped[sid] = {
+                "site_id": sid,
+                "site_name": r["site_name"],
+                "articles": []
+            }
+        site_grouped[sid]["articles"].append(r)
+
+    site_list = list(site_grouped.values())
+
+    return jsonify({
+        "ok": True,
+        "rows": out_rows,
+        "sites": site_list,
+        "next_cursor": next_cursor,
+        "has_more": has_more
+    })
+
 
 # ---- 🆕 明細：記事×version のリンク一覧 ----
 @admin_bp.route("/admin/iseo/applied_details", methods=["GET"])
