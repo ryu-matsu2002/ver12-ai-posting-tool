@@ -3431,7 +3431,7 @@ def admin_iseo_applied_all_data():
     # フィルタ
     user_id = request.args.get("user_id", type=int)
     site_id = request.args.get("site_id", type=int)
-    version = request.args.get("version", type=int)
+    version = request.args.get("version", type=int)  # ← 最新Versionでの絞り込み
     date_from = request.args.get("date_from")
     date_to   = request.args.get("date_to")
     limit = min(max(request.args.get("limit", default=50, type=int), 1), 200)
@@ -3440,7 +3440,7 @@ def admin_iseo_applied_all_data():
     if user_id is None:
         return jsonify({"ok": False, "error": "user_id required"}), 400
 
-    # カーソル（last_applied_at, link_version の複合）
+    # カーソル（last_applied_at, latest_ver の複合）
     cursor = request.args.get("cursor")  # "ISO8601.VER"
     cur_ts = None
     cur_ver = None
@@ -3453,58 +3453,71 @@ def admin_iseo_applied_all_data():
             cur_ts = None
             cur_ver = None
 
-    # 動的WHERE
-    where = ["ila.status = 'applied'"]
     params = {}
-
-    # ここまでに user_id None は弾いているため、必ず user 絞り込みを入れる
-    where.append("u.id = :user_id")
     params["user_id"] = user_id
+    # 動的条件（この段階では CTE 後の最終SELECTに適用）
+    where_final = ["u.id = :user_id"]
     if site_id is not None:
-        where.append("s.id = :site_id")
+        where_final.append("s.id = :site_id")
         params["site_id"] = site_id
     if version is not None:
-        where.append("ila.link_version = :version")
+        where_final.append("l.latest_ver = :version")
         params["version"] = version
     if date_from:
-        where.append("ila.applied_at >= :date_from")
+        where_final.append("l.last_applied_at >= :date_from")
         params["date_from"] = datetime.fromisoformat(f"{date_from}T00:00:00+00:00")
     if date_to:
-        where.append("ila.applied_at < :date_to")
+        where_final.append("l.last_applied_at < :date_to")
         params["date_to"] = datetime.fromisoformat(f"{date_to}T23:59:59.999999+00:00")
-
-    # カーソル: (last_applied_at desc, link_version desc) の keyset
+    # カーソル: (last_applied_at desc, latest_ver desc) の keyset
     if cur_ts is not None and cur_ver is not None:
-        where.append("(MAX(ila.applied_at) < :cur_ts OR (MAX(ila.applied_at) = :cur_ts AND ila.link_version < :cur_ver))")
+        where_final.append("(l.last_applied_at < :cur_ts OR (l.last_applied_at = :cur_ts AND l.latest_ver < :cur_ver))")
         params["cur_ts"] = cur_ts
         params["cur_ver"] = cur_ver
-
-    where_sql = " AND ".join(where) if where else "1=1"
+    where_sql = " AND ".join(where_final) if where_final else "1=1"
 
     sql = text(f"""
+      WITH latest AS (
+        SELECT
+          s.user_id,
+          ila.site_id,
+          ila.post_id,
+          MAX(ila.link_version) AS latest_ver,
+          MAX(ila.applied_at) FILTER (WHERE ila.status = 'applied') AS last_applied_at
+        FROM internal_link_actions ila
+        JOIN site s ON s.id = ila.site_id
+        WHERE s.user_id = :user_id
+        GROUP BY s.user_id, ila.site_id, ila.post_id
+      )
       SELECT
-        u.id             AS user_id,
+        u.id   AS user_id,
         COALESCE(u.username, (u.last_name || u.first_name)) AS user_name,
-        s.id             AS site_id,
-        s.name           AS site_name,
-        ci.wp_post_id    AS post_id,
-        ci.title         AS src_title,
-        ci.url           AS src_url,
-        ila.link_version AS link_version,
-        COUNT(*)         AS link_count,
-        MAX(ila.applied_at) AS last_applied_at
-      FROM internal_link_actions ila
-      JOIN site s   ON s.id = ila.site_id
+        s.id   AS site_id,
+        s.name AS site_name,
+        ci.wp_post_id AS post_id,
+        ci.title      AS src_title,
+        ci.url        AS src_url,
+        l.latest_ver  AS link_version,
+        COUNT(a.*)    AS candidate_count,
+        SUM(CASE WHEN a.status = 'applied' THEN 1 ELSE 0 END) AS applied_count,
+        l.last_applied_at AS last_applied_at
+      FROM latest l
+      JOIN site s   ON s.id = l.site_id
       JOIN "user" u ON u.id = s.user_id
       LEFT JOIN content_index ci
-        ON ci.site_id = ila.site_id
-       AND ci.wp_post_id = ila.post_id
+        ON ci.site_id = l.site_id
+       AND ci.wp_post_id = l.post_id
+      LEFT JOIN internal_link_actions a
+        ON a.site_id = l.site_id
+       AND a.post_id = l.post_id
+       AND a.link_version = l.latest_ver
       WHERE {where_sql}
-      GROUP BY u.id, user_name, s.id, s.name, ci.wp_post_id, ci.title, ci.url, ila.link_version
-      ORDER BY last_applied_at DESC, ila.link_version DESC
+      GROUP BY u.id, user_name, s.id, s.name, ci.wp_post_id, ci.title, ci.url, l.latest_ver, l.last_applied_at
+      ORDER BY l.last_applied_at DESC NULLS LAST, l.latest_ver DESC
       LIMIT :limit
     """)
     params["limit"] = limit
+
     rows = db.session.execute(sql, params).mappings().all() or []
 
     def _row(r):
@@ -3516,8 +3529,9 @@ def admin_iseo_applied_all_data():
             post_id=r.get("post_id"),
             src_title=r.get("src_title"),
             src_url=r.get("src_url"),
-            link_version=int(r.get("link_version") or 0),
-            link_count=int(r.get("link_count") or 0),
+            link_version=int(r.get("link_version") or 0),   # 最新Version
+            candidate_count=int(r.get("candidate_count") or 0),
+            applied_count=int(r.get("applied_count") or 0),
             last_applied_at=(r.get("last_applied_at").isoformat() if r.get("last_applied_at") else None),
         )
 

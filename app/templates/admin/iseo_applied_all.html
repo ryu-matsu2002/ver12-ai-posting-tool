@@ -51,7 +51,7 @@
             <th>User</th>
             <th>Site</th>
             <th>記事</th>
-            <th style="width:90px" class="text-end">リンク数</th>
+            <th style="width:120px" class="text-end">候補／反映</th>
             <th style="width:80px">Version</th>
           </tr>
         </thead>
@@ -139,17 +139,22 @@
     const user = r.user_name || ("#" + r.user_id);
     const site = "#" + r.site_id + (r.site_name ? " " + r.site_name : "");
     const title = r.src_title || "(no title)";
-    const count = (typeof r.link_count === "number") ? r.link_count : (r.link_count || "");
-    const ver = (typeof r.link_version === "number") ? r.link_version : (r.link_version || "");
+    const cand = (typeof r.candidate_count === "number") ? r.candidate_count : (r.candidate_count || "");
+    const appl = (typeof r.applied_count === "number") ? r.applied_count : (r.applied_count || "");
+    const ver  = (typeof r.link_version === "number") ? r.link_version : (r.link_version || "");
+
+    // 候補／反映の表示（例: 8 / 3）
+    const countHtml = `<span class="fw-bold">${cand}</span><span class="text-muted small">／${appl}</span>`;
+
     return (
-      '<tr data-site="' + r.site_id + '" data-post="' + r.post_id + '" data-version="' + r.link_version + '">' +
-        "<td>" + dt + "</td>" +
-        "<td>" + user + "</td>" +
-        "<td>" + site + "</td>" +
-        '<td><a href="' + u + '" target="_blank" rel="noopener">' + title + "</a></td>" +
-        '<td class="text-end">' + count + "</td>" +
-        '<td><span class="badge text-bg-secondary">V' + ver + "</span></td>" +
-      "</tr>"
+      `<tr data-site="${r.site_id}" data-post="${r.post_id}" data-version="${r.link_version}">
+        <td>${dt}</td>
+        <td>${user}</td>
+        <td>${site}</td>
+        <td><a href="${u}" target="_blank" rel="noopener">${title}</a></td>
+        <td class="text-end">${countHtml}</td>
+        <td><span class="badge text-bg-secondary">V${ver}</span></td>
+      </tr>`
     );
   }
 
