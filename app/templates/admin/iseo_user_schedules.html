@@ -85,23 +85,21 @@
       <tr>
         <th style="width:32px;"><input type="checkbox" id="check-all"></th>
         <th>ユーザー</th>
-        <th class="num">サイト数</th>
-        <th>有効</th>
         <th>状態</th>
         <th class="num">保留記事数</th>
+        <th class="num">予測消化日数</th>
         <th>最終実行</th>
         <th>次回予定</th>
         <th>直近実行の結果</th>
         <th>累計実績</th>
-        <th>スケジュール設定</th>
         <th>直近のエラー</th>
         <th>Preview</th>
         <th>操作</th>
       </tr>
     </thead>
     <tbody id="tbody">
-      <!-- 初期表示：列数14に合わせたプレースホルダを1行だけ表示 -->
-      <tr><td colspan="14" class="muted">読み込み中…</td></tr>
+      <!-- 初期表示：列数12に合わせたプレースホルダを1行だけ表示 -->
+      <tr><td colspan="12" class="muted">読み込み中…</td></tr>
     </tbody>
   </table>
 
@@ -160,6 +158,19 @@
       }[status] || 's-idle';
       return `<span class="badge ${cls}">${map[status] || '待機'}</span>`;
     }
+    function startedChip(isStarted){
+      return isStarted
+        ? '<span class="badge s-running" style="margin-left:6px;">開始済み</span>'
+        : '<span class="badge s-idle" style="margin-left:6px;">未開始</span>';
+    }
+    function fmtPredDays(x){
+      if (x == null || isNaN(x)) return '<span class="muted">-</span>';
+      const v = Number(x);
+      const s = v.toFixed(1) + ' 日';
+      // しきい値で色づけ（30日超で注意色）
+      if (v > 30) return `<span class="badge s-warn">${s}</span>`;
+      return s;
+    }
     function esc(s){return String(s==null?'':s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));}
     function badgeLabel(s){ return ({running:'実行中', queued:'待機中', paused:'一時停止', idle:'待機', error:'エラー'})[s] || s || '-'; }
 
@@ -187,11 +198,15 @@
 
       const rows = filtered.map(x => {
         const last = x.last_result || {};
-        // 累計表示に変更
-        const lastAll = `適用:${x.applied_total ?? 0} / 記事:${x.processed_total ?? 0}`;
+        // 累計実績（リンク/記事/平均）
+        const avgLP = (typeof x.avg_links_per_post === 'number') ? x.avg_links_per_post.toFixed(1) : '0.0';
+        const totalSummary = `リンク:${x.applied_total ?? 0} / 記事:${x.processed_total ?? 0} / 平均:${avgLP}`;
+        // 直近実行の結果（所要: 分）
+        const dur = (typeof last.duration_min === 'number') ? `${last.duration_min}分` : '-';
+        const lastSummary =
+          `${last.status ? ('[' + esc(badgeLabel(last.status)) + '] ') : ''}` +
+          `適用:${last.applied ?? '-'} / 記事:${last.processed_posts ?? '-'} / 所要:${dur}`;
         const err = x.last_error ? `<div class="truncate-1 mono" title="${esc(x.last_error)}">${esc(x.last_error)}</div>` : '<span class="muted">-</span>';
-        const enabled = x.is_enabled ? '<span class="chip">ON</span>' : '<span class="muted">OFF</span>';
-        const rate = x.rate_limit_per_min ? `${x.rate_limit_per_min}/分` : '-';
 
         // 操作ボタン：開始のみ。実行中はdisabledで「実行中」表示
         const running = (x.status === 'running');
@@ -209,22 +224,13 @@
             <td class="nowrap">
               <div><strong>名前：</strong>${esc(x.username || '')} <span class="muted mono">（ID #${x.user_id}）</span></div>
             </td>
-            <td class="num">${x.sites || 0}</td>
-            <td>${enabled}</td>
-            <td>${badgeJa(x.status)}</td>
+            <td>${badgeJa(x.status)}${startedChip(!!x.is_started)}</td>
             <td class="num">${(x.pending ?? 0).toLocaleString()}</td>
+            <td class="num">${fmtPredDays(x.pred_days)}</td>
             <td>${fmtTime(x.last_run_at)}</td>
             <td>${fmtTime(x.next_run_at)}</td>
-            <td class="mono">
-              ${last.status ? ('[' + esc(badgeLabel(last.status)) + '] ') : ''}適用:${last.applied ?? '-'} / 記事:${last.processed_posts ?? '-'}
-              ${last.finished_at ? `<div class="muted">${fmtTime(last.finished_at)}</div>` : ''}
-            </td>
-            <td class="mono">${lastAll}</td>
-            <td class="mono">
-              間隔:${x.tick_interval_sec ?? '-'} 秒<br>
-              1回の処理記事数:${x.budget_per_tick ?? '-'}<br>
-              レート上限:${rate}
-            </td>
+            <td class="mono">${lastSummary}</td>
+            <td class="mono">${totalSummary}</td>
             <td>${err}</td>
             <!-- 追加: Preview 列 -->
             <td class="row-actions">
@@ -237,7 +243,7 @@
           </tr>
         `;
       });
-      tbody.innerHTML = rows.length ? rows.join('') : `<tr><td colspan="14" class="muted">対象ユーザーがいません</td></tr>`;
+      tbody.innerHTML = rows.length ? rows.join('') : `<tr><td colspan="12" class="muted">対象ユーザーがいません</td></tr>`;
       wireRowActions();
     }
 

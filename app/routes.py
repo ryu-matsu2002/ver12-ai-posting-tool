@@ -3068,7 +3068,8 @@ def _get_or_create_user_schedule(uid: int) -> InternalSeoUserSchedule:
 def admin_iseo_user_schedules_status():
     """
     一覧テーブル用のJSON。
-    pending件数・全期間累計の applied/processed・last_error を返す。
+    返却: pending件数 / 状態 / 「開始済み」判定 / 直近実行の所要 / 直近7日スループット / 予測消化日数 /
+         累計 applied/processed・平均リンク数・last_error。
     ※ 互換のため applied_24h / processed_24h も当面返す（同値または別集計）。
     """
     from app import db
@@ -3076,6 +3077,7 @@ def admin_iseo_user_schedules_status():
     from sqlalchemy import func, text
     from app.models import User, Site, InternalSeoUserSchedule, InternalSeoUserRun
     now_utc = datetime.now(timezone.utc)
+    since_7d = now_utc - timedelta(days=7)
     # 対象ユーザーは「サイトを1つ以上持つユーザー」を基本にする
     user_rows = (
         db.session.query(
@@ -3099,6 +3101,10 @@ def admin_iseo_user_schedules_status():
             .order_by(InternalSeoUserRun.started_at.desc(), InternalSeoUserRun.id.desc())
             .first()
         )
+        # 「開始済み」判定（is_enabled かつ 1度でも実行したことがある）
+        is_started = bool(getattr(sch, "is_enabled", False) and (
+            (last_run is not None) or getattr(sch, "last_run_at", None)
+        ))
         # pending 件数（ユーザー配下サイトの pending の distinct post_id）
         pending_cnt = db.session.execute(
             text("""
@@ -3127,11 +3133,38 @@ def admin_iseo_user_schedules_status():
         # 互換：従来の24hキーは当面返す（必要に応じて後で削除）
         applied_24h = applied_total
         processed_24h = processed_total
+        # 直近7日の処理記事スループット（実績ベース）
+        agg_7d = (
+            db.session.query(
+                func.coalesce(func.sum(InternalSeoUserRun.processed_posts), 0)
+            )
+            .filter(
+                InternalSeoUserRun.user_id == u.user_id,
+                InternalSeoUserRun.started_at >= since_7d
+            )
+            .one()
+        )
+        throughput_7d = int(agg_7d[0] or 0)  # 7日間で処理した記事数
+        avg_per_day = float(throughput_7d) / 7.0 if throughput_7d else 0.0
+        # 予測消化日数：pending を 7日平均/日の処理数で割る（0なら None）
+        pred_days = (float(pending_cnt) / avg_per_day) if avg_per_day > 0 else None
+
+        # 直近実行の所要（分）
+        if last_run and getattr(last_run, "started_at", None) and getattr(last_run, "finished_at", None):
+            dur_sec = (last_run.finished_at - last_run.started_at).total_seconds()
+            duration_min = round(dur_sec / 60.0, 1)
+        else:
+            duration_min = None
+
+        # 平均リンク数/記事（累計）
+        avg_links_per_post = (float(applied_total) / float(processed_total)) if processed_total > 0 else 0.0
+
         result.append({
             "user_id": u.user_id,
             "username": u.username,
             "sites": int(u.site_cnt or 0),
             "is_enabled": bool(getattr(sch, "is_enabled", False)),
+            "is_started": is_started,
             "status": getattr(sch, "status", "idle") if sch else "idle",
             "last_run_at": getattr(sch, "last_run_at", None).isoformat() if sch and sch.last_run_at else None,
             "next_run_at": getattr(sch, "next_run_at", None).isoformat() if sch and sch.next_run_at else None,
@@ -3140,9 +3173,14 @@ def admin_iseo_user_schedules_status():
             "rate_limit_per_min": getattr(sch, "rate_limit_per_min", None) if sch else None,
             "last_error": getattr(sch, "last_error", None) if sch else None,
             "pending": int(pending_cnt),
+            # 直近7日スループットと予測
+            "throughput_7d": throughput_7d,
+            "avg_per_day": avg_per_day,
+            "pred_days": pred_days,
             # 新：全期間累計
             "applied_total": applied_total,
             "processed_total": processed_total,
+            "avg_links_per_post": avg_links_per_post,
             # 旧：後方互換（テンプレ移行中は残す）
             "applied_24h": applied_24h,
             "processed_24h": processed_24h,
@@ -3151,6 +3189,7 @@ def admin_iseo_user_schedules_status():
                 "applied": getattr(last_run, "applied", None) if last_run else None,
                 "processed_posts": getattr(last_run, "processed_posts", None) if last_run else None,
                 "finished_at": getattr(last_run, "finished_at", None).isoformat() if last_run and last_run.finished_at else None,
+                "duration_min": duration_min,
             },
         })
     return jsonify({"items": result})
