@@ -275,3 +275,21 @@ def find_fallback_body_tail(html: str) -> int:
             if best is None or idx > best:
                 best = idx
     return best if best is not None else len(html)
+
+
+# ===== Topic URL 判定（共通ユーティリティ） ==============================
+# 仕様：
+# - 「URL に 'topic' を含む」ものを topic ページとみなす（大文字小文字は無視）
+# - クエリ/パス/アンカーいずれに含まれていても True（仕様をシンプルに統一）
+# - 判定は 1 箇所に集約し、他モジュール（planner/applier/legacy_cleaner）から利用する
+TOPIC_SUBSTRING = "topic"
+
+def is_topic_url(url: str | None) -> bool:
+    """
+    URL に 'topic' を含むかを判定する。
+    - None/空文字なら False
+    - 大文字小文字は無視して判定
+    """
+    if not url:
+        return False
+    return TOPIC_SUBSTRING in (url.lower())

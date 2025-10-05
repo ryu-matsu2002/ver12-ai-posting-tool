@@ -24,6 +24,7 @@ from app.services.internal_seo.utils import (
     jaccard,
     title_tfidf_cosine,
     is_natural_span,
+    is_topic_url,
 )
 
 from app.services.internal_seo.applier import (
@@ -616,7 +617,7 @@ def plan_links_for_post(
                 .filter_by(site_id=site_id, wp_post_id=src_post_id)
                 .one_or_none()
             )
-            if row_url and "topic" in ((row_url[0] or "").lower()):
+            if row_url and is_topic_url(row_url[0] or ""):
                 logger.info("[Planner] skip src=%s (topic page)", src_post_id)
                 return stats
         except Exception:
@@ -692,6 +693,71 @@ def plan_links_for_post(
             continue
     if not candidates:
         logger.info("[Planner] src=%s no fresh candidates", src_post_id)
+
+    # --- 追加: topicページを“最大1件だけ”優先挿入（マッチした場合のみ） ----------------
+    def _pick_best_topic_target(site_id: int,
+                                src_post_id: int,
+                                existing_post_ids: set[int],
+                                pending_targets: set[int]) -> Optional[int]:
+        """
+        同一サイト内の topicページ群から、src と十分マッチするものを1件だけ選ぶ。
+        - 既存リンク済み/既にpendingのターゲットは除外
+        - _same_genre_ok（keywords Jaccard or タイトル類似）でマッチ判定
+        - 複数ある場合は「タイトルコサイン類似度」が最大のものを採用（近似）
+        - 見つからなければ None
+        """
+        # src タイトルを軽量取得
+        src_title_row = (
+            ContentIndex.query
+            .with_entities(ContentIndex.title)
+            .filter_by(site_id=site_id, wp_post_id=src_post_id)
+            .one_or_none()
+        )
+        src_title = (src_title_row[0] or "") if src_title_row else ""
+
+        # サイト内の topic ページ候補（publish & URLにtopicを含む）
+        topic_rows = (
+            ContentIndex.query
+            .with_entities(ContentIndex.wp_post_id, ContentIndex.title, ContentIndex.url)
+            .filter(ContentIndex.site_id == site_id)
+            .filter(ContentIndex.status == "publish")
+            .filter(ContentIndex.wp_post_id.isnot(None))
+            .filter(ContentIndex.url.ilike("%topic%"))
+            .all()
+        )
+        best_pid: Optional[int] = None
+        best_cos = -1.0
+        for pid, t_title, t_url in topic_rows:
+            pid = int(pid)
+            if pid == src_post_id:
+                continue
+            if pid in existing_post_ids or pid in pending_targets:
+                continue
+            # src と topic が“十分近い”か（共通キーワード/Jaccard or タイトル類似）
+            try:
+                if not _same_genre_ok(site_id, src_post_id, pid):
+                    continue
+            except Exception:
+                continue
+            # 類似度の近似指標（タイトルコサイン）で最良の1件を選ぶ
+            cos = 0.0
+            try:
+                cos = title_tfidf_cosine(src_title, t_title or "")
+            except Exception:
+                cos = 0.0
+            if cos > best_cos:
+                best_cos = cos
+                best_pid = pid
+        return best_pid
+
+    # topic候補の選出（あれば candidates の先頭に挿入＝1枠確保；全体上限は守る）
+    try:
+        topic_pid = _pick_best_topic_target(site_id, src_post_id, existing_post_ids, pending_targets)
+    except Exception:
+        topic_pid = None
+    if topic_pid is not None:
+        # 既存の candidates に含まれていれば重複を除去して先頭に置く
+        candidates = [topic_pid] + [t for t in candidates if t != topic_pid]    
 
     # 4) 本数決定（最低2本・最大4本を保証。H2が少なければ H2 数まで）
     need_min = max(2, int(getattr(cfg, "min_links_per_post", 2) or 2))

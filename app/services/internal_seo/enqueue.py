@@ -264,6 +264,9 @@ def enqueue_refill_for_site(
         _env_bool(["INTERNAL_SEO_REFILL_INCREMENTAL", "INTERNAL_SEO_INCREMENTAL"], True)
     )
 
+    # job_kind によって「適用なし（plan-only）」か「適用あり（refill）」を切り替える
+    _limit_posts = 0 if job_kind == "refill-plan-only" else _env_int(["INTERNAL_SEO_LIMIT_POSTS"], 50)
+
     params = {
         "site_id": site_id,
         "pages": int(pages),
@@ -271,7 +274,8 @@ def enqueue_refill_for_site(
         "min_score": float(min_score),
         "max_k": int(max_k),
         "limit_sources": int(limit_sources),
-        "limit_posts": 0,                       # ★ ここがポイント：適用フェーズを実行させない
+        # plan-only は 0（適用なし）/ refill は ENV 由来値（適用あり）
+        "limit_posts": int(_limit_posts),
         "incremental": bool(incremental),
         "job_kind": job_kind,                   # 追跡しやすい kind
     }

@@ -5,6 +5,8 @@ import unicodedata
 from html import unescape
 from dataclasses import dataclass
 from typing import List, Tuple, Dict, Optional
+# topic判定を一元化（将来のルール変更にも追随）
+from app.services.internal_seo.utils import is_topic_url
 
 # aタグ抽出（オープンタグ全体も捕捉：版情報属性を読み取るため）
 _A_TAG = re.compile(r'(<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>)(.*?)</a\s*>', re.I | re.S)
@@ -293,8 +295,8 @@ def find_and_remove_legacy_links(
             continue
 
         # --- topicページへのリンクは絶対に削除・変更しない ---
-        # href に "topic" を含む場合は完全スキップ
-        if "topic" in href.lower():
+        # is_topic_url() による一元判定（小文字化/パターン拡張にも対応）
+        if is_topic_url(href):
             match_idx += 1
             continue
         

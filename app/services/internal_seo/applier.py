@@ -23,7 +23,7 @@ from app.models import (
 )
 from app.wp_client import fetch_single_post, update_post_content
 from app.services.internal_seo.legacy_cleaner import find_and_remove_legacy_links
-from app.services.internal_seo.utils import nfkc_norm, is_ng_anchor, title_tokens, extract_h2_sections
+from app.services.internal_seo.utils import nfkc_norm, is_ng_anchor, title_tokens, extract_h2_sections, is_topic_url
 
 logger = logging.getLogger(__name__)
 
@@ -775,6 +775,20 @@ def preview_apply_for_post(site_id: int, src_post_id: int) -> Tuple[str, ApplyRe
         db.session.commit()
 
     site = db.session.get(Site, site_id)
+    # ▼ topic スキップ（プレビューでも触らない）
+    try:
+        if os.getenv("INTERNAL_SEO_SKIP_TOPIC", "1") != "0":
+            src_url_row = (
+                ContentIndex.query
+                .with_entities(ContentIndex.url)
+                .filter_by(site_id=site_id, wp_post_id=src_post_id)
+                .one_or_none()
+            )
+            src_url = (src_url_row[0] or "") if src_url_row else ""
+            if is_topic_url(src_url):
+                return "", ApplyResult(message="skip-topic-page"), []
+    except Exception:
+        pass
     wp_post = fetch_single_post(site, src_post_id)
     if not wp_post:
         return "", ApplyResult(message="fetch-failed-or-excluded"), []
@@ -1470,13 +1484,11 @@ def apply_actions_for_post(site_id: int, src_post_id: int, dry_run: bool = False
         db.session.commit()
 
     site = db.session.get(Site, site_id)
-    # ▼ topic スキップ（記事URLに 'topic' を含む場合は一切触らない）
-    # （重複ブロックを削除：上の分岐だけ残す
-    # ▼ topic スキップ（記事URLに 'topic' を含む場合は一切触らない）
+    # ▼ topic スキップ（記事URLが topic のときは“適用ロジック全体”を停止）
     try:
         if os.getenv("INTERNAL_SEO_SKIP_TOPIC", "1") != "0":
             src_url = _post_url(site_id, src_post_id) or ""
-            if "topic" in (src_url or "").lower():
+            if is_topic_url(src_url):
                 return ApplyResult(message="skip-topic-page")
     except Exception:
         pass
