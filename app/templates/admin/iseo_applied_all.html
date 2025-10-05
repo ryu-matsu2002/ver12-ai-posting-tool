@@ -15,6 +15,10 @@
       </span>
     </div>
     <div class="col-auto">
+      <label class="form-label mb-0 small">Site ID</label>
+      <input type="number" class="form-control form-control-sm" name="site_id" placeholder="任意">
+    </div>
+    <div class="col-auto">
       <label class="form-label mb-0 small">Version</label>
       <input type="number" class="form-control form-control-sm" name="version" placeholder="任意">
     </div>
@@ -34,8 +38,32 @@
 
   <div id="msg" class="alert d-none" role="alert"></div>
 
-  <!-- ▼ サイトごとの開閉パネルをここに動的に構築 -->
-  <div id="site-accordion" class="accordion"></div>
+  <div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span>記事×Version サマリ</span>
+      <small class="text-muted">並び順：最終適用日時 desc → version desc</small>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle mb-0" id="tbl">
+        <thead>
+          <tr>
+            <th style="width:140px">最終適用</th>
+            <th>User</th>
+            <th>Site</th>
+            <th>記事</th>
+            <th style="width:90px" class="text-end">リンク数</th>
+            <th style="width:80px">Version</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card-footer d-flex justify-content-between">
+      <button class="btn btn-sm btn-outline-secondary" id="btn-prev" disabled>← Prev</button>
+      <button class="btn btn-sm btn-outline-secondary" id="btn-next" disabled>Next →</button>
+    </div>
+  </div>
 </div>
 
 <!-- 明細モーダル -->
@@ -78,39 +106,34 @@
   const API_LIST   = "{{ url_for('admin.admin_iseo_applied_all_data') }}";
   const API_DETAIL = "{{ url_for('admin.admin_iseo_applied_details') }}";
 
-  const msg   = document.getElementById("msg");
-  const frm   = document.getElementById("frm-filter");
-  const accEl = document.getElementById("site-accordion");
+  const tbody   = document.querySelector("#tbl tbody");
+  const msg     = document.getElementById("msg");
+  const btnPrev = document.getElementById("btn-prev");
+  const btnNext = document.getElementById("btn-next");
+  const frm     = document.getElementById("frm-filter");
 
-  // サイト別の状態：cursor/loaded/tbody参照など
-  const siteState = new Map(); // site_id -> {cursor, loaded, tbodyEl, metaEl}
+  // カーソルページング
+  let nextCursor = null;     // サーバーから返ってくる next_cursor
+  let hasMore    = false;    // サーバーから返ってくる has_more
+  const cursorStack = [];    // 前ページ復元用に、直前のカーソルを積む
 
   function csrfHeader() {
     const meta = document.querySelector('meta[name="csrf-token"]');
     return meta ? { "X-CSRFToken": meta.content } : {};
   }
+
   function showMsg(ok, text) {
     msg.classList.remove("d-none", "alert-success", "alert-danger");
     msg.classList.add(ok ? "alert-success" : "alert-danger");
     msg.textContent = text;
   }
-  function clearMsg() {
-    msg.classList.add("d-none");
-    msg.textContent = "";
-  }
+
   function formQuery(form) {
+    // Object.fromEntries は十分新しいブラウザで動作
     return Object.fromEntries(new FormData(form).entries());
   }
-  function esc(s){
-    return String(s==null?'':s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
-  }
-  function fmtDateTime(iso){
-    if (!iso) return "-";
-    try { return new Date(iso).toLocaleString(); } catch { return iso; }
-  }
 
-  // 1行（記事×version）HTML
-  function rowHtml(r){
+  function rowHtml(r) {
     const u  = r.src_url || "#";
     const dt = r.last_applied_at ? new Date(r.last_applied_at).toLocaleString() : "-";
     const user = r.user_name || ("#" + r.user_id);
@@ -123,202 +146,54 @@
         "<td>" + dt + "</td>" +
         "<td>" + user + "</td>" +
         "<td>" + site + "</td>" +
-        '<td><a href="' + u + '" target="_blank" rel="noopener">' + esc(title) + "</a></td>" +
+        '<td><a href="' + u + '" target="_blank" rel="noopener">' + title + "</a></td>" +
         '<td class="text-end">' + count + "</td>" +
         '<td><span class="badge text-bg-secondary">V' + ver + "</span></td>" +
       "</tr>"
     );
   }
 
-  // サイトパネル（アコーディオン）1個を組み立て
-  function buildSitePanel(site){
-    const sid = site.site_id;
-    const sname = site.site_name || ("#" + sid);
-
-    const itemId = "site-" + sid;
-    const headerId = "h-" + sid;
-    const bodyId = "b-" + sid;
-
-    const wrapper = document.createElement("div");
-    wrapper.className = "accordion-item mb-2";
-    wrapper.innerHTML = `
-      <h2 class="accordion-header" id="${headerId}">
-        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
-                data-bs-target="#${bodyId}" aria-expanded="false" aria-controls="${bodyId}">
-          <span class="me-2 badge bg-secondary">#${sid}</span> <strong>${esc(sname)}</strong>
-          <span class="ms-3 small text-muted" id="${itemId}-meta">読み込み待ち</span>
-        </button>
-      </h2>
-      <div id="${bodyId}" class="accordion-collapse collapse" aria-labelledby="${headerId}" data-bs-parent="#site-accordion">
-        <div class="accordion-body">
-          <div class="table-responsive">
-            <table class="table table-sm table-hover align-middle mb-0">
-              <thead>
-                <tr>
-                  <th style="width:140px">最終適用</th>
-                  <th>User</th>
-                  <th>Site</th>
-                  <th>記事</th>
-                  <th style="width:90px" class="text-end">リンク数</th>
-                  <th style="width:80px">Version</th>
-                </tr>
-              </thead>
-              <tbody id="${itemId}-tbody">
-                <tr><td colspan="6" class="text-center text-muted py-3">読み込み中…</td></tr>
-              </tbody>
-            </table>
-          </div>
-          <!-- すべて自動で取り切るためページングUIは非表示 -->
-        </div>
-      </div>
-    `;
-    accEl.appendChild(wrapper);
-
-    // 状態登録
-    const st = {
-      cursor: null,
-      loaded: false,
-      tbodyEl: wrapper.querySelector(`#${itemId}-tbody`),
-      metaEl:  wrapper.querySelector(`#${itemId}-meta`),
-    };
-    siteState.set(sid, st);
-
-    // 開いたときに遅延ロード
-    wrapper.querySelector(`#${bodyId}`).addEventListener("show.bs.collapse", () => {
-      if (!st.loaded) {
-        loadSiteRows(sid, true);
-      }
-    });
-
-    return wrapper;   // ←★ これで buildSitePanel をきちんと閉じる
-  }
-
-  // --- 1ページ取得（内部用） ---
-  async function fetchOnePage(baseParams){
-    const url = API_LIST + "?" + new URLSearchParams(baseParams).toString();
-    const res = await fetch(url, { headers: { ...csrfHeader() } });
-    let js = {};
-    try { js = await res.json(); } catch(e){ js = {}; }
-    if (!res.ok || !js.ok) throw new Error(js.error || res.statusText || "取得失敗");
-    return js;
-  }
-
-  // サイトごとの記事×versionを取得して描画（全件取り切る・逐次追記）
-  async function loadSiteRows(site_id, first){
-    const st = siteState.get(site_id);
-    if (!st) return;
-
+  async function load(first) {
     if (first === true) {
-      st.cursor = null;
-      // プレースホルダ再表示
-      st.tbodyEl.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">読み込み中…</td></tr>';
+      // 先頭ページから再検索
+      nextCursor = null;
+      cursorStack.length = 0;
     }
 
-    const base = formQuery(frm);
-    base.site_id = site_id;
-    // 1リクエストのページサイズ（サーバ上限200まで）で高速連続フェッチ
-    base.limit = 200;
+    const params = formQuery(frm);
+    if (nextCursor) params.cursor = nextCursor;
 
-    let total = 0;
-    let lastAppliedISO = null;
-    let cursor = st.cursor || null;
-
-    // 初回はtbodyを空に
-    st.tbodyEl.innerHTML = "";
-
-    // 逐次取得ループ（キーセットページング）
-    while (true) {
-      const params = { ...base };
-      if (cursor) params.cursor = cursor;
-      let js;
-      try {
-        js = await fetchOnePage(params);
-      } catch (err) {
-        st.tbodyEl.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-3">${esc(String(err))}</td></tr>`;
-        return;
-      }
-      const chunk = Array.isArray(js.rows) ? js.rows.filter(r => r.site_id === site_id) : [];
-      if (chunk.length) {
-        // 逐次追記
-        const html = chunk.map(rowHtml).join("");
-        const temp = document.createElement("tbody");
-        temp.innerHTML = html;
-        while (temp.firstChild) st.tbodyEl.appendChild(temp.firstChild);
-        // クリックハンドラ付与（重複防止フラグ付き）
-        st.tbodyEl.querySelectorAll("tr").forEach(tr => {
-          if (!tr.dataset.bound) {
-            tr.dataset.bound = "1";
-            tr.addEventListener("click", () => openDetail(tr));
-          }
-        });
-        total += chunk.length;
-        if (!lastAppliedISO) lastAppliedISO = chunk[0]?.last_applied_at || null;
-      }
-
-      if (!js.has_more) {
-        cursor = null;
-        break;
-      }
-      cursor = js.next_cursor || null;
-      // UI固まり防止
-      await new Promise(r => requestAnimationFrame(r));
-    }
-
-    if (total === 0) {
-      st.tbodyEl.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">データがありません</td></tr>';
-    }
-
-    // メタ表示更新
-    if (st.metaEl) {
-      st.metaEl.textContent = `最終適用: ${fmtDateTime(lastAppliedISO)} / 件数: ${total.toLocaleString()}`;
-    }
-
-    st.cursor = null; // 全件取り切り
-    st.loaded = true;
-  }
-
-  // 初期ロード：サイト見出し一覧を構築（遅延ロード前提）
-  async function loadSites(){
-    clearMsg();
-
-    // リセット
-    accEl.innerHTML = "";
-    siteState.clear();
-
-    const base = formQuery(frm);
-    // サイト一覧は軽量取得：まず1回呼んで sites をもらう
-    const url = API_LIST + "?" + new URLSearchParams(base).toString();
+    const url = API_LIST + "?" + new URLSearchParams(params).toString();
     const res = await fetch(url, { headers: { ...csrfHeader() } });
     let js = {};
-    try { js = await res.json(); } catch(e){ js = {}; }
+    try { js = await res.json(); } catch (e) { js = {}; }
 
     if (!res.ok || !js.ok) {
-      showMsg(false, js.error || res.statusText || "一覧取得に失敗しました");
+      showMsg(false, js.error || res.statusText || "取得に失敗しました");
       return;
     }
 
-    // 1) サーバが sites を返していればそれを使う
-    let sites = Array.isArray(js.sites) ? js.sites : null;
+    const rows = Array.isArray(js.rows) ? js.rows : [];
+    tbody.innerHTML = rows.length
+      ? rows.map(rowHtml).join("")
+      : '<tr><td colspan="6" class="text-center text-muted py-4">データがありません</td></tr>';
 
-    // 2) rows からユニークサイト抽出のフォールバック
-    if (!sites || !sites.length) {
-      const rows = Array.isArray(js.rows) ? js.rows : [];
-      const map = new Map();
-      for (const r of rows) {
-        if (!map.has(r.site_id)) {
-          map.set(r.site_id, {site_id: r.site_id, site_name: r.site_name || ("#" + r.site_id)});
-        }
-      }
-      sites = Array.from(map.values());
+    // 行クリックで明細
+    tbody.querySelectorAll("tr").forEach(function (tr) {
+      tr.addEventListener("click", function () { openDetail(tr); });
+    });
+
+    // ページング制御
+    hasMore = !!js.has_more;
+    if (hasMore) {
+      // 次ページあり：今の next を保存して、ボタンON
+      nextCursor = js.next_cursor || null;
+    } else {
+      nextCursor = null;
     }
 
-    if (!sites.length) {
-      accEl.innerHTML = `<div class="text-muted">表示できるサイトがありません</div>`;
-      return;
-    }
-
-    // サイトごとのアコーディオン生成（行は展開時に遅延ロード）
-    sites.forEach(s => buildSitePanel(s));
+    btnNext.disabled = !hasMore;
+    btnPrev.disabled = cursorStack.length === 0;
   }
 
   async function openDetail(tr) {
@@ -353,11 +228,11 @@
         const st   = it.status || "";
         return (
           "<tr>" +
-            '<td><a href="' + esc(turl) + '" target="_blank" rel="noopener">' + esc(turl) + "</a></td>" +
-            "<td>" + esc(atxt) + "</td>" +
-            "<td><code>" + esc(pos) + "</code></td>" +
+            '<td><a href="' + turl + '" target="_blank" rel="noopener">' + turl + "</a></td>" +
+            "<td>" + atxt + "</td>" +
+            "<td><code>" + pos + "</code></td>" +
             "<td>" + apAt + "</td>" +
-            "<td>" + esc(st) + "</td>" +
+            "<td>" + st + "</td>" +
           "</tr>"
         );
       }).join("");
@@ -369,14 +244,31 @@
     m.show();
   }
 
-  // 検索ボタン：サイト一覧を取り直し（各サイトは開いた時に遅延ロード）
+  // 検索ボタン
   frm.addEventListener("submit", function (e) {
     e.preventDefault();
-    loadSites();
+    load(true);
   });
 
-  // 初期ロード：サイト見出しのみ
-  loadSites();
+  // ページング：Next
+  btnNext.addEventListener("click", function () {
+    if (btnNext.disabled) return;
+    // 今のカーソル状態をスタックしてから次へ
+    cursorStack.push(nextCursor);
+    load(false);
+  });
+
+  // ページング：Prev（実装簡易のため、サーバ側 prev は使わず再検索）
+  btnPrev.addEventListener("click", function () {
+    if (btnPrev.disabled) return;
+    // ひとつ戻る：直前のカーソルを捨てて、先頭から再ロード
+    cursorStack.pop();
+    nextCursor = null;
+    load(true);
+  });
+
+  // 初期ロード
+  load(true);
 })();
 </script>
 {% endblock %}
