@@ -82,8 +82,8 @@
   const frm   = document.getElementById("frm-filter");
   const accEl = document.getElementById("site-accordion");
 
-  // サイト別の状態：cursor/hasMore/loaded/tbody/button参照など
-  const siteState = new Map(); // site_id -> {cursor, hasMore, loaded, tbodyEl, btnNext, btnPrev}
+  // サイト別の状態：cursor/loaded/tbody参照など
+  const siteState = new Map(); // site_id -> {cursor, loaded, tbodyEl, metaEl}
 
   function csrfHeader() {
     const meta = document.querySelector('meta[name="csrf-token"]');
@@ -168,10 +168,7 @@
               </tbody>
             </table>
           </div>
-          <div class="d-flex justify-content-between mt-2">
-            <button class="btn btn-sm btn-outline-secondary" id="${itemId}-prev" disabled>← Prev</button>
-            <button class="btn btn-sm btn-outline-secondary" id="${itemId}-next" disabled>Next →</button>
-          </div>
+          <!-- すべて自動で取り切るためページングUIは非表示 -->
         </div>
       </div>
     `;
@@ -180,13 +177,9 @@
     // 状態登録
     const st = {
       cursor: null,
-      hasMore: false,
       loaded: false,
       tbodyEl: wrapper.querySelector(`#${itemId}-tbody`),
-      btnPrev: wrapper.querySelector(`#${itemId}-prev`),
-      btnNext: wrapper.querySelector(`#${itemId}-next`),
       metaEl:  wrapper.querySelector(`#${itemId}-meta`),
-      cursorStack: [],
     };
     siteState.set(sid, st);
 
@@ -197,71 +190,90 @@
       }
     });
 
-    // ページング操作
-    st.btnNext.addEventListener("click", () => {
-      if (st.btnNext.disabled) return;
-      st.cursorStack.push(st.cursor);
-      loadSiteRows(sid, false);
-    });
-    st.btnPrev.addEventListener("click", () => {
-      if (st.btnPrev.disabled) return;
-      // Prev は簡易実装：カーソルを捨てて先頭から再検索
-      st.cursorStack.pop();
-      st.cursor = null;
-      loadSiteRows(sid, true);
-    });
-
-    return wrapper;
+    return wrapper;   // ←★ これで buildSitePanel をきちんと閉じる
   }
 
-  // サイトごとの記事×versionを取得して描画
+  // --- 1ページ取得（内部用） ---
+  async function fetchOnePage(baseParams){
+    const url = API_LIST + "?" + new URLSearchParams(baseParams).toString();
+    const res = await fetch(url, { headers: { ...csrfHeader() } });
+    let js = {};
+    try { js = await res.json(); } catch(e){ js = {}; }
+    if (!res.ok || !js.ok) throw new Error(js.error || res.statusText || "取得失敗");
+    return js;
+  }
+
+  // サイトごとの記事×versionを取得して描画（全件取り切る・逐次追記）
   async function loadSiteRows(site_id, first){
     const st = siteState.get(site_id);
     if (!st) return;
 
     if (first === true) {
       st.cursor = null;
-      st.cursorStack.length = 0;
+      // プレースホルダ再表示
+      st.tbodyEl.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">読み込み中…</td></tr>';
     }
 
     const base = formQuery(frm);
     base.site_id = site_id;
-    if (st.cursor) base.cursor = st.cursor;
+    // 1リクエストのページサイズ（サーバ上限200まで）で高速連続フェッチ
+    base.limit = 200;
 
-    const url = API_LIST + "?" + new URLSearchParams(base).toString();
-    const res = await fetch(url, { headers: { ...csrfHeader() } });
-    let js = {};
-    try { js = await res.json(); } catch(e){ js = {}; }
+    let total = 0;
+    let lastAppliedISO = null;
+    let cursor = st.cursor || null;
 
-    if (!res.ok || !js.ok) {
-      st.tbodyEl.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-3">${esc(js.error || res.statusText || "取得失敗")}</td></tr>`;
-      return;
+    // 初回はtbodyを空に
+    st.tbodyEl.innerHTML = "";
+
+    // 逐次取得ループ（キーセットページング）
+    while (true) {
+      const params = { ...base };
+      if (cursor) params.cursor = cursor;
+      let js;
+      try {
+        js = await fetchOnePage(params);
+      } catch (err) {
+        st.tbodyEl.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-3">${esc(String(err))}</td></tr>`;
+        return;
+      }
+      const chunk = Array.isArray(js.rows) ? js.rows.filter(r => r.site_id === site_id) : [];
+      if (chunk.length) {
+        // 逐次追記
+        const html = chunk.map(rowHtml).join("");
+        const temp = document.createElement("tbody");
+        temp.innerHTML = html;
+        while (temp.firstChild) st.tbodyEl.appendChild(temp.firstChild);
+        // クリックハンドラ付与（重複防止フラグ付き）
+        st.tbodyEl.querySelectorAll("tr").forEach(tr => {
+          if (!tr.dataset.bound) {
+            tr.dataset.bound = "1";
+            tr.addEventListener("click", () => openDetail(tr));
+          }
+        });
+        total += chunk.length;
+        if (!lastAppliedISO) lastAppliedISO = chunk[0]?.last_applied_at || null;
+      }
+
+      if (!js.has_more) {
+        cursor = null;
+        break;
+      }
+      cursor = js.next_cursor || null;
+      // UI固まり防止
+      await new Promise(r => requestAnimationFrame(r));
     }
 
-    const rows = Array.isArray(js.rows) ? js.rows.filter(r => r.site_id === site_id) : [];
-    if (!rows.length) {
+    if (total === 0) {
       st.tbodyEl.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">データがありません</td></tr>';
-    } else {
-      st.tbodyEl.innerHTML = rows.map(rowHtml).join("");
-      // 行クリックで明細
-      st.tbodyEl.querySelectorAll("tr").forEach(tr => {
-        tr.addEventListener("click", () => openDetail(tr));
-      });
     }
 
-    // メタ表示更新（サイト名・最終適用）
-    const last = rows[0]; // 並びは last_applied desc
-    if (last && st.metaEl) {
-      st.metaEl.textContent = `最終適用: ${fmtDateTime(last.last_applied_at)} / 件数: ${rows.length.toLocaleString()}`;
-    } else if (st.metaEl) {
-      st.metaEl.textContent = `最終適用: -`;
+    // メタ表示更新
+    if (st.metaEl) {
+      st.metaEl.textContent = `最終適用: ${fmtDateTime(lastAppliedISO)} / 件数: ${total.toLocaleString()}`;
     }
 
-    // ページング制御（サイト単位）
-    st.hasMore = !!js.has_more;
-    st.cursor = st.hasMore ? (js.next_cursor || null) : null;
-    st.btnNext.disabled = !st.hasMore;
-    st.btnPrev.disabled = st.cursorStack.length === 0;
+    st.cursor = null; // 全件取り切り
     st.loaded = true;
   }
 
@@ -288,7 +300,7 @@
     // 1) サーバが sites を返していればそれを使う
     let sites = Array.isArray(js.sites) ? js.sites : null;
 
-    // 2) フォールバック：rows からユニークサイト抽出
+    // 2) rows からユニークサイト抽出のフォールバック
     if (!sites || !sites.length) {
       const rows = Array.isArray(js.rows) ? js.rows : [];
       const map = new Map();
@@ -305,7 +317,7 @@
       return;
     }
 
-    // サイトごとのアコーディオン生成
+    // サイトごとのアコーディオン生成（行は展開時に遅延ロード）
     sites.forEach(s => buildSitePanel(s));
   }
 
