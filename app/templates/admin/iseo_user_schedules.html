@@ -65,10 +65,10 @@
 
   <!-- KPI -->
   <div class="kpis" id="kpis">
-    <div class="kpi"><h3>対象ユーザー数</h3><div class="v" id="k_users">-</div></div>
-    <div class="kpi"><h3>保留記事数（記事単位の合計）</h3><div class="v" id="k_pending">-</div></div>
-    <div class="kpi"><h3>直近24時間の適用リンク数</h3><div class="v" id="k_applied24">-</div></div>
-    <div class="kpi"><h3>直近24時間の処理記事数</h3><div class="v" id="k_processed24">-</div></div>
+    <div class="kpi"><h3>内部SEO対象ユーザー数</h3><div class="v" id="k_users">-</div></div>
+    <div class="kpi"><h3>内部リンク待ちの記事数</h3><div class="v" id="k_pending">-</div></div>
+    <div class="kpi"><h3>これまでに追加された内部リンク数</h3><div class="v" id="k_applied24">-</div></div>
+    <div class="kpi"><h3>これまでにSEO処理した記事数</h3><div class="v" id="k_processed24">-</div></div>
   </div>
 
   <!-- 上部の操作ボタン群は削除：検索と更新のみ -->
@@ -92,7 +92,7 @@
         <th>最終実行</th>
         <th>次回予定</th>
         <th>直近実行の結果</th>
-        <th>直近24時間の実績</th>
+        <th>累計実績</th>
         <th>スケジュール設定</th>
         <th>直近のエラー</th>
         <th>Preview</th>
@@ -166,12 +166,13 @@
     function renderKPIs(list){
       const totalUsers = list.length;
       const sumPending = list.reduce((a,b)=>a + (Number(b.pending||0)||0), 0);
-      const sumApplied24 = list.reduce((a,b)=>a + (Number(b.applied_24h||0)||0), 0);
-      const sumProcessed24 = list.reduce((a,b)=>a + (Number(b.processed_24h||0)||0), 0);
+      // 累計（バックエンドの applied_total / processed_total を合算）
+      const sumApplied = list.reduce((a,b)=>a + (Number(b.applied_total||0)||0), 0);
+      const sumProcessed = list.reduce((a,b)=>a + (Number(b.processed_total||0)||0), 0);
       kUsers.textContent = totalUsers.toLocaleString();
       kPending.textContent = sumPending.toLocaleString();
-      kApplied24.textContent = sumApplied24.toLocaleString();
-      kProcessed24.textContent = sumProcessed24.toLocaleString();
+      kApplied24.textContent = sumApplied.toLocaleString();
+      kProcessed24.textContent = sumProcessed.toLocaleString();
     }
 
     function render() {
@@ -186,7 +187,8 @@
 
       const rows = filtered.map(x => {
         const last = x.last_result || {};
-        const last24 = `適用:${x.applied_24h ?? 0} / 記事:${x.processed_24h ?? 0}`;
+        // 累計表示に変更
+        const lastAll = `適用:${x.applied_total ?? 0} / 記事:${x.processed_total ?? 0}`;
         const err = x.last_error ? `<div class="truncate-1 mono" title="${esc(x.last_error)}">${esc(x.last_error)}</div>` : '<span class="muted">-</span>';
         const enabled = x.is_enabled ? '<span class="chip">ON</span>' : '<span class="muted">OFF</span>';
         const rate = x.rate_limit_per_min ? `${x.rate_limit_per_min}/分` : '-';
@@ -217,7 +219,7 @@
               ${last.status ? ('[' + esc(badgeLabel(last.status)) + '] ') : ''}適用:${last.applied ?? '-'} / 記事:${last.processed_posts ?? '-'}
               ${last.finished_at ? `<div class="muted">${fmtTime(last.finished_at)}</div>` : ''}
             </td>
-            <td class="mono">${last24}</td>
+            <td class="mono">${lastAll}</td>
             <td class="mono">
               間隔:${x.tick_interval_sec ?? '-'} 秒<br>
               1回の処理記事数:${x.budget_per_tick ?? '-'}<br>

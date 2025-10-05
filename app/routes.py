@@ -3067,14 +3067,15 @@ def _get_or_create_user_schedule(uid: int) -> InternalSeoUserSchedule:
 @admin_required_effective
 def admin_iseo_user_schedules_status():
     """
-    一覧テーブル用のJSON。pending件数・直近24hの applied/processed・last_error も返す。
+    一覧テーブル用のJSON。
+    pending件数・全期間累計の applied/processed・last_error を返す。
+    ※ 互換のため applied_24h / processed_24h も当面返す（同値または別集計）。
     """
     from app import db
     from datetime import datetime, timedelta, timezone
     from sqlalchemy import func, text
     from app.models import User, Site, InternalSeoUserSchedule, InternalSeoUserRun
     now_utc = datetime.now(timezone.utc)
-    since_24h = now_utc - timedelta(hours=24)
     # 対象ユーザーは「サイトを1つ以上持つユーザー」を基本にする
     user_rows = (
         db.session.query(
@@ -3111,20 +3112,21 @@ def admin_iseo_user_schedules_status():
             """),
             {"uid": u.user_id}
         ).scalar() or 0
-        # 直近24hの集計
-        agg_24h = (
+        # ✅ 全期間の累計（時間条件を外す）
+        agg_all = (
             db.session.query(
                 func.coalesce(func.sum(InternalSeoUserRun.applied), 0),
                 func.coalesce(func.sum(InternalSeoUserRun.processed_posts), 0),
             )
-            .filter(
-                InternalSeoUserRun.user_id == u.user_id,
-                InternalSeoUserRun.started_at >= since_24h
-            )
+            .filter(InternalSeoUserRun.user_id == u.user_id)
             .one()
         )
-        applied_24h = int(agg_24h[0] or 0)
-        processed_24h = int(agg_24h[1] or 0)
+        applied_total = int(agg_all[0] or 0)
+        processed_total = int(agg_all[1] or 0)
+
+        # 互換：従来の24hキーは当面返す（必要に応じて後で削除）
+        applied_24h = applied_total
+        processed_24h = processed_total
         result.append({
             "user_id": u.user_id,
             "username": u.username,
@@ -3138,6 +3140,10 @@ def admin_iseo_user_schedules_status():
             "rate_limit_per_min": getattr(sch, "rate_limit_per_min", None) if sch else None,
             "last_error": getattr(sch, "last_error", None) if sch else None,
             "pending": int(pending_cnt),
+            # 新：全期間累計
+            "applied_total": applied_total,
+            "processed_total": processed_total,
+            # 旧：後方互換（テンプレ移行中は残す）
             "applied_24h": applied_24h,
             "processed_24h": processed_24h,
             "last_result": {
