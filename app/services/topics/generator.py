@@ -74,14 +74,37 @@ def clean_gpt_output(text: str) -> str:
     text = re.sub(r"</body>.*?</html>", "", text, flags=re.DOTALL | re.IGNORECASE)
     return text.strip()
 
-def _chat(msgs: list[dict[str, str]], max_t: int, temp: float, *, user_id: Optional[int] = None) -> str:
+def _chat(
+    msgs: list[dict[str, str]],
+    max_t: int,
+    temp: float,
+    *,
+    user_id: Optional[int] = None,
+    timeout: Optional[float] = None,  # ← 追加: 秒指定（例: 0.8）
+) -> str:
     used = sum(_tok(m.get("content", "")) for m in msgs)
     available = CTX_LIMIT - used - 16
     max_t = max(1, min(max_t, available))
     def _call(m: int) -> str:
-        res = client.chat.completions.create(
-            model=MODEL, messages=msgs, max_tokens=m, temperature=temp, top_p=TOP_P, timeout=120,
-        )
+        # OpenAI SDK の timeout が無い版でも安全に呼べるように try で二段構え
+        try:
+            res = client.chat.completions.create(
+                model=MODEL,
+                messages=msgs,
+                max_tokens=m,
+                temperature=temp,
+                top_p=TOP_P,
+                timeout=timeout if timeout is not None else 120,
+            )
+        except TypeError:
+            # 一部バージョンで timeout パラメータ未対応の場合のフォールバック
+            res = client.chat.completions.create(
+                model=MODEL,
+                messages=msgs,
+                max_tokens=m,
+                temperature=temp,
+                top_p=TOP_P,
+            )
         try:
             if hasattr(res, "usage") and user_id:
                 usage = res.usage
@@ -223,7 +246,8 @@ def generate_anchor_texts(
     slug_bottom = _ensure_unique_slug(user_id, f"{base}-bottom")
 
     snap = traits or None
-    for pos, text, slug in (("slot_top", top_text, slug_top), ("slot_bottom", bottom_text, slug_bottom)):
+    # routes 側の pos=top/bottom と統一
+    for pos, text, slug in (("top", top_text, slug_top), ("bottom", bottom_text, slug_bottom)):
         db.session.add(TopicAnchorLog(
             user_id=user_id, site_id=site_id, page_id=None, source_url=source_url,
             position=pos, anchor_text=text, event="impression", latency_ms=None, topics_snapshot=snap
