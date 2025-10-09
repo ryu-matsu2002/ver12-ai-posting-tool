@@ -70,29 +70,23 @@ bp = Blueprint("main", __name__)
 # 必要なら app/__init__.py で admin_bp を登録
 admin_bp = Blueprint("admin", __name__)
 
-# === Topic API: token auth helper (login or header token) ===
-def _topic_api_authorized() -> bool:
-    """ログイン or X-Topic-Token / Authorization ヘッダのいずれかで認証を通す"""
+# --- Topic API: ヘッダトークン認証ヘルパ ---
+def _topic_api_authorized() -> tuple[bool, int | None]:
+    """
+    X-Topic-Token を検証して (ok, user_id) を返す。
+    - ログイン不要で叩くための軽量API鍵
+    - 現状は環境変数 or 固定値 'local-test-token' を許可
+    """
     try:
-        if getattr(current_user, "is_authenticated", False):
-            return True
+        token = (request.headers.get("X-Topic-Token") or "").strip()
+        allowed = {t for t in (os.getenv("TOPIC_API_TOKEN"), "local-test-token") if t}
+        if token and token in allowed:
+            uid = int(os.getenv("TOPIC_API_USER_ID", "1"))
+            return True, uid
     except Exception:
-        pass
+        current_app.logger.exception("[topic_api] token parse/verify failed")
+    return False, None
 
-    tok = (
-        request.headers.get("X-Topic-Token")
-        or request.headers.get("X-API-Key")
-        or request.headers.get("Authorization")
-    )
-    if tok and tok.lower().startswith("bearer "):
-        tok = tok[7:]
-
-    secret = (
-        current_app.config.get("TOPIC_API_TOKEN")
-        or os.getenv("TOPIC_API_TOKEN")
-        or "local-test-token"
-    )
-    return bool(tok) and tok == secret
 
 # === Impersonation helpers =====================================================
 # 置き場所：bp/admin_bp を作った直後（最初のルート定義より前）
