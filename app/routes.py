@@ -70,6 +70,30 @@ bp = Blueprint("main", __name__)
 # 必要なら app/__init__.py で admin_bp を登録
 admin_bp = Blueprint("admin", __name__)
 
+# === Topic API: token auth helper (login or header token) ===
+def _topic_api_authorized() -> bool:
+    """ログイン or X-Topic-Token / Authorization ヘッダのいずれかで認証を通す"""
+    try:
+        if getattr(current_user, "is_authenticated", False):
+            return True
+    except Exception:
+        pass
+
+    tok = (
+        request.headers.get("X-Topic-Token")
+        or request.headers.get("X-API-Key")
+        or request.headers.get("Authorization")
+    )
+    if tok and tok.lower().startswith("bearer "):
+        tok = tok[7:]
+
+    secret = (
+        current_app.config.get("TOPIC_API_TOKEN")
+        or os.getenv("TOPIC_API_TOKEN")
+        or "local-test-token"
+    )
+    return bool(tok) and tok == secret
+
 # === Impersonation helpers =====================================================
 # 置き場所：bp/admin_bp を作った直後（最初のルート定義より前）
 
@@ -7683,8 +7707,10 @@ from threading import Thread
 from flask import jsonify
 
 @bp.post("/topic/anchors")
-@login_required
 def topic_anchors():
+    # 通常ログイン or トークンヘッダのどちらか必須
+    if not _topic_api_authorized():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
     """
     入力:
       JSON: {
