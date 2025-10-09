@@ -7735,8 +7735,9 @@ def topic_anchors():
     if auth_uid != site.user_id:
         return jsonify({"ok": False, "error": "forbidden site ownership"}), 403
 
-    # URLが自分のサイト配下か確認
-    if not source_url.startswith(site.url_base or ""):
+    # URLが自分のサイト配下か確認（末尾スラッシュ差異を正規化）
+    site_base = (site.url or "").rstrip("/")
+    if site_base and not source_url.startswith(site_base):
         return jsonify({"ok": False, "error": "invalid source domain"}), 400
 
     # 1) アンカー文のみ生成
