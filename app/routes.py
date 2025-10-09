@@ -7705,11 +7705,33 @@ def external_seo_prepare_captcha_upload():
 # ===========================
 from threading import Thread
 from flask import jsonify
+import json
+import re
+
+# --- Topic API: ヘッダトークン認証ヘルパ ---
+def _topic_api_authorized() -> tuple[bool, int | None]:
+    """
+    X-Topic-Token を検証して (ok, user_id) を返す。
+    - ログイン不要で叩くための軽量API鍵
+    - 実装メモ: 現状は環境変数 or 設定固定での簡易検証。
+      将来的にDBにAPIキーを保存してユーザー毎に発行/失効を行う。
+    """
+    try:
+        token = request.headers.get("X-Topic-Token", "").strip()
+        # ★最小実装：環境変数か固定値 'local-test-token' を許可
+        allowed = {os.getenv("TOPIC_API_TOKEN", ""), "local-test-token"}
+        if token and token in allowed:
+            # テスト用：固定で user_id=14 を返す／本番は token→user_id を逆引き
+            return True, int(os.getenv("TOPIC_API_USER_ID", "14"))
+    except Exception:
+        pass
+    return False, None
 
 @bp.post("/topic/anchors")
 def topic_anchors():
-    # 通常ログイン or トークンヘッダのどちらか必須
-    if not _topic_api_authorized():
+    # トークン認証（未ログイン前提）
+    ok, auth_uid = _topic_api_authorized()
+    if not ok or not auth_uid:
         return jsonify({"ok": False, "error": "unauthorized"}), 401
     """
     入力:
@@ -7743,12 +7765,12 @@ def topic_anchors():
     if not site_id:
         return jsonify({"ok": False, "error": "site_id is required"}), 400
     site = Site.query.get(site_id)
-    if not site or site.user_id != current_user.id:
+    if not site or site.user_id != auth_uid:
         return jsonify({"ok": False, "error": "invalid site_id"}), 400
 
     # 1) アンカー生成（slugs も確保）
     anchors = tg.generate_anchor_texts(
-        user_id=current_user.id,
+        user_id=auth_uid,
         site_id=site_id,
         source_url=source_url,
         current_title=current_title,
@@ -7760,10 +7782,10 @@ def topic_anchors():
     results = {}
     for pos, item in (("top", anchors.top), ("bottom", anchors.bottom)):
         # 既存 slug があれば流用（重複回避）
-        page = TopicPage.query.filter_by(user_id=current_user.id, slug=item.slug).first()
+        page = TopicPage.query.filter_by(user_id=auth_uid, slug=item.slug).first()
         if not page:
             page = TopicPage(
-                user_id=current_user.id,
+                user_id=auth_uid,
                 site_id=site_id,
                 slug=item.slug,
                 title=item.text[:255],
@@ -7789,14 +7811,13 @@ def topic_anchors():
             current_app.logger.exception("[topic_anchors] WP post failed: %s", e)
             # WPに出せなくてもアプリ内リンクは返す（後でクリック時に再投稿する）
 
-        results[pos] = {"text": item.text, "href": url_for(".topic_page", slug=item.slug)}
+        results[pos] = {"text": item.text, "href": url_for(".topic_page_public", slug=item.slug)}
 
     return jsonify(results), 200
 
 
 @bp.get("/topic/<slug>")
-@login_required
-def topic_page(slug: str):
+def topic_page_public(slug: str):
     """
     - 即座に TopicPage.published_url へリダイレクト（瞬時表示）
     - 裏で本文を正式生成し、WPへ差分更新（update_post_content）
@@ -7806,8 +7827,10 @@ def topic_page(slug: str):
     from app.wp_client import update_post_content, post_topic_to_wp
 
     page = TopicPage.query.filter_by(slug=slug).first()
-    if not page or page.user_id != current_user.id:
+    if not page:
         abort(404)
+    # このページのオーナー（未ログインでも動く）
+    owner_uid = page.user_id    
     # 公開URLが無ければ安全に新規投稿を試みる
     if not page.published_url and page.site_id:
         site = db.session.get(Site, page.site_id)
@@ -7830,7 +7853,7 @@ def topic_page(slug: str):
     # クリックログ（latency は後段生成に依存しない）
     try:
         db.session.add(TopicAnchorLog(
-            user_id=current_user.id,
+            user_id=owner_uid,
             site_id=page.site_id,
             page_id=page.id,
             source_url=(page.meta or {}).get("source_url") or "",
@@ -7848,8 +7871,9 @@ def topic_page(slug: str):
             if not p:
                 return
             site = db.session.get(Site, p.site_id) if p.site_id else None
+            _uid = p.user_id
             # 生成に必要な文脈（最小限）。ユーザー特性はV1では未注入→将来拡張。
-            affiliates = tg._get_affiliate_links(current_user.id, p.site_id, limit=2)
+            affiliates = tg._get_affiliate_links(_uid, p.site_id, limit=2)
             filled_prompt = tg.OFFICIAL_TOPIC_PROMPT.format(
                 user_traits="{}",
                 title="",
@@ -7861,7 +7885,7 @@ def topic_page(slug: str):
                 out = tg._chat(
                     [{"role": "system", "content": "出力形式に厳密に従ってください。"},
                      {"role": "user", "content": filled_prompt}],
-                    max_t=2200, temp=0.55, user_id=current_user.id
+                    max_t=2200, temp=0.55, user_id=_uid
                 )
                 # タイトル＆本文抽出
                 title, body = p.title, ""
