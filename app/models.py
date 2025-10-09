@@ -87,6 +87,10 @@ class User(db.Model, UserMixin):
         lazy="dynamic",
         cascade="all, delete-orphan",
     )
+    # ── Topic 自動生成（新規）
+    topic_prompts = db.relationship("TopicPrompt", backref="user", lazy=True, cascade="all, delete-orphan")
+    topic_pages = db.relationship("TopicPage", backref="user", lazy=True, cascade="all, delete-orphan")
+    topic_anchor_logs = db.relationship("TopicAnchorLog", backref="user", lazy=True, cascade="all, delete-orphan")
 
 
 
@@ -855,4 +859,104 @@ class InternalSeoUserRun(db.Model):
     __table_args__ = (
         db.Index("ix_iseo_user_runs_user_started", "user_id", "started_at"),
         db.Index("ix_iseo_user_runs_status", "status"),
+    )
+
+# =======================================================================
+#                           TOPIC: 自動生成モデル
+#   ステップ1（ユーザー情報なし版）の「アンカー生成 → クリック時に瞬間生成」
+#   を実現するための最小セット。以後の拡張（Topics API統合等）も想定。
+# =======================================================================
+
+class TopicPrompt(db.Model):
+    """
+    Topicページ生成の“設計図”。1ユーザー内で複数保持可。
+    - prompt: 生成に使うプロンプト雛形（JSONでも文字列でも可）
+    - site_id: ひも付けるサイト（任意）
+    """
+    __tablename__ = "topic_prompts"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("site.id"), nullable=True, index=True)
+
+    name = db.Column(db.String(120), nullable=False)                 # 画面で識別する名称
+    prompt = db.Column(SA_JSON, nullable=True)                       # 本文/見出し/一覧などの生成指示（構造化）
+    tags = db.Column(db.Text, nullable=True)                         # 補助用のCSVタグ
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+
+    created_at = db.Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    site = db.relationship("Site", backref=db.backref("topic_prompts", lazy="dynamic"))
+
+    __table_args__ = (
+        db.Index("ix_topic_prompts_user_site", "user_id", "site_id"),
+    )
+
+
+class TopicPage(db.Model):
+    """
+    生成済みのTopicページ本体。
+    - クリック瞬間生成後に保存（以降はキャッシュとして即返却）
+    - slug: ルーティング用（/t/<slug>）
+    """
+    __tablename__ = "topic_pages"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("site.id"), nullable=True, index=True)
+    source_prompt_id = db.Column(db.Integer, db.ForeignKey("topic_prompts.id"), nullable=True, index=True)
+
+    slug = db.Column(db.String(191), nullable=False)                 # URLスラッグ（ユーザー内一意）
+    title = db.Column(db.String(255), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    body = db.Column(db.Text, nullable=True)                         # 生成HTML（サニタイズ後）
+
+    topics_json = db.Column(SA_JSON, nullable=True)                  # 生成時点のTopics APIスナップショット（後で使う）
+    meta = db.Column(SA_JSON, nullable=True)                         # 生成メタ（見出し配列/関連記事IDs等）
+    generated_ms = db.Column(db.Integer, nullable=True)              # 生成所要時間(ms)の記録
+
+    created_at = db.Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, index=True)
+    updated_at = db.Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # 参考：将来WP等へ公開した場合のURL
+    published_url = db.Column(db.String(512), nullable=True)
+
+    prompt = db.relationship("TopicPrompt", backref=db.backref("topic_pages", lazy="dynamic"))
+    site = db.relationship("Site", backref=db.backref("topic_pages", lazy="dynamic"))
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "slug", name="uq_topic_pages_user_slug"),
+        db.Index("ix_topic_pages_user_created", "user_id", "created_at"),
+    )
+
+
+class TopicAnchorLog(db.Model):
+    """
+    アンカー表示/クリックの監査ログ。
+    - event: impression / click
+    - click 時は latency_ms に「クリック→生成完了」までの時間を記録
+    """
+    __tablename__ = "topic_anchor_logs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("site.id"), nullable=True, index=True)
+    page_id = db.Column(db.Integer, db.ForeignKey("topic_pages.id"), nullable=True, index=True)
+
+    source_url = db.Column(db.String(512), nullable=False)           # アンカーを表示/クリックした元記事URL
+    position = db.Column(db.String(50), nullable=False)              # 'slot_top' / 'slot_bottom' / 'p:3' 等
+    anchor_text = db.Column(db.String(255), nullable=False)
+
+    event = db.Column(db.String(12), nullable=False, default="impression")  # impression|click
+    latency_ms = db.Column(db.Integer, nullable=True)                # click時のみ
+
+    topics_snapshot = db.Column(SA_JSON, nullable=True)              # 当時のユーザーTopics（将来の分析用）
+    created_at = db.Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, index=True)
+
+    page = db.relationship("TopicPage", backref=db.backref("anchor_logs", lazy="dynamic"))
+    site = db.relationship("Site", backref=db.backref("topic_anchor_logs", lazy="dynamic"))
+
+    __table_args__ = (
+        db.Index("ix_topic_anchor_logs_user_event_created", "user_id", "event", "created_at"),
     )
