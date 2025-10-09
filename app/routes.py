@@ -7832,15 +7832,13 @@ def topic_generate_now():
     from app.services.topics import generator as tg
     from app.wp_client import update_post_content, post_topic_to_wp
     import time
-
-    slug = request.args.get("slug") or ""
-    # URLで渡ってきた slug はデコードして比較する
-    slug = unquote(slug)
+    # URLから来た slug を“生文字列”に正規化（URLデコード）
+    slug = unquote(request.args.get("slug", "") or "")
     pos = request.args.get("pos", "unknown")
 
     page = TopicPage.query.filter_by(slug=slug).first()
     if not page:
-        # 既存データが“エンコード済みslug”で保存されていた救済（移行期対応）
+        # 既存データが“URLエンコードslug”で保存されているケースを救済
         encoded = quote(slug, safe="")
         page = TopicPage.query.filter_by(slug=encoded).first()
     if not page:
