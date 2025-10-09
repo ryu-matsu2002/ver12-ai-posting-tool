@@ -7704,7 +7704,8 @@ def external_seo_prepare_captcha_upload():
 # Topic Anchors / Topic Page
 # ===========================
 from threading import Thread
-from flask import jsonify
+from flask import jsonify, request, url_for, current_app, abort, redirect
+import os
 import json
 import re
 
@@ -7717,14 +7718,15 @@ def _topic_api_authorized() -> tuple[bool, int | None]:
       将来的にDBにAPIキーを保存してユーザー毎に発行/失効を行う。
     """
     try:
-        token = request.headers.get("X-Topic-Token", "").strip()
-        # ★最小実装：環境変数か固定値 'local-test-token' を許可
-        allowed = {os.getenv("TOPIC_API_TOKEN", ""), "local-test-token"}
+        token = (request.headers.get("X-Topic-Token") or "").strip()
+        # ★最小実装：環境変数か固定値 'local-test-token' を許可（空文字は除外）
+        allowed = {t for t in (os.getenv("TOPIC_API_TOKEN"), "local-test-token") if t}
         if token and token in allowed:
             # テスト用：固定で user_id=14 を返す／本番は token→user_id を逆引き
-            return True, int(os.getenv("TOPIC_API_USER_ID", "14"))
+            uid = int(os.getenv("TOPIC_API_USER_ID", "14"))
+            return True, uid
     except Exception:
-        pass
+        current_app.logger.exception("[topic_api] token parse/verify failed")
     return False, None
 
 @bp.post("/topic/anchors")
@@ -7765,27 +7767,36 @@ def topic_anchors():
     if not site_id:
         return jsonify({"ok": False, "error": "site_id is required"}), 400
     site = Site.query.get(site_id)
-    if not site or site.user_id != auth_uid:
+    if not site:
         return jsonify({"ok": False, "error": "invalid site_id"}), 400
+    # トークン利用時でも所有者を特定して使う
+    owner_uid = site.user_id
+    # ★ 追加: 認可（トークン紐づけ想定ユーザーとサイト所有者が一致しない場合は拒否）
+    if auth_uid != owner_uid:
+        return jsonify({"ok": False, "error": "forbidden site ownership"}), 403
 
     # 1) アンカー生成（slugs も確保）
-    anchors = tg.generate_anchor_texts(
-        user_id=auth_uid,
-        site_id=site_id,
-        source_url=source_url,
-        current_title=current_title,
-        page_summary=page_summary,
-        user_traits_json=user_traits,
-    )
+    try:
+        anchors = tg.generate_anchor_texts(
+            user_id=owner_uid,
+            site_id=site_id,
+            source_url=source_url,
+            current_title=current_title,
+            page_summary=page_summary,
+            user_traits_json=user_traits,
+        )
+    except Exception as e:
+        current_app.logger.exception("[topic_anchors] anchor generation failed: %s", e)
+        return jsonify({"ok": False, "error": "anchor generation failed"}), 500
 
     # 2) 骨組みTopicを作成し、WPへ即公開（“準備中…”）
     results = {}
     for pos, item in (("top", anchors.top), ("bottom", anchors.bottom)):
         # 既存 slug があれば流用（重複回避）
-        page = TopicPage.query.filter_by(user_id=auth_uid, slug=item.slug).first()
+        page = TopicPage.query.filter_by(user_id=owner_uid, slug=item.slug).first()
         if not page:
             page = TopicPage(
-                user_id=auth_uid,
+                user_id=owner_uid,
                 site_id=site_id,
                 slug=item.slug,
                 title=item.text[:255],
@@ -7793,8 +7804,15 @@ def topic_anchors():
                 meta={"source_url": source_url, "phase": "skeleton"},
             )
             db.session.add(page)
-            db.session.flush()
-        # WP へ初回投稿（post_id と link を保持）
+            # ★★★ ここで必ずコミットして骨組みを確定 ★★★
+            try:
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                current_app.logger.exception("[topic_anchors] skeleton commit failed: %s", e)
+                return jsonify({"ok": False, "error": "skeleton commit failed"}), 500
+
+        # WP へ初回投稿（post_id と link を保持）—失敗しても骨組みは残す
         try:
             post_id, link = post_topic_to_wp(
                 site=site,
@@ -7808,11 +7826,11 @@ def topic_anchors():
             page.published_url = link
             db.session.commit()
         except Exception as e:
-            current_app.logger.exception("[topic_anchors] WP post failed: %s", e)
+            db.session.rollback()
+            current_app.logger.exception("[topic_anchors] WP post failed (skeleton kept): %s", e)
             # WPに出せなくてもアプリ内リンクは返す（後でクリック時に再投稿する）
 
         results[pos] = {"text": item.text, "href": url_for(".topic_page_public", slug=item.slug)}
-
     return jsonify(results), 200
 
 
