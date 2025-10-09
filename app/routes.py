@@ -7702,6 +7702,7 @@ def external_seo_prepare_captcha_upload():
 # 1) /topic/anchors           → アンカー文生成のみ（WP投稿なし）
 # 2) /topic/build-skeleton    → WPに下書きを作成（必要なときのみ）
 # 3) /topic/generate-now      → クリック瞬間に本文生成・WP更新・URL返却
+from urllib.parse import unquote, quote
 
 # =====================================================
 # 1️⃣ /topic/anchors （アンカー文生成のみ、骨組み投稿は分離）
@@ -7770,7 +7771,9 @@ def topic_build_skeleton():
         return jsonify({"ok": False, "error": "unauthorized"}), 401
 
     data = request.get_json(silent=True) or {}
-    slug = data.get("slug")
+    slug = data.get("slug") or ""
+    # URLエンコードで渡ってきた slug を DB には常に“生文字列”で保存する
+    slug = unquote(slug)
     site_id = data.get("site_id")
     title = data.get("title") or "準備中トピック"
     source_url = data.get("source_url") or ""
@@ -7797,11 +7800,15 @@ def topic_build_skeleton():
         db.session.commit()
 
     # WP下書きを投稿（再投稿でも安全）
+    # 要件: 自動生成されるtopicページのURLには `topic` を付ける（最小実装として slug に `topic-` を前置）
+    wp_slug = slug
+    if not wp_slug.startswith("topic-"):
+        wp_slug = f"topic-{wp_slug}"
     post_id, link = post_topic_to_wp(
         site=site,
         title=page.title,
         html="<p>準備中…</p>",
-        slug=page.slug,
+        slug=wp_slug,
     )
     page.meta = dict(page.meta or {}) | {"wp_post_id": post_id}
     page.published_url = link
@@ -7824,10 +7831,16 @@ def topic_generate_now():
     from app.wp_client import update_post_content, post_topic_to_wp
     import time
 
-    slug = request.args.get("slug")
+    slug = request.args.get("slug") or ""
+    # URLで渡ってきた slug はデコードして比較する
+    slug = unquote(slug)
     pos = request.args.get("pos", "unknown")
 
     page = TopicPage.query.filter_by(slug=slug).first()
+    if not page:
+        # 既存データが“エンコード済みslug”で保存されていた救済（移行期対応）
+        encoded = quote(slug, safe="")
+        page = TopicPage.query.filter_by(slug=encoded).first()
     if not page:
         abort(404)
     site = Site.query.get(page.site_id)
@@ -7876,7 +7889,9 @@ def topic_generate_now():
         if site and post_id:
             update_post_content(site=site, post_id=post_id, new_html=html)
         elif site:
-            pid, link = post_topic_to_wp(site=site, title=page.title, html=html, slug=page.slug)
+            # 要件: URLに `topic` を付ける
+            wp_slug = page.slug if page.slug.startswith("topic-") else f"topic-{page.slug}"
+            pid, link = post_topic_to_wp(site=site, title=page.title, html=html, slug=wp_slug)
             page.meta["wp_post_id"] = pid
             page.published_url = link
             db.session.commit()
