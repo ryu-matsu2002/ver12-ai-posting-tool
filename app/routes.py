@@ -7674,3 +7674,205 @@ def external_seo_prepare_captcha_upload():
         pass
 
     return jsonify({"ok": True, "captcha_url": captcha_url})
+
+
+# ===========================
+# Topic Anchors / Topic Page
+# ===========================
+from threading import Thread
+from flask import jsonify
+
+@bp.post("/topic/anchors")
+@login_required
+def topic_anchors():
+    """
+    入力:
+      JSON: {
+        "site_id": int,
+        "source_url": str,
+        "current_title": str,
+        "page_summary": str,
+        "user_traits": dict|null,
+        "topic_prompt_id": int|null
+      }
+    返却:
+      {"top":{"text": "...", "href": "/topic/<slug_top>"},
+       "bottom":{"text": "...", "href": "/topic/<slug_bottom>"}}
+    挙動:
+      - アンカー生成（表示用）
+      - 骨組みTopicをDB作成→WPへ即公開（content="準備中..."）
+    """
+    from app.models import TopicPage, Site
+    from app.services.topics import generator as tg
+    from app.wp_client import post_topic_to_wp
+
+    data = request.get_json(silent=True) or {}
+    site_id = data.get("site_id")
+    source_url = data.get("source_url") or ""
+    current_title = data.get("current_title") or ""
+    page_summary = data.get("page_summary") or ""
+    user_traits = data.get("user_traits") or None
+    topic_prompt_id = data.get("topic_prompt_id")
+
+    if not site_id:
+        return jsonify({"ok": False, "error": "site_id is required"}), 400
+    site = Site.query.get(site_id)
+    if not site or site.user_id != current_user.id:
+        return jsonify({"ok": False, "error": "invalid site_id"}), 400
+
+    # 1) アンカー生成（slugs も確保）
+    anchors = tg.generate_anchor_texts(
+        user_id=current_user.id,
+        site_id=site_id,
+        source_url=source_url,
+        current_title=current_title,
+        page_summary=page_summary,
+        user_traits_json=user_traits,
+    )
+
+    # 2) 骨組みTopicを作成し、WPへ即公開（“準備中…”）
+    results = {}
+    for pos, item in (("top", anchors.top), ("bottom", anchors.bottom)):
+        # 既存 slug があれば流用（重複回避）
+        page = TopicPage.query.filter_by(user_id=current_user.id, slug=item.slug).first()
+        if not page:
+            page = TopicPage(
+                user_id=current_user.id,
+                site_id=site_id,
+                slug=item.slug,
+                title=item.text[:255],
+                body="準備中…（数秒後に自動で更新されます）",
+                meta={"source_url": source_url, "phase": "skeleton"},
+            )
+            db.session.add(page)
+            db.session.flush()
+        # WP へ初回投稿（post_id と link を保持）
+        try:
+            post_id, link = post_topic_to_wp(
+                site=site,
+                title=page.title,
+                html=tg._topic_to_html(page.title, page.body or ""),
+                slug=page.slug,
+            )
+            meta = dict(page.meta or {})
+            meta["wp_post_id"] = post_id
+            page.meta = meta
+            page.published_url = link
+            db.session.commit()
+        except Exception as e:
+            current_app.logger.exception("[topic_anchors] WP post failed: %s", e)
+            # WPに出せなくてもアプリ内リンクは返す（後でクリック時に再投稿する）
+
+        results[pos] = {"text": item.text, "href": url_for(".topic_page", slug=item.slug)}
+
+    return jsonify(results), 200
+
+
+@bp.get("/topic/<slug>")
+@login_required
+def topic_page(slug: str):
+    """
+    - 即座に TopicPage.published_url へリダイレクト（瞬時表示）
+    - 裏で本文を正式生成し、WPへ差分更新（update_post_content）
+    """
+    from app.models import TopicPage, Site, TopicAnchorLog
+    from app.services.topics import generator as tg
+    from app.wp_client import update_post_content, post_topic_to_wp
+
+    page = TopicPage.query.filter_by(slug=slug).first()
+    if not page or page.user_id != current_user.id:
+        abort(404)
+    # 公開URLが無ければ安全に新規投稿を試みる
+    if not page.published_url and page.site_id:
+        site = db.session.get(Site, page.site_id)
+        if site:
+            try:
+                post_id, link = post_topic_to_wp(
+                    site=site,
+                    title=page.title,
+                    html=tg._topic_to_html(page.title, page.body or ""),
+                    slug=page.slug,
+                )
+                meta = dict(page.meta or {})
+                meta["wp_post_id"] = post_id
+                page.meta = meta
+                page.published_url = link
+                db.session.commit()
+            except Exception as e:
+                current_app.logger.exception("[topic_page] initial post failed: %s", e)
+
+    # クリックログ（latency は後段生成に依存しない）
+    try:
+        db.session.add(TopicAnchorLog(
+            user_id=current_user.id,
+            site_id=page.site_id,
+            page_id=page.id,
+            source_url=(page.meta or {}).get("source_url") or "",
+            position="unknown",
+            anchor_text=page.title,
+            event="click",
+        ))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    def _finalize_in_bg(page_id: int):
+        with current_app.app_context():
+            p = db.session.get(TopicPage, page_id)
+            if not p:
+                return
+            site = db.session.get(Site, p.site_id) if p.site_id else None
+            # 生成に必要な文脈（最小限）。ユーザー特性はV1では未注入→将来拡張。
+            affiliates = tg._get_affiliate_links(current_user.id, p.site_id, limit=2)
+            filled_prompt = tg.OFFICIAL_TOPIC_PROMPT.format(
+                user_traits="{}",
+                title="",
+                summary="",
+                anchor=p.title,
+                affiliates=json.dumps(affiliates, ensure_ascii=False),
+            )
+            try:
+                out = tg._chat(
+                    [{"role": "system", "content": "出力形式に厳密に従ってください。"},
+                     {"role": "user", "content": filled_prompt}],
+                    max_t=2200, temp=0.55, user_id=current_user.id
+                )
+                # タイトル＆本文抽出
+                title, body = p.title, ""
+                m1 = re.search(r"【タイトル】\s*(.+?)\s*【本文】", out, flags=re.DOTALL)
+                m2 = re.search(r"【本文】\s*(.+)$", out, flags=re.DOTALL)
+                if m1:
+                    title = (m1.group(1) or "").strip() or title
+                if m2:
+                    body = (m2.group(1) or "").strip()
+                # アンカー優先でタイトル整合
+                title = p.title
+                # おすすめ挿入（重複回避）
+                if affiliates and "おすすめはこちら" not in body:
+                    a = affiliates[0]
+                    body = f"{body.rstrip()}\n\nおすすめはこちら：{a.get('title','おすすめ')}（{a.get('url','')}）"
+                p.body = body or (p.body or "")
+                p.meta = dict(p.meta or {}) | {"phase": "final"}
+                db.session.commit()
+                # WP 更新（post_id があれば差分更新/無ければ新規）
+                html = tg._topic_to_html(p.title, p.body or "")
+                post_id = (p.meta or {}).get("wp_post_id")
+                if site and post_id:
+                    ok = update_post_content(site=site, post_id=post_id, new_html=html)
+                    if not ok:
+                        current_app.logger.warning("[topic_page] update_post_content returned False")
+                elif site:
+                    pid, link = post_topic_to_wp(site=site, title=p.title, html=html, slug=p.slug)
+                    meta = dict(p.meta or {}); meta["wp_post_id"] = pid
+                    p.meta = meta; p.published_url = link
+                    db.session.commit()
+            except Exception as e:
+                current_app.logger.exception("[topic_page] finalize failed: %s", e)
+
+    # 裏で最終本文生成＆WP更新
+    Thread(target=_finalize_in_bg, args=(page.id,), daemon=True).start()
+
+    # 即座に公開URLへリダイレクト（なければ 204）
+    if page.published_url:
+        return redirect(page.published_url, code=302)
+    return ("", 204)    

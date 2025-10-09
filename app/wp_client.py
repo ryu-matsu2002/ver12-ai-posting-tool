@@ -9,7 +9,7 @@ from flask import current_app
 from .models import Site, Article, Error, InternalSeoConfig
 from datetime import datetime
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from urllib.parse import urljoin
 
 
@@ -364,3 +364,50 @@ def _decorate_html(content: str) -> str:
     content = content.replace('<h3>', '<h3 class="ai-h3">')
     content = content.replace('<p>', '<p class="ai-p">')
     return content
+
+
+# =============================================================
+# 🔸 NEW: Topicページ用の汎用投稿ヘルパ（Article不要）
+# =============================================================
+def post_topic_to_wp(
+    site: Site,
+    title: str,
+    html: str,
+    *,
+    slug: Optional[str] = None,
+    status: str = "publish",
+    category_ids: Optional[List[int]] = None,
+) -> Tuple[int, str]:
+    """
+    Topicページ（汎用HTML断片）を WordPress に投稿し、(post_id, link) を返す。
+    - Article モデルに依存しない軽量版
+    - slug を指定すると WP 側のスラッグに設定（将来の更新取得が容易）
+    - category_ids は WordPress のカテゴリIDの配列（例：[12, 34]）。未指定ならカテゴリ付与なし。
+    """
+    site_url = normalize_url(site.url)
+    url = f"{site_url}/wp-json/wp/v2/posts"
+    headers = _post_headers(site.username, site.app_pass, site_url)
+
+    post_data: Dict[str, Any] = {
+        "title": title,
+        "content": f'<div class="ai-content">{_decorate_html(html)}</div>',
+        "status": status,
+    }
+    if slug:
+        post_data["slug"] = slug
+    # WordPress の REST は categories に「数値IDの配列」を要求
+    if category_ids:
+        post_data["categories"] = category_ids
+
+    resp = requests.post(url, json=post_data, headers=headers, timeout=TIMEOUT)
+    if resp.status_code == 201:
+        data = resp.json()
+        post_id = int(data.get("id"))
+        link = data.get("link") or ""
+        current_app.logger.info("[WP] topic posted: id=%s link=%s", post_id, link)
+        return post_id, link
+    try:
+        body = resp.json()
+    except Exception:
+        body = resp.text
+    raise HTTPError(f"[WP] topic create failed status={resp.status_code} body={str(body)[:200]}")

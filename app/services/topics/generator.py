@@ -341,33 +341,42 @@ def resolve_or_build_by_slug(
 # === WordPress 反映（フック） ===
 def _publish_topic_to_wp(page: TopicPage) -> None:
     """
-    既存のWP投稿ロジックを再利用して「トピックページ」として公開する。
-    - ここでは共通の投稿ヘルパを呼ぶだけにして、詳細は既存のWP側関数へ委譲。
-    - すでに公開済みなら何もしない（published_url があればスキップ）。
+    TopicPage を WordPress に「記事として」公開し、URLとpost_idを保存する。
+    - 既に published_url があればスキップ（多重投稿防止）
+    - post_id はモデル変更なしで meta.wp_post_id に格納
     """
     if page.published_url:
         return
+    if not page.site_id:
+        logging.info("[WP publish] site_id is None, skip.")
+        return
     try:
-        # 既存のWordPress投稿ユーティリティ（あなたの環境に合わせて1行を差し替え）
-        from app.services.blog_post.base_post import post_to_wordpress  # 例：存在するなら
-    except Exception:
-        # 存在しない環境でも落とさない。あとで差し替え可能。
-        logging.info("[WP publish] base_post.post_to_wordpress が見つからないためスキップ")
+        from app.models import Site
+        from app.wp_client import post_topic_to_wp
+    except Exception as e:
+        logging.info(f"[WP publish] import failed, skip: {e}")
         return
 
-    # 投稿用の最小パラメータ
-    site_id = page.site_id
-    title = page.title
-    html_body = _topic_to_html(title, page.body)
+    site = db.session.get(Site, page.site_id)
+    if not site:
+        logging.info("[WP publish] Site not found, skip.")
+        return
 
-    # 実行（実装側の返り値：URL を想定）
+    title = page.title
+    html_body = _topic_to_html(title, page.body or "")
+
     try:
-        published_url = post_to_wordpress(site_id=site_id, title=title, html=html_body, category="topics")
-        if published_url:
-            page.published_url = published_url
-            db.session.commit()
+        # カテゴリを付与したい場合は category_ids=[... ] を渡してください（数値ID）
+        post_id, link = post_topic_to_wp(site=site, title=title, html=html_body, slug=page.slug)
+        # 保存（post_id は meta に入れてモデル変更を回避）
+        meta = dict(page.meta or {})
+        meta["wp_post_id"] = post_id
+        page.meta = meta
+        page.published_url = link
+        db.session.commit()
     except Exception as e:
-        logging.exception(f"[WP publish] post_to_wordpress error: {e}")
+        logging.exception(f"[WP publish] topic post failed: {e}")
+
 
 def _topic_to_html(title: str, body_text: str) -> str:
     """
