@@ -7804,6 +7804,8 @@ def topic_build_skeleton():
     wp_slug = slug
     if not wp_slug.startswith("topic-"):
         wp_slug = f"topic-{wp_slug}"
+    # ➜ 要望: 自動生成URLに「topic」を付ける（最小実装：slugを topic- 前置）
+    wp_slug = slug if slug.startswith("topic-") else f"topic-{slug}"
     post_id, link = post_topic_to_wp(
         site=site,
         title=page.title,
