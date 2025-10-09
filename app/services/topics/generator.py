@@ -169,6 +169,26 @@ OFFICIAL_ANCHOR_PROMPT = (
     '{"top":"…","bottom":"…"}'
 )
 
+def _safe_format_prompt(template: str, **kv) -> str:
+    """
+    JSONなどの波かっこを安全に保持したまま、指定キーだけをformat埋め込みする。
+    手順:
+      1) `{user_traits}` 等、埋め込み対象だけ一旦マーカーに置換
+      2) 残りの `{` `}` を全部エスケープ（`{{` `}}`）
+      3) マーカーを元の `{key}` に戻してから format(**kv)
+    """
+    markers = {k: f"__FMT_MARKER_{k.upper()}__" for k in kv.keys()}
+    tmp = template
+    # 対象キーだけ先にマーカー化
+    for k, m in markers.items():
+        tmp = tmp.replace("{" + k + "}", m)
+    # それ以外の波かっこはエスケープ
+    tmp = tmp.replace("{", "{{").replace("}", "}}")
+    # マーカーをフォーマット用の {key} に戻す
+    for k, m in markers.items():
+        tmp = tmp.replace(m, "{" + k + "}")
+    return tmp.format(**kv)
+
 # === アンカー生成（表示時） ===
 def generate_anchor_texts(
     *, user_id: int, site_id: Optional[int], source_url: str,
@@ -178,7 +198,8 @@ def generate_anchor_texts(
 ) -> AnchorResult:
     traits = user_traits_json or _topics_snapshot_for_user() or {}
     affiliates = _get_affiliate_links(user_id, site_id, limit=2)
-    ap = (anchor_prompt or OFFICIAL_ANCHOR_PROMPT).format(
+    ap = _safe_format_prompt(
+        (anchor_prompt or OFFICIAL_ANCHOR_PROMPT),
         user_traits=json.dumps(traits, ensure_ascii=False),
         title=current_title or "",
         summary=(page_summary or "")[:800],
