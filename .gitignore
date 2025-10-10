@@ -23,3 +23,8 @@ instance/
 credentials/*.json
 credentials/service_account.json
 *.log
+
+# GSC credentials (do not commit)
+app/credentials/*
+!app/credentials/.gitkeep
+
