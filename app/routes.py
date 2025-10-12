@@ -6623,7 +6623,7 @@ def submit_captcha():
     from app.enums import BlogType
     from app.utils.captcha_dataset_utils import save_captcha_label_pair
     from app import db
-    from flask import jsonify, session, request
+    from flask import jsonify, session, request, current_app
     import logging, contextlib, asyncio
     import time
 
@@ -6859,19 +6859,23 @@ def submit_captcha():
         
 
     finally:
-        # ハンドオフ中はセッション・一時保存を維持する（人手操作で同一セッションを使うため）
-        if not keep_pw_session:
+        # ハンドオフ中は何も片付けない（同一セッションで人手操作を続行するため）
+        if keep_pw_session:
+            current_app.logger.info("[cleanup] handoff in progress -> keep session alive (sid=%s)", session_id)
+        else:
+            current_app.logger.info("[cleanup] closing pw session & clearing temp keys (sid=%s)", session_id)
             with contextlib.suppress(Exception):
                 pwctl.close_session(session_id)
             with contextlib.suppress(Exception):
                 pw_clear(session_id)
-            # メールトークンも、ハンドオフ継続時は即解放しない
+            # メールトークンはハンドオフでない通常経路のみ解放
             if token:
                 release(token)
-        # 進捗オブジェクトは残しつつ、一時キーだけ掃除
-        for key in list(session.keys()):
-            if key.startswith("captcha_") and key != "captcha_status":
-                session.pop(key)
+            # 進捗オブジェクト(captcha_status)は残しつつ、一時キー(captcha_*)を掃除
+            for key in list(session.keys()):
+                if key.startswith("captcha_") and key != "captcha_status":
+                    session.pop(key)
+
 
 @bp.route("/ld/open_create_ui", methods=["POST"])
 @login_required
