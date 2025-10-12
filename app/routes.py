@@ -6876,6 +6876,143 @@ def submit_captcha():
                 if key.startswith("captcha_") and key != "captcha_status":
                     session.pop(key)
 
+# ====== /handoff_finalize ======
+@bp.route("/handoff_finalize", methods=["POST"])
+@login_required
+def handoff_finalize():
+    """
+    ユーザーが /member/blog/create で手動作成を終えたあとに呼ぶ。
+    既存の Playwright セッションでダッシュボードから blog_id / api_key を回収して DB に保存する。
+    """
+    from flask import jsonify, session, request, current_app
+    from app.models import Site, ExternalBlogAccount
+    from app.enums import BlogType
+    from app import db
+    import contextlib
+
+    site_id = request.form.get("site_id", type=int) or (session.get("captcha_status") or {}).get("site_id")
+    account_id = request.form.get("account_id", type=int) or (session.get("captcha_status") or {}).get("account_id")
+    session_id = session.get("captcha_session_id") or (session.get("captcha_status") or {}).get("handoff", {}).get("session_id")
+    # handoff_ready の時点では session["captcha_session_id"] を保持している前提
+    if not session_id:
+        # 念のため DB 側から拾う（あれば）
+        acct = ExternalBlogAccount.query.get(account_id) if account_id else None
+        if acct and getattr(acct, "captcha_session_id", None):
+            session_id = acct.captcha_session_id
+
+    if not all([site_id, account_id, session_id]):
+        return jsonify({"status": "error", "message": "handoff セッション情報が不足しています"}), 400
+
+    site = Site.query.get(site_id)
+    acct = ExternalBlogAccount.query.get(account_id)
+    if not site or not acct or acct.site_id != site_id:
+        return jsonify({"status": "error", "message": "対象が不正です"}), 400
+    if (not current_user.is_admin) and (site.user_id != current_user.id):
+        return jsonify({"status": "error", "message": "権限がありません"}), 403
+
+    # ここから回収
+    cred = pw_get(session_id) or {}
+    email = cred.get("email") or session.get("captcha_email")
+    password = cred.get("password") or session.get("captcha_password")
+    livedoor_id = cred.get("livedoor_id") or session.get("captcha_nickname")
+    desired_blog_id = cred.get("desired_blog_id") or session.get("captcha_desired_blog_id") or livedoor_id
+    token = cred.get("token") or session.get("captcha_token")
+
+    if not (email and password and livedoor_id):
+        return jsonify({"status": "error", "message": "資格情報が不足しています"}), 400
+
+    # 既存セッションからページを取得（落ちてたら revive）
+    page = pwctl.run(pwctl.get_page(session_id)) or pwctl.run(pwctl.revive(session_id))
+    if not page:
+        return jsonify({"status": "error", "message": "Playwright セッションが見つかりません"}), 500
+
+    # ここで blog_id / api_key を回収
+    result = pwctl.run(recover_atompub_key(
+        page,
+        livedoor_id=livedoor_id,
+        nickname=(email.split("@")[0] if email else livedoor_id),
+        email=email,
+        password=password,
+        site=site,
+        desired_blog_id=desired_blog_id,
+    ))
+
+    if not result or not result.get("success"):
+        return jsonify({
+            "status": "handoff_error",
+            "message": result.get("error", "APIキーの回収に失敗しました"),
+            "site_id": site_id,
+            "account_id": account_id,
+        }), 200
+
+    new_blog_id  = (result.get("blog_id") or "").strip() or None
+    new_api_key  = (result.get("api_key") or "").strip() or None
+    new_endpoint = (result.get("endpoint") or "").strip() or None
+
+    # 重複 blog_id があれば既存を優先
+    dup = None
+    if new_blog_id:
+        dup = (ExternalBlogAccount.query
+               .filter(
+                   ExternalBlogAccount.site_id == site_id,
+                   ExternalBlogAccount.blog_type == (acct.blog_type or BlogType.LIVEDOOR),
+                   ExternalBlogAccount.livedoor_blog_id == new_blog_id,
+                   ExternalBlogAccount.id != account_id
+               )
+               .first())
+    target = dup or acct
+
+    if hasattr(target, "is_captcha_completed"):
+        target.is_captcha_completed = True
+    if new_blog_id and hasattr(target, "livedoor_blog_id"):
+        target.livedoor_blog_id = new_blog_id
+    if new_blog_id and hasattr(target, "username"):
+        if not target.username or target.username.startswith("u-"):
+            target.username = new_blog_id
+    if new_endpoint and hasattr(target, "atompub_endpoint"):
+        with contextlib.suppress(Exception):
+            target.atompub_endpoint = new_endpoint
+    if new_api_key and hasattr(target, "atompub_key_enc"):
+        from app.services.blog_signup.crypto_utils import encrypt
+        with contextlib.suppress(Exception):
+            target.atompub_key_enc = encrypt(new_api_key)
+        if hasattr(target, "api_post_enabled"):
+            target.api_post_enabled = True
+
+    db.session.commit()
+
+    got_api = bool(new_api_key or getattr(target, "atompub_key_enc", None))
+    resolved_account_id = target.id
+    session["captcha_status"] = {
+        "captcha_sent": True,
+        "email_verified": True,
+        "account_created": True,
+        "api_key_received": got_api,
+        "step": "API取得完了",
+        "site_id": site_id,
+        "account_id": resolved_account_id,
+    }
+
+    # handoff 完了したので後片付け
+    with contextlib.suppress(Exception):
+        pwctl.close_session(session_id)
+    with contextlib.suppress(Exception):
+        pw_clear(session_id)
+    if token:
+        release(token)
+    for key in list(session.keys()):
+        if key.startswith("captcha_") and key != "captcha_status":
+            session.pop(key)
+
+    return jsonify({
+        "status": "captcha_success",
+        "step": session["captcha_status"]["step"],
+        "site_id": site_id,
+        "account_id": resolved_account_id,
+        "api_key_received": got_api,
+        "next_cta": "ready_to_post" if got_api else "captcha_done"
+    }), 200
+
 
 @bp.route("/ld/open_create_ui", methods=["POST"])
 @login_required
