@@ -41,6 +41,7 @@ from app.utils.locks import pg_advisory_lock
 
 # ビルド識別（デプロイ反映チェック用）
 BUILD_TAG = "2025-09-12 livedoor-create-guarded + handoff-tab"
+HANDOFF_MODE = True  # ✅ 手動ハンドオフ中は自動作成ロジックを無効化
 logger.info(f"[LD-Recover] loaded build {BUILD_TAG}")
 
 # 直列化・バックオフ・成功検知タイムアウト
@@ -1113,6 +1114,9 @@ async def _extract_public_url(page) -> str | None:
 
 async def recover_atompub_key(page, livedoor_id: str | None, nickname: str, email: str, password: str, site,
                               desired_blog_id: str | None = None) -> dict:
+    # ✅ ハンドオフ運用中はここを使わず、routes側の open_create_tab_for_handoff で別タブに渡す
+    if HANDOFF_MODE:
+        return {"success": False, "error": "recover_disabled_in_handoff_mode"}
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     logger.info("[LD-Recover] args: livedoor_id=%s desired_blog_id=%s email=%s", livedoor_id, desired_blog_id, email)
 

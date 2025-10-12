@@ -47,6 +47,9 @@ from app.forms import EditKeywordForm
 from .forms import KeywordForm
 from app.image_utils import _is_image_url
 
+from app.services.blog_signup.livedoor_signup import generate_livedoor_id_candidates
+from app.services.blog_signup.livedoor_atompub_recover import open_create_tab_for_handoff
+
 # ==== 外部SEO: 簡易ステータスストア（トークン→状態） ====
 EXTSEO_STATUS = {}  # { token: { step, progress, captcha_url, site_id, account_id, ... } }
 
@@ -6551,7 +6554,8 @@ def prepare_captcha():
 
     # 仮登録データ（メール & 候補 blog_id）
     email, token = create_inbox()
-    livedoor_id  = generate_safe_id()
+    # 英字開始・3–20・英数＋_ 準拠の候補ロジックを採用
+    livedoor_id  = generate_livedoor_id_candidates(site)[0]
     password     = generate_safe_password()
 
     try:
@@ -6800,30 +6804,45 @@ def submit_captcha():
         if not nickname:
             nickname = email.split("@")[0]  # フォールバック
 
-        result = pwctl.run(recover_atompub_key(
-            page,
-            livedoor_id=user_id,
-            nickname=nickname or (email.split("@")[0] if email else None),
-            email=email,
-            password=password,
-            site=site,
-            desired_blog_id=desired_blog_id,
-        ))
-
-
-        if not result or not result.get("success"):
+        # ✅ 自動作成はやめて **手動ハンドオフ** に切替
+        # 同一セッションの新タブで /member/blog/create を開くだけ（送信はしない）
+        result = open_create_tab_for_handoff(
+            session_id,
+            site,
+            prefill_title=True,   # 生成済みタイトルを入力欄にプリフィル
+        )
+        if not result or not result.get("ok"):
             with contextlib.suppress(Exception):
                 pwctl.close_session(session_id)
             return jsonify({
-                "status": "recreate_required",
-                "message": result.get("error", "APIキーの回収に失敗しました"),
+                "status": "handoff_error",
+                "message": result.get("error", "handoff_failed"),
                 "site_id": site_id,
+                "account_id": account_id
             }), 200
 
-        new_blog_id  = (result.get("blog_id") or "").strip() or None
-        new_api_key  = (result.get("api_key") or "").strip() or None
-        new_endpoint = (result.get("endpoint") or "").strip() or None
-
+        # フロントはこのURLを新規タブで開く（ユーザーが「ブログを作成する」を手動クリック）
+        handoff = {
+            "url": result.get("url"),
+            "prefilled_title": result.get("prefilled_title"),
+            "has_blog_id_box": result.get("has_blog_id_box"),
+        }
+        session["captcha_status"] = {
+            "captcha_sent": True,
+            "email_verified": True,
+            "account_created": False,
+            "api_key_received": False,
+            "step": "handoff_ready",
+            "site_id": site_id,
+            "account_id": account_id,
+        }
+        return jsonify({
+            "status": "handoff_ready",
+            "site_id": site_id,
+            "account_id": account_id,
+            "handoff": handoff,
+            "next_cta": "open_create_ui"
+        }), 200
         # 重複 blog_id があれば既存を優先
         dup = None
         if new_blog_id:
@@ -6887,7 +6906,23 @@ def submit_captcha():
         if token:
             release(token)   # ← ここを追加！        
 
-
+@bp.route("/ld/open_create_ui", methods=["POST"])
+@login_required
+def open_create_ui():
+    """任意タイミングで“別タブで作成画面”を開きたい場合の軽量API（UIボタン用）"""
+    from flask import request, jsonify, session as flask_session
+    from app.models import Site
+    session_id = request.form.get("session_id") or flask_session.get("captcha_session_id")
+    site_id    = request.form.get("site_id")    or flask_session.get("captcha_site_id")
+    if not session_id or not site_id:
+        return jsonify({"ok": False, "error": "missing_params"}), 400
+    site = Site.query.get(int(site_id))
+    if not site:
+        return jsonify({"ok": False, "error": "site_not_found"}), 404
+    result = open_create_tab_for_handoff(session_id, site, prefill_title=True)
+    if not result or not result.get("ok"):
+        return jsonify({"ok": False, "error": result.get("error", "handoff_failed")}), 500
+    return jsonify({"ok": True, **result}), 200
 
 @bp.route("/captcha_status", methods=["GET"])
 @login_required
@@ -7537,7 +7572,8 @@ def external_seo_bootstrap():
 
     # ▼ 従来と同じ規則で生成（＝VPS時代と完全一致）
     email, inbox_token = create_inbox()                 # 既存GWのまま
-    livedoor_id = generate_safe_id()
+    # 英字開始・3–20・英数＋_ 準拠の候補ロジックを採用
+    livedoor_id = generate_livedoor_id_candidates(site)[0]
     password    = generate_safe_password()
     try:
         blog_title = ld_craft_blog_title(site)          # タイトル規則を完全踏襲
