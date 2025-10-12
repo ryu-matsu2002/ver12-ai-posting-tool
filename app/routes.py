@@ -6630,7 +6630,8 @@ def submit_captcha():
     logger = logging.getLogger(__name__)
     # ハンドオフ中は後片付けを抑止するフラグ
     keep_pw_session = False
-
+    # finally で参照するので先に用意しておく（未定義参照対策）
+    token = None
     captcha_text = request.form.get("captcha_text")
     if not captcha_text:
         return jsonify({"status": "error", "message": "CAPTCHA文字列が入力されていません"}), 400
@@ -6831,6 +6832,13 @@ def submit_captcha():
         }
         # ここからは人手作業にバトンを渡すので、セッションは維持する
         keep_pw_session = True
+        current_app.logger.info(
+            "[handoff] ready sid=%s url=%s has_id_box=%s title=%s",
+            session_id,
+            handoff.get("url"),
+            handoff.get("has_blog_id_box"),
+            handoff.get("prefilled_title"),
+        )
         session["captcha_status"] = {
             "captcha_sent": True,
             "email_verified": True,
@@ -6857,12 +6865,13 @@ def submit_captcha():
                 pwctl.close_session(session_id)
             with contextlib.suppress(Exception):
                 pw_clear(session_id)
+            # メールトークンも、ハンドオフ継続時は即解放しない
+            if token:
+                release(token)
+        # 進捗オブジェクトは残しつつ、一時キーだけ掃除
         for key in list(session.keys()):
             if key.startswith("captcha_") and key != "captcha_status":
                 session.pop(key)
-        # メールトークンも、ハンドオフ継続時は即解放しない
-        if token and not keep_pw_session:
-            release(token)      
 
 @bp.route("/ld/open_create_ui", methods=["POST"])
 @login_required
