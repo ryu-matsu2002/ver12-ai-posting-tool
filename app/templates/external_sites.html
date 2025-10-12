@@ -296,6 +296,26 @@
     padding: 10px 12px;
     font-size: .9rem;
   }
+  /* ===== 手動API入力UI（コンパクトなダークフォーム） ===== */
+  .man-row{ display:grid; grid-template-columns: 120px 1fr; gap:10px; align-items:center; }
+  .man-row + .man-row{ margin-top:10px; }
+  .man-label{ font-size:.85rem; opacity:.9; white-space:nowrap; }
+  .man-input{
+    width:100%; border-radius:10px; border:1px solid var(--edge);
+    background: rgba(255,255,255,.10); color:var(--txt);
+    padding:10px 12px; outline: none; font-size:.92rem;
+  }
+  .man-help{ font-size:.78rem; opacity:.75; margin-top:6px; }
+  .man-actions{ display:flex; gap:10px; margin-top:12px; flex-wrap:wrap; }
+  .status-badge{
+    display:inline-flex; align-items:center; gap:6px; padding:3px 8px;
+    border-radius:999px; font-size:.78rem; border:1px solid var(--edge);
+    background: rgba(0,0,0,.20); color:#fff;
+  }
+  .status-ok{ background:#14532D; }     /* 深緑 */
+  .status-ng{ background:#7F1D1D; }     /* 深赤 */
+  .key-mask{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
 
   /* === 追加: ブログ追加ボタンの無効時をグレー化＆1行固定 === */
   .btn, .btn-outline{ white-space: nowrap; }              /* ボタンの改行禁止 */
@@ -519,6 +539,62 @@
                           <div>総記事数: <b>{{ acc.stat_total|default(0) }}</b></div>
                           <div><a class="underline" href="{{ url_for('main.external_accounts') }}?site_id={{ s.id }}">記事一覧</a></div>
                         </div>
+                        {# ====== D: 手動API保存UI（Livedoor） ====== #}
+                        {% set _rawkey = acc.api_key or acc.atompub_key or '' %}
+                        {% set _mask = _rawkey and ('••••' ~ (_rawkey[-4:] if _rawkey|length >= 4 else _rawkey)) or '' %}
+                        <div class="mt-4 p-3 rounded-lg" style="background: rgba(0,0,0,.14); border:1px solid var(--edge)">
+                          <div class="flex items-center justify-between mb-2">
+                            <div class="font-bold text-sm">API手動設定</div>
+                            <div>
+                              <span id="ld-conn-{{ acc.id }}" class="status-badge {{ 'status-ok' if acc.api_post_enabled else 'status-ng' if acc.api_post_enabled is not none else '' }}">
+                                {% if acc.api_post_enabled is none %}未テスト{% elif acc.api_post_enabled %}接続OK{% else %}未接続{% endif %}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div class="man-row">
+                            <label class="man-label" for="ld-blogid-{{ acc.id }}">ブログID</label>
+                            <input id="ld-blogid-{{ acc.id }}" class="man-input" type="text"
+                                   placeholder="例: my_blog_123"
+                                   value="{{ acc.livedoor_blog_id or '' }}"
+                                   autocomplete="off"
+                                   pattern="^[a-z0-9_]{3,20}$"
+                                   title="半角英数字とアンダーバーのみ、3〜20文字">
+                          </div>
+
+                          <div class="man-row">
+                            <label class="man-label" for="ld-endpoint-{{ acc.id }}">エンドポイント</label>
+                            <input id="ld-endpoint-{{ acc.id }}" class="man-input" type="url"
+                                   placeholder="https://livedoor.blogcms.jp/atompub"
+                                   value="{{ acc.atompub_endpoint or '' }}"
+                                   autocomplete="off">
+                          </div>
+
+                          <div class="man-row">
+                              <label class="man-label" for="ld-blogid-{{ acc.id }}">ブログID</label>
+                              <input id="ld-blogid-{{ acc.id }}" class="man-input" type="text"
+                                     placeholder="例: my_blog_123"
+                                     value="{{ acc.livedoor_blog_id or '' }}"
+                                     autocomplete="off"
+                                     pattern="^[a-z0-9_]{3,20}$"
+                                     title="半角英数字とアンダーバーのみ、3〜20文字">
+                            </div>
+
+                          <div class="man-actions">
+                            <button type="button" class="btn btn-green"
+                                    data-site-id="{{ s.id }}" data-account-id="{{ acc.id }}"
+                                    onclick="saveLivedoorCreds(this)">保存</button>
+                            <button type="button" class="btn btn-outline"
+                                    data-site-id="{{ s.id }}" data-account-id="{{ acc.id }}"
+                                    onclick="testLivedoorCreds(this)">接続テスト</button>
+                            <span class="ml-auto text-xs opacity-90 key-mask">
+                              保存済みキー: <span id="ld-keymask-{{ acc.id }}">{{ _mask or '—' }}</span>
+                            </span>
+                          </div>
+                          <div class="man-help">
+                            ※ ブログIDは半角英数字とアンダーバー（3〜20文字）／ エンドポイントは <code>/atompub</code> まででOK
+                          </div>
+                        </div>
 
                         <div class="mt-3" id="actionArea-acc-{{ acc.id }}">
                           {% if not acc.api_key %}
@@ -654,6 +730,59 @@
                             <div>総記事数: <b>{{ acc.stat_total|default(0) }}</b></div>
                             <div><a class="underline" href="{{ url_for('main.external_accounts') }}?site_id={{ s.id }}">記事一覧</a></div>
                           </div>
+                          {# ====== D: 手動API保存UI（テンプレ側にも同様に） ====== #}
+                          {% set _rawkey = acc.api_key or acc.atompub_key or '' %}
+                          {% set _mask = _rawkey and ('••••' ~ (_rawkey[-4:] if _rawkey|length >= 4 else _rawkey)) or '' %}
+                          <div class="mt-4 p-3 rounded-lg" style="background: rgba(0,0,0,.14); border:1px solid var(--edge)">
+                            <div class="flex items-center justify-between mb-2">
+                              <div class="font-bold text-sm">API手動設定</div>
+                              <div>
+                                <span id="ld-conn-{{ acc.id }}" class="status-badge {{ 'status-ok' if acc.api_post_enabled else 'status-ng' if acc.api_post_enabled is not none else '' }}">
+                                  {% if acc.api_post_enabled is none %}未テスト{% elif acc.api_post_enabled %}接続OK{% else %}未接続{% endif %}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div class="man-row">
+                              <label class="man-label" for="ld-blogid-{{ acc.id }}">ブログID</label>
+                              <input id="ld-blogid-{{ acc.id }}" class="man-input" type="text"
+                                     placeholder="例: my_blog_123"
+                                     value="{{ acc.livedoor_blog_id or '' }}"
+                                     autocomplete="off"
+                                     pattern="^[a-z0-9_]{3,20}$"
+                                     title="半角英数字とアンダーバーのみ、3〜20文字">
+                            </div>
+
+                            <div class="man-row">
+                              <label class="man-label" for="ld-endpoint-{{ acc.id }}">エンドポイント</label>
+                              <input id="ld-endpoint-{{ acc.id }}" class="man-input" type="url"
+                                     placeholder="https://livedoor.blogcms.jp/atompub"
+                                     value="{{ acc.atompub_endpoint or '' }}"
+                                     autocomplete="off">
+                            </div>
+
+                            <div class="man-row">
+                              <label class="man-label" for="ld-apikey-{{ acc.id }}">APIキー</label>
+                              <input id="ld-apikey-{{ acc.id }}" class="man-input" type="password"
+                                     placeholder="貼り付けて保存（保存後はマスク表示）"
+                                     autocomplete="off">
+                            </div>
+
+                            <div class="man-actions">
+                              <button type="button" class="btn btn-green"
+                                      data-site-id="{{ s.id }}" data-account-id="{{ acc.id }}"
+                                      onclick="saveLivedoorCreds(this)">保存</button>
+                              <button type="button" class="btn btn-outline"
+                                      data-site-id="{{ s.id }}" data-account-id="{{ acc.id }}"
+                                      onclick="testLivedoorCreds(this)">接続テスト</button>
+                              <span class="ml-auto text-xs opacity-90 key-mask">
+                                保存済みキー: <span id="ld-keymask-{{ acc.id }}">{{ _mask or '—' }}</span>
+                              </span>
+                            </div>
+                            <div class="man-help">
+                              ※ ブログIDは半角英数字とアンダーバー（3〜20文字）／ エンドポイントは <code>/atompub</code> まででOK
+                            </div>
+                          </div>
 
                           <div class="mt-3" id="actionArea-acc-{{ acc.id }}">
                             {% if not acc.api_key %}
@@ -779,6 +908,20 @@
 
 {% block scripts %}
 <script>
+  /* === エンドポイント正規化（http(s)付与、末尾を /atompub に統一、末尾スラ削除） === */
+  function normalizeAtomPubEndpoint(raw){
+    let v = String(raw||'').trim();
+    if(!v) return v;
+    if(!/^https?:\/\//i.test(v)){ v = 'https://' + v; }
+    try{
+      const u = new URL(v);
+      let p = (u.pathname || '/').replace(/\/{2,}/g,'/');
+      if(!/\/atompub\/?$/i.test(p)){ p = p.replace(/\/+$/,'') + '/atompub'; }
+      p = p.replace(/\/+$/,''); // 末尾スラ削除
+      u.pathname = p;
+      return u.toString();
+    }catch(_){ return v; }
+  }
   /* ================== 方式A: ローカル・ヘルパー設定 ================== */
   const SIGNUP_VIA_CLIENT_FLAG = false;
   const HELPER_ORIGIN = 'https://127.0.0.1:17653';
@@ -1491,6 +1634,14 @@ function showCaptchaModal(url){
     initSorting();
     // タブ閉じ/遷移時に握りっぱなし解放
     window.addEventListener('beforeunload', ()=>{ navigator.sendBeacon && navigator.sendBeacon('/external-seo/end'); });
+    // エンドポイント欄は blur で正規化（動的クローンにも対応）
+    const onBlurNormalize = (e)=>{
+      if(!(e.target && typeof e.target.id === 'string')) return;
+      if(!/^ld-endpoint-\d+$/.test(e.target.id)) return;
+      const v = normalizeAtomPubEndpoint(e.target.value);
+      if(v && v !== e.target.value) e.target.value = v;
+    };
+    document.addEventListener('blur', onBlurNormalize, true);
   });
 
   // 外部SEO同時実行制御
@@ -1548,6 +1699,80 @@ function showCaptchaModal(url){
     }catch(e){ console.warn("release失敗", e); }
     sessionStorage.removeItem("extseoToken");
   }
+  /* ================== D: 手動API保存 & 接続テスト ================== */
+  function _last4(s){ if(!s) return ''; const t=String(s); return t.slice(-4); }
+  function _maskKey(raw){ if(!raw) return '—'; const last=_last4(raw); return '••••' + last; }
 
+  async function saveLivedoorCreds(btn){
+    const aid = btn.dataset.accountId, sid = btn.dataset.siteId;
+    if(!aid || !sid) return;
+    const blog   = (document.getElementById(`ld-blogid-${aid}`)?.value || '').trim();
+    let   ep     = (document.getElementById(`ld-endpoint-${aid}`)?.value || '').trim();
+    const apiKey = (document.getElementById(`ld-apikey-${aid}`)?.value || '').trim();
+
+    // 簡易クライアント検証（サーバでも必ず検証する）
+    if(!blog || !/^[a-z0-9_]{3,20}$/.test(blog)){ showToast('ブログIDが不正です（半角英数字とアンダーバー 3〜20文字）','error'); return; }
+    if(!ep){ showToast('エンドポイントを入力してください','error'); return; }
+    // 正規化（UIにも反映）
+    ep = normalizeAtomPubEndpoint(ep);
+    const epEl = document.getElementById(`ld-endpoint-${aid}`); if(epEl) epEl.value = ep;
+
+    btn.setAttribute('aria-busy','true'); btn.disabled = true;
+    try{
+      const body = new URLSearchParams();
+      body.append('site_id', sid);
+      body.append('account_id', aid);
+      body.append('blog_id', blog);
+      body.append('endpoint', ep);
+      body.append('api_key', apiKey);
+      const r = await fetch('/external/livedoor/credentials/save', {
+        method: 'POST', headers: {'Content-Type':'application/x-www-form-urlencoded'},
+        body, credentials: 'same-origin'
+      });
+      const js = await r.json().catch(()=>({ ok:false, error:'保存APIが不正な応答を返しました' }));
+      if(!js.ok){ throw new Error(js.error || '保存に失敗しました'); }
+      // 表示更新（キーは再表示しない方針。送信値の末尾4文字だけ表示）
+      const maskEl = document.getElementById(`ld-keymask-${aid}`);
+      if(maskEl){ maskEl.textContent = js.masked_key || _maskKey(apiKey); }
+      // 新しいキーは入力欄から消す
+      const keyEl = document.getElementById(`ld-apikey-${aid}`); if(keyEl) keyEl.value='';
+      // 接続状態は未テストに戻す/維持する（API側の応答に合わせて）
+      const st = document.getElementById(`ld-conn-${aid}`);
+      if(st && js.status==='unknown'){ st.textContent='未テスト'; st.classList.remove('status-ok','status-ng'); }
+      showToast('保存しました','success');
+    }catch(e){
+      showToast(e.message || '保存に失敗しました','error');
+    }finally{
+      btn.removeAttribute('aria-busy'); btn.disabled = false;
+    }
+  }
+
+  async function testLivedoorCreds(btn){
+    const aid = btn.dataset.accountId, sid = btn.dataset.siteId;
+    if(!aid || !sid) return;
+    btn.setAttribute('aria-busy','true'); btn.disabled = true;
+    try{
+      const body = new URLSearchParams();
+      body.append('site_id', sid);
+      body.append('account_id', aid);
+      const r = await fetch('/external/livedoor/credentials/test', {
+        method: 'POST', headers: {'Content-Type':'application/x-www-form-urlencoded'},
+        body, credentials: 'same-origin'
+      });
+      const js = await r.json().catch(()=>({ ok:false, status:'error', detail:'テストAPIが不正な応答を返しました' }));
+      const st = document.getElementById(`ld-conn-${aid}`);
+      if(js.ok){
+        if(st){ st.textContent='接続OK'; st.classList.add('status-ok'); st.classList.remove('status-ng'); }
+        showToast('接続OK','success');
+      }else{
+        if(st){ st.textContent='未接続'; st.classList.add('status-ng'); st.classList.remove('status-ok'); }
+        showToast(js.detail || '接続できませんでした','error');
+      }
+    }catch(e){
+      showToast(e.message || '接続テストでエラー','error');
+    }finally{
+      btn.removeAttribute('aria-busy'); btn.disabled = false;
+    }
+  }
 </script>
 {% endblock %}

@@ -16,7 +16,7 @@ import os
 import re as _re
 import random, string
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 from flask import Blueprint, render_template, redirect, url_for, flash
 from app import db
@@ -46,34 +46,55 @@ except Exception:
     def unidecode(x): return x
 
 def _slugify_ascii(s: str) -> str:
+    """
+    既存のスラッグ化（ハイフン）→ Livedoor ID 規約に合う最小限の正規化に変更。
+    規約: 3〜20文字、先頭は英字、半角英数字とアンダーバーのみ。
+    """
     if not s:
         s = "blog"
     s = unidecode(str(s)).lower()
     s = s.replace("&", " and ")
-    s = _re.sub(r"[^a-z0-9]+", "-", s)
-    s = _re.sub(r"-{2,}", "-", s).strip("-")
-    if s and s[0].isdigit():
-        s = "blog-" + s
-    if not s:
-        s = "blog"
+    # 英数字以外は "_" に寄せ、連続は一つに
+    s = _re.sub(r"[^a-z0-9_]+", "_", s)
+    s = _re.sub(r"_{2,}", "_", s).strip("_")
+    # 先頭は英字に強制（英字が無ければプレフィックスを与える）
+    if not s or not s[0].isalpha():
+        s = ("blog_" + s).strip("_")
+    # 長さ制約
     s = s[:20]
     if len(s) < 3:
-        s = (s + "-blog")[:20]
+        s = (s + "_blog")[:20]
     return s
 
 def suggest_livedoor_blog_id(base_text: str, db_session) -> str:
+    """
+    後方互換のための単一候補関数（内部は新ポリシー準拠）。
+    DB衝突を避けるため、base / base_blog / base_info ... の順で探す。
+    """
     base = _slugify_ascii(base_text)
-    candidate, n = base, 0
-    while True:
+    variants = [base, f"{base}_blog", f"{base}_info"]
+    # 長さ20に収まるように各候補を切り詰め
+    variants = [v[:20] for v in variants]
+    # DB重複を避けて一つ返す
+    for cand in variants:
         exists = db_session.query(ExternalBlogAccount.id).filter(
             ExternalBlogAccount.blog_type == BlogType.LIVEDOOR,
-            ExternalBlogAccount.livedoor_blog_id == candidate
+            ExternalBlogAccount.livedoor_blog_id == cand
         ).first()
         if not exists:
-            return candidate
+            return cand
+    # それでも衝突する場合は末尾に番号を当てる（20文字上限を維持）
+    n = 1
+    while True:
+        tail = f"_{n}"
+        cand = (base[: max(3, 20 - len(tail))] + tail)
+        exists = db_session.query(ExternalBlogAccount.id).filter(
+            ExternalBlogAccount.blog_type == BlogType.LIVEDOOR,
+            ExternalBlogAccount.livedoor_blog_id == cand
+        ).first()
+        if not exists and 3 <= len(cand) <= 20:
+            return cand
         n += 1
-        tail = str(n)
-        candidate = (base[: max(1, 20 - len(tail) - 1)] + "-" + tail)
 
 def generate_safe_id(n=10) -> str:
     chars = string.ascii_lowercase + string.digits + "_"
@@ -215,6 +236,70 @@ def fetch_livedoor_credentials(task_id: str) -> dict | None:
         return None
     with open(path) as f:
         return json.load(f)
+    
+
+# ─────────────────────────────────────────────
+# 新：WPサイト情報ベースの Livedoor ID 候補生成（第1〜第3候補）
+# ─────────────────────────────────────────────
+def _extract_sld_from_url(url: str) -> str:
+    """
+    URL から第2レベル相当を抽出し、規約に沿って整形。
+    例: https://example-site.co.jp → example_site
+    """
+    try:
+        from urllib.parse import urlparse
+        netloc = urlparse(url or "").netloc.lower()
+    except Exception:
+        netloc = ""
+    if ":" in netloc:
+        netloc = netloc.split(":", 1)[0]
+    parts = [p for p in netloc.split(".") if p]
+    # 規模の大きいTLD/SLDは除外
+    junk = {"www","com","jp","net","org","co","info","biz","blog","site"}
+    core = [p for p in parts if p not in junk]
+    if not core:
+        return ""
+    # 末尾（右側）から意味ありそうな部分を取り、結合
+    sld = "_".join(_re.sub(r"[^a-z0-9_]+","_", c) for c in core[-2:])
+    sld = _re.sub(r"_+","_", sld)
+    return _slugify_ascii(sld)
+
+def generate_livedoor_id_candidates(site) -> List[str]:
+    """
+    規約準拠の ID 候補を第1〜第3候補で返す。
+    先頭は URL の SLD を優先。取れない場合は Site.name をローマ字化。
+    """
+    site_url  = (getattr(site, "url", "")  or "").strip()
+    site_name = (getattr(site, "name", "") or "").strip()
+
+    base = _extract_sld_from_url(site_url)
+    if not base:
+        base = _slugify_ascii(site_name or "blog")
+
+    # 長さ20を厳守（下で接尾辞を付けるため、必要に応じて切り詰める）
+    base = base[:20] if base else "blog"
+    # 3〜20に丸める（短すぎるとき）
+    if len(base) < 3:
+        base = (base + "_blog")[:20]
+
+    c1 = base
+    c2 = (base[:20 - len("_blog")] + "_blog") if len(base) <= 20 else base[:20]
+    c3 = (base[:20 - len("_info")] + "_info") if len(base) <= 20 else base[:20]
+    # 冗長や重複の掃除
+    out = []
+    for c in (c1, c2, c3):
+        c = _re.sub(r"[^a-z0-9_]+", "", c)
+        c = c[:20]
+        if len(c) < 3:
+            continue
+        if not c[0].isalpha():
+            c = ("blog_" + c)[:20]
+        if c not in out:
+            out.append(c)
+    # 最低1つ保証
+    if not out:
+        out = ["blog_id"]
+    return out    
 
 @bp.route('/confirm_email_manual/<task_id>')
 def confirm_email_manual(task_id):
@@ -244,7 +329,9 @@ def register_blog_account(site, email_seed: str = "ld"):
     """
     from app.services.mail_utils.mail_gw import create_inbox
     email, token = create_inbox()
-    livedoor_id = generate_safe_id()
+    # 🔁 ここで WPサイト情報から Livedoor ID 候補を生成（第1候補を採用）
+    id_candidates = generate_livedoor_id_candidates(site)
+    livedoor_id = id_candidates[0]
     password    = generate_safe_password()
 
     try:
@@ -261,6 +348,8 @@ def register_blog_account(site, email_seed: str = "ld"):
         "password": password,
         "token": token,
         "session_id": session_id,
+        # UI での手動登録支援用：第1〜第3候補を返す
+        "livedoor_id_candidates": id_candidates,
     }
 
 # --- ここから：ブログ作成（Recover）内蔵 ---
@@ -1184,7 +1273,10 @@ def signup(site, email_seed: str = "ld"):
 __all__ = [
     # 新API
     "prepare_captcha", "submit_captcha", "create_blog_and_fetch_api_key",
-    "generate_safe_id", "generate_safe_password", "suggest_livedoor_blog_id",
+    "generate_safe_id", "generate_safe_password",
+    "suggest_livedoor_blog_id",
+    # 新規：WPベースID候補
+    "generate_livedoor_id_candidates",
     # Recover API（内部で使用）
     "recover_atompub_key",
     # 互換API

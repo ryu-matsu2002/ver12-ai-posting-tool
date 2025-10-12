@@ -6130,6 +6130,213 @@ def external_account_delete(acct_id):
     return {"ok": True, "deleted_articles": int(deleted_articles)}
 
 
+# -----------------------------------------------------------------
+# Livedoor 手動保存: APIキー/エンドポイント
+# -----------------------------------------------------------------
+@bp.post("/external/livedoor/credentials/save")
+@login_required
+def livedoor_credentials_save():
+    """
+    入力: site_id, account_id, blog_id, endpoint, api_key
+    機能: 検証・正規化して保存（DB優先 / 暫定JSONフォールバック）
+    戻り: { ok: true, masked_key: "••••abcd", status: "unknown" } or { ok:false, error:"..." }
+    """
+    from flask import request, jsonify, abort
+    from app import db
+    from app.models import Site, ExternalBlogAccount, BlogType
+    import re, urllib.parse
+    # 暫定フォールバック（DB未対応環境）: JSON保存関数
+    try:
+        from app.services.blog_signup.livedoor_signup import save_livedoor_credentials as _json_save
+    except Exception:
+        _json_save = None
+
+    def _mask_tail(s: str, n: int = 4) -> str:
+        if not s:
+            return ""
+        tail = s[-n:] if len(s) >= n else s
+        return "••••" + tail
+
+    def _normalize_endpoint(raw: str) -> str:
+        v = (raw or "").strip()
+        if not v:
+            return v
+        # スキーム付与
+        if not re.match(r"^https?://", v, re.I):
+            v = "https://" + v
+        # 余計な空白や連続スラッシュの整理（プロトコル部は除く）
+        parts = urllib.parse.urlsplit(v)
+        path = re.sub(r"/{2,}", "/", parts.path or "/")
+        # /atompub が含まれていなければ付与（末尾スラッシュは1つに）
+        if not re.search(r"/atompub/?$", path, re.I):
+            path = path.rstrip("/") + "/atompub"
+        path = path.rstrip("/")  # 最終的に末尾スラなしに統一
+        v2 = urllib.parse.urlunsplit((parts.scheme, parts.netloc, path, parts.query, parts.fragment))
+        return v2
+
+    def _validate_blog_id(bid: str) -> bool:
+        return bool(re.match(r"^[a-z0-9_]{3,20}$", (bid or "").strip()))
+
+    # --- 入力取得（JSON or form） ---
+    getv = (request.get_json(silent=True) or request.form)
+    site_id    = getv.get("site_id", type=int)
+    account_id = getv.get("account_id", type=int)
+    blog_id    = (getv.get("blog_id") or "").strip()
+    endpoint   = (getv.get("endpoint") or "").strip()
+    api_key    = (getv.get("api_key") or "").strip()
+
+    if not site_id or not account_id:
+        return jsonify(ok=False, error="site_id と account_id は必須です"), 400
+    if not blog_id or not endpoint or not api_key:
+        return jsonify(ok=False, error="blog_id / endpoint / api_key は必須です"), 400
+    if not _validate_blog_id(blog_id):
+        return jsonify(ok=False, error="blog_id の形式が不正です（半角英数+_ 3〜20 文字）"), 400
+
+    # 所有権
+    site = Site.query.get_or_404(site_id)
+    if (not current_user.is_admin) and (site.user_id != current_user.id):
+        abort(403)
+    acct = ExternalBlogAccount.query.get_or_404(account_id)
+    if acct.site_id != site.id and (not current_user.is_admin):
+        return jsonify(ok=False, error="アカウントがサイトに属していません"), 400
+    # Livedoor 以外は拒否
+    if getattr(acct, "blog_type", None) != BlogType.LIVEDOOR:
+        return jsonify(ok=False, error="このアカウントは Livedoor ではありません"), 400
+
+    # 正規化
+    endpoint_norm = _normalize_endpoint(endpoint)
+    if not re.match(r"^https://[^/]+/.*", endpoint_norm, re.I):
+        return jsonify(ok=False, error="endpoint URL が不正です"), 400
+
+    # --- 保存（DB優先 / フォールバックJSON） ---
+    saved = False
+    try:
+        # できるだけ広くフィールドに対応（環境差異を吸収）
+        if hasattr(acct, "livedoor_blog_id"):
+            acct.livedoor_blog_id = blog_id
+        if hasattr(acct, "atompub_endpoint"):
+            acct.atompub_endpoint = endpoint_norm
+        if hasattr(acct, "atompub_key_enc"):
+            # 暗号化フィールド想定
+            acct.atompub_key_enc = api_key
+        elif hasattr(acct, "api_key"):
+            # 平文フィールドがある環境向け
+            acct.api_key = api_key
+        # 未テスト状態に戻す（Boolean/Nullable 両対応）
+        if hasattr(acct, "api_post_enabled"):
+            try:
+                acct.api_post_enabled = None
+            except Exception:
+                pass
+        db.session.commit()
+        saved = True
+    except Exception:
+        db.session.rollback()
+        saved = False
+
+    # DBが使えない（または失敗）環境では暫定JSONに保存
+    if not saved:
+        if _json_save is None:
+            return jsonify(ok=False, error="保存に失敗しました（DB/JSONともに不可）"), 500
+        try:
+            _json_save(
+                site_id=site_id,
+                account_id=account_id,
+                livedoor_blog_id=blog_id,
+                endpoint=endpoint_norm,
+                api_key=api_key,
+            )
+        except Exception as e:
+            return jsonify(ok=False, error=f"保存に失敗しました: {e}"), 500
+
+    return jsonify(ok=True, masked_key=_mask_tail(api_key, 4), status="unknown")
+
+
+# -----------------------------------------------------------------
+# Livedoor 接続テスト（軽量 AtomPub GET）
+# -----------------------------------------------------------------
+@bp.post("/external/livedoor/credentials/test")
+@login_required
+def livedoor_credentials_test():
+    """
+    入力: site_id, account_id
+    機能: 保存済み blog_id / endpoint / api_key で軽量接続確認
+    戻り: { ok:true } もしくは { ok:false, detail:"..." }
+    副作用: ExternalBlogAccount.api_post_enabled を True/False に更新
+    """
+    from flask import request, jsonify, abort
+    from app import db
+    from app.models import Site, ExternalBlogAccount, BlogType
+    import requests
+
+    # livedoor_atompub 側に probe 関数があれば利用、無ければフォールバック
+    try:
+        from app.services.livedoor_atompub import probe_auth as _probe_auth
+    except Exception:
+        _probe_auth = None
+
+    getv = (request.get_json(silent=True) or request.form)
+    site_id    = getv.get("site_id", type=int)
+    account_id = getv.get("account_id", type=int)
+    if not site_id or not account_id:
+        return jsonify(ok=False, detail="site_id と account_id は必須です"), 400
+
+    site = Site.query.get_or_404(site_id)
+    if (not current_user.is_admin) and (site.user_id != current_user.id):
+        abort(403)
+    acct = ExternalBlogAccount.query.get_or_404(account_id)
+    if acct.site_id != site.id and (not current_user.is_admin):
+        return jsonify(ok=False, detail="アカウントがサイトに属していません"), 400
+    if getattr(acct, "blog_type", None) != BlogType.LIVEDOOR:
+        return jsonify(ok=False, detail="このアカウントは Livedoor ではありません"), 400
+
+    blog_id  = getattr(acct, "livedoor_blog_id", None)
+    endpoint = getattr(acct, "atompub_endpoint", None)
+    # キーは環境によりフィールド名が異なりうる
+    api_key  = getattr(acct, "atompub_key_enc", None) or getattr(acct, "api_key", None)
+    if not (blog_id and endpoint and api_key):
+        return jsonify(ok=False, detail="設定が不足しています（blog_id / endpoint / api_key）"), 400
+
+    ok = False
+    detail = ""
+    try:
+        if callable(_probe_auth):
+            # 既存ユーティリティがある場合はそれを最優先
+            # 期待: 戻り値 True/False、例外でエラー詳細
+            ok = bool(_probe_auth(endpoint=endpoint, api_key=api_key, blog_id=blog_id))
+            detail = "" if ok else "認証エラー"
+        else:
+            # フォールバック: 最小の GET を投げ、200/401/403 で判定（超軽量）
+            # 認証ヘッダ方式が環境依存のため、ここでは疎通/認証失敗の大枠のみを判定
+            try:
+                resp = requests.get(endpoint, timeout=6)
+                if resp.status_code // 100 == 2:
+                    ok = True
+                elif resp.status_code in (401, 403):
+                    ok = False
+                    detail = "認証エラー"
+                else:
+                    ok = False
+                    detail = f"HTTP {resp.status_code}"
+            except requests.Timeout:
+                ok = False
+                detail = "タイムアウト"
+    except Exception as e:
+        ok = False
+        detail = f"接続エラー: {e}"
+
+    # フラグ更新（Nullable/Boolean を許容）
+    try:
+        if hasattr(acct, "api_post_enabled"):
+            acct.api_post_enabled = True if ok else False
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    if ok:
+        return jsonify(ok=True)
+    return jsonify(ok=False, detail=(detail or "接続に失敗しました")), 200
+
 
 # -----------------------------------------------------------
 # 管理者向け: 全ユーザーの外部ブログアカウント一覧

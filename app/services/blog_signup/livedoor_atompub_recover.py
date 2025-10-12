@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 import logging
 import re as _re
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit, urlunsplit
 from typing import List
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ except Exception:
 from app.utils.locks import pg_advisory_lock
 
 # ビルド識別（デプロイ反映チェック用）
-BUILD_TAG = "2025-09-12 livedoor-create-guarded"
+BUILD_TAG = "2025-09-12 livedoor-create-guarded + handoff-tab"
 logger.info(f"[LD-Recover] loaded build {BUILD_TAG}")
 
 # 直列化・バックオフ・成功検知タイムアウト
@@ -578,6 +578,65 @@ def _craft_blog_title(site) -> str:
     fallbacks = [f"{base}ブログ", f"{base}ログ", f"{base}手帖", "こつこつブログ"]
     return fallbacks[_deterministic_index(salt, len(fallbacks))][:48]
 
+# ─────────────────────────────────────────────
+# 追加: AtomPub エンドポイント軽量プローブ
+# ─────────────────────────────────────────────
+try:
+    import requests  # 最小フォールバック用（ない環境では False を返す）
+except Exception:
+    requests = None  # type: ignore
+
+def _normalize_atompub_endpoint(raw: str) -> str:
+    """
+    'example.com' → 'https://example.com/atompub' に正規化。
+    末尾スラッシュは付けない（'/atompub' で統一）。
+    """
+    v = (raw or "").strip()
+    if not v:
+        return v
+    if not _re.match(r"^https?://", v, _re.I):
+        v = "https://" + v
+    parts = urlsplit(v)
+    path = _re.sub(r"/{2,}", "/", parts.path or "/")
+    if not _re.search(r"/atompub/?$", path, _re.I):
+        path = path.rstrip("/") + "/atompub"
+    path = path.rstrip("/")
+    return urlunsplit((parts.scheme, parts.netloc, path, parts.query, parts.fragment))
+
+def probe_auth(*, endpoint: str, api_key: str | None = None, blog_id: str | None = None, timeout: int = 6) -> bool:
+    """
+    Livedoor AtomPub の **超軽量疎通チェック**。
+    - 認証ヘッダは扱わず、2xx を疎通OKとみなす。
+    - 401/403 は“認証エラー”として False。
+    - それ以外／例外は False。
+    ルート側の「接続テスト」用途（存在チェック）に特化。
+    """
+    if not endpoint or requests is None:
+        return False
+    url = _normalize_atompub_endpoint(endpoint)
+    # まずは素のエンドポイント
+    try:
+        r = requests.get(url, timeout=timeout)
+        if r.status_code // 100 == 2:
+            return True
+        if r.status_code in (401, 403):
+            return False
+    except Exception as e:
+        logger.debug("[LD-AtomPub] probe GET base error: %s", e)
+    # blog_id 付きでも何パターンか当ててみる（環境差対策）
+    if blog_id:
+        for suffix in (f"/blog/{blog_id}", f"/blogs/{blog_id}", f"/{blog_id}"):
+            try:
+                r2 = requests.get(url + suffix, timeout=timeout)
+                if r2.status_code // 100 == 2:
+                    return True
+                if r2.status_code in (401, 403):
+                    return False
+            except Exception as e:
+                logger.debug("[LD-AtomPub] probe GET suffix error (%s): %s", suffix, e)
+    return False
+
+
 
 # ─────────────────────────────────────────────
 # 追加：フレーム横断・同意チェック・エラーテキスト採取
@@ -658,7 +717,7 @@ async def _maybe_accept_terms(page) -> bool:
 async def _has_blog_id_input(page) -> bool:
     for sel in [
         '#blogId', 'input[name="blog_id"]', 'input[name="livedoor_blog_id"]',
-        'input[name="blogId"]', 'input#livedoor_blog_id', 'input[placeholder*="ブログURL"]',  # ← ここにカンマ
+        'input[name="blogId"]', 'input#livedoor_blog_id', 'input[placeholder*="ブログURL"]',
         '#sub', 'input[name="sub"]'   # ← これが生きる
     ]:
         try:
@@ -1297,3 +1356,122 @@ async def recover_atompub_key(page, livedoor_id: str | None, nickname: str, emai
         logger.error("[LD-Recover] AtomPub処理エラー", exc_info=True)
         return {"success": False, "error": str(e), "html_path": err_html, "png_path": err_png}
 
+
+# ─────────────────────────────────────────────
+# NEW（タスクB）: 手動ハンドオフ用に“同一セッションの新タブ”を開く
+# ─────────────────────────────────────────────
+async def _open_create_tab_for_handoff(page, site, *, prefill_title: bool = True) -> dict:
+    """
+    既存のログイン済み Page から **同一ブラウザコンテキスト**で新しいタブを開き、
+    /member/blog/create に遷移して人手作業を受け渡しやすい状態に整える。
+
+    - 規約同意チェックがあればON
+    - タイトル入力欄があれば、可能なら generate_blog_title(site) を事前入力（送信はしない）
+    - blog_id 入力欄の有無を返す（人がIDを決めて入力する指標）
+    """
+    try:
+        ctx = page.context
+        newp = await ctx.new_page()
+    except Exception as e:
+        logger.error("[LD-Recover] failed to open new tab for handoff: %s", e)
+        return {"ok": False, "error": "cannot_open_new_tab"}
+
+    try:
+        await newp.goto("https://livedoor.blogcms.jp/member/blog/create", wait_until="load")
+        try:
+            await newp.wait_for_load_state("networkidle", timeout=15000)
+        except Exception:
+            pass
+        await _maybe_close_overlays(newp)
+        await _maybe_accept_terms(newp)
+
+        prefilled = None
+        if prefill_title:
+            try:
+                desired_title = await generate_blog_title(site)
+                # タイトル欄が見つかった場合のみ入力（送信はしない）
+                title_sels = ['#blogTitle', 'input[name="title"]']
+                for sel in title_sels:
+                    try:
+                        await newp.wait_for_selector(sel, state="attached", timeout=4000)
+                        inp = newp.locator(sel).first
+                        if await inp.count() > 0:
+                            try:
+                                await inp.fill("")
+                            except Exception:
+                                try:
+                                    await inp.click(); await inp.press("Control+A"); await inp.press("Delete")
+                                except Exception:
+                                    pass
+                            await inp.fill(desired_title[:48])
+                            prefilled = desired_title[:48]
+                            logger.info("[LD-Recover] prefilled blog title for handoff: %s", prefilled)
+                            break
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+        has_id_box = await _has_blog_id_input(newp)
+        # 使いやすいよう blog_id 欄にフォーカスしておく（あれば）
+        if has_id_box:
+            for sel in ['#blogId', 'input[name="blog_id"]', 'input[name="livedoor_blog_id"]', 'input[name="blogId"]', 'input#livedoor_blog_id', 'input[name="sub"]']:
+                try:
+                    loc = newp.locator(sel).first
+                    if await loc.count() > 0:
+                        try:
+                            await loc.focus()
+                        except Exception:
+                            pass
+                        break
+                except Exception:
+                    continue
+
+        # 画面の安定化
+        try:
+            await newp.wait_for_load_state("networkidle", timeout=3000)
+        except Exception:
+            pass
+
+        return {
+            "ok": True,
+            "url": newp.url,
+            "prefilled_title": prefilled,
+            "has_blog_id_box": has_id_box,
+        }
+    except Exception as e:
+        logger.error("[LD-Recover] open handoff tab error: %s", e, exc_info=True)
+        return {"ok": False, "error": "handoff_navigation_failed"}
+
+
+def open_create_tab_for_handoff(session_id: str, site, *, prefill_title: bool = True) -> dict:
+    """
+    同期ラッパー：pwctl でセッションから Page を取得し、
+    同一セッションの新タブを準備して **人手作業にバトン**を渡す。
+
+    戻り値例:
+      {"ok": True, "url": ".../member/blog/create", "prefilled_title": "…", "has_blog_id_box": True}
+
+    注意：ここでは **送信を行わない**。以降の操作（ID入力/送信/CAPTCHA対応）は人手前提。
+    """
+    if pwctl is None:
+        return {"ok": False, "error": "pwctl_unavailable"}
+    # 既存セッションの page を取得（無ければ revive）
+    page = pwctl.run(pwctl.get_page(session_id))
+    if page is None:
+        page = pwctl.run(pwctl.revive(session_id))
+        if page is None:
+            return {"ok": False, "error": f"session_not_found:{session_id}"}
+    # 念のため最新の storage_state を保存してから実行（別ワーカーでも状態共有）
+    try:
+        pwctl.run(pwctl.save_storage_state(session_id))
+    except Exception:
+        pass
+    # 実処理
+    result = pwctl.run(_open_create_tab_for_handoff(page, site, prefill_title=prefill_title))
+    # 戻りに合わせて state も再保存（新タブでクッキーが増えた場合に備える）
+    try:
+        pwctl.run(pwctl.save_storage_state(session_id))
+    except Exception:
+        pass
+    return result
