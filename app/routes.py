@@ -6628,6 +6628,8 @@ def submit_captcha():
     import time
 
     logger = logging.getLogger(__name__)
+    # ハンドオフ中は後片付けを抑止するフラグ
+    keep_pw_session = False
 
     captcha_text = request.form.get("captcha_text")
     if not captcha_text:
@@ -6827,6 +6829,8 @@ def submit_captcha():
             "prefilled_title": result.get("prefilled_title"),
             "has_blog_id_box": result.get("has_blog_id_box"),
         }
+        # ここからは人手作業にバトンを渡すので、セッションは維持する
+        keep_pw_session = True
         session["captcha_status"] = {
             "captcha_sent": True,
             "email_verified": True,
@@ -6835,6 +6839,7 @@ def submit_captcha():
             "step": "handoff_ready",
             "site_id": site_id,
             "account_id": account_id,
+            "handoff": handoff,
         }
         return jsonify({
             "status": "handoff_ready",
@@ -6843,68 +6848,21 @@ def submit_captcha():
             "handoff": handoff,
             "next_cta": "open_create_ui"
         }), 200
-        # 重複 blog_id があれば既存を優先
-        dup = None
-        if new_blog_id:
-            dup = (ExternalBlogAccount.query
-                   .filter(
-                       ExternalBlogAccount.site_id == site_id,
-                       ExternalBlogAccount.blog_type == (acct.blog_type or BlogType.LIVEDOOR),
-                       ExternalBlogAccount.livedoor_blog_id == new_blog_id,
-                       ExternalBlogAccount.id != account_id
-                   )
-                   .first())
-        target = dup or acct
-
-        if hasattr(target, "is_captcha_completed"):
-            target.is_captcha_completed = True
-        if new_blog_id and hasattr(target, "livedoor_blog_id"):
-            target.livedoor_blog_id = new_blog_id
-        if new_blog_id and hasattr(target, "username"):
-            if not target.username or target.username.startswith("u-"):
-                target.username = new_blog_id
-        if new_endpoint and hasattr(target, "atompub_endpoint"):
-            with contextlib.suppress(Exception):
-                target.atompub_endpoint = new_endpoint
-        if new_api_key and hasattr(target, "atompub_key_enc"):
-            with contextlib.suppress(Exception):
-                target.atompub_key_enc = encrypt(new_api_key)
-            if hasattr(target, "api_post_enabled"):
-                target.api_post_enabled = True
-
-        db.session.commit()
-
-        got_api = bool(new_api_key or getattr(target, "atompub_key_enc", None))
-        resolved_account_id = target.id
-        session["captcha_status"] = {
-            "captcha_sent": True,
-            "email_verified": True,
-            "account_created": True,
-            "api_key_received": got_api,
-            "step": "既存アカウントに紐付け済み" if dup else "API取得完了",
-            "site_id": site_id,
-            "account_id": resolved_account_id,
-        }
-
-        return jsonify({
-            "status": "captcha_success",
-            "step": session["captcha_status"]["step"],
-            "site_id": site_id,
-            "account_id": resolved_account_id,
-            "api_key_received": got_api,
-            "next_cta": "ready_to_post" if got_api else "captcha_done"
-        }), 200
+        
 
     finally:
-        with contextlib.suppress(Exception):
-            pwctl.close_session(session_id)
-        with contextlib.suppress(Exception):   # ★ 追加
-            pw_clear(session_id)
+        # ハンドオフ中はセッション・一時保存を維持する（人手操作で同一セッションを使うため）
+        if not keep_pw_session:
+            with contextlib.suppress(Exception):
+                pwctl.close_session(session_id)
+            with contextlib.suppress(Exception):
+                pw_clear(session_id)
         for key in list(session.keys()):
             if key.startswith("captcha_") and key != "captcha_status":
                 session.pop(key)
-        if token:
-            release(token)   # ← ここを追加！        
+        # メールトークンも、ハンドオフ継続時は即解放しない
+        if token and not keep_pw_session:
+            release(token)      
 
 @bp.route("/ld/open_create_ui", methods=["POST"])
 @login_required
