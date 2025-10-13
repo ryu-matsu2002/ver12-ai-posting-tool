@@ -6588,19 +6588,7 @@ def prepare_captcha():
             account_id=account_id,
             desired_blog_id=desired_blog_id)
     
-    # ★★★ 重要：/submit_captcha 側の復元経路差異に備え、pw_controller 側ストアにも重ねて保存
-    try:
-        pw_set(session_id, {
-            "email": email,
-            "password": password,
-            "livedoor_id": livedoor_id,
-            "desired_blog_id": desired_blog_id or livedoor_id,
-            "token": token,
-            "site_id": site_id,
-            "account_id": account_id,
-        })
-    except Exception:
-        logger.warning("[prepare_captcha] pw_set failed (sid=%s)", session_id, exc_info=True)
+    # 追加保存は不要。/submit_captcha は pw_session_store.pw_get(session_id) を参照する前提
 
     # 画像URL化
     img_name = Path(img_abs_path).name
