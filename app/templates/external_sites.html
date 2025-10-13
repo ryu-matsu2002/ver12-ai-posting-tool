@@ -1231,7 +1231,9 @@
 
   /* ================== CAPTCHA / 進捗 / 削除 ================== */
   let progressInterval=null, lastStatus=null, captchaSubmitLocked=false, maxSeenPct=0;
-  let CAPTCHA_SUBMITTED = false;   // ← 追加
+  let CAPTCHA_SUBMITTED = false;                // 送信済みフラグ
+  let HANDOFF_IN_PROGRESS = false;              // ★ 追加: 手動ハンドオフ中フラグ
+  let RELEASE_TOKEN_ON_CLOSE = true;            // ★ 追加: close時に extseo トークンを解放するか
   function clampPct(x){ return Math.max(0, Math.min(100, Math.round(Number(x)||0))); }
   function setAccProgress(pct, instant=false){
     const bar=document.getElementById('accProgressBar'), num=document.getElementById('accProgressPct'); if(!bar||!num) return;
@@ -1357,6 +1359,9 @@
     sessionStorage.setItem("currentSiteId", siteId);
     sessionStorage.setItem("currentAccountId", accountId);
     sessionStorage.setItem("currentPlatform", platform);
+    // 新規オープン時はハンドオフではない前提
+    HANDOFF_IN_PROGRESS = false;
+    RELEASE_TOKEN_ON_CLOSE = true;
      if (!SIGNUP_VIA_CLIENT_FLAG){
       // サーバ方式: 既存の /prepare_captcha を呼ぶ
       const params=new URLSearchParams();
@@ -1373,6 +1378,11 @@
         })
         .then(data => {
           if(data && data.captcha_url){
+            // ★ 追加: サーバが返す session_id を保存（/submit_captcha で必ず同封する）
+            if (data.session_id) {
+              window.__captchaSessionId = String(data.session_id);
+              sessionStorage.setItem("captchaSessionId", String(data.session_id));
+            }
             maxSeenPct=0; setAccProgress(15);
             document.getElementById("captchaImage").src=data.captcha_url+"?t="+Date.now();
             document.getElementById("captchaModal").classList.remove("hidden");
@@ -1401,8 +1411,10 @@
       btn.classList.add("bg-blue-600"); btn.innerText="送信";
     }
     setAccProgress(0,true); captchaSubmitLocked=false;
-    // ユーザーが途中で閉じた場合もセマフォは解放しておく
-    releaseExtSeoToken();
+    // ★ 変更: ハンドオフ中はトークンを保持（サーバ側もセッションを保持する前提）
+    if (RELEASE_TOKEN_ON_CLOSE) {
+      releaseExtSeoToken();
+    }
   }
 
   function disableAndMarkBusy(el, label){
@@ -1507,7 +1519,15 @@ function showCaptchaModal(url){
     }
     // （サーバ方式）従来どおり
     CAPTCHA_SUBMITTED = true;
-    const payload=new URLSearchParams({"captcha_text":fd.get("captcha_text"),"site_id":siteId,"account_id":accountId,"blog":platform});
+    // ★ 追加: prepare_captcha で受け取った session_id を同封する
+    const sidStored = sessionStorage.getItem("captchaSessionId") || window.__captchaSessionId || "";
+    const payload=new URLSearchParams({
+      "captcha_text": fd.get("captcha_text"),
+      "site_id": siteId,
+      "account_id": accountId,
+      "blog": platform
+    });
+    if (sidStored) payload.append("session_id", sidStored);
     fetch("/submit_captcha",{method:"POST",body:payload})      
       .then(r=>r.json())
       .then(async data=>{
@@ -1520,6 +1540,9 @@ function showCaptchaModal(url){
             if (data.handoff.session_id) {
               sessionStorage.setItem("handoffSessionId", String(data.handoff.session_id));
             }
+            // ★ 追加: ハンドオフ移行中は close でトークンを解放しない
+            HANDOFF_IN_PROGRESS = true;
+            RELEASE_TOKEN_ON_CLOSE = false;
             // 案内＆新規タブを開く
             showToast("新しいタブでブログ作成画面を開きました。作成し終えたら『API取得』を押してください。","info",5200);
             window.open(data.handoff.url, "_blank", "noopener");
@@ -1537,8 +1560,9 @@ function showCaptchaModal(url){
           showToast("CAPTCHA突破に失敗しました。再度お試しください。","error"); 
           restoreCaptchaButton(siteId, accountId, "❌ 再挑戦"); 
           updateCaptchaStatusUI(data);
+          RELEASE_TOKEN_ON_CLOSE = true;
           await releaseExtSeoToken();  // 失敗時は即解放
-          closeCaptcha(); 
+          closeCaptcha();
           return;
         }
         if(data.status==="captcha_success" && data.api_key_received){
@@ -1551,8 +1575,9 @@ function showCaptchaModal(url){
         if(data.status==="recreate_required"){ 
           showToast("ブログ制作に失敗。『↻ ブログを再制作』からやり直してください。","error"); 
           restoreCaptchaButton(siteId, accountId, "↻ ブログを再制作"); 
+          RELEASE_TOKEN_ON_CLOSE = true;
           await releaseExtSeoToken();   // 作り直し要求＝今回の実行は終了
-          closeCaptcha(); 
+          closeCaptcha();
           return; 
         }
         if(data.status==="captcha_success"){ 
@@ -1563,6 +1588,7 @@ function showCaptchaModal(url){
         }
         showToast("予期しない応答が返されました","error");
         restoreCaptchaButton(siteId, accountId, "⚠ 不明な応答");
+        RELEASE_TOKEN_ON_CLOSE = true;
         await releaseExtSeoToken();   // 未知レスポンス時も解放
         closeCaptcha();
       })
@@ -1570,6 +1596,7 @@ function showCaptchaModal(url){
         console.error(err);
         showToast("CAPTCHA送信中にエラーが発生しました","error");
         restoreCaptchaButton(siteId, accountId, "❌ 再挑戦");
+        RELEASE_TOKEN_ON_CLOSE = true;
         await releaseExtSeoToken();   // 送信エラーも解放
         closeCaptcha();
       });
@@ -1630,7 +1657,9 @@ function showCaptchaModal(url){
         showToast('APIキーを取得しました','success');
         // 使い終わった handoff セッションIDは掃除
         sessionStorage.removeItem('handoffSessionId');
-        // 実行セマフォも解放
+        // 実行セマフォも解放（ハンドオフ完了）
+        HANDOFF_IN_PROGRESS = false;
+        RELEASE_TOKEN_ON_CLOSE = true;
         await releaseExtSeoToken();
         return;
       }
@@ -1680,6 +1709,7 @@ function showCaptchaModal(url){
             if(sid && aid) switchToPostCTA(sid,aid);
             setAccProgress(100); clearInterval(progressInterval); progressInterval=null;
             // ポーリングが「完了」を検知 → 解放してから閉じる
+            RELEASE_TOKEN_ON_CLOSE = true;
             releaseExtSeoToken().finally(()=>{ closeCaptcha(); });
             ensureLdOpen(sid);
           }

@@ -6619,8 +6619,9 @@ def prepare_captcha():
         "captcha_url": captcha_url,
         "site_id": site_id,
         "account_id": account_id,
-        # デバッグ観測用（前段が正常にトークンを持てているかを UI から確認可能）
+        # ← ★ これを必ず返す（フロントが submit 時に同封）
         "session_id": session_id,
+        # token 自体は返さない方が安全。保存できたかのフラグだけ返す
         "token_saved": True
     })
 
@@ -6653,11 +6654,12 @@ def submit_captcha():
         with contextlib.suppress(Exception):
             save_captcha_label_pair(img_name, captcha_text)
 
+    # ★ まずフォーム優先で受ける（ブラウザの Flask セッションが空でも復旧できる）
+    site_id    = request.form.get("site_id", type=int) or session.get("captcha_site_id")
     account_id = request.form.get("account_id", type=int) or session.get("captcha_account_id")
-    site_id    = session.get("captcha_site_id")
-    session_id = session.get("captcha_session_id")
+    session_id = request.form.get("session_id") or session.get("captcha_session_id")
 
-    # ★ 追加：サーバー側ストアから資格情報を復元（フォーム/Flaskセッションが空でもOK）
+    # ★ サーバー側ストアから資格情報を復元（フォーム/Flaskセッションが空でもOK）
     cred = pw_get(session_id) if session_id else None
 
     email = (
@@ -6730,7 +6732,12 @@ def submit_captcha():
     # --- ここから 既存の「メール認証→AtomPubキー回収」を継続 ---
     try:
         # メール確認リンク取得（最大 5 回 / 30 秒）
-        email_token = session.get("captcha_token") or (cred and cred.get("token"))
+        # ★ 変数名の食い違いバグ修正：token を一元化して扱う
+        token = (
+            request.form.get("token")
+            or session.get("captcha_token")
+            or (cred and cred.get("token"))
+        )
         if not token:
             with contextlib.suppress(Exception):
                 pwctl.close_session(session_id)
