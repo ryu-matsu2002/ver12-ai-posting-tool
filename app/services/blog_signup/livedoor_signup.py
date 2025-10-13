@@ -245,7 +245,49 @@ async def _ld_submit(page: Page, captcha_text: str, session_id: str) -> bool:
     logger.info("[LD-Signup] submit captcha (sid=%s)", session_id)
 
     await page.fill('input[name="captcha"]', captcha_text.replace(" ", "").replace("　", ""))
-    await page.click('input[type="submit"]')
+    # 規約チェックの未処理で submit が物理的に覆われるケースを解消
+    try:
+        await _ensure_terms_checked(page)
+    except Exception:
+        pass
+
+    # submit セレクタを特定化（ログに出ている #commit-button を優先）
+    submit_selectors = [
+        'input#commit-button',
+        '#commit-button',
+        'input[type="submit"][id="commit-button"]',
+        'input[type="submit"][value="完了"]',
+        'input[type="submit"][value*="登録"]',
+        'input[type="submit"]',
+        'button[type="submit"]',
+    ]
+    clicked = False
+    for sel in submit_selectors:
+        try:
+            btn = page.locator(sel).first
+            if await btn.count() == 0:
+                continue
+            # 既存ユーティリティで確実に押す
+            try:
+                await btn.scroll_into_view_if_needed(timeout=1500)
+            except Exception:
+                pass
+            # visible/enabled 安定化＋force まで面倒を見てくれる
+            if await _wait_enabled_and_click(page, btn, timeout=6000, label_for_log=f"submit {sel}"):
+                clicked = True
+                break
+        except Exception:
+            continue
+    if not clicked:
+        # 最終フォールバック：focus → Enter
+        try:
+            await page.locator('input[name="captcha"]').first.focus()
+            await page.keyboard.press("Enter")
+            logger.info("[LD-Signup] submit fallback via Enter key")
+            clicked = True
+        except Exception:
+            logger.error("[LD-Signup] submit click failed (all selectors)")
+            clicked = False
 
     try:
         await page.wait_for_url("**/register/done", timeout=30_000)
@@ -717,6 +759,60 @@ async def _maybe_close_overlays(page):
         """)
     except Exception:
         pass
+
+async def _ensure_terms_checked(page):
+    """
+    livedoor の登録フォームで、submit を覆う .rulecheckbox 等の規約同意 UI を処理する。
+    - 規約チェックボックスを見つけて check()
+    - それでも覆い被さる要素があれば pointer-events を無効化（submit 直前の最小限ハック）
+    """
+    selectors = [
+        '.rulecheckbox input[type="checkbox"]',
+        'input[type="checkbox"][name*="agree" i]',
+        'input[type="checkbox"][id*="agree" i]',
+        'input[type="checkbox"][id*="rule" i]',
+        'input[type="checkbox"][name*="rule" i]',
+        'input#agreement', 'input[name="agreement"]',
+    ]
+    # 1) チェックボックスを try-check
+    for sel in selectors:
+        try:
+            loc = page.locator(sel).first
+            if await loc.count() > 0:
+                try:
+                    await loc.scroll_into_view_if_needed(timeout=1000)
+                except Exception:
+                    pass
+                try:
+                    # check() は既にチェック済みでも OK
+                    await loc.check(timeout=1500)
+                    logger.info("[LD-Signup] terms checkbox checked via %s", sel)
+                    break
+                except Exception:
+                    # label 経由のクリックも試す
+                    try:
+                        await loc.click(timeout=800, force=True)
+                        logger.info("[LD-Signup] terms checkbox clicked(force) via %s", sel)
+                        break
+                    except Exception:
+                        continue
+        except Exception:
+            continue
+    # 2) まだ被さっている場合に備え、.rulecheckbox 直下の pointer-events を落とす
+    try:
+        await page.evaluate("""
+            (() => {
+              const host = document.querySelector('.rulecheckbox');
+              if (!host) return;
+              host.style.pointerEvents = 'auto';
+              for (const el of host.querySelectorAll('p,div,section')) {
+                el.style.pointerEvents = 'none';
+              }
+            })();
+        """)
+        logger.info("[LD-Signup] disabled pointer-events under .rulecheckbox (defensive)")
+    except Exception:
+        pass    
 
 async def _find_in_any_frame(page, selectors, timeout_ms=15000, require_visible=True):
     logger.info("[LD-Recover] frame-scan start selectors=%s timeout=%sms", selectors[:2], timeout_ms)
