@@ -144,19 +144,84 @@ async def _ld_prepare(page: Page, email_addr: str, livedoor_id: str, password: s
 
     await page.click('input[type="submit"][value="ユーザー情報を登録"]')
 
-    img = page.locator("#captcha-img")
+    # 1) 画面オーバーレイ（クッキー同意など）を可能な限り閉じる
     try:
-        await img.wait_for(state="visible", timeout=20_000)
-    except PWTimeoutError:
-        await img.wait_for(state="attached", timeout=5_000)
+        await _maybe_close_overlays(page)  # 同ファイル内ユーティリティ
+    except Exception:
+        pass
+
+    # 2) CAPTCHA候補セレクタ（UI変化に備え複数）
+    captcha_selectors = [
+        "#captcha-img",
+        "img#captcha-img",
+        'img[src*="captcha"]',
+        'img[alt*="captcha" i]',
+        'img[alt*="認証"]',
+        'img[alt*="確認"]',
+        'img[alt*="セキュリティ"]',
+    ]
+
+    # ページ/フレーム横断で探索
+    target = None
+    # まずはメインフレームで素直に探す
+    for sel in captcha_selectors:
+        try:
+            loc = page.locator(sel).first
+            if await loc.count() > 0:
+                target = loc
+                break
+        except Exception:
+            continue
+    # 見つからなければ全frameを走査
+    if target is None:
+        try:
+            for fr in page.frames:
+                for sel in captcha_selectors:
+                    try:
+                        loc = fr.locator(sel).first
+                        if await loc.count() > 0:
+                            target = loc
+                            raise StopIteration
+                    except Exception:
+                        continue
+        except StopIteration:
+            pass
+        except Exception:
+            pass
 
     ts = time.strftime("%Y%m%d_%H%M%S")
     img_path = CAPTCHA_DIR / f"captcha_{session_id}_{ts}.png"
-    await img.screenshot(path=str(img_path))
 
-    logger.info("[LD-Signup] CAPTCHA画像を %s に保存 (sid=%s)", img_path, session_id)
-    await pwctl.set_step(session_id, "captcha_required")
-    return str(img_path)
+    if target is not None:
+        # 3) 可視化を待ち、ビューポート内へスクロールして要素スクショ
+        try:
+            try:
+                await target.wait_for(state="visible", timeout=30_000)
+            except PWTimeoutError:
+                await target.wait_for(state="attached", timeout=10_000)
+            try:
+                await target.scroll_into_view_if_needed(timeout=2_000)
+            except Exception:
+                pass
+            await target.screenshot(path=str(img_path))
+            logger.info("[LD-Signup] CAPTCHA画像を %s に保存 (sid=%s)", img_path, session_id)
+            await pwctl.set_step(session_id, "captcha_required")
+            return str(img_path)
+        except PWTimeoutError:
+            logger.warning("[LD-Signup] CAPTCHA要素の可視化に失敗。フルページでフォールバック (sid=%s)", session_id)
+        except Exception:
+            logger.warning("[LD-Signup] CAPTCHA要素のスクショに失敗。フルページでフォールバック (sid=%s)", session_id, exc_info=True)
+
+    # 4) フォールバック：要素が見つからない/撮れない場合はフルページを撮る
+    try:
+        await page.screenshot(path=str(img_path), full_page=True)
+        logger.info("[LD-Signup] フォールバックとしてフルページを保存 %s (sid=%s)", img_path, session_id)
+        await pwctl.set_step(session_id, "captcha_required")
+        return str(img_path)
+    except Exception:
+        # それでもダメなら例外（上位でログ＆ユーザー通知）
+        logger.error("[LD-Signup] CAPTCHA画像の取得に完全失敗 (sid=%s)", session_id, exc_info=True)
+        raise
 
 # ─────────────────────────────────────────────
 # 新：CAPTCHA送信（同一セッションで継続）— 同期API
