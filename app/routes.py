@@ -6503,6 +6503,7 @@ from app.services.blog_signup.livedoor_signup import (
     submit_captcha as ld_submit_captcha,     # 新API名
     suggest_livedoor_blog_id,
     poll_latest_link_gw,                     # メール認証リンク取得
+    generate_livedoor_id_candidates,         # ★ 追加：実際に利用しているため
 )
 from app.services.mail_utils.mail_gw import create_inbox
 from app.services.blog_signup.livedoor_atompub_recover import recover_atompub_key
@@ -6514,7 +6515,8 @@ from app.services.pw_session_store import (
     get_cred as pw_get,
     clear as pw_clear,
 )
-
+# ★ 二重 import を避けつつ pw_set も使えるように
+from app.services.pw_controller import pw_set
 
 # ====== /prepare_captcha ======
 @bp.route("/prepare_captcha", methods=["POST"])
@@ -6553,7 +6555,11 @@ def prepare_captcha():
                             "site_id": site_id, "account_id": account_id})
 
     # 仮登録データ（メール & 候補 blog_id）
-    email, token = create_inbox()
+    email, token = create_inbox()  # 既存
+    if not (email and token):
+        return jsonify({"ok": False, "error": "mailbox_init_failed"}), 500
+
+    desired_blog_id = request.form.get("blog_id") or request.form.get("sub") or None
     # 英字開始・3–20・英数＋_ 準拠の候補ロジックを採用
     livedoor_id  = generate_livedoor_id_candidates(site)[0]
     password     = generate_safe_password()
@@ -6581,6 +6587,20 @@ def prepare_captcha():
             site_id=site_id,
             account_id=account_id,
             desired_blog_id=desired_blog_id)
+    
+    # ★★★ 重要：/submit_captcha 側の復元経路差異に備え、pw_controller 側ストアにも重ねて保存
+    try:
+        pw_set(session_id, {
+            "email": email,
+            "password": password,
+            "livedoor_id": livedoor_id,
+            "desired_blog_id": desired_blog_id or livedoor_id,
+            "token": token,
+            "site_id": site_id,
+            "account_id": account_id,
+        })
+    except Exception:
+        logger.warning("[prepare_captcha] pw_set failed (sid=%s)", session_id, exc_info=True)
 
     # 画像URL化
     img_name = Path(img_abs_path).name
@@ -6608,9 +6628,13 @@ def prepare_captcha():
         db.session.commit()
 
     return jsonify({
+        "ok": True,
         "captcha_url": captcha_url,
         "site_id": site_id,
-        "account_id": account_id
+        "account_id": account_id,
+        # デバッグ観測用（前段が正常にトークンを持てているかを UI から確認可能）
+        "session_id": session_id,
+        "token_saved": True
     })
 
 
