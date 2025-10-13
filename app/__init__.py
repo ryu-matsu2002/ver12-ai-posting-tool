@@ -64,9 +64,24 @@ def create_app() -> Flask:
         "pool_size": int(os.getenv("POOL_SIZE", 50)),
         "max_overflow": int(os.getenv("MAX_OVERFLOW", 100)),
         "pool_timeout": int(os.getenv("POOL_TIMEOUT", 60)),
-        "pool_recycle": 1800,  # ✅ 追加（切断予防）
-        "pool_pre_ping": True,  # ✅ この行を追加！
+        "pool_recycle": 1800,          # 既存: 切断予防（必要に応じて環境変数化してもOK）
+        "pool_pre_ping": True,         # 既存: 取得時に死活監視して自動再接続
     }
+    # --- ここから追加: 既存設定を壊さずに堅牢化オプションをマージ ---
+    _eng = app.config.setdefault("SQLALCHEMY_ENGINE_OPTIONS", {})
+    # 接続の再利用順を LIFO に（アイドル時間の短縮 → タイムアウトに強くなる）
+    _eng.setdefault("pool_use_lifo", True)
+    # psycopg2 の TCP keepalive（RDS/CloudSQL 等のアイドル切断対策）
+    _ca = dict(_eng.get("connect_args") or {})
+    _ca.setdefault("keepalives", 1)
+    _ca.setdefault("keepalives_idle", int(os.getenv("PG_KEEPALIVES_IDLE", 30)))
+    _ca.setdefault("keepalives_interval", int(os.getenv("PG_KEEPALIVES_INTERVAL", 10)))
+    _ca.setdefault("keepalives_count", int(os.getenv("PG_KEEPALIVES_COUNT", 5)))
+    # DATABASE_URL 側で sslmode が未指定なら require を既定に（既に指定されていれば尊重）
+    if "sslmode" not in _ca and "postgresql" in str(app.config.get("SQLALCHEMY_DATABASE_URI", "")):
+        _ca["sslmode"] = os.getenv("PG_SSLMODE", "require")
+    _eng["connect_args"] = _ca
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = _eng
 
     # ─── 拡張をバインド ───────────────────────
     db.init_app(app)
