@@ -1363,8 +1363,15 @@
       params.append("site_id",siteId);
       params.append("account_id",accountId);
       params.append("blog",platform);
-      fetch("/external-seo/prepare_captcha",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:params})
-        .then(data=>{
+      fetch("/prepare_captcha", { method:"POST", headers:{"Content-Type":"application/x-www-form-urlencoded"}, body:params,credentials: "same-origin", })
+        .then(async r => {
+          if (!r.ok) {
+            const txt = await r.text().catch(()=>"");
+            throw new Error(`HTTP ${r.status} ${r.statusText} ${txt}`);
+          }
+          return r.json();
+        })
+        .then(data => {
           if(data && data.captcha_url){
             maxSeenPct=0; setAccProgress(15);
             document.getElementById("captchaImage").src=data.captcha_url+"?t="+Date.now();
