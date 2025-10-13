@@ -2,6 +2,8 @@ from __future__ import annotations
 from datetime import timedelta
 import logging
 logger = logging.getLogger(__name__)
+from flask import current_app  # 既存で使用、明示
+from sqlalchemy.exc import OperationalError  # ✅ 追加：safe_commit 用
 
 from flask import (
     Blueprint, render_template, redirect, url_for,
@@ -6530,6 +6532,31 @@ def prepare_captcha():
     import logging
     logger = logging.getLogger(__name__)
 
+    # ---------- ✅ 追加: DBコミットを堅牢化 ----------
+    def safe_commit(session, retries: int = 1) -> bool:
+        """
+        OperationalError(切断など)時に rollback→最大1回だけ再実行。
+        失敗したら False。その他の例外は上位へ投げない（呼び出し側で握りつぶす方針）。
+        """
+        try:
+            session.commit()
+            return True
+        except OperationalError as e:
+            try:
+                current_app.logger.warning("safe_commit: OperationalError on commit, retrying once: %s", e)
+                session.rollback()
+                session.commit()
+                return True
+            except OperationalError as e2:
+                current_app.logger.exception("safe_commit: retry failed: %s", e2)
+                session.rollback()
+                return False
+        except Exception:
+            # ここでは堅く失敗に倒す（呼び出し側で握りつぶす設計）
+            current_app.logger.exception("safe_commit: non-OperationalError on commit")
+            session.rollback()
+            return False
+
     site_id    = request.form.get("site_id", type=int)
     blog       = request.form.get("blog")  # "livedoor"
     account_id = request.form.get("account_id", type=int)
@@ -6612,7 +6639,12 @@ def prepare_captcha():
     if acct:
         acct.captcha_session_id = session_id
         acct.captcha_image_path = f"captchas/{img_name}"
-        db.session.commit()
+        # ✅ DB書き込みは“任意”。失敗してもUIは session_id で回復できるため成功返却を優先
+        if not safe_commit(db.session, retries=1):
+            current_app.logger.warning(
+                "[prepare_captcha] DB更新(外部アカウントへのcaptcha_session_id設定)に失敗しましたが続行します "
+                "(site_id=%s account_id=%s session_id=%s)", site_id, account_id, session_id
+            )
 
     return jsonify({
         "ok": True,

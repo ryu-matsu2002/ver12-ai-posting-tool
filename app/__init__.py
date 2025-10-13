@@ -66,6 +66,12 @@ def create_app() -> Flask:
         "pool_timeout": int(os.getenv("POOL_TIMEOUT", 60)),
         "pool_recycle": 1800,          # 既存: 切断予防（必要に応じて環境変数化してもOK）
         "pool_pre_ping": True,         # 既存: 取得時に死活監視して自動再接続
+        "connect_args": {  # ✅ 追加（psycopg2 keepalive）
+            "keepalives": 1,
+            "keepalives_idle": int(os.getenv("PG_KEEPALIVE_IDLE", 60)),
+            "keepalives_interval": int(os.getenv("PG_KEEPALIVE_INTERVAL", 30)),
+            "keepalives_count": int(os.getenv("PG_KEEPALIVE_COUNT", 5)),
+        },
     }
     # --- ここから追加: 既存設定を壊さずに堅牢化オプションをマージ ---
     _eng = app.config.setdefault("SQLALCHEMY_ENGINE_OPTIONS", {})
