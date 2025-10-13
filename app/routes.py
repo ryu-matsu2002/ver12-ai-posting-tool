@@ -6515,8 +6515,7 @@ from app.services.pw_session_store import (
     get_cred as pw_get,
     clear as pw_clear,
 )
-# ★ 二重 import を避けつつ pw_set も使えるように
-from app.services.pw_controller import pw_set
+# ※ pw_set は存在しないため import しない（ImportError対策）
 
 # ====== /prepare_captcha ======
 @bp.route("/prepare_captcha", methods=["POST"])
