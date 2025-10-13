@@ -6719,7 +6719,7 @@ def submit_captcha():
     # --- ここから 既存の「メール認証→AtomPubキー回収」を継続 ---
     try:
         # メール確認リンク取得（最大 5 回 / 30 秒）
-        token = session.get("captcha_token") or (cred and cred.get("token"))
+        email_token = session.get("captcha_token") or (cred and cred.get("token"))
         if not token:
             with contextlib.suppress(Exception):
                 pwctl.close_session(session_id)
@@ -6829,6 +6829,8 @@ def submit_captcha():
             "url": result.get("url"),
             "prefilled_title": result.get("prefilled_title"),
             "has_blog_id_box": result.get("has_blog_id_box"),
+            # ★ 追加：後続の /handoff_finalize で確実に同一PWセッションを掴めるようにする
+            "session_id": session_id,
         }
         # ここからは人手作業にバトンを渡すので、セッションは維持する
         keep_pw_session = True
@@ -6847,6 +6849,7 @@ def submit_captcha():
             "step": "handoff_ready",
             "site_id": site_id,
             "account_id": account_id,
+            # ★ 追加：セッション側にも handoff.session_id を保存（保険）
             "handoff": handoff,
         }
         return jsonify({
@@ -6869,8 +6872,12 @@ def submit_captcha():
             with contextlib.suppress(Exception):
                 pw_clear(session_id)
             # メールトークンはハンドオフでない通常経路のみ解放
-            if token:
-                release(token)
+            # セマフォ解放は /external-seo/end に委ねる（ここではメールトークンは解放対象ではない）
+            # もしここで解放したい場合は extseo_token を取り出して release する
+            # with contextlib.suppress(Exception):
+            #     ext_tok = session.get("extseo_token")
+            #     if ext_tok:
+            #         release(ext_tok)
             # 進捗オブジェクト(captcha_status)は残しつつ、一時キー(captcha_*)を掃除
             for key in list(session.keys()):
                 if key.startswith("captcha_") and key != "captcha_status":
@@ -6889,6 +6896,8 @@ def handoff_finalize():
     from app.enums import BlogType
     from app import db
     import contextlib
+    # ★ 追加：ここでのみ使うためローカル import（明示しておく）
+    from app.services.blog_signup.livedoor_atompub_recover import recover_atompub_key
 
     site_id = request.form.get("site_id", type=int) or (session.get("captcha_status") or {}).get("site_id")
     account_id = request.form.get("account_id", type=int) or (session.get("captcha_status") or {}).get("account_id")
@@ -6916,7 +6925,7 @@ def handoff_finalize():
     password = cred.get("password") or session.get("captcha_password")
     livedoor_id = cred.get("livedoor_id") or session.get("captcha_nickname")
     desired_blog_id = cred.get("desired_blog_id") or session.get("captcha_desired_blog_id") or livedoor_id
-    token = cred.get("token") or session.get("captcha_token")
+    email_token = cred.get("token") or session.get("captcha_token")
 
     if not (email and password and livedoor_id):
         return jsonify({"status": "error", "message": "資格情報が不足しています"}), 400
@@ -6998,8 +7007,11 @@ def handoff_finalize():
         pwctl.close_session(session_id)
     with contextlib.suppress(Exception):
         pw_clear(session_id)
-    if token:
-        release(token)
+    # 同上：セマフォは /external-seo/end で解放。ここでは何もしない
+    # with contextlib.suppress(Exception):
+    #     ext_tok = session.get("extseo_token")
+    #     if ext_tok:
+    #         release(ext_tok)
     for key in list(session.keys()):
         if key.startswith("captcha_") and key != "captcha_status":
             session.pop(key)
