@@ -200,7 +200,7 @@ def admin_title_meta_backfill():
     push_to_wp = _as_bool(data.get("push_to_wp", False))
     after_id   = _as_int(data.get("after_id"))
 
-    ok, result = run_title_meta_backfill(
+    result = run_title_meta_backfill(
         site_id=site_id,
         user_id=user_id,
         limit=limit,
@@ -208,8 +208,8 @@ def admin_title_meta_backfill():
         after_id=after_id,
         push_to_wp=push_to_wp,
     )
-    status = 200 if ok else 400
-    return jsonify({"ok": ok, **result}), status
+    status = 200 if result.get("ok") else 400
+    return jsonify(result), status
 
 @bp.route('/robots.txt')
 def robots_txt():
