@@ -180,9 +180,14 @@ def _as_int(v, default=None):
         return default
     
 from app.tasks import run_title_meta_backfill
-from sqlalchemy import text
 from flask import render_template, request, jsonify
-from app import db  
+from app import db
+try:
+    # あなたのプロジェクトの User / Site モデル名に合わせて import
+    from app.models import User, Site
+except Exception:
+    User = None
+    Site = None
 
 @admin_bp.route("/admin/tools/title-meta-backfill", methods=["GET", "POST"])
 @admin_required_effective
@@ -210,13 +215,21 @@ def admin_title_meta_backfill():
     ]) or (data.get("limit") is not None) or dryrun or push_to_wp
 
     if request.method == "GET" and not params_present:
-        # 画面表示：テンプレに軽量の候補一覧を渡す（必須ではないが親切）
-        users = db.session.execute(
-            text("SELECT id, username FROM users ORDER BY id ASC LIMIT 200")
-        ).mappings().all()
-        sites = db.session.execute(
-            text("SELECT id, COALESCE(name, url) AS label FROM site ORDER BY id ASC LIMIT 200")
-        ).mappings().all()
+        # 画面表示：テンプレに候補一覧を渡す（ORMで取得。失敗時は空配列にフォールバック）
+        users = []
+        sites = []
+        try:
+            if User is not None:
+                # モデルオブジェクトをそのまま渡す（template は u.id / u.username で参照可能）
+                users = db.session.query(User).order_by(User.id.asc()).limit(200).all()
+        except Exception:
+            users = []
+        try:
+            if Site is not None:
+                # template は s.id / (s.name or s.url) で参照可能
+                sites = db.session.query(Site).order_by(Site.id.asc()).limit(200).all()
+        except Exception:
+            sites = []
         return render_template("title_meta_backfill.html", users=users, sites=sites)
 
     # API 実行
