@@ -186,6 +186,25 @@ class Article(db.Model):
     title_prompt = db.Column(db.Text, nullable=True)   # 生成時に使ったタイトルプロンプト
     body_prompt  = db.Column(db.Text, nullable=True)   # 生成時に使った本文プロンプト
 
+    # === Title & Meta: メタ説明（最大180文字で運用）・品質ラベル・手動フラグ ===
+    meta_description = db.Column(db.Text, nullable=True)
+    meta_desc_quality = db.Column(
+        db.Enum(
+            "empty",
+            "too_short",
+            "too_long",
+            "duplicate",
+            "suspected_ai",
+            "ok",
+            name="meta_desc_quality_enum",
+        ),
+        nullable=True,
+        index=True,
+    )
+    meta_desc_last_updated_at = db.Column(DateTime(timezone=True), nullable=True, index=True)
+    # 手動編集が入った記事は自動上書きしない
+    is_manual_meta = db.Column(db.Boolean, nullable=False, default=False, index=True)
+
     # タイムゾーン対応カラム (UTC保持、表示時にJSTに変換)
     created_at   = db.Column(
         DateTime(timezone=True),
@@ -203,6 +222,24 @@ class Article(db.Model):
 
     site_id     = db.Column(db.Integer, db.ForeignKey("site.id"))
     user_id     = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+
+class ArticleAudit(db.Model):
+    """
+    Title/Meta の変更監査ログ（ロールバックと追跡用の最小構成）
+    """
+    __tablename__ = "article_audits"
+
+    id = db.Column(db.Integer, primary_key=True)
+    article_id = db.Column(db.Integer, db.ForeignKey("articles.id"), nullable=False, index=True)
+    # どのフィールドを変更したか（例: 'meta_description'）
+    field = db.Column(db.String(50), nullable=False)
+    before = db.Column(db.Text, nullable=True)
+    after  = db.Column(db.Text, nullable=True)
+    job_id = db.Column(db.String(64), nullable=True, index=True)  # バッチ/ジョブのひも付け
+    created_at = db.Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, index=True)
+
+    article = db.relationship("Article", backref=db.backref("audit_logs", lazy="dynamic"))
+    
 
 class Keyword(db.Model):
     __tablename__ = "keywords"

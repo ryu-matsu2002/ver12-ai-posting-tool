@@ -24,16 +24,20 @@ MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 # 🔧 token数制限（本文切れ対策）
 TOKENS = {
-    "title": 120,
-    "outline": 800,
-    "block": 3600
+     "title": 120,
+     "outline": 800,
+     "block": 3600,
+     # メタ説明用：短文要約なので小さめで十分
+     "meta": 220,
 }
 
 # 🔧 温度設定（出力のブレ抑制）
 TEMP = {
-    "title": 0.6,
-    "outline": 0.65,
-    "block": 0.65
+     "title": 0.6,
+     "outline": 0.65,
+     "block": 0.65,
+     # メタはなるべく安定させる
+     "meta": 0.4,
 }
 
 TOP_P = 0.9
@@ -47,6 +51,9 @@ POST_HOURS = list(range(10, 21))
 MAX_PERDAY = 5
 AVERAGE_POSTS = 4
 MAX_SCHEDULE_DAYS = 30  # ← 本日から30日以内の投稿枠に限定
+# メタ説明の最大/最小判定
+META_MAX = 180      # 最大文字数（厳守）
+META_MIN_OK = 80    # 目安：80未満は短すぎ判定
 
 # ============================================
 # 🔧 安全な出力クリーニング関数
@@ -58,6 +65,85 @@ def clean_gpt_output(text: str) -> str:
     text = re.sub(r"<!DOCTYPE html>.*?<body.*?>", "", text, flags=re.DOTALL|re.IGNORECASE)
     text = re.sub(r"</body>.*?</html>", "", text, flags=re.DOTALL|re.IGNORECASE)
     return text.strip()
+
+# ===========================================
+# 🆕 HTML除去 & 安全トリム（メタ説明向け）
+# ============================================
+def _strip_html(s: str) -> str:
+    if not s:
+        return ""
+    # 最低限のタグ除去（速度優先、外部依存なし）
+    s = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", s, flags=re.I | re.S)
+    s = re.sub(r"<[^>]+>", "", s)
+    # 連続空白を1つに
+    s = re.sub(r"\s+", " ", s)
+    return s.strip()
+
+def _smart_truncate(s: str, limit: int = META_MAX) -> str:
+    if not s:
+        return ""
+    if len(s) <= limit:
+        return s.strip()
+    cut = s[:limit]
+    # 句点・読点・空白の直前で切る（優先度順）
+    for sep in ["。", "．", "！", "？", "、", "，", " ", "　"]:
+        i = cut.rfind(sep)
+        if i >= 60:  # あまりに短くならないよう下限
+            cut = cut[:i]
+            break
+    return cut.strip()
+
+def _meta_quality_label(desc: str) -> str:
+    n = len(desc or "")
+    if n == 0:
+        return "empty"
+    if n < META_MIN_OK:
+        return "too_short"
+    if n > META_MAX:
+        return "too_long"
+    return "ok"
+
+def _gen_meta_with_ai(title: str, body_html: str, user_id: int | None) -> str:
+    """
+    タイトル＋本文から“自然な1文の要約”を生成（180文字以内）。
+    失敗したら空文字を返し、呼び出し側でフォールバック。
+    """
+    try:
+        body_txt = _strip_html(body_html or "")
+        # 本文が極端に短いときはタイトルを補う
+        context = (body_txt[:1200] if len(body_txt) > 0 else "")  # 入れすぎるとコスト増のため短く
+        sys = "あなたは日本語のSEO編集者です。与えられた記事の要点を、検索ユーザーがクリックしたくなる自然な日本語1文で要約してください。誇張表現は避け、事実ベースで書いてください。"
+        usr = (
+            "出力条件:\n"
+            f"- 文字数は必ず{META_MAX}文字以内\n"
+            "- 句読点途中で途切れない自然な文\n"
+            "- 記号・囲み文字・引用符は使わない\n"
+            "- 具体的な利点や手順・比較など“読者の得”が伝わる記述\n\n"
+            f"【タイトル】\n{title}\n\n"
+            f"【本文（抜粋）】\n{context}\n"
+        )
+        return _chat(
+            [{"role": "system", "content": sys}, {"role": "user", "content": usr}],
+            TOKENS["meta"],
+            TEMP["meta"],
+            user_id=user_id,
+        )
+    except Exception as e:
+        logging.warning(f"[meta-ai] 生成失敗: {e}")
+        return ""
+
+def _gen_meta_fallback(title: str, body_html: str) -> str:
+    """
+    AI失敗時のフォールバック：本文先頭パラグラフを整形して丸める。
+    """
+    txt = _strip_html(body_html or "")
+    if not txt:
+        txt = (title or "").strip()
+    # 先頭文抽出（句点区切り）
+    m = re.split(r"[。．!?！？]", txt, maxsplit=1)
+    seed = m[0] if m and m[0] else txt[:META_MAX]
+    return _smart_truncate(seed, META_MAX)
+
 
 # ============================================
 # 🔧 トークンカウント（概算）
@@ -328,6 +414,19 @@ def _generate(app, aid: int, tpt: str, bpt: str, format: str = "html", self_revi
             )
             art.progress = 80
             db.session.flush()
+
+            # 🆕 メタ説明の自動生成（手動フラグが無いときのみ）
+            if not getattr(art, "is_manual_meta", False):
+                # まずAIで生成
+                meta = _gen_meta_with_ai(art.title or "", art.body or "", user_id=user_id)
+                # フォールバック
+                if not meta:
+                    meta = _gen_meta_fallback(art.title or "", art.body or "")
+                # 安全トリム（180字厳守）
+                meta = _smart_truncate(meta, META_MAX)
+                art.meta_description = meta
+                art.meta_desc_quality = _meta_quality_label(meta)
+                art.meta_desc_last_updated_at = datetime.utcnow()
 
             # ✅ アイキャッチ画像（1つ目のh2見出しを参照）
             match = re.search(r"<h2\b[^>]*>(.*?)</h2>", art.body or "", re.IGNORECASE)
