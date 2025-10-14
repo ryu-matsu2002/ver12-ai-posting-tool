@@ -7,11 +7,14 @@ import time
 from flask import current_app
 from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import text  # ★ 追加
+import requests
+from urllib.parse import urlparse
 
 from . import db
 from .models import Article
 from .wp_client import post_to_wp  # 統一された WordPress 投稿関数
 from sqlalchemy.orm import selectinload
+from app.wp_client import normalize_url, _post_headers, TIMEOUT  # WP反映用ヘルパを再利用
 
 # ✅ GSCクリック・表示回数の毎日更新ジョブ用
 from app.google_client import update_all_gsc_sites, fetch_new_queries_since
@@ -1162,6 +1165,7 @@ def run_meta_regen_batch(
     t0 = time.perf_counter()
     scanned = updated = skipped_manual = failed = 0
     samples: list[dict] = []
+    updated_ids: list[int] = []
     last_id = after_id or 0
 
     q = (
@@ -1236,6 +1240,7 @@ def run_meta_regen_batch(
             art.meta_desc_quality = new_quality
             art.meta_desc_last_updated_at = datetime.utcnow()
             db.session.add(art)
+            updated_ids.append(art.id)
 
             # 監査ログ
             audit = ArticleAudit(
@@ -1261,6 +1266,7 @@ def run_meta_regen_batch(
             # 直前バッチ全体を失敗として扱う
             failed += (updated or 0)
             updated = 0
+            updated_ids = []
 
     current_app.logger.info(
         "[meta-regen] site=%s user=%s dryrun=%s scanned=%s updated=%s skipped_manual=%s failed=%s next_cursor=%s (%.1f ms)",
@@ -1276,7 +1282,150 @@ def run_meta_regen_batch(
         "cursor": last_id,
         "elapsed_ms": int((time.perf_counter() - t0) * 1000),
         "samples": samples,
+        "updated_ids": updated_ids,
     }    
+
+# ────────────────────────────────────────────────
+# WP 反映ユーティリティ（slug → post_id 解決 & excerpt/SEOメタ更新）
+# ────────────────────────────────────────────────
+def _extract_slug_from_url(url: str) -> Optional[str]:
+    try:
+        p = urlparse(url or "")
+        seg = (p.path or "/").rstrip("/").split("/")[-1]
+        return seg or None
+    except Exception:
+        return None
+
+def _find_wp_post_id_by_slug(site, slug: str) -> Optional[int]:
+    """
+    GET /wp-json/wp/v2/posts?slug={slug} で1件取得 → id を返す
+    """
+    if not slug:
+        return None
+    site_url = normalize_url(site.url)
+    headers = _post_headers(site.username, site.app_pass, site_url)
+    try:
+        resp = requests.get(
+            f"{site_url}/wp-json/wp/v2/posts",
+            params={"slug": slug, "context": "edit", "_fields": "id,slug"},
+            headers=headers,
+            timeout=TIMEOUT,
+        )
+        if 200 <= resp.status_code < 300:
+            rows = resp.json() or []
+            if rows:
+                return int(rows[0].get("id"))
+    except Exception as e:
+        current_app.logger.info(f"[WP-SEO] slug resolve failed slug={slug}: {e}")
+    return None
+
+def _push_excerpt_and_seo_meta(site, wp_post_id: int, title: str, meta_desc: str) -> bool:
+    """
+    excerpt を更新し、Yoast/RankMath のメタキーにもベストエフォートで書き込み。
+    """
+    site_url = normalize_url(site.url)
+    headers = _post_headers(site.username, site.app_pass, site_url)
+    ok = True
+    # 1) excerpt
+    try:
+        r = requests.post(
+            f"{site_url}/wp-json/wp/v2/posts/{wp_post_id}",
+            json={"excerpt": meta_desc},
+            headers=headers,
+            timeout=TIMEOUT,
+        )
+        ok = ok and (200 <= r.status_code < 300)
+    except Exception as e:
+        current_app.logger.info(f"[WP-SEO] excerpt push error id={wp_post_id}: {e}")
+        ok = False
+    # 2) プラグイン用メタ（失敗しても致命ではない）
+    meta_try = [
+        {"_yoast_wpseo_title": title},
+        {"_yoast_wpseo_metadesc": meta_desc},
+        {"rank_math_title": title},
+        {"rank_math_description": meta_desc},
+    ]
+    for meta_obj in meta_try:
+        try:
+            r = requests.post(
+                f"{site_url}/wp-json/wp/v2/posts/{wp_post_id}",
+                json={"meta": meta_obj},
+                headers=headers,
+                timeout=TIMEOUT,
+            )
+            # 400/403 は REST 未公開キーの可能性。ログだけ残す。
+            if not (200 <= r.status_code < 300):
+                current_app.logger.info(f"[WP-SEO] meta write {list(meta_obj.keys())[0]} -> {r.status_code}: {r.text[:120]}")
+        except Exception as e:
+            current_app.logger.info(f"[WP-SEO] meta write skipped ({list(meta_obj.keys())[0]}): {e}")
+    return ok
+
+# ────────────────────────────────────────────────
+# 管理画面から呼ぶ本体：タイトル/メタ再生成 → （任意で）WPへ本番反映
+# ────────────────────────────────────────────────
+def run_title_meta_backfill(
+    *,
+    user_id: int | None = None,
+    site_id: int | None = None,
+    limit: int = 200,
+    dryrun: bool = True,
+    push_to_wp: bool = False,
+    after_id: int | None = None,
+) -> Dict[str, any]:
+    """
+    1) DB上で meta を再生成（dryrun なら書き込みなし）
+    2) push_to_wp=True かつ dryrun=False のとき、'posted' 記事だけ WP に excerpt/SEOメタを反映
+    戻り: dict(summary..., wp={tried, ok, skipped_no_url})
+    """
+    res = run_meta_regen_batch(
+        site_id=site_id,
+        user_id=user_id,
+        limit=limit,
+        dryrun=dryrun,
+        after_id=after_id,
+    )
+
+    wp_summary = {"tried": 0, "ok": 0, "skipped_no_url": 0}
+    if not dryrun and push_to_wp and res.get("updated_ids"):
+        # 対象記事を取得（posted のみ WP 反映）
+        arts: List[Article] = (
+            Article.query
+            .filter(Article.id.in_(res["updated_ids"]))
+            .filter(Article.status == "posted")
+            .all()
+        )
+        if arts:
+            # site が1つに固定されていれば1回取得、未指定なら記事ごとに取得
+            site_map: Dict[int, Site] = {}
+            if site_id:
+                s = Site.query.get(site_id)
+                if s:
+                    site_map[site_id] = s
+            for a in arts:
+                if not a.posted_url:
+                    wp_summary["skipped_no_url"] += 1
+                    continue
+                s = site_map.get(a.site_id) or Site.query.get(a.site_id)
+                if not s:
+                    wp_summary["skipped_no_url"] += 1
+                    continue
+                slug = _extract_slug_from_url(a.posted_url)
+                wp_id = _find_wp_post_id_by_slug(s, slug) if slug else None
+                if not wp_id:
+                    wp_summary["skipped_no_url"] += 1
+                    continue
+                wp_summary["tried"] += 1
+                meta_desc = (a.meta_description or "").strip()
+                title = (a.title or a.keyword or "").strip()
+                ok = _push_excerpt_and_seo_meta(s, wp_id, title, meta_desc)
+                if ok:
+                    wp_summary["ok"] += 1
+
+    return {
+        **res,
+        "wp": wp_summary,
+    }
+
 
 # ────────────────────────────────────────────────
 # 内部SEO 自動化ジョブ

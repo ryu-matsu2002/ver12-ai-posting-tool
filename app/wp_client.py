@@ -31,6 +31,29 @@ UA_FAKE = (
 def normalize_url(url: str) -> str:
     return url.rstrip('/')
 
+def _clean_meta(s: str, max_len: int | None = None) -> str:
+    """
+    メタ説明などを WP 送信用に軽くサニタイズ：
+      - 両端空白除去
+      - 改行・タブ・全角空白を半角スペースへ
+      - 連続スペースを 1 つに圧縮
+      - max_len があれば末尾を安全トリム
+    """
+    if not s:
+        return ""
+    txt = str(s).strip()
+    txt = txt.replace("\u3000", " ")     # 全角スペース
+    txt = txt.replace("\r", " ").replace("\n", " ").replace("\t", " ")
+    # 連続空白を 1 つに
+    while "  " in txt:
+        txt = txt.replace("  ", " ")
+    if max_len and len(txt) > max_len:
+        txt = txt[:max_len].rstrip()
+    return txt
+
+def _truncate(s: str, n: int) -> str:
+    return s if not s or len(s) <= n else s[:n].rstrip()
+
 # 投稿用のヘッダー作成（application/json 用）
 def _post_headers(username: str, app_pass: str, site_url: str) -> dict:
     token = base64.b64encode(f'{username}:{app_pass}'.encode('utf-8')).decode('utf-8')
@@ -332,11 +355,17 @@ def post_to_wp(site: Site, art: Article) -> str:
         except Exception as e:
             current_app.logger.warning(f"アイキャッチ画像のアップロード失敗: Article ID {art.id}, User: {art.user_id}, Site: {site.url}, エラー: {e}")
 
+    # メタ説明（DBにあれば使用）— 改行/全角/連続空白をならし、180 文字に整形
+    meta_desc = _clean_meta(art.meta_description or "", max_len=180)
+
     post_data = {
         "title": art.title,
         "content": f'<div class="ai-content">{_decorate_html(art.body)}</div>',
         "status": "publish",
     }
+    # 保険として excerpt にもメタ説明を入れておく（多くのテーマ/SEOプラグインが拾う）
+    if meta_desc:
+        post_data["excerpt"] = meta_desc
     if featured_media_id:
         post_data["featured_media"] = featured_media_id
 
@@ -347,6 +376,12 @@ def post_to_wp(site: Site, art: Article) -> str:
             art.posted_url = response.json().get("link")
             db.session.commit()
             current_app.logger.info(f"投稿成功: Article ID {art.id}, User: {art.user_id}, Site: {site.url} -> {art.posted_url}")
+            # 可能なら SEO メタもプッシュ（失敗しても投稿は成功として進める）
+            try:
+                wp_id = int(response.json().get("id"))
+                _push_seo_meta_to_wp(site, wp_id, art, meta_desc)
+            except Exception as e:
+                current_app.logger.warning(f"[WP-SEO] meta push skipped: {e}")
             return art.posted_url or "success"
         else:
             raise HTTPError(f"ステータスコード {response.status_code}")
@@ -365,6 +400,55 @@ def _decorate_html(content: str) -> str:
     content = content.replace('<p>', '<p class="ai-p">')
     return content
 
+def _push_seo_meta_to_wp(site: Site, wp_post_id: int, art: Article, meta_desc: str = "") -> None:
+    """
+    WordPress 側に SEO メタをできる範囲で反映する補助処理。
+    - すでに post 作成時に excerpt は送っているが、ここでも再度ベストエフォートで反映
+    - Yoast / RankMath のメタキーにも試行（RESTで拒否される環境もあるため、失敗はログのみ）
+    """
+    import requests
+    site_url = normalize_url(site.url)
+    headers = _post_headers(site.username, site.app_pass, site_url)
+
+    # 1) excerpt を再度同期（冪等）
+    if meta_desc:
+        try:
+            resp = requests.post(
+                f"{site_url}/wp-json/wp/v2/posts/{wp_post_id}",
+                json={"excerpt": meta_desc},
+                headers=headers,
+                timeout=TIMEOUT,
+            )
+            resp.raise_for_status()
+        except Exception as e:
+            current_app.logger.info(f"[WP-SEO] excerpt sync skipped: {e}")
+
+    # 2) 代表的SEOプラグインのメタキーにベストエフォートで書き込み
+    #    Yoast:   _yoast_wpseo_title, _yoast_wpseo_metadesc
+    #    RankMath: rank_math_title, rank_math_description
+    # ※ REST で書けない設定のWPも多いので、失敗はログのみで継続
+    # タイトルも軽整形＆60字トリム（一般的な推奨値）
+    title_for_meta = _truncate(_clean_meta(art.title or art.keyword or ""), 60)
+    meta_desc = _clean_meta(meta_desc or title_for_meta, max_len=180)
+    meta_try_list = [
+        {"_yoast_wpseo_title": title_for_meta},
+        {"_yoast_wpseo_metadesc": meta_desc or title_for_meta},
+        {"rank_math_title": title_for_meta},
+        {"rank_math_description": meta_desc or title_for_meta},
+    ]
+    for meta_obj in meta_try_list:
+        try:
+            resp = requests.post(
+                f"{site_url}/wp-json/wp/v2/posts/{wp_post_id}",
+                json={"meta": meta_obj},
+                headers=headers,
+                timeout=TIMEOUT,
+            )
+            # 多くの環境で 400/403 が返る（RESTで未公開のmetaキー）。その場合は情報ログだけ。
+            if not (200 <= resp.status_code < 300):
+                current_app.logger.info(f"[WP-SEO] meta write {list(meta_obj.keys())[0]} -> {resp.status_code}: {resp.text[:120]}")
+        except Exception as e:
+            current_app.logger.info(f"[WP-SEO] meta write skipped ({list(meta_obj.keys())[0]}): {e}")
 
 # =============================================================
 # 🔸 NEW: Topicページ用の汎用投稿ヘルパ（Article不要）

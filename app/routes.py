@@ -151,20 +151,21 @@ def admin_return():
 # ------------------------------------------------------------------------------
 # 管理API: Title & Meta バッチ再生成
 #
-# ・タイトル：記事タイトルをそのまま <title> に使う（DB更新は不要）
-# ・メタ説明：AIで自動生成、180文字以内（デフォルト）。既存記事へ一括適用。
+# ・タイトル：記事タイトルをそのまま <title> として利用（DB更新は不要）
+# ・メタ説明：AIで自動生成（既定180文字）。既存記事へ一括適用。
 #
-# クエリ/ボディで以下の任意パラメータを受け付けます：
-#   - site_id: int      … 対象サイト限定
-#   - user_id: int      … 対象ユーザー限定
-#   - limit: int        … 一度に処理する記事数上限（デフォルト 500）
-#   - dry_run: bool     … true なら保存せず件数のみ（デフォルト false）
-#   - overwrite_manual: bool … true で is_manual_meta=True も上書き（デフォルト false）
-#   - max_chars: int    … 文字数上限（デフォルト 180）
+# 
+# 受け取るパラメータ（GET/POSTとも可）:
+#   - site_id: int       … 対象サイト限定（省略可）
+#   - user_id: int       … 対象ユーザー限定（省略可）
+#   - limit: int         … 1回の処理上限（既定 200）
+#   - dryrun: bool       … プレビューのみ（DB書込なし）。true/1/on で有効
+#   - push_to_wp: bool   … DB反映後に WP へも同期（posted 記事のみ）。dryrun時は無視
+#   - after_id: int      … 続き実行用カーソル（前回レスポンスの cursor を渡す）
 #
 # 例:
-#   GET  /admin/tools/title-meta-backfill?site_id=1&limit=200&dry_run=1
-#   POST /admin/tools/title-meta-backfill  (JSONボディで同パラメータ)
+#   GET  /admin/tools/title-meta-backfill?site_id=1&limit=200&dryrun=1
+#   POST /admin/tools/title-meta-backfill  （JSON/FORM で同パラメータ）
 # ------------------------------------------------------------------------------
 def _as_bool(v):
     if isinstance(v, bool):
@@ -177,6 +178,8 @@ def _as_int(v, default=None):
         return int(v)
     except Exception:
         return default
+    
+from app.tasks import run_title_meta_backfill    
 
 @admin_bp.route("/admin/tools/title-meta-backfill", methods=["GET", "POST"])
 @admin_required_effective
@@ -190,20 +193,20 @@ def admin_title_meta_backfill():
         if not data:
             data.update(request.form.to_dict())
 
-    site_id          = _as_int(data.get("site_id"))
-    user_id          = _as_int(data.get("user_id"))
-    limit            = _as_int(data.get("limit"))
-    dry_run          = _as_bool(data.get("dry_run", False))
-    overwrite_manual = _as_bool(data.get("overwrite_manual", False))
-    max_chars        = _as_int(data.get("max_chars"), 180) or 180
+    site_id    = _as_int(data.get("site_id"))
+    user_id    = _as_int(data.get("user_id"))
+    limit      = _as_int(data.get("limit"), 200) or 200
+    dryrun     = _as_bool(data.get("dryrun", data.get("dry_run", False)))
+    push_to_wp = _as_bool(data.get("push_to_wp", False))
+    after_id   = _as_int(data.get("after_id"))
 
     ok, result = run_title_meta_backfill(
         site_id=site_id,
         user_id=user_id,
         limit=limit,
-        dry_run=dry_run,
-        overwrite_manual=overwrite_manual,
-        max_chars=max_chars,
+        dryrun=dryrun,
+        after_id=after_id,
+        push_to_wp=push_to_wp,
     )
     status = 200 if ok else 400
     return jsonify({"ok": ok, **result}), status
