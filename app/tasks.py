@@ -1204,12 +1204,8 @@ def run_meta_regen_batch(
             # 生成素材の準備
             base_text = _strip_html(art.body or "") or (art.title or art.keyword or "")
             # AI 生成（本文が短い/空でも _gen_meta_with_ai はフォールバック内で安全に処理）
-            ai_meta = _gen_meta_with_ai(
-                title=art.title or "",
-                body_text=base_text,
-                keyword=art.keyword or "",
-                max_chars=180,
-            )
+            # ※ _gen_meta_with_ai(title: str, body_html: str, user_id: int | None)
+            ai_meta = _gen_meta_with_ai(art.title or "", art.body or "", art.user_id)
             if not ai_meta:
                 ai_meta = _gen_meta_fallback(
                     title=art.title or "",
