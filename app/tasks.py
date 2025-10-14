@@ -33,6 +33,15 @@ from app.external_seo_generator import (
 )
 from app.models import PromptTemplate
 from app.article_generator import _generate
+from app.models import ArticleAudit  # 🆕 監査ログ
+# メタ生成の共通関数（article_generator.py で定義済みのものを再利用）
+from app.article_generator import (
+    _strip_html,
+    _smart_truncate,
+    _meta_quality_label,
+    _gen_meta_with_ai,
+    _gen_meta_fallback,
+)
 
 
 # === 内部SEO 自動化 で使う import ===
@@ -1124,6 +1133,149 @@ def filter_autogen_candidates(site_id: int, candidates: List[str]) -> Dict[str, 
         "deduped": deduped,
         "dup_keywords": dup_keywords,
         "art_dup_keywords": art_dup_keywords,
+    }
+
+# ────────────────────────────────────────────────
+# 🆕 Title & Meta バッチ再生成（既存記事向け）
+#   - 対象: is_manual_meta=false AND meta_desc_quality ∈ quality_targets
+#   - 既定の対象品質: empty / too_short / too_long / duplicate
+#   - status は done / posted を既定対象（pending/gen は除外）
+#   - dryrun=True なら DB 書き込みを行わず差分だけ返す
+#   - カーソル実行: after_id（最後に処理した article.id）を受け取り続きから実行
+# ────────────────────────────────────────────────
+def run_meta_regen_batch(
+    site_id: int | None = None,
+    user_id: int | None = None,
+    *,
+    limit: int = 200,
+    dryrun: bool = True,
+    quality_targets: tuple[str, ...] = ("empty", "too_short", "too_long", "duplicate"),
+    status_targets: tuple[str, ...] = ("done", "posted"),
+    after_id: int | None = None,
+):
+    """
+    既存記事のメタディスクリプションを一括で再生成する。
+    戻り値: dict(total, scanned, updated, skipped_manual, failed, cursor, samples)
+      - cursor: 次呼び出し用の last_id（続き実行に利用）
+      - samples: ドライラン時の差分プレビュー（最大20件）
+    """
+    t0 = time.perf_counter()
+    scanned = updated = skipped_manual = failed = 0
+    samples: list[dict] = []
+    last_id = after_id or 0
+
+    q = (
+        Article.query
+        .filter(Article.is_manual_meta == False)  # noqa: E712
+        .filter(Article.status.in_(list(status_targets)))
+        .filter(Article.meta_desc_quality.in_(list(quality_targets)))
+        .order_by(Article.id.asc())
+    )
+    if site_id is not None:
+        q = q.filter(Article.site_id == site_id)
+    if user_id is not None:
+        q = q.filter(Article.user_id == user_id)
+    if last_id:
+        q = q.filter(Article.id > last_id)
+
+    rows = q.limit(max(1, int(limit))).all()
+    total = len(rows)
+    if not rows:
+        return {
+            "total": 0, "scanned": 0, "updated": 0,
+            "skipped_manual": 0, "failed": 0,
+            "cursor": after_id, "elapsed_ms": int((time.perf_counter()-t0)*1000),
+            "samples": [],
+        }
+
+    for art in rows:
+        last_id = art.id
+        scanned += 1
+        try:
+            # 安全側: 手動フラグが立っていたらスキップ（上の WHERE と二重だが保険）
+            if getattr(art, "is_manual_meta", False):
+                skipped_manual += 1
+                continue
+
+            # 生成素材の準備
+            base_text = _strip_html(art.body or "") or (art.title or art.keyword or "")
+            # AI 生成（本文が短い/空でも _gen_meta_with_ai はフォールバック内で安全に処理）
+            ai_meta = _gen_meta_with_ai(
+                title=art.title or "",
+                body_text=base_text,
+                keyword=art.keyword or "",
+                max_chars=180,
+            )
+            if not ai_meta:
+                ai_meta = _gen_meta_fallback(
+                    title=art.title or "",
+                    keyword=art.keyword or "",
+                    max_chars=180,
+                )
+            ai_meta = _smart_truncate(ai_meta, 180)
+            new_quality = _meta_quality_label(ai_meta)
+
+            if dryrun:
+                if len(samples) < 20:
+                    samples.append({
+                        "id": art.id,
+                        "title": art.title,
+                        "keyword": art.keyword,
+                        "current": (art.meta_description or "").strip(),
+                        "current_len": len(art.meta_description or ""),
+                        "current_quality": art.meta_desc_quality,
+                        "suggest": ai_meta,
+                        "suggest_len": len(ai_meta),
+                        "suggest_quality": new_quality,
+                    })
+                continue
+
+            # 本適用
+            before = (art.meta_description or "").strip()
+            art.meta_description = ai_meta
+            art.meta_desc_quality = new_quality
+            art.meta_desc_last_updated_at = datetime.utcnow()
+            db.session.add(art)
+
+            # 監査ログ
+            audit = ArticleAudit(
+                article_id=art.id,
+                field="meta_description",
+                before=before,
+                after=ai_meta,
+                job_id="meta-regenerator",
+                created_at=datetime.utcnow(),
+            )
+            db.session.add(audit)
+            updated += 1
+        except Exception as e:
+            failed += 1
+            current_app.logger.exception("[meta-regen] article_id=%s error: %s", art.id, e)
+
+    if not dryrun:
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            current_app.logger.exception("[meta-regen] commit failed: %s", e)
+            # 直前バッチ全体を失敗として扱う
+            failed += (updated or 0)
+            updated = 0
+
+    current_app.logger.info(
+        "[meta-regen] site=%s user=%s dryrun=%s scanned=%s updated=%s skipped_manual=%s failed=%s next_cursor=%s (%.1f ms)",
+        site_id, user_id, int(dryrun), scanned, updated, skipped_manual, failed, last_id,
+        (time.perf_counter() - t0) * 1000,
+    )
+    return {
+        "total": total,
+        "scanned": scanned,
+        "updated": updated,
+        "skipped_manual": skipped_manual,
+        "failed": failed,
+        "cursor": last_id,
+        "elapsed_ms": int((time.perf_counter() - t0) * 1000),
+        "samples": samples,
     }    
 
 # ────────────────────────────────────────────────

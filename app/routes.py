@@ -51,6 +51,8 @@ from app.image_utils import _is_image_url
 
 from app.services.blog_signup.livedoor_signup import generate_livedoor_id_candidates
 from app.services.blog_signup.livedoor_atompub_recover import open_create_tab_for_handoff
+# === Title & Meta バッチ再生成（管理API）で呼ぶ関数 ===
+from app.tasks import run_title_meta_backfill
 
 # ==== 外部SEO: 簡易ステータスストア（トークン→状態） ====
 EXTSEO_STATUS = {}  # { token: { step, progress, captcha_url, site_id, account_id, ... } }
@@ -146,6 +148,65 @@ def admin_return():
     return redirect(url_for("admin.admin_users"))
 # ==============================================================================
 
+# ------------------------------------------------------------------------------
+# 管理API: Title & Meta バッチ再生成
+#
+# ・タイトル：記事タイトルをそのまま <title> に使う（DB更新は不要）
+# ・メタ説明：AIで自動生成、180文字以内（デフォルト）。既存記事へ一括適用。
+#
+# クエリ/ボディで以下の任意パラメータを受け付けます：
+#   - site_id: int      … 対象サイト限定
+#   - user_id: int      … 対象ユーザー限定
+#   - limit: int        … 一度に処理する記事数上限（デフォルト 500）
+#   - dry_run: bool     … true なら保存せず件数のみ（デフォルト false）
+#   - overwrite_manual: bool … true で is_manual_meta=True も上書き（デフォルト false）
+#   - max_chars: int    … 文字数上限（デフォルト 180）
+#
+# 例:
+#   GET  /admin/tools/title-meta-backfill?site_id=1&limit=200&dry_run=1
+#   POST /admin/tools/title-meta-backfill  (JSONボディで同パラメータ)
+# ------------------------------------------------------------------------------
+def _as_bool(v):
+    if isinstance(v, bool):
+        return v
+    s = str(v).strip().lower()
+    return s in ("1", "true", "yes", "on")
+
+def _as_int(v, default=None):
+    try:
+        return int(v)
+    except Exception:
+        return default
+
+@admin_bp.route("/admin/tools/title-meta-backfill", methods=["GET", "POST"])
+@admin_required_effective
+def admin_title_meta_backfill():
+    # GET の querystring または POST の JSON / form を一元的に吸収
+    data = {}
+    if request.method == "GET":
+        data.update(request.args.to_dict())
+    else:
+        data.update(request.get_json(silent=True) or {})
+        if not data:
+            data.update(request.form.to_dict())
+
+    site_id          = _as_int(data.get("site_id"))
+    user_id          = _as_int(data.get("user_id"))
+    limit            = _as_int(data.get("limit"))
+    dry_run          = _as_bool(data.get("dry_run", False))
+    overwrite_manual = _as_bool(data.get("overwrite_manual", False))
+    max_chars        = _as_int(data.get("max_chars"), 180) or 180
+
+    ok, result = run_title_meta_backfill(
+        site_id=site_id,
+        user_id=user_id,
+        limit=limit,
+        dry_run=dry_run,
+        overwrite_manual=overwrite_manual,
+        max_chars=max_chars,
+    )
+    status = 200 if ok else 400
+    return jsonify({"ok": ok, **result}), status
 
 @bp.route('/robots.txt')
 def robots_txt():
