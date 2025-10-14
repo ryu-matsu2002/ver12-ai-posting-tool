@@ -230,7 +230,8 @@ def admin_title_meta_backfill():
                 sites = db.session.query(Site).order_by(Site.id.asc()).limit(200).all()
         except Exception:
             sites = []
-        return render_template("title_meta_backfill.html", users=users, sites=sites)
+        # admin 配下に置いているため正しいテンプレートパスで呼び出す
+        return render_template("admin/title_meta_backfill.html", users=users, sites=sites)
 
     # API 実行
     result = run_title_meta_backfill(
