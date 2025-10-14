@@ -1344,6 +1344,11 @@ def _push_excerpt_and_seo_meta(site, wp_post_id: int, title: str, meta_desc: str
         {"_yoast_wpseo_metadesc": meta_desc},
         {"rank_math_title": title},
         {"rank_math_description": meta_desc},
+        # ここから追記（★）
+        {"title_tag": title},                     # 独自/日本語ラベルの可能性が高い
+        {"meta_description_tag": meta_desc},     # 独自/日本語ラベルの可能性が高い
+        {"_aioseo_title": title},                # AIOSEO の一般的キー（環境により異なる）
+        {"_aioseo_description": meta_desc},
     ]
     for meta_obj in meta_try:
         try:
