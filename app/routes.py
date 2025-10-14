@@ -179,7 +179,10 @@ def _as_int(v, default=None):
     except Exception:
         return default
     
-from app.tasks import run_title_meta_backfill    
+from app.tasks import run_title_meta_backfill
+from sqlalchemy import text
+from flask import render_template, request, jsonify
+from app import db  
 
 @admin_bp.route("/admin/tools/title-meta-backfill", methods=["GET", "POST"])
 @admin_required_effective
@@ -200,6 +203,23 @@ def admin_title_meta_backfill():
     push_to_wp = _as_bool(data.get("push_to_wp", False))
     after_id   = _as_int(data.get("after_id"))
 
+    # 画面表示モード or API モードの判定
+    # → これらのいずれかが指定されていれば API、無ければ「画面表示」
+    params_present = any(v is not None and str(v) != "" for v in [
+        site_id, user_id, after_id
+    ]) or (data.get("limit") is not None) or dryrun or push_to_wp
+
+    if request.method == "GET" and not params_present:
+        # 画面表示：テンプレに軽量の候補一覧を渡す（必須ではないが親切）
+        users = db.session.execute(
+            text("SELECT id, username FROM users ORDER BY id ASC LIMIT 200")
+        ).mappings().all()
+        sites = db.session.execute(
+            text("SELECT id, COALESCE(name, url) AS label FROM site ORDER BY id ASC LIMIT 200")
+        ).mappings().all()
+        return render_template("title_meta_backfill.html", users=users, sites=sites)
+
+    # API 実行
     result = run_title_meta_backfill(
         site_id=site_id,
         user_id=user_id,
