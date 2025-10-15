@@ -18,26 +18,27 @@
 
         <!-- 検索入力（デバウンスで候補を遅延取得） -->
         <input id="user_search" type="text" placeholder="ユーザー名/メールで検索（入力で候補を取得）"
-               class="w-full border rounded-lg px-3 py-2 mb-2">
+               class="w-full border rounded-lg px-3 py-2 mb-2" autocomplete="off">
 
         <!-- 初回は空。フォーカス/検索で候補をAJAX注入 -->
-        <select id="user_select" class="w-full border rounded-lg px-3 py-2">
+        <select id="user_select" class="w-full border rounded-lg px-3 py-2" aria-describedby="user_help">
           <option value="">-- ユーザーを選んでください --</option>
         </select>
 
-        <p class="text-xs text-gray-500 mt-1">
+        <p id="user_help" class="text-xs text-gray-500 mt-1">
           ※ 初回表示時は高速化のためユーザー一覧を読み込みません。入力/フォーカス時に候補を取得します。
         </p>
       </div>
 
       <div class="flex items-end">
         <button id="btnAutoAll"
-                class="w-full md:w-auto px-4 py-2 rounded-lg bg-purple-600 text-white hover:bg-purple-700 transition">
+                class="w-full md:w-auto px-4 py-2 rounded-lg bg-purple-600 text-white hover:bg-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled>
           🔁 このユーザーの全記事に適用（自動で最後まで）
         </button>
       </div>
     </div>
-    <span id="busy" class="hidden text-sm text-gray-600">実行中…完了までお待ちください</span>
+    <span id="busy" class="hidden text-sm text-gray-600" aria-live="polite">実行中…完了までお待ちください</span>
   </div>
 
   <!-- 進捗表示 -->
@@ -55,8 +56,8 @@
       </label>
     </div>
     <div class="bg-white rounded-2xl shadow p-5 md:col-span-2">
-      <h3 class="font-semibold mb-2">サイト別内訳（上位）</h3>
-      <div id="p_by_site" class="text-sm text-gray-700 space-y-1 max-h-52 overflow-auto"></div>
+      <h3 class="font-semibold mb-2">サイト別内訳（上位50）</h3>
+      <div id="p_by_site" class="text-sm text-gray-700 space-y-1 max-h-52 overflow-auto" aria-live="polite"></div>
     </div>
   </div>
 
@@ -82,8 +83,14 @@
   const pBySite    = el('#p_by_site');
 
   function setBusy(v) {
-    btnAutoAll.disabled = v;
+    btnAutoAll.disabled = v || !(userSelect.value && userSelect.value.trim());
     busy.classList.toggle('hidden', !v);
+    document.body.toggleAttribute('aria-busy', v);
+  }
+
+  // ユーザー選択の有無でボタン活性/非活性
+  function reflectButtonState() {
+    btnAutoAll.disabled = !(userSelect.value && userSelect.value.trim());
   }
 
   // ---------------- ユーザー候補（遅延取得） ----------------
@@ -99,6 +106,7 @@
     if (current && Array.from(userSelect.options).some(o => o.value === current)) {
       userSelect.value = current;
     }
+    reflectButtonState();
   }
 
   async function fetchUsers(q) {
@@ -107,7 +115,6 @@
       usersCtrl = new AbortController();
       const params = new URLSearchParams();
       if (q && q.trim()) params.set('q', q.trim());
-      // 既定20件で十分。必要ならテンプレ側でlimit追加可
       const res = await fetch(`${usersSuggestEp}?${params.toString()}`, { signal: usersCtrl.signal });
       const data = await res.json().catch(() => ({items: []}));
       setUserOptions(data.items || []);
@@ -133,47 +140,77 @@
     fetchUsers('');
   });
 
-  // 選択が変わったら進捗更新
-  userSelect.addEventListener('change', refreshProgress);
+  // 選択が変わったら進捗更新＆ボタン状態更新
+  userSelect.addEventListener('change', () => {
+    reflectButtonState();
+    refreshProgress();
+  });
 
   // ---------------- 進捗描画 ----------------
+  let progressTimer = null;
+
+  function safePercent(num) {
+    const n = Number(num);
+    return Number.isFinite(n) ? n : 0;
+  }
+
   async function refreshProgress() {
     const uid = (userSelect.value || '').trim();
-    if (!uid) { pTotal.textContent='-'; pApplied.textContent='-'; pPct.textContent='-'; pBySite.innerHTML=''; return; }
+    if (!uid) {
+      pTotal.textContent='-'; pApplied.textContent='-'; pPct.textContent='-'; pBySite.innerHTML='';
+      return;
+    }
     const po = pPublished.checked ? '1' : '0';
     const url = `${progressEp}?user_id=${encodeURIComponent(uid)}&published_only=${po}`;
     try {
       const res = await fetch(url);
+      // 例外系(4xx/5xx)はJSONでない可能性→ガード
+      if (!res.ok) {
+        pBySite.innerHTML = `<div class="text-red-600">進捗取得エラー：HTTP ${res.status}</div>`;
+        return;
+      }
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || 'progress error');
+
       pTotal.textContent   = data.total;
       pApplied.textContent = data.applied;
-      pPct.textContent     = data.percentage.toFixed(2);
-      pBySite.innerHTML    = (data.by_site || []).map(r => {
-        const pct = r.total ? Math.round((r.applied / r.total) * 100) : 0;
-        return `<div>#${r.site_id} … ${r.applied}/${r.total} (${pct}%)</div>`;
+
+      const pctNum = safePercent(data.percentage);
+      pPct.textContent     = safePercent(pctNum).toFixed(2);
+
+      const list = (data.by_site || []).slice(0, 50).map(r => {
+        const t = Number(r.total) || 0;
+        const a = Number(r.applied) || 0;
+        const pct = t ? Math.round((a / t) * 100) : 0;
+        return `<div>#${r.site_id} … ${a}/${t} (${pct}%)</div>`;
       }).join('');
+      pBySite.innerHTML = list || '<div class="text-gray-500">データなし</div>';
     } catch (e) {
-      // 軽い失敗は無視
+      // 軽い失敗は無視（UI上は静かに）
     }
   }
+
   pPublished.addEventListener('change', refreshProgress);
-  setInterval(refreshProgress, 5000);
+
+  // ポーリングは1本に限定
+  if (!progressTimer) {
+    progressTimer = setInterval(refreshProgress, 5000);
+  }
 
   // ---------------- 実行結果描画 ----------------
   function escapeHtml(s) {
-    return String(s || '').replace(/[&<>"']/g, m => ({
+    return String(s || '').replace(/[&<>\"']/g, m => ({
       '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
     }[m]));
   }
 
   function renderSummaryAuto(res) {
     // ループ完走後サーバが返すサマリーに対応（routes の実装に合わせる）
-    const updatedTotal = res.updated_total ?? res.updated ?? 0;
-    const iterations   = res.iterations ?? 1;
+    const updatedTotal = Number(res.updated_total ?? res.updated ?? 0);
+    const iterations   = Number(res.iterations ?? 1);
     const lastCursor   = (res.last_cursor ?? res.cursor ?? '');
     const lastChunk    = res.last_chunk || {};
-    const lastUpdated  = lastChunk.updated ?? 0;
+    const lastUpdated  = Number(lastChunk.updated ?? 0);
     const doneFlag     = (lastChunk.done === true) || (!lastCursor || lastCursor === 0);
 
     return `
@@ -185,7 +222,7 @@
           <div class="p-3 rounded-lg bg-gray-50">最終チャンク更新<br><span class="text-lg font-bold">${lastUpdated}</span></div>
           <div class="p-3 rounded-lg bg-gray-50">状態<br><span class="text-lg font-bold">${doneFlag ? '完了' : '未完'}</span></div>
         </div>
-        <div class="mt-3 text-sm">last_cursor: <code class="px-2 py-1 bg-gray-100 rounded">${escapeHtml(lastCursor ?? '')}</code></div>
+        <div class="mt-3 text-sm">last_cursor: <code class="px-2 py-1 bg-gray-100 rounded">${escapeHtml(String(lastCursor ?? ''))}</code></div>
       </div>
     `;
   }
@@ -203,13 +240,15 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: Number(uid) })
       });
-      const data = await res.json().catch(() => ({}));
+
+      let data = {};
+      try { data = await res.json(); } catch (_){ /* 非JSONでも落とさない */ }
 
       if (!res.ok || data.ok === false) {
         resultBox.innerHTML = `
           <div class="bg-red-50 border border-red-200 text-red-800 rounded-xl p-4">
             <div class="font-semibold mb-1">エラー</div>
-            <pre class="text-xs whitespace-pre-wrap">${escapeHtml(JSON.stringify(data, null, 2))}</pre>
+            <pre class="text-xs whitespace-pre-wrap">${escapeHtml(JSON.stringify(data || {status: res.status}, null, 2))}</pre>
           </div>`;
         return;
       }
@@ -227,6 +266,13 @@
     }
   });
 
-  // 初期：何もしない（高速化のためユーザー配列は描画しない）
+  // Enter キーで実行（セレクトにフォーカス中）
+  userSelect.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' && !btnAutoAll.disabled) {
+      btnAutoAll.click();
+    }
+  });
+
+  // 初期：高速化のためユーザー配列は描画しない
 </script>
 {% endblock %}

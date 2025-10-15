@@ -184,7 +184,7 @@ import os
 from flask import render_template, request, jsonify, current_app
 from app import db
 from sqlalchemy.orm import load_only
-from sqlalchemy import func, case
+from sqlalchemy import func, case, or_
 
 try:
     # あなたのプロジェクトの User / Site / Article モデル名に合わせて import
@@ -352,32 +352,41 @@ def admin_title_meta_progress():
     base = db.session.query(Article).filter(Article.user_id == user_id)
     if published_only:
         # 公開済み判定: posted_at または posted_url のどちらかが入っていれば公開とみなす
-        base = base.filter(
-            (Article.posted_at.isnot(None)) | (func.coalesce(Article.posted_url, "") != "")
-        )
+        base = base.filter(or_(Article.posted_at.isnot(None), func.coalesce(Article.posted_url, "") != ""))
 
-    applied_cond = func.coalesce(Article.meta_description, "") != ""
-    # より厳密にするなら AND Article.meta_desc_last_updated_at.isnot(None) を併用:
-    # applied_cond = and_(applied_cond, Article.meta_desc_last_updated_at.isnot(None))
+    # 以降でサブクエリ列だけを参照できるよう、必要列に絞って別名付け
+    base_sub = (
+        base.with_entities(
+            Article.id.label("id"),
+            Article.site_id.label("site_id"),
+            Article.meta_description.label("meta_description"),
+        ).subquery()
+    )
+    # サブクエリ列版の適用条件
+    applied_cond_sub = func.coalesce(base_sub.c.meta_description, "") != ""
 
-    total = db.session.query(func.count(Article.id)).select_from(base.subquery()).scalar() or 0
-    applied = db.session.query(func.count(Article.id)).select_from(
-        base.filter(applied_cond).subquery()
-    ).scalar() or 0
+    # 分母：全件数
+    total = db.session.query(func.count(base_sub.c.id)).scalar() or 0
+    # 分子：meta_description が非空
+    applied = (
+        db.session.query(
+            func.sum(case((applied_cond_sub, 1), else_=0))
+        ).scalar() or 0
+    )
 
     by_site_rows = (
         db.session.query(
-            Article.site_id.label("site_id"),
-            func.count(Article.id).label("total"),
-            func.sum(case((applied_cond, 1), else_=0)).label("applied"),
+            base_sub.c.site_id.label("site_id"),
+            func.count(base_sub.c.id).label("total"),
+            func.sum(case((applied_cond_sub, 1), else_=0)).label("applied"),
         )
-        .select_from(base.subquery())  # base を subquery に落として published フィルタを引き継ぐ
-        .group_by("site_id")
-        .order_by("site_id")
+        .select_from(base_sub)
+        .group_by(base_sub.c.site_id)
+        .order_by(base_sub.c.site_id)
         .limit(500)
         .all()
     )
-    by_site = [{"site_id": r.site_id, "total": int(r.total), "applied": int(r.applied or 0)} for r in by_site_rows]
+    by_site = [{"site_id": int(r.site_id), "total": int(r.total), "applied": int(r.applied or 0)} for r in by_site_rows]
 
     pct = (applied / total * 100.0) if total else 0.0
     return jsonify({
