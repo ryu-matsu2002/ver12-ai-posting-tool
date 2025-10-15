@@ -318,7 +318,7 @@ def admin_title_meta_rows():
     a_base = (db.session.query(
                 Article.user_id.label("user_id"),
                 func.count(Article.id).label("cnt"))
-              .filter(Article.user_id.in__(user_ids))
+              .filter(Article.user_id.in_(user_ids))
               .filter(Article.is_manual_meta == False)  # noqa: E712
               .filter(Article.status.in_(status_targets))
               .filter(Article.meta_desc_quality.in_(quality_targets))
@@ -333,7 +333,7 @@ def admin_title_meta_rows():
             Article.site_id.label("site_id"),
             func.count(Article.id).label("cnt")
         )
-        .filter(Article.user_id.in__(user_ids))
+        .filter(Article.user_id.in_(user_ids))
         .filter(Article.is_manual_meta == False)  # noqa: E712
         .filter(Article.status.in_(status_targets))
         .filter(Article.meta_desc_quality.in_(quality_targets))
@@ -342,7 +342,7 @@ def admin_title_meta_rows():
     )
     # サイト名をまとめて引く
     site_ids = sorted({int(r.site_id) for r in s_rows if r.site_id is not None})
-    site_map = {s.id: (s.name or s.url or f"site#{s.id}") for s in db.session.query(Site.id, Site.name, Site.url).filter(Site.id.in__(site_ids)).all()}
+    site_map = {s.id: (s.name or s.url or f"site#{s.id}") for s in db.session.query(Site.id, Site.name, Site.url).filter(Site.id.in_(site_ids)).all()}
 
     per_user_sites = {}
     for r in s_rows:
