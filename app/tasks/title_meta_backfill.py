@@ -3,8 +3,8 @@
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 
+from typing import Any, Dict, Optional, Tuple
 from sqlalchemy import func, or_
-from sqlalchemy.orm import Session
 
 from app import db
 from app.models import Article
@@ -59,21 +59,33 @@ def _judge_quality(meta_desc: str) -> str:
         return "too_long"
     return "ok"
 
-# --- WP 反映（フックだけ。既存のあなたの実装に差し替え可能） ---------------
 def _push_meta_to_wp_if_needed(article: Article) -> None:
-    """
-    WP反映ロジックに接続するフック。
-    既存プロジェクトに WP クライアントがあるならここで呼ぶ。
-    何もなければ安全に return。
-    """
+    """投稿済み記事のメタをWP側へ反映。update_post_meta が使えるときだけ実行。"""
     try:
-        # 例:
-        # from app.services.wp_sync import update_meta_description
-        # if article.wp_post_id and article.posted_url:
-        #     update_meta_description(site=article.site, wp_post_id=article.wp_post_id, meta=article.meta_description)
-        return
+        from app.wp_client import update_post_meta  # 既存記事のメタ更新専用
+        wp_post_id = getattr(article, "wp_post_id", None)
+        site = getattr(article, "site", None)
+        if not wp_post_id or not site:
+            current_app.logger.info(
+                "[title-meta] skip WP meta sync (missing wp_post_id/site) article_id=%s", article.id
+            )
+            return
+        update_post_meta(site=site, wp_post_id=wp_post_id,
+                         meta_description=article.meta_description or "")
     except Exception as e:
-        current_app.logger.exception("[title-meta] WP push failed article_id=%s err=%s", article.id, e)
+        current_app.logger.exception(
+            "[title-meta] WP meta sync failed article_id=%s err=%s", article.id, e
+        )
+
+def _auto_post_if_needed(article: Article) -> None:
+    """未投稿(done)記事をWPへ新規投稿し、DBのposted系フィールドを更新。"""
+    try:
+        from app.wp_client import post_to_wp
+        result = post_to_wp(article)  # 戻り値の仕様に依存せず、後続は別ジョブでもよい
+        # 可能ならここで article.status/posted_at/posted_url/wp_post_id を更新
+        # post_to_wpが内部で更新する場合は何もしない
+    except Exception as e:
+        current_app.logger.exception("[title-meta] auto-post failed article_id=%s err=%s", article.id, e)
 
 # --- 本体 --------------------------------------------------------------------
 
@@ -99,11 +111,12 @@ def run_title_meta_backfill(
     qualities = ("empty", "too_short", "too_long", "duplicate")
     statuses  = ("done", "posted")
 
-    q = (
-        db.session.query(Article)
-        .filter(Article.is_manual_meta == False)  # noqa: E712
-        .filter(Article.status.in_(statuses))
-        .filter(Article.meta_desc_quality.in_(qualities))
+    q = db.session.query(Article).filter(
+        Article.is_manual_meta == False,             # noqa: E712
+        Article.status.in_(statuses),
+        # ★ ここが肝：品質未評価(NULL) も対象に含める
+        or_(Article.meta_desc_quality.in_(qualities),
+            Article.meta_desc_quality.is_(None))
     )
 
     if user_id:
@@ -146,9 +159,15 @@ def run_title_meta_backfill(
             art.meta_desc_last_updated_at = _now()
             updated += 1
 
-        # WP反映（posted のみ）。重くなるので try/except で個別に処理
-        if push_to_wp and art.status == "posted":
-            _push_meta_to_wp_if_needed(art)
+        # WP反映：要件に合わせて分岐
+        if push_to_wp:
+            if art.status == "posted":
+                # 既に公開済み → メタをWP側へ更新
+                _push_meta_to_wp_if_needed(art)
+            elif art.status == "done":
+                # 未投稿 → 投稿せず、メタタグだけDB更新。
+                # スケジューラーの通常投稿処理でWPへ反映される。
+                current_app.logger.info("[title-meta] kept done article_id=%s for scheduler to post later", art.id)
 
     if not dryrun:
         try:

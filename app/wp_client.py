@@ -495,3 +495,68 @@ def post_topic_to_wp(
     except Exception:
         body = resp.text
     raise HTTPError(f"[WP] topic create failed status={resp.status_code} body={str(body)[:200]}")
+
+
+# =============================================================
+# 🔧 追加: 既存記事の「メタ説明だけ」を安全に更新するヘルパ
+#   - 既存の post_to_wp() に一切影響を与えない“別入口”
+#   - excerpt を確実に同期し、主要SEOプラグインの description キーにも
+#     ベストエフォートで書き込む（失敗しても投稿は壊れない）
+#   - 戻り値: True（いずれか成功）/ False（全部失敗）
+# =============================================================
+def update_post_meta(site: Site, wp_post_id: int, meta_description: str) -> bool:
+    """
+    既存WP投稿のメタ説明を更新する。
+    - まず excerpt を更新（多くのテーマ/プラグインが拾う）
+    - 次に Yoast / RankMath の description メタキーを書き込み（任意・失敗許容）
+    """
+    site_url = normalize_url(site.url)
+    headers = _post_headers(site.username, site.app_pass, site_url)
+    meta_desc = _clean_meta(meta_description or "", max_len=180)
+
+    ok_any = False
+
+    # 1) excerpt を更新（冪等）
+    try:
+        resp = requests.post(
+            f"{site_url}/wp-json/wp/v2/posts/{wp_post_id}",
+            json={"excerpt": meta_desc},
+            headers=headers,
+            timeout=TIMEOUT,
+        )
+        if 200 <= resp.status_code < 300:
+            ok_any = True
+        else:
+            current_app.logger.info(
+                "[WP-SEO] excerpt update failed %s: %s",
+                resp.status_code, resp.text[:160]
+            )
+    except Exception as e:
+        current_app.logger.info("[WP-SEO] excerpt update error: %s", e)
+
+    # 2) 主要SEOプラグインの description メタキーをベストエフォートで更新
+    #    タイトルは既存の投稿機能で十分なのでここでは触らない（安全最優先）
+    for meta_obj in ({"_yoast_wpseo_metadesc": meta_desc},
+                     {"rank_math_description": meta_desc}):
+        try:
+            resp = requests.post(
+                f"{site_url}/wp-json/wp/v2/posts/{wp_post_id}",
+                json={"meta": meta_obj},
+                headers=headers,
+                timeout=TIMEOUT,
+            )
+            if 200 <= resp.status_code < 300:
+                ok_any = True
+            else:
+                # 多くの環境で 400/403 は通常（REST未公開メタ）
+                current_app.logger.info(
+                    "[WP-SEO] meta write %s -> %s: %s",
+                    list(meta_obj.keys())[0], resp.status_code, resp.text[:160]
+                )
+        except Exception as e:
+            current_app.logger.info(
+                "[WP-SEO] meta write skipped (%s): %s",
+                list(meta_obj.keys())[0], e
+            )
+
+    return ok_any
