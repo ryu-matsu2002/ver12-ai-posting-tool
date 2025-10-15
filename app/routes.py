@@ -7834,7 +7834,7 @@ def confirm_livedoor_email(task_id):
 from flask import Blueprint, request, redirect, url_for, flash
 from flask_login import login_required, current_user
 from app.models import ExternalBlogAccount
-from app.tasks import _run_external_post_job
+#from app.tasks import _run_external_post_job
 
 # 既存の
 # @bp.route("/external-seo/generate/<int:site_id>/<int:blog_id>", methods=["POST"])
