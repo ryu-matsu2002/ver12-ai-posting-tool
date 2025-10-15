@@ -234,6 +234,11 @@ def admin_title_meta_backfill():
     iters = 0
     cursor = None
     last_result = {}
+    # ★ 追加: WP反映の実績カウンタ（分子/分母/内訳）を合算
+    wp_target_total_sum = 0
+    wp_synced_ok_sum    = 0
+    wp_unresolved_sum   = 0
+    wp_failed_sum       = 0
 
     while True:
         iters += 1
@@ -258,6 +263,12 @@ def admin_title_meta_backfill():
         # 1チャンクの更新件数（存在すれば）を加算
         total_updated += int(result.get("updated", 0))
 
+        # ★ 追加: チャンクごとのWP実績を合算（キーが無い旧版でも0扱い）
+        wp_target_total_sum += int(result.get("wp_target_total", 0) or 0)
+        wp_synced_ok_sum    += int(result.get("wp_synced_ok", 0) or 0)
+        wp_unresolved_sum   += int(result.get("wp_unresolved", 0) or 0)
+        wp_failed_sum       += int(result.get("wp_failed", 0) or 0)
+
         # 続きカーソルのキー名は実装差異に合わせて両対応
         cursor = result.get("cursor") or result.get("next_after_id")
         done   = bool(result.get("done")) or (cursor in (None, "", 0))
@@ -274,7 +285,17 @@ def admin_title_meta_backfill():
             "updated": int(last_result.get("updated", 0)),
             "cursor": last_result.get("cursor"),
             "done": bool(last_result.get("done")),
+            # 参考: 最終チャンク単体のWP実績（UIで“直近の動き”を見たい場合に使用可）
+            "wp_target_total": int(last_result.get("wp_target_total", 0) or 0),
+            "wp_synced_ok":    int(last_result.get("wp_synced_ok", 0) or 0),
+            "wp_unresolved":   int(last_result.get("wp_unresolved", 0) or 0),
+            "wp_failed":       int(last_result.get("wp_failed", 0) or 0),
         },
+        # ★ 合算（UIの分子/分母はこちらを利用）
+        "wp_target_total": wp_target_total_sum,   # 分母: WP反映対象（postedのみ）
+        "wp_synced_ok":    wp_synced_ok_sum,      # 分子: 実際にWPへ反映成功
+        "wp_unresolved":   wp_unresolved_sum,     # 未解決（wp_post_id見つからず等）
+        "wp_failed":       wp_failed_sum,         # API等の失敗
     }
     return jsonify(summary), 200
 

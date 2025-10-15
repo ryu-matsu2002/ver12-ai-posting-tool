@@ -15,7 +15,7 @@
       </div>
     </div>
     <div class="text-xs text-gray-500 mt-2">
-      分母＝<strong>投稿記事</strong>／ 分子＝<code>meta_description</code> 非空（適用済み）／ 手動メタ除外
+      分母＝<strong>WP反映対象（posted記事）</strong> ／ 分子＝<code>WPへメタ反映できた件数</code> ／ 手動メタ除外
     </div>
   </div>
 
@@ -47,6 +47,22 @@
       </div>
     </div>
   </div>
+
+  <!-- 実行結果の簡易ダイアログ -->
+  <div id="resultModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center z-40">
+    <div class="bg-white rounded-xl shadow-xl w-[520px] max-w-[92vw] p-5">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-semibold">WP反映 実行結果</h2>
+        <button id="closeModal" class="text-gray-500 hover:text-gray-700">✕</button>
+      </div>
+      <div id="resultBody" class="text-sm space-y-2">
+        <!-- 動的に埋め込む -->
+      </div>
+      <div class="text-right mt-4">
+        <button id="okModal" class="px-3 py-1 rounded bg-purple-600 text-white hover:bg-purple-700">OK</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -62,6 +78,11 @@
   const nextBtn = el('#next');
   const reloadBtn = el('#btnReload');
 
+  const modal = el('#resultModal');
+  const closeModalBtn = el('#closeModal');
+  const okModalBtn = el('#okModal');
+  const resultBody = el('#resultBody');
+
   let page = 1, perPage = 20, total = 0, debounceTimer = null;
 
   const pill = (text, hint='') =>
@@ -74,15 +95,17 @@
     return `<span class="inline-flex px-2 py-1 rounded ${cls}">${label}</span>`;
   }
 
-  const progressText = (a,t,pct)=>{
-    const p = Number.isFinite(pct) ? pct : (t? Math.round((a/t)*10000)/100 : 0);
+  const roundPct = (num)=> Math.round(num * 100) / 100;
+
+  const progressText = (a,t)=>{
+    const p = (t>0) ? roundPct((a / t) * 100) : 0;
     return `${a} / ${t}（${p}%）`;
   };
 
-  const miniBar = (pct)=>{
-    const p = Math.max(0, Math.min(100, Number(pct||0)));
+  const miniBar = (a,t)=>{
+    const pct = (t>0) ? Math.max(0, Math.min(100, (a/t)*100)) : 0;
     return `<span class="inline-block w-28 h-2 bg-gray-200 rounded-full overflow-hidden align-middle" aria-hidden="true">
-              <span class="block h-2" style="width:${p}%; background:#8b5cf6;"></span>
+              <span class="block h-2" style="width:${pct}%; background:#8b5cf6;"></span>
             </span>`;
   };
 
@@ -95,22 +118,25 @@
   };
 
   function rowHtml(item){
+    // 初回描画は従来の集計（meta適用）で描くが、実行後はWP実績で上書きする
     const total = Number(item.total_cnt||0);
     const applied = Number(item.applied_cnt||0);
-    const pct = Number.isFinite(item.percentage) ? item.percentage : (total? Math.round((applied/total)*10000)/100 : 0);
     const fallback = Number(item.target_cnt || Math.max(total - applied,0));
     const canRun = total>0 && applied<total;
 
     return `
-      <tr class="border-t">
+      <tr class="border-t" data-user-row="${item.user_id}">
         <td class="px-4 py-3 align-top">
           <div class="font-medium">#${item.user_id} ${item.username} <span class="text-gray-500 text-xs">&lt;${item.email}&gt;</span></div>
         </td>
-        <td class="px-4 py-3 align-top">${statusBadge(applied,total,fallback)}</td>
+        <td class="px-4 py-3 align-top">
+          <span class="js-status">${statusBadge(applied,total,fallback)}</span>
+          <div class="text-[11px] text-gray-500 mt-1 js-basis">表示基準: DB適用</div>
+        </td>
         <td class="px-4 py-3 align-top">
           <div class="flex items-center gap-2">
-            <span>${progressText(applied,total,pct)}</span>
-            ${miniBar(pct)}
+            <span class="js-progress-text">${progressText(applied,total)}</span>
+            <span class="js-bar">${miniBar(applied,total)}</span>
           </div>
         </td>
         <td class="px-4 py-3 align-top">
@@ -149,7 +175,55 @@
     }
   }
 
-  // ★ クリック委譲（CSPでinline禁止でも確実に動く）
+  // ---- 実行後：対象ユーザー行をWP実績で上書き表示する ----
+  function applyWpResultToRow(userId, wpSyncedOk, wpTargetTotal){
+    const row = rowsEl.querySelector(`tr[data-user-row="${userId}"]`);
+    if(!row) return;
+
+    const a = Number(wpSyncedOk||0);
+    const t = Number(wpTargetTotal||0);
+
+    // 進捗テキストとバー
+    const progressTextEl = row.querySelector('.js-progress-text');
+    const barEl = row.querySelector('.js-bar');
+    if(progressTextEl) progressTextEl.textContent = progressText(a, t);
+    if(barEl) barEl.innerHTML = miniBar(a, t);
+
+    // ステータス
+    const statusEl = row.querySelector('.js-status');
+    if(statusEl) statusEl.innerHTML = statusBadge(a, t, Math.max(t - a, 0));
+
+    // 表示基準の注記
+    const basisEl = row.querySelector('.js-basis');
+    if(basisEl) basisEl.textContent = '表示基準: WP反映実績';
+  }
+
+  function showResultModal(summary){
+    const ok = !!summary?.ok;
+    const rows = [];
+    rows.push(`<div class="font-medium ${ok?'text-green-700':'text-red-700'}">${ok?'完了':'失敗'}</div>`);
+    if(summary){
+      const a = Number(summary.wp_synced_ok||0);
+      const t = Number(summary.wp_target_total||0);
+      const unres = Number(summary.wp_unresolved||0);
+      const fail = Number(summary.wp_failed||0);
+      const pct = t>0 ? roundPct((a/t)*100) : 0;
+
+      rows.push(`<div>ユーザー #${summary.user_id}</div>`);
+      rows.push(`<div class="mt-2">WP反映: <strong>${a} / ${t}（${pct}%）</strong></div>`);
+      rows.push(`<div class="text-gray-600">未解決（wp_post_id未特定）: ${unres} / 失敗: ${fail}</div>`);
+    }
+    resultBody.innerHTML = rows.join('');
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+  }
+
+  function hideResultModal(){
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+  }
+
+  // ★ クリック委譲
   rowsEl.addEventListener('click', async (ev)=>{
     const btn = ev.target.closest('button[data-user-id]');
     if(!btn) return;
@@ -162,14 +236,23 @@
       const headers = {'Content-Type':'application/json'};
       const csrf = getCsrfToken(); if(csrf) headers['X-CSRFToken']=csrf;
 
+      // 押下直後に100%にしない：完了レスポンスを待ってからUI更新
       const res = await fetch(runEp, { method:'POST', headers, body: JSON.stringify({ user_id: userId }) });
       const text = await res.text();
       if(!res.ok){
         alert(`実行に失敗（${res.status}）\n${text.slice(0,300)}`);
       }else{
         let data={}; try{ data = text? JSON.parse(text):{} }catch{}
-        if(data.ok===false){ alert(`実行に失敗\n${data.error||'unknown error'}`); }
-        await fetchPage();
+        if(data.ok===false){
+          alert(`実行に失敗\n${data.error||'unknown error'}`);
+        }else{
+          // ★ 実行直後の表示は「WP反映実績」で上書き（分子/分母をWP基準に差し替え）
+          const a = Number(data.wp_synced_ok||0);
+          const t = Number(data.wp_target_total||0);
+          applyWpResultToRow(userId, a, t);
+          // 結果ダイアログ
+          showResultModal(data);
+        }
       }
     }catch(e){
       alert('通信エラー：' + (e?.message||e));
@@ -178,8 +261,16 @@
     }
   });
 
+  // モーダル操作
+  closeModalBtn.addEventListener('click', hideResultModal);
+  okModalBtn.addEventListener('click', hideResultModal);
+  modal.addEventListener('click', (e)=>{ if(e.target===modal) hideResultModal(); });
+
   // UI操作
-  qEl.addEventListener('input', ()=>{ clearTimeout(debounceTimer); debounceTimer=setTimeout(()=>{ page=1; fetchPage(); },250); });
+  qEl.addEventListener('input', ()=>{
+    clearTimeout(debounceTimer);
+    debounceTimer=setTimeout(()=>{ page=1; fetchPage(); },250);
+  });
   reloadBtn.addEventListener('click', ()=>fetchPage());
   prevBtn.addEventListener('click', ()=>{ if(page>1){ page--; fetchPage(); } });
   nextBtn.addEventListener('click', ()=>{ page++; fetchPage(); });

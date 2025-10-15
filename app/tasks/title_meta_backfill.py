@@ -1,7 +1,6 @@
 # app/tasks/title_meta_backfill.py
 
 from datetime import datetime
-from typing import Any, Dict, Optional, Tuple
 
 from typing import Any, Dict, Optional, Tuple
 from sqlalchemy import func, or_
@@ -59,23 +58,44 @@ def _judge_quality(meta_desc: str) -> str:
         return "too_long"
     return "ok"
 
-def _push_meta_to_wp_if_needed(article: Article) -> None:
-    """投稿済み記事のメタをWP側へ反映。update_post_meta が使えるときだけ実行。"""
+def _push_meta_to_wp_if_needed(article: Article) -> str:
+    """投稿済み記事のメタをWP側へ反映し、結果ステータスを返す。
+    戻り値: 'ok' | 'unresolved' | 'failed'
+    """
     try:
-        from app.wp_client import update_post_meta  # 既存記事のメタ更新専用
+        # 既存記事のメタ更新専用（既存APIを流用）
+        from app.wp_client import update_post_meta, resolve_wp_post_id
+
         wp_post_id = getattr(article, "wp_post_id", None)
         site = getattr(article, "site", None)
-        if not wp_post_id or not site:
-            current_app.logger.info(
-                "[title-meta] skip WP meta sync (missing wp_post_id/site) article_id=%s", article.id
+        if not site:
+            current_app.logger.info("[title-meta] skip WP meta sync (missing site) article_id=%s", article.id)
+            return "unresolved"
+
+        # ★ 追加：wp_post_id が空なら、内部SEOと同手法で「スキップ前に解決」
+        if not wp_post_id:
+            wp_post_id = resolve_wp_post_id(site=site, art=article, save=True) or None
+            if wp_post_id:
+                current_app.logger.info("[title-meta] resolved wp_post_id=%s article_id=%s", wp_post_id, article.id)
+
+        # 解決できたときのみWPへ反映
+        if wp_post_id:
+            ok = update_post_meta(
+                site=site,
+                wp_post_id=wp_post_id,
+                meta_description=article.meta_description or "",
             )
-            return
-        update_post_meta(site=site, wp_post_id=wp_post_id,
-                         meta_description=article.meta_description or "")
+            return "ok" if ok else "failed"
+        else:
+            current_app.logger.info(
+                "[title-meta] unresolved wp_post_id; meta not pushed article_id=%s", article.id
+            )
+            return "unresolved"
     except Exception as e:
         current_app.logger.exception(
             "[title-meta] WP meta sync failed article_id=%s err=%s", article.id, e
         )
+        return "failed"
 
 def _auto_post_if_needed(article: Article) -> None:
     """未投稿(done)記事をWPへ新規投稿し、DBのposted系フィールドを更新。"""
@@ -130,10 +150,25 @@ def run_title_meta_backfill(
 
     rows = q.all()
     if not rows:
-        return {"ok": True, "updated": 0, "cursor": after_id, "done": True}
+        return {
+            "ok": True,
+            "updated": 0,
+            "cursor": after_id,
+            "done": True,
+            # 進捗可視化用の追加フィールド（空でもキーは返す）
+            "wp_target_total": 0,      # 分母候補：WP反映対象（postedかつpush_to_wp=True）の件数
+            "wp_synced_ok": 0,         # 分子：実際にWPへ反映できた件数
+            "wp_unresolved": 0,        # wp_post_id未解決などで未反映
+            "wp_failed": 0,            # API等の失敗で未反映
+        }
 
     updated = 0
     last_id = after_id or 0
+    # 進捗カウンタ（UI用）
+    wp_target_total = 0
+    wp_synced_ok = 0
+    wp_unresolved = 0
+    wp_failed = 0
 
     for art in rows:
         last_id = art.id
@@ -162,8 +197,15 @@ def run_title_meta_backfill(
         # WP反映：要件に合わせて分岐
         if push_to_wp:
             if art.status == "posted":
-                # 既に公開済み → メタをWP側へ更新
-                _push_meta_to_wp_if_needed(art)
+                # 既に公開済み → メタをWP側へ更新（ここがWP分子のカウント対象）
+                wp_target_total += 1
+                result = _push_meta_to_wp_if_needed(art)
+                if result == "ok":
+                    wp_synced_ok += 1
+                elif result == "unresolved":
+                    wp_unresolved += 1
+                else:
+                    wp_failed += 1
             elif art.status == "done":
                 # 未投稿 → 投稿せず、メタタグだけDB更新。
                 # スケジューラーの通常投稿処理でWPへ反映される。
@@ -183,4 +225,9 @@ def run_title_meta_backfill(
         "updated": updated,
         "cursor": last_id,
         "done": done,
+        # 進捗可視化用の追加フィールド
+        "wp_target_total": wp_target_total,
+        "wp_synced_ok": wp_synced_ok,
+        "wp_unresolved": wp_unresolved,
+        "wp_failed": wp_failed,
     }

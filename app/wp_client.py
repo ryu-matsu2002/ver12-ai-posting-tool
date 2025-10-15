@@ -10,7 +10,7 @@ from .models import Site, Article, Error, InternalSeoConfig
 from datetime import datetime
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 
 
@@ -97,6 +97,105 @@ def _wp_posts_endpoint(base_url: str) -> str:
 
 def _wp_single_post_endpoint(base_url: str, post_id: int) -> str:
     return urljoin(_wp_posts_endpoint(base_url).rstrip("/") + "/", str(post_id))
+
+def _extract_slug_from_url(url: str) -> Optional[str]:
+    """
+    記事URLから末尾のスラッグを推定（/で終わるURLにも対応）
+    例:
+      https://example.com/foo/bar/ -> bar
+      https://example.com/foo-bar  -> foo-bar
+    """
+    if not url:
+        return None
+    try:
+        p = urlparse(url)
+        path = (p.path or "").rstrip("/")
+        if not path:
+            return None
+        slug = path.split("/")[-1]
+        return slug or None
+    except Exception:
+        return None
+
+def _links_match(a: str, b: str) -> bool:
+    """末尾スラッシュ有無などの軽微な差を吸収して比較"""
+    if not a or not b:
+        return False
+    return normalize_url(a) == normalize_url(b)
+
+def resolve_wp_post_id(site: Site, art: Article, *, save: bool = True) -> Optional[int]:
+    """
+    内部SEOでの“URL/スラッグ/タイトルからWP投稿を特定”する手法を共通化。
+    見つかったら（save=Trueのとき）articles.wp_post_id に保存して返す。
+    """
+    try:
+        _rate_limit(site)
+        site_url = normalize_url(site.url)
+        headers = _get_headers(site.username, site.app_pass, site_url)
+
+        # 1) URL からスラッグを抽出して照会
+        slug = _extract_slug_from_url(art.posted_url or "")
+        if slug:
+            params = {
+                "slug": slug,
+                "per_page": 1,
+                "context": "edit",
+                "_fields": "id,link,slug,status",
+            }
+            url = _wp_posts_endpoint(site_url)
+            try:
+                resp = _request_with_retry("GET", url, headers, params=params)
+                items = resp.json() or []
+                if items:
+                    wp_id = int(items[0].get("id"))
+                    if save and getattr(art, "wp_post_id", None) != wp_id:
+                        art.wp_post_id = wp_id
+                        db.session.commit()
+                    current_app.logger.info("[WP] resolve by slug ok site_id=%s article_id=%s wp_id=%s", site.id, art.id, wp_id)
+                    return wp_id
+            except Exception as e:
+                current_app.logger.info("[WP] resolve by slug skipped: %s", e)
+
+        # 2) タイトル検索で候補取得 → link 突合
+        title_q = (art.title or "").strip()
+        if title_q:
+            params = {
+                "search": title_q,
+                "per_page": 10,
+                "context": "edit",
+                "_fields": "id,link,slug,status",
+            }
+            url = _wp_posts_endpoint(site_url)
+            try:
+                resp = _request_with_retry("GET", url, headers, params=params)
+                items = resp.json() or []
+                # posted_url があれば link と厳密比較、無ければ最上位候補を採用（保守的に1件目）
+                if art.posted_url:
+                    for it in items:
+                        if _links_match(it.get("link") or "", art.posted_url):
+                            wp_id = int(it.get("id"))
+                            if save and getattr(art, "wp_post_id", None) != wp_id:
+                                art.wp_post_id = wp_id
+                                db.session.commit()
+                            current_app.logger.info("[WP] resolve by title+link ok site_id=%s article_id=%s wp_id=%s", site.id, art.id, wp_id)
+                            return wp_id
+                # posted_url が無い場合や一致が無い場合、候補が1件のみならそれを採用（安全側で実装）
+                if len(items) == 1:
+                    wp_id = int(items[0].get("id"))
+                    if save and getattr(art, "wp_post_id", None) != wp_id:
+                        art.wp_post_id = wp_id
+                        db.session.commit()
+                    current_app.logger.info("[WP] resolve by title(single) ok site_id=%s article_id=%s wp_id=%s", site.id, art.id, wp_id)
+                    return wp_id
+            except Exception as e:
+                current_app.logger.info("[WP] resolve by title skipped: %s", e)
+
+        current_app.logger.info("[WP] resolve failed site_id=%s article_id=%s", site.id, art.id)
+        return None
+    except Exception as e:
+        current_app.logger.warning("[WP] resolve error site_id=%s article_id=%s: %s", getattr(site, "id", "?"), getattr(art, "id", "?"), e)
+        return None
+
 
 def _request_with_retry(method: str, url: str, headers: Dict[str, str], params=None, json_body=None, timeout=TIMEOUT) -> requests.Response:
     last_exc = None
@@ -372,13 +471,20 @@ def post_to_wp(site: Site, art: Article) -> str:
     try:
         response = requests.post(url, json=post_data, headers=headers, timeout=TIMEOUT)
         if response.status_code == 201:
+            wp_id = int(response.json().get("id"))
             art.status = "posted"
             art.posted_url = response.json().get("link")
+            # 🔒 恒久対策: 新規投稿時に WP の投稿IDを必ず保存
+            try:
+                if getattr(art, "wp_post_id", None) != wp_id:
+                    art.wp_post_id = wp_id
+            except Exception:
+                # モデルにフィールドが無い等の事故対策（落とさない）
+                current_app.logger.warning("[WP] wp_post_id save skipped (model missing?) article_id=%s", art.id)
             db.session.commit()
             current_app.logger.info(f"投稿成功: Article ID {art.id}, User: {art.user_id}, Site: {site.url} -> {art.posted_url}")
             # 可能なら SEO メタもプッシュ（失敗しても投稿は成功として進める）
             try:
-                wp_id = int(response.json().get("id"))
                 _push_seo_meta_to_wp(site, wp_id, art, meta_desc)
             except Exception as e:
                 current_app.logger.warning(f"[WP-SEO] meta push skipped: {e}")
