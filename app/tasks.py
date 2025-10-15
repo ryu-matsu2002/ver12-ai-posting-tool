@@ -1422,7 +1422,9 @@ def run_title_meta_backfill(
                 if ok:
                     wp_summary["ok"] += 1
 
+    # 呼び出し元（管理ページ側）が成功/失敗を明確に判定できるようにフラグを付与
     return {
+        "ok": True,
         **res,
         "wp": wp_summary,
     }
