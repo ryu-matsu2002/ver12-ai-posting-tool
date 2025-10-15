@@ -57,7 +57,7 @@ from app.services.internal_seo.applier import apply_actions_for_site, apply_acti
 from app.services.internal_seo import user_scheduler  # 🆕 追加
 import os
 from math import inf
-from typing import List, Dict, Set, Tuple, Optional
+from typing import List, Dict, Set, Tuple, Optional, Any
 import json
 from app.models import InternalLinkAction  # 🆕 refill 集計で使用
 from app.models import InternalSeoUserSchedule  # 🆕 ユーザースケジュール確認用
@@ -1424,9 +1424,11 @@ def run_title_meta_backfill(
 
     # 呼び出し元（管理ページ側）が成功/失敗を明確に判定できるようにフラグを付与
     return {
-        "ok": True,
         **res,
         "wp": wp_summary,
+        "ok": True,
+        # ループ継続の有無をルート側が見られるように補助フラグを返す
+        "done": (res.get("cursor") in (None, 0, "")),
     }
 
 
