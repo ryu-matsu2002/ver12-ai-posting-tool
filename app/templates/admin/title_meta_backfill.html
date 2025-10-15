@@ -5,7 +5,6 @@
 <div class="px-4 py-6">
   <h1 class="text-2xl font-bold mb-4">🧩 Title & Meta バッチ再生成（ユーザー別）</h1>
 
-  <!-- フィルタ & 再読込 -->
   <div class="bg-white rounded-2xl shadow p-4 mb-4">
     <div class="flex flex-col md:flex-row gap-3 items-start md:items-center">
       <div class="flex-1 w-full">
@@ -16,12 +15,10 @@
       </div>
     </div>
     <div class="text-xs text-gray-500 mt-2">
-      分母＝<strong>投稿記事</strong>（既定）／ 分子＝<code>meta_description</code> が空でない記事数（=適用済み）／ 手動メタは除外<br>
-      ※ 投稿判定：<code>posted_at</code> あり または <code>posted_url</code> 非空
+      分母＝<strong>投稿記事</strong>／ 分子＝<code>meta_description</code> 非空（適用済み）／ 手動メタ除外
     </div>
   </div>
 
-  <!-- テーブル -->
   <div class="bg-white rounded-2xl shadow overflow-hidden">
     <div class="border-b px-4 py-2 text-sm text-gray-600 flex items-center justify-between">
       <div>表示は遅延取得（初回DBなしで高速表示）</div>
@@ -38,13 +35,10 @@
             <th class="text-right px-4 py-2 w-28">操作</th>
           </tr>
         </thead>
-        <tbody id="rows">
-          <!-- JSで注入 -->
-        </tbody>
+        <tbody id="rows"></tbody>
       </table>
     </div>
 
-    <!-- ページャ -->
     <div class="border-t px-4 py-3 flex items-center justify-between text-sm">
       <div><span id="pagerInfo">0 / 0</span></div>
       <div class="space-x-2">
@@ -56,8 +50,8 @@
 </div>
 
 <script>
-  const listEp   = "{{ url_for('admin.admin_title_meta_rows') }}";
-  const runEp    = "{{ url_for('admin.admin_title_meta_backfill') }}";
+  const listEp = "{{ url_for('admin.admin_title_meta_rows') }}";
+  const runEp  = "{{ url_for('admin.admin_title_meta_backfill') }}";
 
   const el = (s) => document.querySelector(s);
   const rowsEl = el('#rows');
@@ -70,57 +64,53 @@
 
   let page = 1, perPage = 20, total = 0, debounceTimer = null;
 
-  function pill(text, hint='') {
-    return `<span class="inline-flex items-center px-2 py-1 rounded-full bg-gray-100 text-gray-700 mr-2 mb-1" title="${hint}">${text}</span>`;
-  }
+  const pill = (text, hint='') =>
+    `<span class="inline-flex items-center px-2 py-1 rounded-full bg-gray-100 text-gray-700 mr-2 mb-1" title="${hint}">${text}</span>`;
 
-  function statusBadgeFromProgress(applied, total, fallbackTarget=null) {
-    let ok = false;
-    if (typeof total === 'number' && total > 0) {
-      ok = Number(applied) >= Number(total);
-    } else if (fallbackTarget !== null) {
-      ok = Number(fallbackTarget) === 0;
-    }
+  function statusBadge(applied, total, fallback=0){
+    const ok = total>0 ? (applied>=total) : (fallback===0);
     const cls = ok ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-800';
     const label = ok ? '整備済み' : '整備中';
     return `<span class="inline-flex px-2 py-1 rounded ${cls}">${label}</span>`;
   }
 
-  function progressText(applied, total, percentage) {
-    const a = Number(applied || 0);
-    const t = Number(total || 0);
-    const p = (typeof percentage === 'number') ? percentage : (t ? Math.round((a / t) * 10000) / 100 : 0);
+  const progressText = (a,t,pct)=>{
+    const p = Number.isFinite(pct) ? pct : (t? Math.round((a/t)*10000)/100 : 0);
     return `${a} / ${t}（${p}%）`;
-  }
+  };
 
-  function siteChips(sites) {
-    if (!Array.isArray(sites) || sites.length === 0) {
-      return '<span class="text-gray-400">（なし）</span>';
-    }
-    return sites.map(s => {
+  const miniBar = (pct)=>{
+    const p = Math.max(0, Math.min(100, Number(pct||0)));
+    return `<span class="inline-block w-28 h-2 bg-gray-200 rounded-full overflow-hidden align-middle" aria-hidden="true">
+              <span class="block h-2" style="width:${p}%; background:#8b5cf6;"></span>
+            </span>`;
+  };
+
+  const siteChips = (sites)=>{
+    if(!Array.isArray(sites)||!sites.length) return '<span class="text-gray-400">（なし）</span>';
+    return sites.map(s=>{
       const txt = `${s.name} #${s.site_id} ${s.applied}/${s.total}（${s.percentage}%）`;
       return pill(txt, `site_id=${s.site_id}`);
     }).join('');
-  }
+  };
 
-  function rowHtml(item) {
-    const user = `#${item.user_id} ${item.username} <span class="text-gray-500 text-xs">&lt;${item.email}&gt;</span>`;
-    const total = Number(item.total_cnt || 0);
-    const applied = Number(item.applied_cnt || 0);
-    const percentage = typeof item.percentage === 'number' ? item.percentage : (total ? Math.round((applied / total) * 10000)/100 : 0);
-    const targetFallback = Number(item.target_cnt || Math.max(total - applied, 0));
-    const canRun = total > 0 && applied < total;
+  function rowHtml(item){
+    const total = Number(item.total_cnt||0);
+    const applied = Number(item.applied_cnt||0);
+    const pct = Number.isFinite(item.percentage) ? item.percentage : (total? Math.round((applied/total)*10000)/100 : 0);
+    const fallback = Number(item.target_cnt || Math.max(total - applied,0));
+    const canRun = total>0 && applied<total;
 
     return `
       <tr class="border-t">
         <td class="px-4 py-3 align-top">
-          <div class="font-medium">${user}</div>
+          <div class="font-medium">#${item.user_id} ${item.username} <span class="text-gray-500 text-xs">&lt;${item.email}&gt;</span></div>
         </td>
-        <td class="px-4 py-3 align-top">${statusBadgeFromProgress(applied, total, targetFallback)}</td>
+        <td class="px-4 py-3 align-top">${statusBadge(applied,total,fallback)}</td>
         <td class="px-4 py-3 align-top">
           <div class="flex items-center gap-2">
-            <span>${progressText(applied, total, percentage)}</span>
-            ${renderMiniBar(percentage)}
+            <span>${progressText(applied,total,pct)}</span>
+            ${miniBar(pct)}
           </div>
         </td>
         <td class="px-4 py-3 align-top">
@@ -128,80 +118,72 @@
         </td>
         <td class="px-4 py-3 align-top text-right">
           <button class="px-3 py-1 rounded bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
-                  ${canRun ? '' : 'disabled'}
-                  onclick="runUser(${item.user_id})">実行</button>
+                  data-user-id="${item.user_id}" ${canRun?'':'disabled'}>実行</button>
         </td>
-      </tr>
-    `;
+      </tr>`;
   }
 
-  function renderMiniBar(percentage) {
-    const p = Math.max(0, Math.min(100, Number(percentage || 0)));
-    return `
-      <span class="inline-block w-28 h-2 bg-gray-200 rounded-full overflow-hidden align-middle" aria-hidden="true">
-        <span class="block h-2" style="width:${p}%; background:#8b5cf6;"></span>
-      </span>
-    `;
+  function getCsrfToken(){
+    const m = document.querySelector('meta[name="csrf-token"]');
+    return m ? m.getAttribute('content') : '';
   }
 
-  async function fetchPage() {
+  async function fetchPage(){
     loadingEl.classList.remove('hidden');
-    try {
-      const params = new URLSearchParams({ page: String(page), per_page: String(perPage) });
-      // 既定は公開記事のみ。全件で見たい場合は published_only=0 を付与（必要に応じてUI追加可）
-      params.set('published_only', '1');
-      const q = (qEl.value || '').trim();
-      if (q) params.set('q', q);
+    try{
+      const params = new URLSearchParams({ page:String(page), per_page:String(perPage), published_only:'1' });
+      const q = (qEl.value||'').trim(); if(q) params.set('q', q);
       const res = await fetch(`${listEp}?${params.toString()}`);
       const data = await res.json();
-      total = Number(data.total || 0);
-      rowsEl.innerHTML = (data.items || []).map(rowHtml).join('') || `
-        <tr><td colspan="5" class="px-4 py-8 text-center text-gray-500">該当ユーザーがいません</td></tr>`;
+      total = Number(data.total||0);
+      rowsEl.innerHTML = (data.items||[]).map(rowHtml).join('') ||
+        `<tr><td colspan="5" class="px-4 py-8 text-center text-gray-500">該当ユーザーがいません</td></tr>`;
       const lastPage = Math.max(1, Math.ceil(total / perPage));
       pagerInfo.textContent = `${page} / ${lastPage}（全${total}人）`;
-      prevBtn.disabled = page <= 1;
-      nextBtn.disabled = page >= lastPage;
-    } catch(e) {
+      prevBtn.disabled = page<=1;
+      nextBtn.disabled = page>=lastPage;
+    }catch(e){
       rowsEl.innerHTML = `<tr><td colspan="5" class="px-4 py-8 text-center text-red-600">読み込みに失敗しました</td></tr>`;
-    } finally {
+    }finally{
       loadingEl.classList.add('hidden');
     }
   }
 
-  async function runUser(userId) {
-    const btn = document.activeElement;
-    btn?.setAttribute('disabled', 'disabled');
-    try {
-      const res = await fetch(runEp, {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ user_id: userId })
-      });
-      const data = await res.json().catch(()=>({}));
-      if (!res.ok || data.ok===false) {
-        alert('実行に失敗しました');
-      } else {
-        // 実行後に当該行の進捗が進む可能性が高いのでリロード
-        fetchPage();
+  // ★ クリック委譲（CSPでinline禁止でも確実に動く）
+  rowsEl.addEventListener('click', async (ev)=>{
+    const btn = ev.target.closest('button[data-user-id]');
+    if(!btn) return;
+    const userId = Number(btn.getAttribute('data-user-id'));
+    if(!userId || btn.disabled) return;
+
+    const original = btn.textContent;
+    btn.disabled = true; btn.textContent = '実行中…';
+    try{
+      const headers = {'Content-Type':'application/json'};
+      const csrf = getCsrfToken(); if(csrf) headers['X-CSRFToken']=csrf;
+
+      const res = await fetch(runEp, { method:'POST', headers, body: JSON.stringify({ user_id: userId }) });
+      const text = await res.text();
+      if(!res.ok){
+        alert(`実行に失敗（${res.status}）\n${text.slice(0,300)}`);
+      }else{
+        let data={}; try{ data = text? JSON.parse(text):{} }catch{}
+        if(data.ok===false){ alert(`実行に失敗\n${data.error||'unknown error'}`); }
+        await fetchPage();
       }
-    } catch(e) {
-      alert('通信エラー');
-    } finally {
-      btn?.removeAttribute('disabled');
+    }catch(e){
+      alert('通信エラー：' + (e?.message||e));
+    }finally{
+      btn.disabled = false; btn.textContent = original;
     }
-  }
-  window.runUser = runUser;
-
-  // 検索デバウンス
-  qEl.addEventListener('input', () => {
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => { page = 1; fetchPage(); }, 250);
   });
-  reloadBtn.addEventListener('click', () => fetchPage());
-  prevBtn.addEventListener('click', () => { if (page>1) { page--; fetchPage(); } });
-  nextBtn.addEventListener('click', () => { page++; fetchPage(); });
 
-  // 初回ロード
+  // UI操作
+  qEl.addEventListener('input', ()=>{ clearTimeout(debounceTimer); debounceTimer=setTimeout(()=>{ page=1; fetchPage(); },250); });
+  reloadBtn.addEventListener('click', ()=>fetchPage());
+  prevBtn.addEventListener('click', ()=>{ if(page>1){ page--; fetchPage(); } });
+  nextBtn.addEventListener('click', ()=>{ page++; fetchPage(); });
+
   fetchPage();
 </script>
 {% endblock %}

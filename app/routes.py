@@ -182,6 +182,10 @@ def _as_int(v, default=None):
 import time
 import os
 from flask import render_template, request, jsonify, current_app
+try:
+    from flask_wtf.csrf import csrf_exempt
+except Exception:
+    csrf_exempt = lambda f: f  # WTForms未使用環境でも動かすためのフォールバック
 from app import db
 from sqlalchemy.orm import load_only
 from sqlalchemy import func, case, or_
@@ -196,6 +200,7 @@ except Exception:
 
 @admin_bp.route("/admin/tools/title-meta-backfill", methods=["GET", "POST"])
 @admin_required_effective
+@csrf_exempt  # ← このAPIだけCSRF免除（確実に通す）
 def admin_title_meta_backfill():
     """
     Title & Meta バッチ再生成（UI簡略版）
@@ -214,6 +219,7 @@ def admin_title_meta_backfill():
 
     # ---- POST: “このユーザーの全記事に適用（自動で最後まで）” ----
     payload = (request.get_json(silent=True) or {}) or request.form.to_dict()
+    current_app.logger.info("[admin:title-meta:POST] payload=%s", payload)
     user_id = _as_int(payload.get("user_id"))
     if not user_id:
         return jsonify({"ok": False, "error": "user_id is required"}), 400
