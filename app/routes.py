@@ -180,6 +180,7 @@ def _as_int(v, default=None):
         return default
     
 import time
+import os
 from flask import render_template, request, jsonify, current_app
 from app import db
 from sqlalchemy.orm import load_only
@@ -217,43 +218,53 @@ def admin_title_meta_backfill():
     ]) or (data.get("limit") is not None) or dryrun or push_to_wp
 
     if request.method == "GET" and not params_present:
-        # 画面表示（超軽量モード）：必要カラムのみ + 件数を抑制
-        t0 = time.perf_counter()
-        users, sites = [], []
-        # 表示件数は環境変数で調整可能（既定50）
-        try:
-            _limit = int(os.getenv("ADMIN_TM_LIST_LIMIT", "50"))
-        except Exception:
-            _limit = 50
-        try:
-            if User is not None:
-                users = (
-                    db.session.query(User)
-                    .options(load_only(User.id, User.username))
-                    .order_by(User.id.asc())
-                    .limit(_limit)
-                    .all()
-                )
-        except Exception:
-            current_app.logger.exception("[admin:title-meta] users query failed")
-            users = []
-        try:
-            if Site is not None:
-                # name が無ければ url を表示する想定（テンプレ側はそのまま）
-                sites = (
-                    db.session.query(Site)
-                    .options(load_only(Site.id, Site.name, Site.url))
-                    .order_by(Site.id.asc())
-                    .limit(_limit)
-                    .all()
-                )
-        except Exception:
-            current_app.logger.exception("[admin:title-meta] sites query failed")
-            sites = []
-        dt = int((time.perf_counter() - t0) * 1000)
-        current_app.logger.info("[admin:title-meta] render list users=%s sites=%s in %dms",
-                                len(users), len(sites), dt)
-        return render_template("admin/title_meta_backfill.html", users=users, sites=sites)
+        # 画面表示：デフォルトは“超即時”（DBアクセス完全ゼロ）
+        # 環境変数 ADMIN_TM_FAST=0 のときだけ軽量一覧を出す（必要時に戻せる）
+        fast = os.getenv("ADMIN_TM_FAST", "1") == "1"
+        if fast:
+            t0 = time.perf_counter()
+            # 空配列で描画（テンプレ側は空リストでも成立する想定、
+            # セレクトを使わずID入力でも運用可能）
+            users, sites = [], []
+            dt = int((time.perf_counter() - t0) * 1000)
+            current_app.logger.info("[admin:title-meta] FAST render (no DB) in %dms", dt)
+            return render_template("admin/title_meta_backfill.html", users=users, sites=sites)
+        else:
+            # 旧来の軽量一覧（必要カラムのみ + 件数制限）
+            t0 = time.perf_counter()
+            users, sites = [], []
+            try:
+                _limit = int(os.getenv("ADMIN_TM_LIST_LIMIT", "50"))
+            except Exception:
+                _limit = 50
+            try:
+                if User is not None:
+                    users = (
+                        db.session.query(User)
+                        .options(load_only(User.id, User.username))
+                        .order_by(User.id.asc())
+                        .limit(_limit)
+                        .all()
+                    )
+            except Exception:
+                current_app.logger.exception("[admin:title-meta] users query failed")
+                users = []
+            try:
+                if Site is not None:
+                    sites = (
+                        db.session.query(Site)
+                        .options(load_only(Site.id, Site.name, Site.url))
+                        .order_by(Site.id.asc())
+                        .limit(_limit)
+                        .all()
+                    )
+            except Exception:
+                current_app.logger.exception("[admin:title-meta] sites query failed")
+                sites = []
+            dt = int((time.perf_counter() - t0) * 1000)
+            current_app.logger.info("[admin:title-meta] render list users=%s sites=%s in %dms",
+                                    len(users), len(sites), dt)
+            return render_template("admin/title_meta_backfill.html", users=users, sites=sites)
 
     # API 実行（重い依存はここで遅延 import）
     from app.tasks import run_title_meta_backfill as _run_title_meta_backfill
