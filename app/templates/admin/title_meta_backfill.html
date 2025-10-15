@@ -2,211 +2,163 @@
 {% block title %}Title/Meta再生成 | 管理者{% endblock %}
 
 {% block content %}
-<div class="max-w-7xl mx-auto px-4 py-6">
-  <h1 class="text-2xl font-bold mb-3">🧩 Title & Meta バッチ再生成</h1>
-  <p class="text-sm text-gray-600 mb-6">
-    各ユーザーの<strong>既存記事</strong>について、&lt;title&gt; とメタディスクリプション（AI 生成・既定180字）を
-    一括整備します。行右端の<strong>「実行」</strong>を押すだけで、そのユーザーの全対象記事を最後まで自動処理します。
-  </p>
+<div class="px-4 py-6">
+  <h1 class="text-2xl font-bold mb-4">🧩 Title & Meta バッチ再生成（ユーザー別）</h1>
 
-  <!-- 操作バー（検索・更新） -->
-  <div class="bg-white rounded-2xl shadow p-4 mb-4 flex flex-col md:flex-row gap-3 md:items-center">
-    <div class="flex-1 flex gap-2">
-      <input id="q" type="text" placeholder="ユーザー名で絞り込み（クライアント側フィルタ）"
-             class="w-full border rounded-lg px-3 py-2" autocomplete="off">
-      <button id="btnReload"
-              class="px-3 py-2 rounded-lg border bg-gray-50 hover:bg-gray-100">
-        再読込
-      </button>
+  <!-- フィルタ & 再読込 -->
+  <div class="bg-white rounded-2xl shadow p-4 mb-4">
+    <div class="flex flex-col md:flex-row gap-3 items-start md:items-center">
+      <div class="flex-1 w-full">
+        <input id="q" type="text" class="w-full border rounded-lg px-3 py-2" placeholder="ユーザー名で絞り込み…" />
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="btnReload" class="px-3 py-2 rounded-lg border hover:bg-gray-50">再読込</button>
+      </div>
     </div>
-    <div class="text-xs text-gray-500">
-      対象品質: <code>empty, too_short, too_long, duplicate</code>（変更は API 側パラメータで可）
+    <div class="text-xs text-gray-500 mt-2">
+      対象品質: <code>empty, too_short, too_long, duplicate</code> ／ 対象ステータス: <code>done, posted</code> ／ 手動メタは除外
     </div>
   </div>
 
-  <!-- 一覧（1 ユーザー 1 行） -->
-  <div class="bg-white rounded-2xl shadow">
-    <div class="px-4 py-3 border-b text-sm text-gray-600 flex justify-between">
-      <div>ユーザー一覧（非同期取得）</div>
-      <div id="loadState" class="text-gray-500">読み込み待機中…</div>
+  <!-- テーブル -->
+  <div class="bg-white rounded-2xl shadow overflow-hidden">
+    <div class="border-b px-4 py-2 text-sm text-gray-600 flex items-center justify-between">
+      <div>表示は遅延取得（初回DBなしで高速表示）</div>
+      <div id="loading" class="hidden">読み込み中…</div>
     </div>
-
     <div class="overflow-x-auto">
       <table class="min-w-full text-sm">
         <thead class="bg-gray-50">
           <tr>
-            <th class="text-left px-4 py-2 w-56">ユーザー</th>
+            <th class="text-left px-4 py-2 w-64">ユーザー</th>
+            <th class="text-left px-4 py-2 w-40">状態</th>
             <th class="text-left px-4 py-2 w-28">対象件数</th>
             <th class="text-left px-4 py-2">サイト内訳</th>
-            <th class="text-left px-4 py-2 w-40">直近の結果</th>
-            <th class="text-right px-4 py-2 w-36">操作</th>
+            <th class="text-right px-4 py-2 w-28">操作</th>
           </tr>
         </thead>
-        <tbody id="userRows">
-          <!-- 非同期に挿入 -->
+        <tbody id="rows">
+          <!-- JSで注入 -->
         </tbody>
       </table>
     </div>
-  </div>
 
-  <p class="text-xs text-gray-500 mt-3">
-    初期表示は DB を叩かずに 1 秒以内で開きます。行データは AJAX で軽量取得しています。
-  </p>
+    <!-- ページャ -->
+    <div class="border-t px-4 py-3 flex items-center justify-between text-sm">
+      <div><span id="pagerInfo">0 / 0</span></div>
+      <div class="space-x-2">
+        <button id="prev" class="px-3 py-1 border rounded disabled:opacity-50" disabled>前へ</button>
+        <button id="next" class="px-3 py-1 border rounded disabled:opacity-50" disabled>次へ</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
-  // エンドポイント
-  const listEp     = "{{ url_for('admin.admin_title_meta_users') }}";
-  const runEp      = "{{ url_for('admin.admin_title_meta_backfill') }}";
+  const listEp   = "{{ url_for('admin.admin_title_meta_rows') }}";
+  const runEp    = "{{ url_for('admin.admin_title_meta_backfill') }}";
 
-  // DOM 参照
   const el = (s) => document.querySelector(s);
-  const userRows = el('#userRows');
-  const qInput   = el('#q');
-  const loadState = el('#loadState');
-  const btnReload = el('#btnReload');
+  const rowsEl = el('#rows');
+  const qEl = el('#q');
+  const loadingEl = el('#loading');
+  const pagerInfo = el('#pagerInfo');
+  const prevBtn = el('#prev');
+  const nextBtn = el('#next');
+  const reloadBtn = el('#btnReload');
 
-  // 状態
-  let rawUsers = [];   // API からの生配列
-  let running  = new Set(); // 実行中 user_id
+  let page = 1, perPage = 20, total = 0, debounceTimer = null;
 
-  // HTML ユーティリティ
-  const esc = (s) => String(s ?? '').replace(/[&<>\"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
-  const fmtInt = (n) => Number(n||0).toLocaleString();
-
-  function siteChip(s) {
-    // s: {site_id, name, targets, posted, done}
-    return `
-      <span class="inline-flex items-center gap-2 px-2 py-1 rounded-full border bg-gray-50 mr-2 mb-2">
-        <span class="text-gray-700">${esc(s.name)}</span>
-        <span class="text-gray-500">#${s.site_id}</span>
-        <span class="text-gray-800 font-medium">${fmtInt(s.targets)}</span>
-        <span class="text-xs text-gray-500">(posted:${fmtInt(s.posted)} / done:${fmtInt(s.done)})</span>
-      </span>
-    `;
+  function pill(text, hint='') {
+    return `<span class="inline-flex items-center px-2 py-1 rounded-full bg-gray-100 text-gray-700 mr-2 mb-1" title="${hint}">${text}</span>`;
   }
 
-  function actionCell(user_id) {
-    const busy = running.has(user_id);
-    return `
-      <button data-run="${user_id}"
-              class="px-3 py-2 rounded-lg text-white ${busy?'bg-gray-400 cursor-not-allowed':'bg-purple-600 hover:bg-purple-700'}"
-              ${busy?'disabled':''}>
-        ${busy ? '実行中…' : '実行'}
-      </button>
-    `;
+  function statusBadge(targetCnt) {
+    const ok = Number(targetCnt) === 0;
+    const cls = ok ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-800';
+    const label = ok ? '整備済み' : '整備対象あり';
+    return `<span class="inline-flex px-2 py-1 rounded ${cls}">${label}</span>`;
   }
 
-  function rowHTML(u) {
-    // u: {user_id, name, targets, sites:[...] }
-    const sites = (u.sites||[]).map(siteChip).join('');
+  function rowHtml(item) {
+    const user = `#${item.user_id} ${item.username} <span class="text-gray-500 text-xs">&lt;${item.email}&gt;</span>`;
+    const sites = (item.sites||[]).map(s => pill(`${s.name} #${s.site_id} ×${s.cnt}`, `site_id=${s.site_id}`)).join('');
+    const target = Number(item.target_cnt||0);
     return `
       <tr class="border-t">
-        <td class="px-4 py-3">
-          <div class="font-medium">${esc(u.name)}</div>
-          <div class="text-xs text-gray-500">#${u.user_id}</div>
+        <td class="px-4 py-3 align-top">
+          <div class="font-medium">${user}</div>
         </td>
-        <td class="px-4 py-3">
-          <div class="font-bold">${fmtInt(u.targets)}</div>
+        <td class="px-4 py-3 align-top">${statusBadge(target)}</td>
+        <td class="px-4 py-3 align-top">${target}</td>
+        <td class="px-4 py-3 align-top">
+          <div class="flex flex-wrap">${sites || '<span class="text-gray-400">（なし）</span>'}</div>
         </td>
-        <td class="px-4 py-3">
-          <div class="flex flex-wrap">${sites || '<span class="text-gray-400">内訳なし</span>'}</div>
-        </td>
-        <td class="px-4 py-3">
-          <div id="r-${u.user_id}" class="text-xs text-gray-600">-</div>
-        </td>
-        <td class="px-4 py-3 text-right">
-          ${actionCell(u.user_id)}
+        <td class="px-4 py-3 align-top text-right">
+          <button class="px-3 py-1 rounded bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
+                  ${target===0?'disabled':''}
+                  onclick="runUser(${item.user_id})">実行</button>
         </td>
       </tr>
     `;
   }
 
-  function renderList(filterText='') {
-    const f = (filterText || '').trim().toLowerCase();
-    const rows = rawUsers
-      .filter(u => !f || String(u.name||'').toLowerCase().includes(f) || String(u.user_id).includes(f))
-      .map(rowHTML)
-      .join('');
-    userRows.innerHTML = rows || `
-      <tr><td colspan="5" class="px-4 py-6 text-center text-gray-500">該当ユーザーが見つかりません</td></tr>`;
-    // 再アタッチ（動的生成のため）
-    attachRowHandlers();
-  }
-
-  function attachRowHandlers() {
-    userRows.querySelectorAll('button[data-run]').forEach(btn => {
-      btn.addEventListener('click', () => runForUser(Number(btn.dataset.run)));
-    });
-  }
-
-  async function loadList() {
+  async function fetchPage() {
+    loadingEl.classList.remove('hidden');
     try {
-      loadState.textContent = '読み込み中…';
-      const res = await fetch(listEp, { cache: 'no-store' });
-      const data = await res.json().catch(() => ({users:[]}));
-      rawUsers = Array.isArray(data.users) ? data.users : [];
-      renderList(qInput.value);
-      loadState.textContent = `読み込み完了（${rawUsers.length}件）`;
+      const params = new URLSearchParams({ page: String(page), per_page: String(perPage) });
+      const q = (qEl.value || '').trim();
+      if (q) params.set('q', q);
+      const res = await fetch(`${listEp}?${params.toString()}`);
+      const data = await res.json();
+      total = Number(data.total || 0);
+      rowsEl.innerHTML = (data.items || []).map(rowHtml).join('') || `
+        <tr><td colspan="5" class="px-4 py-8 text-center text-gray-500">該当ユーザーがいません</td></tr>`;
+      const lastPage = Math.max(1, Math.ceil(total / perPage));
+      pagerInfo.textContent = `${page} / ${lastPage}（全${total}人）`;
+      prevBtn.disabled = page <= 1;
+      nextBtn.disabled = page >= lastPage;
     } catch(e) {
-      loadState.textContent = '読み込みエラー';
-      userRows.innerHTML = `
-        <tr><td colspan="5" class="px-4 py-6 text-center text-red-600">一覧の取得に失敗しました</td></tr>`;
+      rowsEl.innerHTML = `<tr><td colspan="5" class="px-4 py-8 text-center text-red-600">読み込みに失敗しました</td></tr>`;
+    } finally {
+      loadingEl.classList.add('hidden');
     }
   }
 
-  async function runForUser(user_id) {
-    if (running.has(user_id)) return;
-    running.add(user_id);
-    // ボタン再描画
-    const cell = userRows.querySelector(`button[data-run="${user_id}"]`);
-    if (cell) {
-      cell.outerHTML = actionCell(user_id);
-      attachRowHandlers();
-    }
-    const resBox = el(`#r-${user_id}`);
-    if (resBox) resBox.textContent = '実行リクエスト送信中…';
-
+  async function runUser(userId) {
+    const btn = document.activeElement;
+    btn?.setAttribute('disabled', 'disabled');
     try {
       const res = await fetch(runEp, {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ user_id })
+        body: JSON.stringify({ user_id: userId })
       });
-      const data = await res.json().catch(()=> ({}));
-      if (!res.ok || data.ok === false) {
-        const msg = data.error ? `エラー: ${data.error}` : `HTTP ${res.status}`;
-        if (resBox) resBox.textContent = msg;
+      const data = await res.json().catch(()=>({}));
+      if (!res.ok || data.ok===false) {
+        alert('実行に失敗しました');
       } else {
-        // サマリーを軽く表示
-        const total = Number(data.updated_total ?? data.updated ?? 0);
-        const iters = Number(data.iterations ?? 1);
-        const okWp  = (data.wp && data.wp.ok) ? ` / WP OK ${data.wp.ok}` : '';
-        if (resBox) resBox.textContent = `完了: 更新 ${total}件 / 反復 ${iters}${okWp}`;
+        // 実行後に当該行の件数が減ることが多いので軽く更新
+        fetchPage();
       }
     } catch(e) {
-      if (resBox) resBox.textContent = '通信エラー';
+      alert('通信エラー');
     } finally {
-      running.delete(user_id);
-      // ボタン再描画
-      const cell2 = userRows.querySelector(`button[data-run="${user_id}"]`);
-      if (cell2) {
-        cell2.outerHTML = actionCell(user_id);
-        attachRowHandlers();
-      }
+      btn?.removeAttribute('disabled');
     }
   }
+  window.runUser = runUser;
 
-  // 入力フィルタ（デバウンス）
-  let deb = null;
-  qInput.addEventListener('input', () => {
-    clearTimeout(deb);
-    deb = setTimeout(() => renderList(qInput.value), 150);
+  // 検索デバウンス
+  qEl.addEventListener('input', () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => { page = 1; fetchPage(); }, 250);
   });
+  reloadBtn.addEventListener('click', () => fetchPage());
+  prevBtn.addEventListener('click', () => { if (page>1) { page--; fetchPage(); } });
+  nextBtn.addEventListener('click', () => { page++; fetchPage(); });
 
-  btnReload.addEventListener('click', loadList);
-
-  // 初期ロード：サーバーはHTMLだけ返し DB は触らない → JS で軽量APIを叩く
-  loadList();
+  // 初回ロード
+  fetchPage();
 </script>
 {% endblock %}

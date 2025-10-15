@@ -273,6 +273,99 @@ def admin_title_meta_backfill():
     return jsonify(summary), 200
 
 
+# --------------------------------------------------------------------
+# ユーザー行（一覧テーブル）の軽量API
+#   - 初回レンダは空HTML → このAPIでデータを遅延取得
+#   - 検索: ?q=（username/emailの部分一致）
+#   - ページング: ?page=1&per_page=20
+#   - 計算対象:
+#       Article.is_manual_meta = false
+#       AND Article.status in ('done','posted')
+#       AND Article.meta_desc_quality in ('empty','too_short','too_long','duplicate')
+# --------------------------------------------------------------------
+@admin_bp.route("/admin/tools/title-meta-rows", methods=["GET"])
+@admin_required_effective
+def admin_title_meta_rows():
+    if User is None or Site is None or Article is None:
+        return jsonify({"items": [], "total": 0, "page": 1, "per_page": 20})
+
+    q = (request.args.get("q") or "").strip()
+    try:
+        page = max(1, int(request.args.get("page", "1")))
+        per_page = max(1, min(50, int(request.args.get("per_page", "20"))))
+    except Exception:
+        page, per_page = 1, 20
+    offset = (page - 1) * per_page
+
+    # 対象ユーザー集合（検索）
+    uq = db.session.query(User.id, User.username, User.email).order_by(User.id.asc())
+    if q:
+        like = f"%{q}%"
+        uq = uq.filter(
+            func.lower(User.username).like(func.lower(like)) |
+            func.lower(User.email).like(func.lower(like))
+        )
+    total_users = uq.count()
+    users = uq.offset(offset).limit(per_page).all()
+    user_ids = [u.id for u in users]
+    if not user_ids:
+        return jsonify({"items": [], "total": total_users, "page": page, "per_page": per_page})
+
+    quality_targets = ("empty", "too_short", "too_long", "duplicate")
+    status_targets = ("done", "posted")
+
+    # ユーザー別の対象件数
+    a_base = (db.session.query(
+                Article.user_id.label("user_id"),
+                func.count(Article.id).label("cnt"))
+              .filter(Article.user_id.in__(user_ids))
+              .filter(Article.is_manual_meta == False)  # noqa: E712
+              .filter(Article.status.in_(status_targets))
+              .filter(Article.meta_desc_quality.in_(quality_targets))
+              .group_by(Article.user_id)
+    )
+    user_cnt_map = {int(r.user_id): int(r.cnt) for r in a_base.all()}
+
+    # サイト別内訳（各ユーザーの上位サイトを最大6件）※軽量化のためユーザーまとめて取得
+    s_rows = (
+        db.session.query(
+            Article.user_id.label("user_id"),
+            Article.site_id.label("site_id"),
+            func.count(Article.id).label("cnt")
+        )
+        .filter(Article.user_id.in__(user_ids))
+        .filter(Article.is_manual_meta == False)  # noqa: E712
+        .filter(Article.status.in_(status_targets))
+        .filter(Article.meta_desc_quality.in_(quality_targets))
+        .group_by(Article.user_id, Article.site_id)
+        .all()
+    )
+    # サイト名をまとめて引く
+    site_ids = sorted({int(r.site_id) for r in s_rows if r.site_id is not None})
+    site_map = {s.id: (s.name or s.url or f"site#{s.id}") for s in db.session.query(Site.id, Site.name, Site.url).filter(Site.id.in__(site_ids)).all()}
+
+    per_user_sites = {}
+    for r in s_rows:
+        per_user_sites.setdefault(int(r.user_id), []).append({
+            "site_id": int(r.site_id),
+            "name": site_map.get(int(r.site_id), f"site#{int(r.site_id)}"),
+            "cnt": int(r.cnt),
+        })
+    # 各ユーザーのレスポンス成形
+    items = []
+    for u in users:
+        sites = sorted(per_user_sites.get(int(u.id), []), key=lambda x: -x["cnt"])[:6]
+        items.append({
+            "user_id": int(u.id),
+            "username": u.username,
+            "email": u.email,
+            "target_cnt": int(user_cnt_map.get(int(u.id), 0)),
+            "sites": sites,
+            # “最近の結果”は重い集計を避け、最大更新時刻だけ軽く返す（任意）
+        })
+    return jsonify({"items": items, "total": total_users, "page": page, "per_page": per_page})
+
+
 # ------------------------------------------------------------------------------
 # 一覧テーブル用の軽量API（1ユーザー=1行）
 #   - 既存ページの初期描画はDBアクセスなしを維持。フロントが本APIをAJAX呼び出し
