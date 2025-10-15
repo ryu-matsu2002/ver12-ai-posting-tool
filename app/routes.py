@@ -184,13 +184,15 @@ import os
 from flask import render_template, request, jsonify, current_app
 from app import db
 from sqlalchemy.orm import load_only
+from sqlalchemy import func, case
 
 try:
-    # あなたのプロジェクトの User / Site モデル名に合わせて import
-    from app.models import User, Site
+    # あなたのプロジェクトの User / Site / Article モデル名に合わせて import
+    from app.models import User, Site, Article
 except Exception:
     User = None
     Site = None
+    Article = None
 
 @admin_bp.route("/admin/tools/title-meta-backfill", methods=["GET", "POST"])
 @admin_required_effective
@@ -278,6 +280,125 @@ def admin_title_meta_backfill():
     )
     status = 200 if result.get("ok") else 400
     return jsonify(result), status
+
+# ------------------------------------------------------------------------------
+# 軽量サジェストAPI: ユーザー / サイト
+# ------------------------------------------------------------------------------
+@admin_bp.route("/admin/tools/_users", methods=["GET"])
+@admin_required_effective
+def admin_tools_users_suggest():
+    """
+    ?q= （username or email の部分一致）, ?limit=（既定20）
+    """
+    if User is None:
+        return jsonify({"items": []})
+    q = (request.args.get("q") or "").strip()
+    try:
+        limit = max(1, min(50, int(request.args.get("limit", "20"))))
+    except Exception:
+        limit = 20
+    qry = db.session.query(User.id, User.username, User.email).order_by(User.id.asc())
+    if q:
+        like = f"%{q}%"
+        qry = qry.filter(
+            func.lower(User.username).like(func.lower(like)) |
+            func.lower(User.email).like(func.lower(like))
+        )
+    rows = qry.limit(limit).all()
+    items = [{"id": r.id, "label": f"#{r.id} {r.username} <{r.email}>" } for r in rows]
+    return jsonify({"items": items})
+
+@admin_bp.route("/admin/tools/_sites", methods=["GET"])
+@admin_required_effective
+def admin_tools_sites_suggest():
+    """
+    ?q= 部分一致, ?user_id= で絞込, ?limit=（既定20）
+    """
+    if Site is None:
+        return jsonify({"items": []})
+    q = (request.args.get("q") or "").strip()
+    user_id = request.args.get("user_id")
+    try:
+        limit = max(1, min(50, int(request.args.get("limit", "20"))))
+    except Exception:
+        limit = 20
+    qry = db.session.query(Site.id, Site.name, Site.url).order_by(Site.id.asc())
+    if user_id:
+        try:
+            uid = int(user_id)
+            qry = qry.filter(Site.user_id == uid)
+        except Exception:
+            pass
+    if q:
+        like = f"%{q}%"
+        qry = qry.filter(
+            func.lower(func.coalesce(Site.name, "")).like(func.lower(like)) |
+            func.lower(Site.url).like(func.lower(like))
+        )
+    rows = qry.limit(limit).all()
+    items = [{"id": r.id, "label": f"#{r.id} {r.name or r.url}"} for r in rows]
+    return jsonify({"items": items})
+
+# ------------------------------------------------------------------------------
+# 進捗API: ユーザー別 Title/Meta 適用状況
+#   分母: 全記事（status 不問）/ 公開記事のみは ?published_only=1
+#   分子: meta_description が非空（+ 任意で meta_desc_last_updated_at IS NOT NULL）
+# ------------------------------------------------------------------------------
+@admin_bp.route("/admin/tools/title-meta-progress", methods=["GET"])
+@admin_required_effective
+def admin_title_meta_progress():
+    if Article is None:
+        return jsonify({"ok": False, "error": "Article model not available"}), 500
+    try:
+        user_id = int(request.args.get("user_id", "0"))
+    except Exception:
+        return jsonify({"ok": False, "error": "user_id is required"}), 400
+    if user_id <= 0:
+        return jsonify({"ok": False, "error": "user_id is required"}), 400
+
+    published_only = (request.args.get("published_only", "0") in ("1", "true", "yes", "on"))
+
+    base = db.session.query(Article).filter(Article.user_id == user_id)
+    if published_only:
+        # 公開済み判定: posted_at または posted_url のどちらかが入っていれば公開とみなす
+        base = base.filter(
+            (Article.posted_at.isnot(None)) | (func.coalesce(Article.posted_url, "") != "")
+        )
+
+    applied_cond = func.coalesce(Article.meta_description, "") != ""
+    # より厳密にするなら AND Article.meta_desc_last_updated_at.isnot(None) を併用:
+    # applied_cond = and_(applied_cond, Article.meta_desc_last_updated_at.isnot(None))
+
+    total = db.session.query(func.count(Article.id)).select_from(base.subquery()).scalar() or 0
+    applied = db.session.query(func.count(Article.id)).select_from(
+        base.filter(applied_cond).subquery()
+    ).scalar() or 0
+
+    by_site_rows = (
+        db.session.query(
+            Article.site_id.label("site_id"),
+            func.count(Article.id).label("total"),
+            func.sum(case((applied_cond, 1), else_=0)).label("applied"),
+        )
+        .select_from(base.subquery())  # base を subquery に落として published フィルタを引き継ぐ
+        .group_by("site_id")
+        .order_by("site_id")
+        .limit(500)
+        .all()
+    )
+    by_site = [{"site_id": r.site_id, "total": int(r.total), "applied": int(r.applied or 0)} for r in by_site_rows]
+
+    pct = (applied / total * 100.0) if total else 0.0
+    return jsonify({
+        "ok": True,
+        "user_id": user_id,
+        "published_only": published_only,
+        "total": total,
+        "applied": applied,
+        "percentage": round(pct, 2),
+        "by_site": by_site,
+    })
+
 
 @bp.route('/robots.txt')
 def robots_txt():
