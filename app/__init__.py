@@ -187,8 +187,10 @@ def create_app() -> Flask:
         app.logger.info("ℹ️ SCHEDULER: skipped (SCHEDULER_ENABLED=%s, JOBS_ROLE=%s)",
                         os.getenv("SCHEDULER_ENABLED"), os.getenv("JOBS_ROLE"))        
 
-    # === PWController 起動（“jobs”ロールのみ）========================
+    # === PWController 起動（“jobs”ロールのみ / Webでは任意で無効化） ===
     role = os.getenv("JOBS_ROLE", "").strip().lower()
+    # Webサービスだけで pwctl を殺すための安全弁（jobs 側には付けない）
+    disable_pw = os.getenv("DISABLE_PWCTL", "0") == "1"
 
     def _start_pw_controller_once():
         try:
@@ -199,7 +201,7 @@ def create_app() -> Flask:
         except Exception as e:
             app.logger.exception("⚠️ PWController start failed: %s", e)
 
-    if role == "jobs":
+    if (role == "jobs") and (not disable_pw):
         _hook = getattr(app, "before_serving", None) or getattr(app, "before_first_request", None)
         if callable(_hook):
             _hook(_start_pw_controller_once)
@@ -209,7 +211,7 @@ def create_app() -> Flask:
             except Exception:
                 app.logger.exception("⚠️ PWController immediate start failed")
     else:
-        app.logger.info("ℹ️ PWController: disabled on role=%s", role)
+        app.logger.info("ℹ️ PWController: disabled on role=%s (disable_pw=%s)", role, disable_pw)
 
 
      # --- CLIコマンド登録（内部SEOパイプライン実行） ---
