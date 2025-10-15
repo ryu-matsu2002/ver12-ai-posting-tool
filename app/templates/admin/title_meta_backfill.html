@@ -15,14 +15,21 @@
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div>
         <label for="user_select" class="block text-sm font-medium mb-1">ユーザーを選択</label>
+
+        <!-- 検索入力（デバウンスで候補を遅延取得） -->
+        <input id="user_search" type="text" placeholder="ユーザー名/メールで検索（入力で候補を取得）"
+               class="w-full border rounded-lg px-3 py-2 mb-2">
+
+        <!-- 初回は空。フォーカス/検索で候補をAJAX注入 -->
         <select id="user_select" class="w-full border rounded-lg px-3 py-2">
           <option value="">-- ユーザーを選んでください --</option>
-          {% for u in users %}
-            <option value="{{ u.id }}">#{{ u.id }} {{ u.username }}</option>
-          {% endfor %}
         </select>
-        <p class="text-xs text-gray-500 mt-1">一覧に出てこない場合は、ユーザー作成/権限をご確認ください。</p>
+
+        <p class="text-xs text-gray-500 mt-1">
+          ※ 初回表示時は高速化のためユーザー一覧を読み込みません。入力/フォーカス時に候補を取得します。
+        </p>
       </div>
+
       <div class="flex items-end">
         <button id="btnAutoAll"
                 class="w-full md:w-auto px-4 py-2 rounded-lg bg-purple-600 text-white hover:bg-purple-700 transition">
@@ -58,26 +65,78 @@
 </div>
 
 <script>
-  const endpoint   = "{{ url_for('admin.admin_title_meta_backfill') }}";
-  const progressEp = "{{ url_for('admin.admin_title_meta_progress') }}";
+  const endpoint        = "{{ url_for('admin.admin_title_meta_backfill') }}";
+  const progressEp      = "{{ url_for('admin.admin_title_meta_progress') }}";
+  const usersSuggestEp  = "{{ url_for('admin.admin_tools_users_suggest') }}";
 
   const el = (sel) => document.querySelector(sel);
-  const userSelect  = el('#user_select');
-  const btnAutoAll  = el('#btnAutoAll');
-  const busy        = el('#busy');
-  const resultBox   = el('#result');
-  const pPublished  = el('#p_published_only');
-  const pTotal      = el('#p_total');
-  const pApplied    = el('#p_applied');
-  const pPct        = el('#p_pct');
-  const pBySite     = el('#p_by_site');
+  const userSearch = el('#user_search');
+  const userSelect = el('#user_select');
+  const btnAutoAll = el('#btnAutoAll');
+  const busy       = el('#busy');
+  const resultBox  = el('#result');
+  const pPublished = el('#p_published_only');
+  const pTotal     = el('#p_total');
+  const pApplied   = el('#p_applied');
+  const pPct       = el('#p_pct');
+  const pBySite    = el('#p_by_site');
 
   function setBusy(v) {
     btnAutoAll.disabled = v;
     busy.classList.toggle('hidden', !v);
   }
 
-  // 進捗描画
+  // ---------------- ユーザー候補（遅延取得） ----------------
+  let usersCtrl = null;   // AbortController
+  let usersOnce = false;  // 初回フォーカス時、空検索で20件だけ取得
+
+  function setUserOptions(items) {
+    const current = userSelect.value || '';
+    const opts = ['<option value="">-- ユーザーを選んでください --</option>']
+      .concat((items || []).map(it => `<option value="${it.id}">${it.label}</option>`));
+    userSelect.innerHTML = opts.join('');
+    // 既存選択がリストにあれば維持
+    if (current && Array.from(userSelect.options).some(o => o.value === current)) {
+      userSelect.value = current;
+    }
+  }
+
+  async function fetchUsers(q) {
+    try {
+      if (usersCtrl) usersCtrl.abort();
+      usersCtrl = new AbortController();
+      const params = new URLSearchParams();
+      if (q && q.trim()) params.set('q', q.trim());
+      // 既定20件で十分。必要ならテンプレ側でlimit追加可
+      const res = await fetch(`${usersSuggestEp}?${params.toString()}`, { signal: usersCtrl.signal });
+      const data = await res.json().catch(() => ({items: []}));
+      setUserOptions(data.items || []);
+    } catch (e) {
+      // 中断/失敗時は候補をクリアせず無視
+    }
+  }
+
+  // 入力のデバウンス
+  let userDebounce = null;
+  userSearch.addEventListener('input', () => {
+    clearTimeout(userDebounce);
+    userDebounce = setTimeout(() => {
+      const q = userSearch.value;
+      fetchUsers(q);
+    }, 200);
+  });
+
+  // セレクトに初回フォーカスしたら空検索で直近20件
+  userSelect.addEventListener('focus', () => {
+    if (usersOnce) return;
+    usersOnce = true;
+    fetchUsers('');
+  });
+
+  // 選択が変わったら進捗更新
+  userSelect.addEventListener('change', refreshProgress);
+
+  // ---------------- 進捗描画 ----------------
   async function refreshProgress() {
     const uid = (userSelect.value || '').trim();
     if (!uid) { pTotal.textContent='-'; pApplied.textContent='-'; pPct.textContent='-'; pBySite.innerHTML=''; return; }
@@ -99,10 +158,9 @@
     }
   }
   pPublished.addEventListener('change', refreshProgress);
-  userSelect.addEventListener('change', refreshProgress);
   setInterval(refreshProgress, 5000);
 
-  // 結果描画（サマリー）
+  // ---------------- 実行結果描画 ----------------
   function escapeHtml(s) {
     return String(s || '').replace(/[&<>"']/g, m => ({
       '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
@@ -110,7 +168,7 @@
   }
 
   function renderSummaryAuto(res) {
-    // ループ完走後サーバが返すサマリーに対応（routes の新実装に合わせる）
+    // ループ完走後サーバが返すサマリーに対応（routes の実装に合わせる）
     const updatedTotal = res.updated_total ?? res.updated ?? 0;
     const iterations   = res.iterations ?? 1;
     const lastCursor   = (res.last_cursor ?? res.cursor ?? '');
@@ -132,7 +190,7 @@
     `;
   }
 
-  // 実行
+  // ---------------- 実行 ----------------
   btnAutoAll.addEventListener('click', async () => {
     const uid = (userSelect.value || '').trim();
     if (!uid) { alert('先にユーザーを選んでください'); return; }
@@ -169,6 +227,6 @@
     }
   });
 
-  // 初期：ユーザー未選択なので空表示
+  // 初期：何もしない（高速化のためユーザー配列は描画しない）
 </script>
 {% endblock %}

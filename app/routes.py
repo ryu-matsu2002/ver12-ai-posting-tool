@@ -199,28 +199,17 @@ except Exception:
 def admin_title_meta_backfill():
     """
     Title & Meta バッチ再生成（UI簡略版）
-    - GET: ユーザーのドロップダウン表示用に users を取得してテンプレへ
+    - GET: 超軽量描画（DBアクセスなし）でテンプレへ
     - POST: user_id のみ受け取り、バッチ処理を自動で最後まで実行（DB反映 + posted は WP 同期）
     """
-    # ---- GET: ドロップダウン表示用ユーザー一覧 ----
+    # ---- GET: 超軽量描画（DBヒット禁止）----
     if request.method == "GET":
         t0 = time.perf_counter()
-        users = []
-        try:
-            if User is not None:
-                users = (
-                    db.session.query(User)
-                    .options(load_only(User.id, User.username))
-                    .order_by(User.id.asc())
-                    .limit(int(os.getenv("ADMIN_TM_LIST_LIMIT", "500")))
-                    .all()
-                )
-        except Exception:
-            current_app.logger.exception("[admin:title-meta] users query failed")
-            users = []
+        # このページは初回表示を最速にするため、ユーザー/サイトのDB取得を行わない
+        # ユーザー候補はテンプレ側で /admin/tools/_users をAJAX遅延取得する前提
+        users, sites = [], []
         dt = int((time.perf_counter() - t0) * 1000)
-        current_app.logger.info("[admin:title-meta] render dropdown users=%s in %dms", len(users), dt)
-        # sites は本UIでは不使用だがテンプレ互換のため空で渡す
+        current_app.logger.info("[admin:title-meta] FAST render (no DB) in %dms", dt)
         return render_template("admin/title_meta_backfill.html", users=users, sites=[])
 
     # ---- POST: “このユーザーの全記事に適用（自動で最後まで）” ----
