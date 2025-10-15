@@ -276,12 +276,12 @@ def admin_title_meta_backfill():
 # --------------------------------------------------------------------
 # ユーザー行（一覧テーブル）の軽量API
 #   - 初回レンダは空HTML → このAPIでデータを遅延取得
-#   - 検索: ?q=（username/emailの部分一致）
+#   - 検索: ?q=（username/email の部分一致）
 #   - ページング: ?page=1&per_page=20
-#   - 計算対象:
-#       Article.is_manual_meta = false
-#       AND Article.status in ('done','posted')
-#       AND Article.meta_desc_quality in ('empty','too_short','too_long','duplicate')
+#   - 進捗メトリクス（本パッチで刷新）:
+#       分母: 「投稿記事」数（既定: published_only=1）
+#             → posted_at IS NOT NULL または posted_url <> ''
+#       分子: meta_description が非空（COALESCE(...,'') <> ''）
 # --------------------------------------------------------------------
 @admin_bp.route("/admin/tools/title-meta-rows", methods=["GET"])
 @admin_required_effective
@@ -290,6 +290,8 @@ def admin_title_meta_rows():
         return jsonify({"items": [], "total": 0, "page": 1, "per_page": 20})
 
     q = (request.args.get("q") or "").strip()
+    # 既定は「公開記事のみ」を分母にする（UIで総数ベースに変えたい時は ?published_only=0）
+    published_only = (request.args.get("published_only", "1").strip().lower() in ("1", "true", "yes", "on"))
     try:
         page = max(1, int(request.args.get("page", "1")))
         per_page = max(1, min(50, int(request.args.get("per_page", "20"))))
@@ -297,7 +299,7 @@ def admin_title_meta_rows():
         page, per_page = 1, 20
     offset = (page - 1) * per_page
 
-    # 対象ユーザー集合（検索）
+    # 対象ユーザー集合（検索・ページング）
     uq = db.session.query(User.id, User.username, User.email).order_by(User.id.asc())
     if q:
         like = f"%{q}%"
@@ -307,62 +309,95 @@ def admin_title_meta_rows():
         )
     total_users = uq.count()
     users = uq.offset(offset).limit(per_page).all()
-    user_ids = [u.id for u in users]
+    user_ids = [int(u.id) for u in users]
     if not user_ids:
         return jsonify({"items": [], "total": total_users, "page": page, "per_page": per_page})
 
-    quality_targets = ("empty", "too_short", "too_long", "duplicate")
-    status_targets = ("done", "posted")
+    # 記事の下地（分母/分子ともこの集合から算出）
+    base_q = db.session.query(
+        Article.user_id.label("user_id"),
+        Article.site_id.label("site_id"),
+        func.coalesce(Article.meta_description, "").label("meta_description"),
+        Article.posted_at.label("posted_at"),
+        func.coalesce(Article.posted_url, "").label("posted_url"),
+    ).filter(Article.user_id.in_(user_ids))
 
-    # ユーザー別の対象件数
-    a_base = (db.session.query(
-                Article.user_id.label("user_id"),
-                func.count(Article.id).label("cnt"))
-              .filter(Article.user_id.in_(user_ids))
-              .filter(Article.is_manual_meta == False)  # noqa: E712
-              .filter(Article.status.in_(status_targets))
-              .filter(Article.meta_desc_quality.in_(quality_targets))
-              .group_by(Article.user_id)
-    )
-    user_cnt_map = {int(r.user_id): int(r.cnt) for r in a_base.all()}
-
-    # サイト別内訳（各ユーザーの上位サイトを最大6件）※軽量化のためユーザーまとめて取得
-    s_rows = (
-        db.session.query(
-            Article.user_id.label("user_id"),
-            Article.site_id.label("site_id"),
-            func.count(Article.id).label("cnt")
+    if published_only:
+        base_q = base_q.filter(
+            or_(Article.posted_at.isnot(None),
+                func.coalesce(Article.posted_url, "") != "")
         )
-        .filter(Article.user_id.in_(user_ids))
-        .filter(Article.is_manual_meta == False)  # noqa: E712
-        .filter(Article.status.in_(status_targets))
-        .filter(Article.meta_desc_quality.in_(quality_targets))
-        .group_by(Article.user_id, Article.site_id)
+
+    base_sub = base_q.subquery()
+    applied_cond = (func.coalesce(base_sub.c.meta_description, "") != "")
+
+    # --- ユーザー別 集計（分母/分子/率） ---
+    u_rows = (
+        db.session.query(
+            base_sub.c.user_id.label("user_id"),
+            func.count(base_sub.c.user_id).label("total_cnt"),
+            func.sum(case((applied_cond, 1), else_=0)).label("applied_cnt"),
+        )
+        .group_by(base_sub.c.user_id)
         .all()
     )
+    totals_map   = {int(r.user_id): int(r.total_cnt or 0)   for r in u_rows}
+    applied_map  = {int(r.user_id): int(r.applied_cnt or 0) for r in u_rows}
+
+    # --- サイト別 内訳（ユーザーまとめて取得） ---
+    s_rows = (
+        db.session.query(
+            base_sub.c.user_id.label("user_id"),
+            base_sub.c.site_id.label("site_id"),
+            func.count(base_sub.c.site_id).label("total"),
+            func.sum(case((applied_cond, 1), else_=0)).label("applied"),
+        )
+        .group_by(base_sub.c.user_id, base_sub.c.site_id)
+        .all()
+    )
+
     # サイト名をまとめて引く
     site_ids = sorted({int(r.site_id) for r in s_rows if r.site_id is not None})
-    site_map = {s.id: (s.name or s.url or f"site#{s.id}") for s in db.session.query(Site.id, Site.name, Site.url).filter(Site.id.in_(site_ids)).all()}
+    site_map = {}
+    if site_ids:
+        for s in db.session.query(Site.id, Site.name, Site.url).filter(Site.id.in_(site_ids)).all():
+            site_map[int(s.id)] = (s.name or s.url or f"site#{int(s.id)}")
 
     per_user_sites = {}
     for r in s_rows:
-        per_user_sites.setdefault(int(r.user_id), []).append({
-            "site_id": int(r.site_id),
-            "name": site_map.get(int(r.site_id), f"site#{int(r.site_id)}"),
-            "cnt": int(r.cnt),
+        uid = int(r.user_id)
+        sid = int(r.site_id) if r.site_id is not None else 0
+        if sid == 0:
+            # site_id 無しはスキップ（集計としては残す場合はここを外す）
+            continue
+        per_user_sites.setdefault(uid, []).append({
+            "site_id": sid,
+            "name": site_map.get(sid, f"site#{sid}"),
+            "total": int(r.total or 0),
+            "applied": int(r.applied or 0),
+            "percentage": float(round((float(r.applied or 0) / float(r.total)) * 100.0, 2)) if r.total else 0.0,
         })
-    # 各ユーザーのレスポンス成形
+
+    # レスポンス整形：整備対象が0でもユーザー行を返す
     items = []
     for u in users:
-        sites = sorted(per_user_sites.get(int(u.id), []), key=lambda x: -x["cnt"])[:6]
+        uid = int(u.id)
+        total = int(totals_map.get(uid, 0))
+        applied = int(applied_map.get(uid, 0))
+        target = max(total - applied, 0)  # 互換: 旧UI用フィールド
+        pct = float(round((applied / total) * 100.0, 2)) if total else 0.0
+        sites = sorted(per_user_sites.get(uid, []), key=lambda x: -x["total"])[:6]
         items.append({
-            "user_id": int(u.id),
+            "user_id": uid,
             "username": u.username,
             "email": u.email,
-            "target_cnt": int(user_cnt_map.get(int(u.id), 0)),
+            "total_cnt": total,
+            "applied_cnt": applied,
+            "percentage": pct,
+            "target_cnt": target,   # ★ 互換のため残す（テンプレ更新後は不要）
             "sites": sites,
-            # “最近の結果”は重い集計を避け、最大更新時刻だけ軽く返す（任意）
         })
+
     return jsonify({"items": items, "total": total_users, "page": page, "per_page": per_page})
 
 

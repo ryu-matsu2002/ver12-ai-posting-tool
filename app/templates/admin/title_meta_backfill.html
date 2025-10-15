@@ -16,7 +16,8 @@
       </div>
     </div>
     <div class="text-xs text-gray-500 mt-2">
-      対象品質: <code>empty, too_short, too_long, duplicate</code> ／ 対象ステータス: <code>done, posted</code> ／ 手動メタは除外
+      分母＝<strong>投稿記事</strong>（既定）／ 分子＝<code>meta_description</code> が空でない記事数（=適用済み）／ 手動メタは除外<br>
+      ※ 投稿判定：<code>posted_at</code> あり または <code>posted_url</code> 非空
     </div>
   </div>
 
@@ -31,8 +32,8 @@
         <thead class="bg-gray-50">
           <tr>
             <th class="text-left px-4 py-2 w-64">ユーザー</th>
-            <th class="text-left px-4 py-2 w-40">状態</th>
-            <th class="text-left px-4 py-2 w-28">対象件数</th>
+            <th class="text-left px-4 py-2 w-36">状態</th>
+            <th class="text-left px-4 py-2 w-56">進捗</th>
             <th class="text-left px-4 py-2">サイト内訳</th>
             <th class="text-right px-4 py-2 w-28">操作</th>
           </tr>
@@ -73,33 +74,73 @@
     return `<span class="inline-flex items-center px-2 py-1 rounded-full bg-gray-100 text-gray-700 mr-2 mb-1" title="${hint}">${text}</span>`;
   }
 
-  function statusBadge(targetCnt) {
-    const ok = Number(targetCnt) === 0;
+  function statusBadgeFromProgress(applied, total, fallbackTarget=null) {
+    let ok = false;
+    if (typeof total === 'number' && total > 0) {
+      ok = Number(applied) >= Number(total);
+    } else if (fallbackTarget !== null) {
+      ok = Number(fallbackTarget) === 0;
+    }
     const cls = ok ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-800';
-    const label = ok ? '整備済み' : '整備対象あり';
+    const label = ok ? '整備済み' : '整備中';
     return `<span class="inline-flex px-2 py-1 rounded ${cls}">${label}</span>`;
+  }
+
+  function progressText(applied, total, percentage) {
+    const a = Number(applied || 0);
+    const t = Number(total || 0);
+    const p = (typeof percentage === 'number') ? percentage : (t ? Math.round((a / t) * 10000) / 100 : 0);
+    return `${a} / ${t}（${p}%）`;
+  }
+
+  function siteChips(sites) {
+    if (!Array.isArray(sites) || sites.length === 0) {
+      return '<span class="text-gray-400">（なし）</span>';
+    }
+    return sites.map(s => {
+      const txt = `${s.name} #${s.site_id} ${s.applied}/${s.total}（${s.percentage}%）`;
+      return pill(txt, `site_id=${s.site_id}`);
+    }).join('');
   }
 
   function rowHtml(item) {
     const user = `#${item.user_id} ${item.username} <span class="text-gray-500 text-xs">&lt;${item.email}&gt;</span>`;
-    const sites = (item.sites||[]).map(s => pill(`${s.name} #${s.site_id} ×${s.cnt}`, `site_id=${s.site_id}`)).join('');
-    const target = Number(item.target_cnt||0);
+    const total = Number(item.total_cnt || 0);
+    const applied = Number(item.applied_cnt || 0);
+    const percentage = typeof item.percentage === 'number' ? item.percentage : (total ? Math.round((applied / total) * 10000)/100 : 0);
+    const targetFallback = Number(item.target_cnt || Math.max(total - applied, 0));
+    const canRun = total > 0 && applied < total;
+
     return `
       <tr class="border-t">
         <td class="px-4 py-3 align-top">
           <div class="font-medium">${user}</div>
         </td>
-        <td class="px-4 py-3 align-top">${statusBadge(target)}</td>
-        <td class="px-4 py-3 align-top">${target}</td>
+        <td class="px-4 py-3 align-top">${statusBadgeFromProgress(applied, total, targetFallback)}</td>
         <td class="px-4 py-3 align-top">
-          <div class="flex flex-wrap">${sites || '<span class="text-gray-400">（なし）</span>'}</div>
+          <div class="flex items-center gap-2">
+            <span>${progressText(applied, total, percentage)}</span>
+            ${renderMiniBar(percentage)}
+          </div>
+        </td>
+        <td class="px-4 py-3 align-top">
+          <div class="flex flex-wrap">${siteChips(item.sites)}</div>
         </td>
         <td class="px-4 py-3 align-top text-right">
           <button class="px-3 py-1 rounded bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
-                  ${target===0?'disabled':''}
+                  ${canRun ? '' : 'disabled'}
                   onclick="runUser(${item.user_id})">実行</button>
         </td>
       </tr>
+    `;
+  }
+
+  function renderMiniBar(percentage) {
+    const p = Math.max(0, Math.min(100, Number(percentage || 0)));
+    return `
+      <span class="inline-block w-28 h-2 bg-gray-200 rounded-full overflow-hidden align-middle" aria-hidden="true">
+        <span class="block h-2" style="width:${p}%; background:#8b5cf6;"></span>
+      </span>
     `;
   }
 
@@ -107,6 +148,8 @@
     loadingEl.classList.remove('hidden');
     try {
       const params = new URLSearchParams({ page: String(page), per_page: String(perPage) });
+      // 既定は公開記事のみ。全件で見たい場合は published_only=0 を付与（必要に応じてUI追加可）
+      params.set('published_only', '1');
       const q = (qEl.value || '').trim();
       if (q) params.set('q', q);
       const res = await fetch(`${listEp}?${params.toString()}`);
@@ -138,7 +181,7 @@
       if (!res.ok || data.ok===false) {
         alert('実行に失敗しました');
       } else {
-        // 実行後に当該行の件数が減ることが多いので軽く更新
+        // 実行後に当該行の進捗が進む可能性が高いのでリロード
         fetchPage();
       }
     } catch(e) {
