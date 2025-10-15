@@ -197,89 +197,91 @@ except Exception:
 @admin_bp.route("/admin/tools/title-meta-backfill", methods=["GET", "POST"])
 @admin_required_effective
 def admin_title_meta_backfill():
-    # GET の querystring または POST の JSON / form を一元的に吸収
-    data = {}
+    """
+    Title & Meta バッチ再生成（UI簡略版）
+    - GET: ユーザーのドロップダウン表示用に users を取得してテンプレへ
+    - POST: user_id のみ受け取り、バッチ処理を自動で最後まで実行（DB反映 + posted は WP 同期）
+    """
+    # ---- GET: ドロップダウン表示用ユーザー一覧 ----
     if request.method == "GET":
-        data.update(request.args.to_dict())
-    else:
-        data.update(request.get_json(silent=True) or {})
-        if not data:
-            data.update(request.form.to_dict())
+        t0 = time.perf_counter()
+        users = []
+        try:
+            if User is not None:
+                users = (
+                    db.session.query(User)
+                    .options(load_only(User.id, User.username))
+                    .order_by(User.id.asc())
+                    .limit(int(os.getenv("ADMIN_TM_LIST_LIMIT", "500")))
+                    .all()
+                )
+        except Exception:
+            current_app.logger.exception("[admin:title-meta] users query failed")
+            users = []
+        dt = int((time.perf_counter() - t0) * 1000)
+        current_app.logger.info("[admin:title-meta] render dropdown users=%s in %dms", len(users), dt)
+        # sites は本UIでは不使用だがテンプレ互換のため空で渡す
+        return render_template("admin/title_meta_backfill.html", users=users, sites=[])
 
-    site_id    = _as_int(data.get("site_id"))
-    user_id    = _as_int(data.get("user_id"))
-    limit      = _as_int(data.get("limit"), 200) or 200
-    dryrun     = _as_bool(data.get("dryrun", data.get("dry_run", False)))
-    push_to_wp = _as_bool(data.get("push_to_wp", False))
-    after_id   = _as_int(data.get("after_id"))
+    # ---- POST: “このユーザーの全記事に適用（自動で最後まで）” ----
+    payload = (request.get_json(silent=True) or {}) or request.form.to_dict()
+    user_id = _as_int(payload.get("user_id"))
+    if not user_id:
+        return jsonify({"ok": False, "error": "user_id is required"}), 400
 
-    # 画面表示モード or API モードの判定
-    # → これらのいずれかが指定されていれば API、無ければ「画面表示」
-    params_present = any(v is not None and str(v) != "" for v in [
-        site_id, user_id, after_id
-    ]) or (data.get("limit") is not None) or dryrun or push_to_wp
+    # 既定挙動：DB反映 + postedのみ WP 反映。limit は内部で十分大きくして周回数を減らす
+    LIMIT_PER_CHUNK = _as_int(os.getenv("ADMIN_TM_LIMIT_PER_CHUNK", 500), 500) or 500
+    MAX_ITERS       = _as_int(os.getenv("ADMIN_TM_MAX_ITERS", 200), 200) or 200
 
-    if request.method == "GET" and not params_present:
-        # 画面表示：デフォルトは“超即時”（DBアクセス完全ゼロ）
-        # 環境変数 ADMIN_TM_FAST=0 のときだけ軽量一覧を出す（必要時に戻せる）
-        fast = os.getenv("ADMIN_TM_FAST", "1") == "1"
-        if fast:
-            t0 = time.perf_counter()
-            # 空配列で描画（テンプレ側は空リストでも成立する想定、
-            # セレクトを使わずID入力でも運用可能）
-            users, sites = [], []
-            dt = int((time.perf_counter() - t0) * 1000)
-            current_app.logger.info("[admin:title-meta] FAST render (no DB) in %dms", dt)
-            return render_template("admin/title_meta_backfill.html", users=users, sites=sites)
-        else:
-            # 旧来の軽量一覧（必要カラムのみ + 件数制限）
-            t0 = time.perf_counter()
-            users, sites = [], []
-            try:
-                _limit = int(os.getenv("ADMIN_TM_LIST_LIMIT", "50"))
-            except Exception:
-                _limit = 50
-            try:
-                if User is not None:
-                    users = (
-                        db.session.query(User)
-                        .options(load_only(User.id, User.username))
-                        .order_by(User.id.asc())
-                        .limit(_limit)
-                        .all()
-                    )
-            except Exception:
-                current_app.logger.exception("[admin:title-meta] users query failed")
-                users = []
-            try:
-                if Site is not None:
-                    sites = (
-                        db.session.query(Site)
-                        .options(load_only(Site.id, Site.name, Site.url))
-                        .order_by(Site.id.asc())
-                        .limit(_limit)
-                        .all()
-                    )
-            except Exception:
-                current_app.logger.exception("[admin:title-meta] sites query failed")
-                sites = []
-            dt = int((time.perf_counter() - t0) * 1000)
-            current_app.logger.info("[admin:title-meta] render list users=%s sites=%s in %dms",
-                                    len(users), len(sites), dt)
-            return render_template("admin/title_meta_backfill.html", users=users, sites=sites)
-
-    # API 実行（重い依存はここで遅延 import）
     from app.tasks import run_title_meta_backfill as _run_title_meta_backfill
-    result = _run_title_meta_backfill(
-        site_id=site_id,
-        user_id=user_id,
-        limit=limit,
-        dryrun=dryrun,
-        after_id=after_id,
-        push_to_wp=push_to_wp,
-    )
-    status = 200 if result.get("ok") else 400
-    return jsonify(result), status
+
+    total_updated = 0
+    iters = 0
+    cursor = None
+    last_result = {}
+
+    while True:
+        iters += 1
+        if iters > MAX_ITERS:
+            current_app.logger.warning("[admin:title-meta] reached MAX_ITERS user_id=%s cursor=%s", user_id, cursor)
+            break
+        result = _run_title_meta_backfill(
+            site_id=None,
+            user_id=user_id,
+            limit=LIMIT_PER_CHUNK,
+            dryrun=False,
+            after_id=cursor,
+            push_to_wp=True,   # 旧「本適用 + WP反映」に相当
+        )
+        last_result = result
+        if not result or not result.get("ok"):
+            # 失敗は即終了
+            status = 400
+            err = (result or {}).get("error", "unknown error")
+            return jsonify({"ok": False, "error": err, "updated": total_updated, "iterations": iters-1}), status
+
+        # 1チャンクの更新件数（存在すれば）を加算
+        total_updated += int(result.get("updated", 0))
+
+        # 続きカーソルのキー名は実装差異に合わせて両対応
+        cursor = result.get("cursor") or result.get("next_after_id")
+        done   = bool(result.get("done")) or (cursor in (None, "", 0))
+        if done:
+            break
+
+    summary = {
+        "ok": True,
+        "user_id": user_id,
+        "updated_total": total_updated,
+        "iterations": iters,
+        "last_cursor": cursor,
+        "last_chunk": {
+            "updated": int(last_result.get("updated", 0)),
+            "cursor": last_result.get("cursor"),
+            "done": bool(last_result.get("done")),
+        },
+    }
+    return jsonify(summary), 200
 
 # ------------------------------------------------------------------------------
 # 軽量サジェストAPI: ユーザー / サイト

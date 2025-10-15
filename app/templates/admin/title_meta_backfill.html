@@ -5,87 +5,32 @@
 <div class="max-w-5xl mx-auto px-4 py-6">
   <h1 class="text-2xl font-bold mb-4">🧩 Title & Meta バッチ再生成</h1>
   <p class="text-sm text-gray-600 mb-6">
-    既存記事に対して <code>&lt;title&gt;</code>（=記事タイトル）とメタディスクリプション（AI生成・既定180文字）を一括で整備します。<br>
-    <strong>Dry-run</strong> はDBを書き換えず差分サンプルを返します。<strong>Push to WP</strong> はDB反映後、公開済み( posted )の記事に限りWordPressの抜粋(Excerpt)や対応可能なSEOメタへ同期を試みます。
+    指定ユーザーの<strong>全記事</strong>について、<code>&lt;title&gt;</code>（=記事タイトル）と
+    メタディスクリプション（AI生成・既定180文字）を一括整備します。<br>
+    実行ボタンは<strong>1つだけ</strong>。サーバ側が自動で最後まで（必要に応じて分割しながら）処理します。
   </p>
 
-  <!-- 入力フォーム -->
+  <!-- 入力フォーム（簡略化） -->
   <div class="bg-white rounded-2xl shadow p-5 space-y-4">
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <!-- user_id -->
       <div>
-        <label class="block text-sm font-medium mb-1">ユーザー（ID直入力 or サジェスト）</label>
-        <div class="flex gap-2">
-          <input id="user_id" type="number" min="1" placeholder="ID"
-                 class="w-32 border rounded-lg px-3 py-2" value="">
-          <input id="user_query" type="text" placeholder="ユーザー名/メールで検索"
-                 class="flex-1 border rounded-lg px-3 py-2" list="user_list">
-          <datalist id="user_list"></datalist>
-        </div>
-        <p class="text-xs text-gray-500 mt-1">候補を選ぶとID欄に反映されます。</p>
+        <label for="user_select" class="block text-sm font-medium mb-1">ユーザーを選択</label>
+        <select id="user_select" class="w-full border rounded-lg px-3 py-2">
+          <option value="">-- ユーザーを選んでください --</option>
+          {% for u in users %}
+            <option value="{{ u.id }}">#{{ u.id }} {{ u.username }}</option>
+          {% endfor %}
+        </select>
+        <p class="text-xs text-gray-500 mt-1">一覧に出てこない場合は、ユーザー作成/権限をご確認ください。</p>
       </div>
-
-      <!-- site_id -->
-      <div>
-        <label class="block text-sm font-medium mb-1">サイト（ID直入力 or サジェスト）</label>
-        <div class="flex gap-2">
-          <input id="site_id" type="number" min="1" placeholder="ID"
-                 class="w-32 border rounded-lg px-3 py-2" value="">
-          <input id="site_query" type="text" placeholder="サイト名/URLで検索（ユーザー選択で絞込）"
-                 class="flex-1 border rounded-lg px-3 py-2" list="site_list">
-          <datalist id="site_list"></datalist>
-        </div>
-        <p class="text-xs text-gray-500 mt-1">空なら全サイト対象（user_idでさらに絞り込み可）</p>
-      </div>
-
-      <!-- limit -->
-      <div>
-        <label class="block text-sm font-medium mb-1">1回の上限件数</label>
-        <input id="limit" type="number" min="1" max="2000" class="w-full border rounded-lg px-3 py-2" value="200">
-        <p class="text-xs text-gray-500 mt-1">大きくしすぎると時間がかかります。200〜500程度推奨。</p>
-      </div>
-
-      <!-- after_id -->
-      <div>
-        <label class="block text-sm font-medium mb-1">続きカーソル（after_id）</label>
-        <input id="after_id" type="number" min="0" class="w-full border rounded-lg px-3 py-2" placeholder="前回レスポンスの cursor を貼り付け" value="">
-        <p class="text-xs text-gray-500 mt-1">前回の続きから再開したい場合に指定（空なら先頭から）。</p>
-      </div>
-
-      <!-- dryrun -->
-      <div class="flex items-center space-x-2">
-        <input id="dryrun" type="checkbox" class="h-4 w-4">
-        <label for="dryrun" class="text-sm font-medium">Dry-run（DB書込なし・差分プレビュー）</label>
-      </div>
-
-      <!-- push_to_wp -->
-      <div class="flex items-center space-x-2">
-        <input id="push_to_wp" type="checkbox" class="h-4 w-4">
-        <label for="push_to_wp" class="text-sm font-medium">Push to WP（DB反映後、WPにも同期）</label>
+      <div class="flex items-end">
+        <button id="btnAutoAll"
+                class="w-full md:w-auto px-4 py-2 rounded-lg bg-purple-600 text-white hover:bg-purple-700 transition">
+          🔁 このユーザーの全記事に適用（自動で最後まで）
+        </button>
       </div>
     </div>
-
-    <!-- ボタン群 -->
-    <div class="flex flex-wrap items-center gap-3 pt-2">
-      <button id="btnPreview" class="px-4 py-2 rounded-lg bg-gray-800 text-white hover:bg-black transition">
-        🔍 プレビュー（Dry-run）
-      </button>
-      <button id="btnApply" class="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition">
-        ✅ 本適用（DBのみ）
-      </button>
-      <button id="btnApplyPush" class="px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 transition">
-        🚀 本適用 + WP反映
-      </button>
-      <button id="btnNextCursor" class="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition hidden">
-        ⏭️ つづきを実行（次カーソル）
-      </button>
-
-      <button id="btnAutoAll" class="px-4 py-2 rounded-lg bg-purple-600 text-white hover:bg-purple-700 transition">
-        🔁 このユーザーの全記事に適用（自動で最後まで）
-      </button>
-
-      <span id="busy" class="hidden text-sm text-gray-600">実行中…少々お待ちを</span>
-    </div>
+    <span id="busy" class="hidden text-sm text-gray-600">実行中…完了までお待ちください</span>
   </div>
 
   <!-- 進捗表示 -->
@@ -113,188 +58,28 @@
 </div>
 
 <script>
-  const endpoint = "{{ url_for('admin.admin_title_meta_backfill') }}";
-  const usersSuggestEp = "{{ url_for('admin.admin_tools_users_suggest') }}";
-  const sitesSuggestEp = "{{ url_for('admin.admin_tools_sites_suggest') }}";
-  const progressEp     = "{{ url_for('admin.admin_title_meta_progress') }}";
+  const endpoint   = "{{ url_for('admin.admin_title_meta_backfill') }}";
+  const progressEp = "{{ url_for('admin.admin_title_meta_progress') }}";
 
   const el = (sel) => document.querySelector(sel);
-  const btnPreview    = el('#btnPreview');
-  const btnApply      = el('#btnApply');
-  const btnApplyPush  = el('#btnApplyPush');
-  const btnNextCursor = el('#btnNextCursor');
-  const btnAutoAll    = el('#btnAutoAll');
-  const busy          = el('#busy');
-  const resultBox     = el('#result');
-  const userQuery     = el('#user_query');
-  const userList      = el('#user_list');
-  const siteQuery     = el('#site_query');
-  const siteList      = el('#site_list');
-  const pPublished    = el('#p_published_only');
-  const pTotal        = el('#p_total');
-  const pApplied      = el('#p_applied');
-  const pPct          = el('#p_pct');
-  const pBySite       = el('#p_by_site');
-
-  function getParams({forceDryrun=null, forcePush=null, useCursor=false} = {}) {
-    const site_id   = el('#site_id').value.trim();
-    const user_id   = el('#user_id').value.trim();
-    const limit     = el('#limit').value.trim() || "200";
-    const dryrun    = (forceDryrun !== null) ? forceDryrun : el('#dryrun').checked;
-    const push_to_wp= (forcePush   !== null) ? forcePush   : el('#push_to_wp').checked;
-    const after_id  = useCursor ? (btnNextCursor.dataset.cursor || "") : (el('#after_id').value.trim());
-
-    const params = new URLSearchParams();
-    if (site_id)   params.set('site_id', site_id);
-    if (user_id)   params.set('user_id', user_id);
-    if (limit)     params.set('limit', limit);
-    if (dryrun)    params.set('dryrun', '1');
-    if (push_to_wp && !dryrun) params.set('push_to_wp', '1'); // dryrun中は無効
-    if (after_id)  params.set('after_id', after_id);
-    return params;
-  }
+  const userSelect  = el('#user_select');
+  const btnAutoAll  = el('#btnAutoAll');
+  const busy        = el('#busy');
+  const resultBox   = el('#result');
+  const pPublished  = el('#p_published_only');
+  const pTotal      = el('#p_total');
+  const pApplied    = el('#p_applied');
+  const pPct        = el('#p_pct');
+  const pBySite     = el('#p_by_site');
 
   function setBusy(v) {
-    [btnPreview, btnApply, btnApplyPush, btnNextCursor].forEach(b => b.disabled = v);
+    btnAutoAll.disabled = v;
     busy.classList.toggle('hidden', !v);
   }
 
-  function renderSummaryCard(res) {
-    const {
-      total, scanned, updated, failed, skipped_manual,
-      cursor, elapsed_ms, samples = [],
-      wp_synced, wp_errors
-    } = res;
-
-    const wpLine = (typeof wp_synced !== 'undefined' || typeof wp_errors !== 'undefined')
-      ? `<div class="text-sm">WP同期: <span class="font-medium">${wp_synced||0}</span> 成功 / <span class="font-medium">${wp_errors||0}</span> エラー</div>`
-      : '';
-
-    const card = `
-      <div class="bg-white rounded-2xl shadow p-5">
-        <h2 class="font-semibold mb-2">実行結果</h2>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-          <div class="p-3 rounded-lg bg-gray-50">total<br><span class="text-lg font-bold">${total||0}</span></div>
-          <div class="p-3 rounded-lg bg-gray-50">scanned<br><span class="text-lg font-bold">${scanned||0}</span></div>
-          <div class="p-3 rounded-lg bg-gray-50">updated (DB)<br><span class="text-lg font-bold">${updated||0}</span></div>
-          <div class="p-3 rounded-lg bg-gray-50">failed<br><span class="text-lg font-bold text-red-600">${failed||0}</span></div>
-          <div class="p-3 rounded-lg bg-gray-50">skipped_manual<br><span class="text-lg font-bold">${skipped_manual||0}</span></div>
-          <div class="p-3 rounded-lg bg-gray-50">elapsed<br><span class="text-lg font-bold">${elapsed_ms||0} ms</span></div>
-        </div>
-        ${wpLine}
-        <div class="mt-3 text-sm">次カーソル: <code class="px-2 py-1 bg-gray-100 rounded">${cursor ?? ''}</code></div>
-      </div>
-    `;
-    return card;
-  }
-
-  function escapeHtml(s) {
-    return String(s || '').replace(/[&<>"']/g, m => ({
-      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-    }[m]));
-  }
-
-  function renderSamplesTable(samples) {
-    if (!samples || samples.length === 0) return `
-      <div class="bg-white rounded-2xl shadow p-5">
-        <h3 class="font-semibold mb-2">差分サンプル</h3>
-        <p class="text-sm text-gray-600">サンプルはありません（件数が少ない、または本適用モード）。</p>
-      </div>
-    `;
-
-    const rows = samples.map(s => `
-      <tr class="border-t">
-        <td class="px-3 py-2 text-sm">#${s.id}</td>
-        <td class="px-3 py-2 text-sm">${escapeHtml(s.title||'')}</td>
-        <td class="px-3 py-2 text-sm">${escapeHtml(s.keyword||'')}</td>
-        <td class="px-3 py-2 text-xs">
-          <div class="font-mono whitespace-pre-wrap break-words">${escapeHtml(s.current||'')}</div>
-          <div class="text-gray-500 mt-1">len=${s.current_len||0} / quality=${escapeHtml(s.current_quality||'')}</div>
-        </td>
-        <td class="px-3 py-2 text-xs">
-          <div class="font-mono whitespace-pre-wrap break-words">${escapeHtml(s.suggest||'')}</div>
-          <div class="text-gray-500 mt-1">len=${s.suggest_len||0} / quality=${escapeHtml(s.suggest_quality||'')}</div>
-        </td>
-      </tr>
-    `).join('');
-
-    return `
-      <div class="bg-white rounded-2xl shadow p-5">
-        <h3 class="font-semibold mb-3">差分サンプル（最大20件）</h3>
-        <div class="overflow-x-auto">
-          <table class="min-w-full text-left">
-            <thead>
-              <tr class="border-b">
-                <th class="px-3 py-2 text-xs font-medium text-gray-500">ID</th>
-                <th class="px-3 py-2 text-xs font-medium text-gray-500">Title</th>
-                <th class="px-3 py-2 text-xs font-medium text-gray-500">Keyword</th>
-                <th class="px-3 py-2 text-xs font-medium text-gray-500">Current Meta</th>
-                <th class="px-3 py-2 text-xs font-medium text-gray-500">Suggested Meta</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </div>
-      </div>
-    `;
-  }
-
-  function setNextCursor(cursor) {
-    if (cursor && Number(cursor) > 0) {
-      btnNextCursor.dataset.cursor = String(cursor);
-      btnNextCursor.classList.remove('hidden');
-    } else {
-      btnNextCursor.dataset.cursor = '';
-      btnNextCursor.classList.add('hidden');
-    }
-  }
-
-  // ---------- サジェスト ----------
-  let userSuggestTimer = null;
-  userQuery.addEventListener('input', () => {
-    clearTimeout(userSuggestTimer);
-    userSuggestTimer = setTimeout(async () => {
-      const q = userQuery.value.trim();
-      if (!q) { userList.innerHTML = ''; return; }
-      const res = await fetch(`${usersSuggestEp}?q=${encodeURIComponent(q)}`);
-      const data = await res.json().catch(() => ({items: []}));
-      userList.innerHTML = (data.items || []).map(it => `<option value="${it.label}" data-id="${it.id}">`).join('');
-    }, 200);
-  });
-  userQuery.addEventListener('change', () => {
-    const opt = Array.from(userList.options).find(o => o.value === userQuery.value);
-    if (opt && opt.getAttribute('data-id')) {
-      el('#user_id').value = opt.getAttribute('data-id');
-      // ユーザーが決まったらサイトサジェストも絞り込める
-      siteList.innerHTML = '';
-      siteQuery.value = '';
-      refreshProgress(); // 決定したタイミングで進捗即更新
-    }
-  });
-
-  let siteSuggestTimer = null;
-  siteQuery.addEventListener('input', () => {
-    clearTimeout(siteSuggestTimer);
-    siteSuggestTimer = setTimeout(async () => {
-      const q = siteQuery.value.trim();
-      const uid = el('#user_id').value.trim();
-      if (!q) { siteList.innerHTML = ''; return; }
-      const url = `${sitesSuggestEp}?q=${encodeURIComponent(q)}${uid ? `&user_id=${uid}` : ''}`;
-      const res = await fetch(url);
-      const data = await res.json().catch(() => ({items: []}));
-      siteList.innerHTML = (data.items || []).map(it => `<option value="${it.label}" data-id="${it.id}">`).join('');
-    }, 200);
-  });
-  siteQuery.addEventListener('change', () => {
-    const opt = Array.from(siteList.options).find(o => o.value === siteQuery.value);
-    if (opt && opt.getAttribute('data-id')) {
-      el('#site_id').value = opt.getAttribute('data-id');
-    }
-  });
-
-  // ---------- 進捗 ----------
+  // 進捗描画
   async function refreshProgress() {
-    const uid = (el('#user_id').value || '').trim();
+    const uid = (userSelect.value || '').trim();
     if (!uid) { pTotal.textContent='-'; pApplied.textContent='-'; pPct.textContent='-'; pBySite.innerHTML=''; return; }
     const po = pPublished.checked ? '1' : '0';
     const url = `${progressEp}?user_id=${encodeURIComponent(uid)}&published_only=${po}`;
@@ -302,102 +87,88 @@
       const res = await fetch(url);
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || 'progress error');
-      pTotal.textContent = data.total;
+      pTotal.textContent   = data.total;
       pApplied.textContent = data.applied;
-      pPct.textContent = data.percentage.toFixed(2);
-      pBySite.innerHTML = (data.by_site || []).map(r => {
+      pPct.textContent     = data.percentage.toFixed(2);
+      pBySite.innerHTML    = (data.by_site || []).map(r => {
         const pct = r.total ? Math.round((r.applied / r.total) * 100) : 0;
         return `<div>#${r.site_id} … ${r.applied}/${r.total} (${pct}%)</div>`;
       }).join('');
-    } catch(e) {
-      // 軽く無視（UIノイズにしない）
+    } catch (e) {
+      // 軽い失敗は無視
     }
   }
   pPublished.addEventListener('change', refreshProgress);
+  userSelect.addEventListener('change', refreshProgress);
   setInterval(refreshProgress, 5000);
 
+  // 結果描画（サマリー）
+  function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, m => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[m]));
+  }
 
-  async function runBatch(params) {
+  function renderSummaryAuto(res) {
+    // ループ完走後サーバが返すサマリーに対応（routes の新実装に合わせる）
+    const updatedTotal = res.updated_total ?? res.updated ?? 0;
+    const iterations   = res.iterations ?? 1;
+    const lastCursor   = (res.last_cursor ?? res.cursor ?? '');
+    const lastChunk    = res.last_chunk || {};
+    const lastUpdated  = lastChunk.updated ?? 0;
+    const doneFlag     = (lastChunk.done === true) || (!lastCursor || lastCursor === 0);
+
+    return `
+      <div class="bg-white rounded-2xl shadow p-5">
+        <h2 class="font-semibold mb-2">実行結果（自動完走）</h2>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+          <div class="p-3 rounded-lg bg-gray-50">合計更新<br><span class="text-lg font-bold">${updatedTotal}</span></div>
+          <div class="p-3 rounded-lg bg-gray-50">反復回数<br><span class="text-lg font-bold">${iterations}</span></div>
+          <div class="p-3 rounded-lg bg-gray-50">最終チャンク更新<br><span class="text-lg font-bold">${lastUpdated}</span></div>
+          <div class="p-3 rounded-lg bg-gray-50">状態<br><span class="text-lg font-bold">${doneFlag ? '完了' : '未完'}</span></div>
+        </div>
+        <div class="mt-3 text-sm">last_cursor: <code class="px-2 py-1 bg-gray-100 rounded">${escapeHtml(lastCursor ?? '')}</code></div>
+      </div>
+    `;
+  }
+
+  // 実行
+  btnAutoAll.addEventListener('click', async () => {
+    const uid = (userSelect.value || '').trim();
+    if (!uid) { alert('先にユーザーを選んでください'); return; }
+
     setBusy(true);
+    resultBox.innerHTML = '';
     try {
-      const url = `${endpoint}?${params.toString()}`;
-      const res = await fetch(url, { method: 'GET' });
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: Number(uid) })
+      });
       const data = await res.json().catch(() => ({}));
 
-      // 失敗時
       if (!res.ok || data.ok === false) {
         resultBox.innerHTML = `
           <div class="bg-red-50 border border-red-200 text-red-800 rounded-xl p-4">
             <div class="font-semibold mb-1">エラー</div>
             <pre class="text-xs whitespace-pre-wrap">${escapeHtml(JSON.stringify(data, null, 2))}</pre>
           </div>`;
-        setNextCursor(null);
         return;
       }
 
-      // 成功時
-      const summary = renderSummaryCard(data);
-      const samples = params.get('dryrun') ? renderSamplesTable(data.samples || []) : '';
-      resultBox.innerHTML = summary + samples;
-
-      // 次カーソル
-      setNextCursor(data.cursor);
-
-      // 入力欄にも反映（任意）
-      if (data.cursor) {
-        el('#after_id').value = data.cursor;
-      }
+      resultBox.innerHTML = renderSummaryAuto(data);
+      await refreshProgress();
     } catch (e) {
       resultBox.innerHTML = `
         <div class="bg-red-50 border border-red-200 text-red-800 rounded-xl p-4">
           <div class="font-semibold mb-1">通信エラー</div>
           <pre class="text-xs whitespace-pre-wrap">${escapeHtml(String(e))}</pre>
         </div>`;
-      setNextCursor(null);
     } finally {
       setBusy(false);
     }
-  }
-
-  btnPreview.addEventListener('click', () => {
-    const p = getParams({ forceDryrun: true, forcePush: false, useCursor: false });
-    runBatch(p);
   });
 
-  btnApply.addEventListener('click', () => {
-    const p = getParams({ forceDryrun: false, forcePush: false, useCursor: false });
-    runBatch(p);
-  });
-
-  btnApplyPush.addEventListener('click', () => {
-    const p = getParams({ forceDryrun: false, forcePush: true, useCursor: false });
-    runBatch(p);
-  });
-
-  btnNextCursor.addEventListener('click', () => {
-    const isDry = el('#dryrun').checked; // 直前のモードを踏襲
-    const willPush = el('#push_to_wp').checked && !isDry;
-    const p = getParams({ forceDryrun: isDry, forcePush: willPush, useCursor: true });
-    runBatch(p);
-  });
-
-  // ---------- 自動で最後まで（cursor が尽きるまで繰り返す） ----------
-  btnAutoAll.addEventListener('click', async () => {
-    const uid = (el('#user_id').value || '').trim();
-    if (!uid) { alert('先にユーザーを選んでください'); return; }
-    // 現在の入力値をベースに、本適用（DBのみ or WP同期はチェックに従う）
-    let isDry = false;
-    const willPush = el('#push_to_wp').checked;
-    let cursor = null;
-    do {
-      const p = getParams({ forceDryrun: isDry, forcePush: willPush, useCursor: !!cursor });
-      if (cursor) p.set('after_id', cursor);
-      await runBatch(p);
-      // 次カーソルを読む
-      cursor = btnNextCursor.dataset.cursor || '';
-      await new Promise(r => setTimeout(r, 250)); // 小休止で負荷平準化
-      await refreshProgress(); // 逐次進捗更新
-    } while (cursor && Number(cursor) > 0);
-  });
+  // 初期：ユーザー未選択なので空表示
 </script>
 {% endblock %}
