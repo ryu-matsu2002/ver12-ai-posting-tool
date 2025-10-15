@@ -320,19 +320,25 @@ def admin_title_meta_rows():
         return jsonify({"items": [], "total": total_users, "page": page, "per_page": per_page})
 
     # 記事の下地（分母/分子ともこの集合から算出）
-    base_q = db.session.query(
-        Article.user_id.label("user_id"),
-        Article.site_id.label("site_id"),
-        func.coalesce(Article.meta_description, "").label("meta_description"),
-        Article.posted_at.label("posted_at"),
-        func.coalesce(Article.posted_url, "").label("posted_url"),
-    ).filter(Article.user_id.in_(user_ids))
-     .filter(Article.is_manual_meta == False)  # ★ 手動メタは進捗の分母から除外
+    # ← ここを()で括ってチェーンを改行。手動メタは分母から除外
+    base_q = (
+        db.session.query(
+            Article.user_id.label("user_id"),
+            Article.site_id.label("site_id"),
+            func.coalesce(Article.meta_description, "").label("meta_description"),
+            Article.posted_at.label("posted_at"),
+            func.coalesce(Article.posted_url, "").label("posted_url"),
+        )
+        .filter(Article.user_id.in_(user_ids))
+        .filter(Article.is_manual_meta == False)  # 分母から手動メタを外す
+    )
 
     if published_only:
         base_q = base_q.filter(
-            or_(Article.posted_at.isnot(None),
-                func.coalesce(Article.posted_url, "") != "")
+            or_(
+                Article.posted_at.isnot(None),
+                func.coalesce(Article.posted_url, "") != ""
+            )
         )
 
     base_sub = base_q.subquery()
