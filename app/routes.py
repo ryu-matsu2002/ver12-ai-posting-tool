@@ -52,7 +52,7 @@ from app.image_utils import _is_image_url
 from app.services.blog_signup.livedoor_signup import generate_livedoor_id_candidates
 from app.services.blog_signup.livedoor_atompub_recover import open_create_tab_for_handoff
 # === Title & Meta バッチ再生成（管理API）で呼ぶ関数 ===
-from app.tasks import run_meta_regen_batch as run_title_meta_backfill
+from app.tasks import run_title_meta_backfill
 
 # ==== 外部SEO: 簡易ステータスストア（トークン→状態） ====
 EXTSEO_STATUS = {}  # { token: { step, progress, captcha_url, site_id, account_id, ... } }
