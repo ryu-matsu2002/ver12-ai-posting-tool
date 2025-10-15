@@ -327,6 +327,7 @@ def admin_title_meta_rows():
         Article.posted_at.label("posted_at"),
         func.coalesce(Article.posted_url, "").label("posted_url"),
     ).filter(Article.user_id.in_(user_ids))
+     .filter(Article.is_manual_meta == False)  # ★ 手動メタは進捗の分母から除外
 
     if published_only:
         base_q = base_q.filter(
