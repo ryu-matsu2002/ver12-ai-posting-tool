@@ -215,22 +215,37 @@ def admin_title_meta_backfill():
     ]) or (data.get("limit") is not None) or dryrun or push_to_wp
 
     if request.method == "GET" and not params_present:
-        # 画面表示：テンプレに候補一覧を渡す（ORMで取得。失敗時は空配列にフォールバック）
-        users = []
-        sites = []
+        # 画面表示（軽量化版）：必要カラムのみ取得し、関係の遅延ロードを避ける
+        t0 = time.perf_counter()
+        users, sites = [], []
         try:
             if User is not None:
-                # モデルオブジェクトをそのまま渡す（template は u.id / u.username で参照可能）
-                users = db.session.query(User).order_by(User.id.asc()).limit(200).all()
+                users = (
+                    db.session.query(User)
+                    .options(load_only(User.id, User.username))
+                    .order_by(User.id.asc())
+                    .limit(200)
+                    .all()
+                )
         except Exception:
+            current_app.logger.exception("[admin:title-meta] users query failed")
             users = []
         try:
             if Site is not None:
-                # template は s.id / (s.name or s.url) で参照可能
-                sites = db.session.query(Site).order_by(Site.id.asc()).limit(200).all()
+                # name が無ければ url を表示する想定（テンプレ側はそのまま）
+                sites = (
+                    db.session.query(Site)
+                    .options(load_only(Site.id, Site.name, Site.url))
+                    .order_by(Site.id.asc())
+                    .limit(200)
+                    .all()
+                )
         except Exception:
+            current_app.logger.exception("[admin:title-meta] sites query failed")
             sites = []
-        # admin 配下に置いているため正しいテンプレートパスで呼び出す
+        dt = int((time.perf_counter() - t0) * 1000)
+        current_app.logger.info("[admin:title-meta] render list users=%s sites=%s in %dms",
+                                len(users), len(sites), dt)
         return render_template("admin/title_meta_backfill.html", users=users, sites=sites)
 
     # API 実行
