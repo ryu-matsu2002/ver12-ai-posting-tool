@@ -272,6 +272,122 @@ def admin_title_meta_backfill():
     }
     return jsonify(summary), 200
 
+
+# ------------------------------------------------------------------------------
+# 一覧テーブル用の軽量API（1ユーザー=1行）
+#   - 既存ページの初期描画はDBアクセスなしを維持。フロントが本APIをAJAX呼び出し
+#   - 集計条件:
+#       is_manual_meta = false
+#       status IN ('done','posted')
+#       meta_desc_quality IN ('empty','too_short','too_long','duplicate')
+#   - 返却: ユーザー1行 + サイト内訳（横チップ向け）
+# ------------------------------------------------------------------------------
+@admin_bp.route("/admin/tools/title-meta-users", methods=["GET"])
+@admin_required_effective
+def admin_title_meta_users():
+    if Article is None or User is None or Site is None:
+        return jsonify({"users": []})
+
+    # クエリ・パラメータ（必要最小限のみ）
+    qualities = request.args.get("qualities")
+    if qualities:
+        quality_targets = tuple([q.strip() for q in qualities.split(",") if q.strip()])
+    else:
+        quality_targets = ("empty", "too_short", "too_long", "duplicate")
+
+    try:
+        limit_users = int(request.args.get("limit", "0"))  # 0=制限なし
+        limit_users = max(0, limit_users)
+    except Exception:
+        limit_users = 0
+
+    # 記事側の基礎集計（user_id, site_id ごと）
+    base = (
+        db.session.query(
+            Article.user_id.label("user_id"),
+            Article.site_id.label("site_id"),
+            func.count(Article.id).label("targets"),
+            func.sum(case((Article.status == "posted", 1), else_=0)).label("posted_targets"),
+            func.sum(case((Article.status == "done",   1), else_=0)).label("done_targets"),
+        )
+        .filter(Article.is_manual_meta == False)  # noqa: E712
+        .filter(Article.status.in_(("done", "posted")))
+        .filter(Article.meta_desc_quality.in_(quality_targets))
+        .group_by(Article.user_id, Article.site_id)
+    )
+
+    rows = base.all()
+    if not rows:
+        return jsonify({"users": []})
+
+    # user→site内訳 へ整形
+    per_user = {}
+    user_ids = set()
+    site_ids = set()
+    for r in rows:
+        uid = int(r.user_id)
+        sid = int(r.site_id) if r.site_id is not None else 0
+        user_ids.add(uid)
+        if sid:
+            site_ids.add(sid)
+        item = per_user.setdefault(uid, {"user_id": uid, "targets": 0, "sites": []})
+        item["targets"] += int(r.targets or 0)
+        if sid:
+            item["sites"].append({
+                "site_id": sid,
+                "targets": int(r.targets or 0),
+                "posted":  int(r.posted_targets or 0),
+                "done":    int(r.done_targets or 0),
+            })
+
+    # ユーザー名を最小集合だけ取得
+    users_meta = {}
+    if user_ids:
+        q_users = (
+            db.session.query(User.id, User.username)
+            .filter(User.id.in_(list(user_ids)))
+            .order_by(User.id.asc())
+        )
+        for u in q_users.all():
+            users_meta[int(u.id)] = {"name": u.username}
+
+    # サイト表示名を最小集合だけ取得
+    sites_meta = {}
+    if site_ids:
+        q_sites = (
+            db.session.query(Site.id, Site.name, Site.url)
+            .filter(Site.id.in_(list(site_ids)))
+            .order_by(Site.id.asc())
+        )
+        for s in q_sites.all():
+            sites_meta[int(s.id)] = {"name": (s.name or s.url or f"site#{s.id}")}
+    # 表示用に整形（サイトは名前を付与し、targets降順で並べる）
+    users = []
+    for uid, info in per_user.items():
+        sites = info["sites"]
+        # サイト名付与
+        for s in sites:
+            meta = sites_meta.get(int(s["site_id"]), {})
+            s["name"] = meta.get("name", f"site#{s['site_id']}")
+        # 降順
+        sites.sort(key=lambda x: x["targets"], reverse=True)
+        users.append({
+            "user_id": uid,
+            "name": users_meta.get(uid, {}).get("name", f"user#{uid}"),
+            "targets": info["targets"],
+            "sites": sites,
+        })
+
+    # ユーザーも targets 降順で並べる
+    users.sort(key=lambda x: x["targets"], reverse=True)
+    if limit_users and len(users) > limit_users:
+        users = users[:limit_users]
+
+    current_app.logger.info("[admin:title-meta:list] users=%s (qualities=%s)", len(users), ",".join(quality_targets))
+    return jsonify({"users": users})
+
+
+
 # ------------------------------------------------------------------------------
 # 軽量サジェストAPI: ユーザー / サイト
 # ------------------------------------------------------------------------------

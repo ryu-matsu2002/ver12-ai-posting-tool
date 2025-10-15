@@ -2,277 +2,211 @@
 {% block title %}Title/Meta再生成 | 管理者{% endblock %}
 
 {% block content %}
-<div class="max-w-5xl mx-auto px-4 py-6">
-  <h1 class="text-2xl font-bold mb-4">🧩 Title & Meta バッチ再生成</h1>
+<div class="max-w-7xl mx-auto px-4 py-6">
+  <h1 class="text-2xl font-bold mb-3">🧩 Title & Meta バッチ再生成</h1>
   <p class="text-sm text-gray-600 mb-6">
-    指定ユーザーの<strong>全記事</strong>について、<code>&lt;title&gt;</code>（=記事タイトル）と
-    メタディスクリプション（AI生成・既定180文字）を一括整備します。<br>
-    実行ボタンは<strong>1つだけ</strong>。サーバ側が自動で最後まで（必要に応じて分割しながら）処理します。
+    各ユーザーの<strong>既存記事</strong>について、&lt;title&gt; とメタディスクリプション（AI 生成・既定180字）を
+    一括整備します。行右端の<strong>「実行」</strong>を押すだけで、そのユーザーの全対象記事を最後まで自動処理します。
   </p>
 
-  <!-- 入力フォーム（簡略化） -->
-  <div class="bg-white rounded-2xl shadow p-5 space-y-4">
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <div>
-        <label for="user_select" class="block text-sm font-medium mb-1">ユーザーを選択</label>
-
-        <!-- 検索入力（デバウンスで候補を遅延取得） -->
-        <input id="user_search" type="text" placeholder="ユーザー名/メールで検索（入力で候補を取得）"
-               class="w-full border rounded-lg px-3 py-2 mb-2" autocomplete="off">
-
-        <!-- 初回は空。フォーカス/検索で候補をAJAX注入 -->
-        <select id="user_select" class="w-full border rounded-lg px-3 py-2" aria-describedby="user_help">
-          <option value="">-- ユーザーを選んでください --</option>
-        </select>
-
-        <p id="user_help" class="text-xs text-gray-500 mt-1">
-          ※ 初回表示時は高速化のためユーザー一覧を読み込みません。入力/フォーカス時に候補を取得します。
-        </p>
-      </div>
-
-      <div class="flex items-end">
-        <button id="btnAutoAll"
-                class="w-full md:w-auto px-4 py-2 rounded-lg bg-purple-600 text-white hover:bg-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled>
-          🔁 このユーザーの全記事に適用（自動で最後まで）
-        </button>
-      </div>
+  <!-- 操作バー（検索・更新） -->
+  <div class="bg-white rounded-2xl shadow p-4 mb-4 flex flex-col md:flex-row gap-3 md:items-center">
+    <div class="flex-1 flex gap-2">
+      <input id="q" type="text" placeholder="ユーザー名で絞り込み（クライアント側フィルタ）"
+             class="w-full border rounded-lg px-3 py-2" autocomplete="off">
+      <button id="btnReload"
+              class="px-3 py-2 rounded-lg border bg-gray-50 hover:bg-gray-100">
+        再読込
+      </button>
     </div>
-    <span id="busy" class="hidden text-sm text-gray-600" aria-live="polite">実行中…完了までお待ちください</span>
-  </div>
-
-  <!-- 進捗表示 -->
-  <div id="progress" class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-    <div class="bg-white rounded-2xl shadow p-5">
-      <h3 class="font-semibold mb-1">進捗（ユーザー）</h3>
-      <div class="text-sm text-gray-600 mb-2">
-        分母: <span id="p_total" class="font-semibold">-</span>　
-        分子: <span id="p_applied" class="font-semibold">-</span>　
-        率: <span id="p_pct" class="font-semibold">-</span>%
-      </div>
-      <label class="inline-flex items-center gap-2 text-xs">
-        <input id="p_published_only" type="checkbox" class="h-4 w-4" checked>
-        公開記事のみを対象
-      </label>
-    </div>
-    <div class="bg-white rounded-2xl shadow p-5 md:col-span-2">
-      <h3 class="font-semibold mb-2">サイト別内訳（上位50）</h3>
-      <div id="p_by_site" class="text-sm text-gray-700 space-y-1 max-h-52 overflow-auto" aria-live="polite"></div>
+    <div class="text-xs text-gray-500">
+      対象品質: <code>empty, too_short, too_long, duplicate</code>（変更は API 側パラメータで可）
     </div>
   </div>
 
-  <!-- 結果表示 -->
-  <div id="result" class="mt-6 space-y-4"></div>
+  <!-- 一覧（1 ユーザー 1 行） -->
+  <div class="bg-white rounded-2xl shadow">
+    <div class="px-4 py-3 border-b text-sm text-gray-600 flex justify-between">
+      <div>ユーザー一覧（非同期取得）</div>
+      <div id="loadState" class="text-gray-500">読み込み待機中…</div>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="text-left px-4 py-2 w-56">ユーザー</th>
+            <th class="text-left px-4 py-2 w-28">対象件数</th>
+            <th class="text-left px-4 py-2">サイト内訳</th>
+            <th class="text-left px-4 py-2 w-40">直近の結果</th>
+            <th class="text-right px-4 py-2 w-36">操作</th>
+          </tr>
+        </thead>
+        <tbody id="userRows">
+          <!-- 非同期に挿入 -->
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <p class="text-xs text-gray-500 mt-3">
+    初期表示は DB を叩かずに 1 秒以内で開きます。行データは AJAX で軽量取得しています。
+  </p>
 </div>
 
 <script>
-  const endpoint        = "{{ url_for('admin.admin_title_meta_backfill') }}";
-  const progressEp      = "{{ url_for('admin.admin_title_meta_progress') }}";
-  const usersSuggestEp  = "{{ url_for('admin.admin_tools_users_suggest') }}";
+  // エンドポイント
+  const listEp     = "{{ url_for('admin.admin_title_meta_users') }}";
+  const runEp      = "{{ url_for('admin.admin_title_meta_backfill') }}";
 
-  const el = (sel) => document.querySelector(sel);
-  const userSearch = el('#user_search');
-  const userSelect = el('#user_select');
-  const btnAutoAll = el('#btnAutoAll');
-  const busy       = el('#busy');
-  const resultBox  = el('#result');
-  const pPublished = el('#p_published_only');
-  const pTotal     = el('#p_total');
-  const pApplied   = el('#p_applied');
-  const pPct       = el('#p_pct');
-  const pBySite    = el('#p_by_site');
+  // DOM 参照
+  const el = (s) => document.querySelector(s);
+  const userRows = el('#userRows');
+  const qInput   = el('#q');
+  const loadState = el('#loadState');
+  const btnReload = el('#btnReload');
 
-  function setBusy(v) {
-    btnAutoAll.disabled = v || !(userSelect.value && userSelect.value.trim());
-    busy.classList.toggle('hidden', !v);
-    document.body.toggleAttribute('aria-busy', v);
-  }
+  // 状態
+  let rawUsers = [];   // API からの生配列
+  let running  = new Set(); // 実行中 user_id
 
-  // ユーザー選択の有無でボタン活性/非活性
-  function reflectButtonState() {
-    btnAutoAll.disabled = !(userSelect.value && userSelect.value.trim());
-  }
+  // HTML ユーティリティ
+  const esc = (s) => String(s ?? '').replace(/[&<>\"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+  const fmtInt = (n) => Number(n||0).toLocaleString();
 
-  // ---------------- ユーザー候補（遅延取得） ----------------
-  let usersCtrl = null;   // AbortController
-  let usersOnce = false;  // 初回フォーカス時、空検索で20件だけ取得
-
-  function setUserOptions(items) {
-    const current = userSelect.value || '';
-    const opts = ['<option value="">-- ユーザーを選んでください --</option>']
-      .concat((items || []).map(it => `<option value="${it.id}">${it.label}</option>`));
-    userSelect.innerHTML = opts.join('');
-    // 既存選択がリストにあれば維持
-    if (current && Array.from(userSelect.options).some(o => o.value === current)) {
-      userSelect.value = current;
-    }
-    reflectButtonState();
-  }
-
-  async function fetchUsers(q) {
-    try {
-      if (usersCtrl) usersCtrl.abort();
-      usersCtrl = new AbortController();
-      const params = new URLSearchParams();
-      if (q && q.trim()) params.set('q', q.trim());
-      const res = await fetch(`${usersSuggestEp}?${params.toString()}`, { signal: usersCtrl.signal });
-      const data = await res.json().catch(() => ({items: []}));
-      setUserOptions(data.items || []);
-    } catch (e) {
-      // 中断/失敗時は候補をクリアせず無視
-    }
-  }
-
-  // 入力のデバウンス
-  let userDebounce = null;
-  userSearch.addEventListener('input', () => {
-    clearTimeout(userDebounce);
-    userDebounce = setTimeout(() => {
-      const q = userSearch.value;
-      fetchUsers(q);
-    }, 200);
-  });
-
-  // セレクトに初回フォーカスしたら空検索で直近20件
-  userSelect.addEventListener('focus', () => {
-    if (usersOnce) return;
-    usersOnce = true;
-    fetchUsers('');
-  });
-
-  // 選択が変わったら進捗更新＆ボタン状態更新
-  userSelect.addEventListener('change', () => {
-    reflectButtonState();
-    refreshProgress();
-  });
-
-  // ---------------- 進捗描画 ----------------
-  let progressTimer = null;
-
-  function safePercent(num) {
-    const n = Number(num);
-    return Number.isFinite(n) ? n : 0;
-  }
-
-  async function refreshProgress() {
-    const uid = (userSelect.value || '').trim();
-    if (!uid) {
-      pTotal.textContent='-'; pApplied.textContent='-'; pPct.textContent='-'; pBySite.innerHTML='';
-      return;
-    }
-    const po = pPublished.checked ? '1' : '0';
-    const url = `${progressEp}?user_id=${encodeURIComponent(uid)}&published_only=${po}`;
-    try {
-      const res = await fetch(url);
-      // 例外系(4xx/5xx)はJSONでない可能性→ガード
-      if (!res.ok) {
-        pBySite.innerHTML = `<div class="text-red-600">進捗取得エラー：HTTP ${res.status}</div>`;
-        return;
-      }
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || 'progress error');
-
-      pTotal.textContent   = data.total;
-      pApplied.textContent = data.applied;
-
-      const pctNum = safePercent(data.percentage);
-      pPct.textContent     = safePercent(pctNum).toFixed(2);
-
-      const list = (data.by_site || []).slice(0, 50).map(r => {
-        const t = Number(r.total) || 0;
-        const a = Number(r.applied) || 0;
-        const pct = t ? Math.round((a / t) * 100) : 0;
-        return `<div>#${r.site_id} … ${a}/${t} (${pct}%)</div>`;
-      }).join('');
-      pBySite.innerHTML = list || '<div class="text-gray-500">データなし</div>';
-    } catch (e) {
-      // 軽い失敗は無視（UI上は静かに）
-    }
-  }
-
-  pPublished.addEventListener('change', refreshProgress);
-
-  // ポーリングは1本に限定
-  if (!progressTimer) {
-    progressTimer = setInterval(refreshProgress, 5000);
-  }
-
-  // ---------------- 実行結果描画 ----------------
-  function escapeHtml(s) {
-    return String(s || '').replace(/[&<>\"']/g, m => ({
-      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-    }[m]));
-  }
-
-  function renderSummaryAuto(res) {
-    // ループ完走後サーバが返すサマリーに対応（routes の実装に合わせる）
-    const updatedTotal = Number(res.updated_total ?? res.updated ?? 0);
-    const iterations   = Number(res.iterations ?? 1);
-    const lastCursor   = (res.last_cursor ?? res.cursor ?? '');
-    const lastChunk    = res.last_chunk || {};
-    const lastUpdated  = Number(lastChunk.updated ?? 0);
-    const doneFlag     = (lastChunk.done === true) || (!lastCursor || lastCursor === 0);
-
+  function siteChip(s) {
+    // s: {site_id, name, targets, posted, done}
     return `
-      <div class="bg-white rounded-2xl shadow p-5">
-        <h2 class="font-semibold mb-2">実行結果（自動完走）</h2>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-          <div class="p-3 rounded-lg bg-gray-50">合計更新<br><span class="text-lg font-bold">${updatedTotal}</span></div>
-          <div class="p-3 rounded-lg bg-gray-50">反復回数<br><span class="text-lg font-bold">${iterations}</span></div>
-          <div class="p-3 rounded-lg bg-gray-50">最終チャンク更新<br><span class="text-lg font-bold">${lastUpdated}</span></div>
-          <div class="p-3 rounded-lg bg-gray-50">状態<br><span class="text-lg font-bold">${doneFlag ? '完了' : '未完'}</span></div>
-        </div>
-        <div class="mt-3 text-sm">last_cursor: <code class="px-2 py-1 bg-gray-100 rounded">${escapeHtml(String(lastCursor ?? ''))}</code></div>
-      </div>
+      <span class="inline-flex items-center gap-2 px-2 py-1 rounded-full border bg-gray-50 mr-2 mb-2">
+        <span class="text-gray-700">${esc(s.name)}</span>
+        <span class="text-gray-500">#${s.site_id}</span>
+        <span class="text-gray-800 font-medium">${fmtInt(s.targets)}</span>
+        <span class="text-xs text-gray-500">(posted:${fmtInt(s.posted)} / done:${fmtInt(s.done)})</span>
+      </span>
     `;
   }
 
-  // ---------------- 実行 ----------------
-  btnAutoAll.addEventListener('click', async () => {
-    const uid = (userSelect.value || '').trim();
-    if (!uid) { alert('先にユーザーを選んでください'); return; }
+  function actionCell(user_id) {
+    const busy = running.has(user_id);
+    return `
+      <button data-run="${user_id}"
+              class="px-3 py-2 rounded-lg text-white ${busy?'bg-gray-400 cursor-not-allowed':'bg-purple-600 hover:bg-purple-700'}"
+              ${busy?'disabled':''}>
+        ${busy ? '実行中…' : '実行'}
+      </button>
+    `;
+  }
 
-    setBusy(true);
-    resultBox.innerHTML = '';
+  function rowHTML(u) {
+    // u: {user_id, name, targets, sites:[...] }
+    const sites = (u.sites||[]).map(siteChip).join('');
+    return `
+      <tr class="border-t">
+        <td class="px-4 py-3">
+          <div class="font-medium">${esc(u.name)}</div>
+          <div class="text-xs text-gray-500">#${u.user_id}</div>
+        </td>
+        <td class="px-4 py-3">
+          <div class="font-bold">${fmtInt(u.targets)}</div>
+        </td>
+        <td class="px-4 py-3">
+          <div class="flex flex-wrap">${sites || '<span class="text-gray-400">内訳なし</span>'}</div>
+        </td>
+        <td class="px-4 py-3">
+          <div id="r-${u.user_id}" class="text-xs text-gray-600">-</div>
+        </td>
+        <td class="px-4 py-3 text-right">
+          ${actionCell(u.user_id)}
+        </td>
+      </tr>
+    `;
+  }
+
+  function renderList(filterText='') {
+    const f = (filterText || '').trim().toLowerCase();
+    const rows = rawUsers
+      .filter(u => !f || String(u.name||'').toLowerCase().includes(f) || String(u.user_id).includes(f))
+      .map(rowHTML)
+      .join('');
+    userRows.innerHTML = rows || `
+      <tr><td colspan="5" class="px-4 py-6 text-center text-gray-500">該当ユーザーが見つかりません</td></tr>`;
+    // 再アタッチ（動的生成のため）
+    attachRowHandlers();
+  }
+
+  function attachRowHandlers() {
+    userRows.querySelectorAll('button[data-run]').forEach(btn => {
+      btn.addEventListener('click', () => runForUser(Number(btn.dataset.run)));
+    });
+  }
+
+  async function loadList() {
     try {
-      const res = await fetch(endpoint, {
+      loadState.textContent = '読み込み中…';
+      const res = await fetch(listEp, { cache: 'no-store' });
+      const data = await res.json().catch(() => ({users:[]}));
+      rawUsers = Array.isArray(data.users) ? data.users : [];
+      renderList(qInput.value);
+      loadState.textContent = `読み込み完了（${rawUsers.length}件）`;
+    } catch(e) {
+      loadState.textContent = '読み込みエラー';
+      userRows.innerHTML = `
+        <tr><td colspan="5" class="px-4 py-6 text-center text-red-600">一覧の取得に失敗しました</td></tr>`;
+    }
+  }
+
+  async function runForUser(user_id) {
+    if (running.has(user_id)) return;
+    running.add(user_id);
+    // ボタン再描画
+    const cell = userRows.querySelector(`button[data-run="${user_id}"]`);
+    if (cell) {
+      cell.outerHTML = actionCell(user_id);
+      attachRowHandlers();
+    }
+    const resBox = el(`#r-${user_id}`);
+    if (resBox) resBox.textContent = '実行リクエスト送信中…';
+
+    try {
+      const res = await fetch(runEp, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: Number(uid) })
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ user_id })
       });
-
-      let data = {};
-      try { data = await res.json(); } catch (_){ /* 非JSONでも落とさない */ }
-
+      const data = await res.json().catch(()=> ({}));
       if (!res.ok || data.ok === false) {
-        resultBox.innerHTML = `
-          <div class="bg-red-50 border border-red-200 text-red-800 rounded-xl p-4">
-            <div class="font-semibold mb-1">エラー</div>
-            <pre class="text-xs whitespace-pre-wrap">${escapeHtml(JSON.stringify(data || {status: res.status}, null, 2))}</pre>
-          </div>`;
-        return;
+        const msg = data.error ? `エラー: ${data.error}` : `HTTP ${res.status}`;
+        if (resBox) resBox.textContent = msg;
+      } else {
+        // サマリーを軽く表示
+        const total = Number(data.updated_total ?? data.updated ?? 0);
+        const iters = Number(data.iterations ?? 1);
+        const okWp  = (data.wp && data.wp.ok) ? ` / WP OK ${data.wp.ok}` : '';
+        if (resBox) resBox.textContent = `完了: 更新 ${total}件 / 反復 ${iters}${okWp}`;
       }
-
-      resultBox.innerHTML = renderSummaryAuto(data);
-      await refreshProgress();
-    } catch (e) {
-      resultBox.innerHTML = `
-        <div class="bg-red-50 border border-red-200 text-red-800 rounded-xl p-4">
-          <div class="font-semibold mb-1">通信エラー</div>
-          <pre class="text-xs whitespace-pre-wrap">${escapeHtml(String(e))}</pre>
-        </div>`;
+    } catch(e) {
+      if (resBox) resBox.textContent = '通信エラー';
     } finally {
-      setBusy(false);
+      running.delete(user_id);
+      // ボタン再描画
+      const cell2 = userRows.querySelector(`button[data-run="${user_id}"]`);
+      if (cell2) {
+        cell2.outerHTML = actionCell(user_id);
+        attachRowHandlers();
+      }
     }
+  }
+
+  // 入力フィルタ（デバウンス）
+  let deb = null;
+  qInput.addEventListener('input', () => {
+    clearTimeout(deb);
+    deb = setTimeout(() => renderList(qInput.value), 150);
   });
 
-  // Enter キーで実行（セレクトにフォーカス中）
-  userSelect.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Enter' && !btnAutoAll.disabled) {
-      btnAutoAll.click();
-    }
-  });
+  btnReload.addEventListener('click', loadList);
 
-  // 初期：高速化のためユーザー配列は描画しない
+  // 初期ロード：サーバーはHTMLだけ返し DB は触らない → JS で軽量APIを叩く
+  loadList();
 </script>
 {% endblock %}

@@ -1186,6 +1186,7 @@ def run_meta_regen_batch(
     total = len(rows)
     if not rows:
         return {
+            "ok": True,
             "total": 0, "scanned": 0, "updated": 0,
             "skipped_manual": 0, "failed": 0,
             "cursor": after_id, "elapsed_ms": int((time.perf_counter()-t0)*1000),
@@ -1270,6 +1271,7 @@ def run_meta_regen_batch(
         (time.perf_counter() - t0) * 1000,
     )
     return {
+        "ok": True,
         "total": total,
         "scanned": scanned,
         "updated": updated,
@@ -1424,9 +1426,9 @@ def run_title_meta_backfill(
 
     # 呼び出し元（管理ページ側）が成功/失敗を明確に判定できるようにフラグを付与
     return {
+        "ok": True,
         **res,
         "wp": wp_summary,
-        "ok": True,
         # ループ継続の有無をルート側が見られるように補助フラグを返す
         "done": (res.get("cursor") in (None, 0, "")),
     }
