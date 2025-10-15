@@ -179,9 +179,11 @@ def _as_int(v, default=None):
     except Exception:
         return default
     
-from app.tasks import run_title_meta_backfill
-from flask import render_template, request, jsonify
+import time
+from flask import render_template, request, jsonify, current_app
 from app import db
+from sqlalchemy.orm import load_only
+
 try:
     # あなたのプロジェクトの User / Site モデル名に合わせて import
     from app.models import User, Site
@@ -215,16 +217,21 @@ def admin_title_meta_backfill():
     ]) or (data.get("limit") is not None) or dryrun or push_to_wp
 
     if request.method == "GET" and not params_present:
-        # 画面表示（軽量化版）：必要カラムのみ取得し、関係の遅延ロードを避ける
+        # 画面表示（超軽量モード）：必要カラムのみ + 件数を抑制
         t0 = time.perf_counter()
         users, sites = [], []
+        # 表示件数は環境変数で調整可能（既定50）
+        try:
+            _limit = int(os.getenv("ADMIN_TM_LIST_LIMIT", "50"))
+        except Exception:
+            _limit = 50
         try:
             if User is not None:
                 users = (
                     db.session.query(User)
                     .options(load_only(User.id, User.username))
                     .order_by(User.id.asc())
-                    .limit(200)
+                    .limit(_limit)
                     .all()
                 )
         except Exception:
@@ -237,7 +244,7 @@ def admin_title_meta_backfill():
                     db.session.query(Site)
                     .options(load_only(Site.id, Site.name, Site.url))
                     .order_by(Site.id.asc())
-                    .limit(200)
+                    .limit(_limit)
                     .all()
                 )
         except Exception:
@@ -248,8 +255,9 @@ def admin_title_meta_backfill():
                                 len(users), len(sites), dt)
         return render_template("admin/title_meta_backfill.html", users=users, sites=sites)
 
-    # API 実行
-    result = run_title_meta_backfill(
+    # API 実行（重い依存はここで遅延 import）
+    from app.tasks import run_title_meta_backfill as _run_title_meta_backfill
+    result = _run_title_meta_backfill(
         site_id=site_id,
         user_id=user_id,
         limit=limit,
