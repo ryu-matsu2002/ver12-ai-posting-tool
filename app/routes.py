@@ -1511,12 +1511,33 @@ def admin_sites():
         flash("このページにはアクセスできません。", "error")
         return redirect(url_for("main.dashboard", username=current_user.username))
 
-    from sqlalchemy import case, literal
-    from app.models import Site, Article, User, Genre, GSCConfig
+    from sqlalchemy import case, literal, func
+    from app.models import Site, Article, User, Genre, GSCConfig, GSCDailyTotal
+    from datetime import datetime, timezone, timedelta
     from collections import defaultdict
 
     # 🔹 ジャンルID→ジャンル名の辞書を事前取得
     genre_dict = {g.id: g.name for g in Genre.query.all()}
+
+    # 🔹 GSCは「JSTの昨日まで」の直近28日で合計を出す（結合なし・相関サブクエリ）
+    JST = timezone(timedelta(hours=9))
+    _today_jst = datetime.now(timezone.utc).astimezone(JST).date()
+    _end_d = _today_jst - timedelta(days=1)      # 昨日まで
+    _start_d = _end_d - timedelta(days=27)       # 直近28日
+    _gsc_clicks_28d = (
+        db.session.query(func.coalesce(func.sum(GSCDailyTotal.clicks), 0))
+        .filter(GSCDailyTotal.site_id == Site.id,
+                GSCDailyTotal.date >= _start_d,
+                GSCDailyTotal.date <= _end_d)
+        .correlate(Site).scalar_subquery()
+    )
+    _gsc_impr_28d = (
+        db.session.query(func.coalesce(func.sum(GSCDailyTotal.impressions), 0))
+        .filter(GSCDailyTotal.site_id == Site.id,
+                GSCDailyTotal.date >= _start_d,
+                GSCDailyTotal.date <= _end_d)
+        .correlate(Site).scalar_subquery()
+    )
 
     # 🔹 サイトごとの統計情報（投稿数など）＋GSC接続状態を取得
     raw = (
@@ -1532,8 +1553,8 @@ def admin_sites():
             func.sum(case((Article.status == "done", 1), else_=0)).label("done"),
             func.sum(case((Article.status == "posted", 1), else_=0)).label("posted"),
             func.sum(case((Article.status == "error", 1), else_=0)).label("error"),
-            func.coalesce(Site.clicks, 0).label("clicks"),
-            func.coalesce(Site.impressions, 0).label("impressions"),
+            _gsc_clicks_28d.label("clicks"),
+            _gsc_impr_28d.label("impressions"),
             func.max(GSCConfig.id).isnot(None).label("gsc_connected")
         )
         .join(User, Site.user_id == User.id)
@@ -5395,10 +5416,28 @@ def gsc_connect():
     sites_query = Site.query.filter_by(user_id=current_user.id)
 
     # ✅ 並び替え条件
-    if order == "most_views":
-        sites_query = sites_query.order_by(Site.impressions.desc())
-    elif order == "least_views":
-        sites_query = sites_query.order_by(Site.impressions.asc())
+    # ※ GSCは「JSTの昨日まで」の直近28日で並べる（相関サブクエリで高速）
+    if order in ("most_views", "least_views"):
+        from datetime import datetime, timezone, timedelta
+        from sqlalchemy import func
+        from app.models import GSCDailyTotal
+        JST = timezone(timedelta(hours=9))
+        _today_jst = datetime.now(timezone.utc).astimezone(JST).date()
+        _end_d = _today_jst - timedelta(days=1)      # 昨日まで
+        _start_d = _end_d - timedelta(days=27)       # 直近28日
+        _gsc_impr_28d = (
+            db.session.query(func.coalesce(func.sum(GSCDailyTotal.impressions), 0))
+            .filter(
+                GSCDailyTotal.site_id == Site.id,
+                GSCDailyTotal.date >= _start_d,
+                GSCDailyTotal.date <= _end_d
+            )
+            .correlate(Site).scalar_subquery()
+        )
+        if order == "most_views":
+            sites_query = sites_query.order_by(_gsc_impr_28d.desc())
+        else:  # "least_views"
+            sites_query = sites_query.order_by(_gsc_impr_28d.asc())
     else:
         sites_query = sites_query.order_by(Site.created_at.desc())  # デフォルト：新しい順
 
