@@ -1,13 +1,16 @@
 # app/tasks/title_meta_backfill.py
 
 from datetime import datetime
-
+import time
 from typing import Any, Dict, Optional, Tuple
 from sqlalchemy import func, or_
 
 from app import db
 from app.models import Article
 from flask import current_app
+
+# 内部SEOと同じバックオフ（秒）
+RETRY_BACKOFF = [1, 2, 4, 8]
 
 # --- ユーティリティ ----------------------------------------------------------
 
@@ -80,12 +83,30 @@ def _push_meta_to_wp_if_needed(article: Article) -> str:
 
         # 解決できたときのみWPへ反映
         if wp_post_id:
-            ok = update_post_meta(
-                site=site,
-                wp_post_id=wp_post_id,
-                meta_description=article.meta_description or "",
-            )
-            return "ok" if ok else "failed"
+            # ★ リトライ: 504/一時失敗などで False が返ってきた場合に限定して再試行
+            last_ok = False
+            for attempt, backoff in enumerate([0] + RETRY_BACKOFF):
+                if attempt:
+                    current_app.logger.warning(
+                        "[title-meta] retry update_post_meta article_id=%s wp_post_id=%s attempt=%s",
+                        article.id, wp_post_id, attempt + 1
+                    )
+                    time.sleep(backoff)
+                try:
+                    last_ok = update_post_meta(
+                        site=site,
+                        wp_post_id=wp_post_id,
+                        meta_description=article.meta_description or "",
+                    )
+                except Exception as e:
+                    # 呼び出し側で握りつぶさずに次のループで再試行
+                    current_app.logger.info(
+                        "[title-meta] update_post_meta raised (will retry): %s", e
+                    )
+                    last_ok = False
+                if last_ok:
+                    break
+            return "ok" if last_ok else "failed"
         else:
             current_app.logger.info(
                 "[title-meta] unresolved wp_post_id; meta not pushed article_id=%s", article.id

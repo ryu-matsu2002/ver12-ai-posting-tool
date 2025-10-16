@@ -54,6 +54,59 @@ def _clean_meta(s: str, max_len: int | None = None) -> str:
 def _truncate(s: str, n: int) -> str:
     return s if not s or len(s) <= n else s[:n].rstrip()
 
+
+def _html_escape_attr(s: str) -> str:
+    if s is None:
+        return ""
+    return (
+        str(s)
+        .replace("&", "&amp;")
+        .replace('"', "&quot;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+def _meta_block(meta_desc: str) -> str:
+    """
+    本文冒頭に挿入する“非表示メタ説明ブロック”。重複挿入防止のためマーカーを付与。
+    - HTML の <head> には入らないが、本文に確実に残る（内部SEOと同じ層）
+    - SR向け/テーマ差異対策としてテキストも同梱（display:none）
+    """
+    esc = _html_escape_attr(_clean_meta(meta_desc, max_len=180))
+    if not esc:
+        return ""
+    return (
+        "<!-- ai-meta-desc:start -->"
+        '<div class="ai-meta-desc" style="display:none" aria-hidden="true">'
+        f'<meta name="description" content="{esc}"/>'
+        f'<p class="ai-meta-desc-text">{esc}</p>'
+        "</div>"
+        "<!-- ai-meta-desc:end -->"
+    )
+
+def _inject_meta_desc_into_html(html: str, meta_desc: str) -> str:
+    """
+    生成済み本文HTMLに meta 説明ブロックを一度だけ注入。
+    - 既に挿入済み（マーカー検出）や <meta name="description"> が本文に存在する場合は何もしない
+    - <div class="ai-content"> が先頭にある場合はその直後に差し込む。無ければ先頭にプレペンド
+    """
+    if not meta_desc:
+        return html or ""
+    body = html or ""
+    low = body.lower()
+    if ("<!-- ai-meta-desc:start -->" in low) or ('meta name="description"' in low):
+        return body
+    block = _meta_block(meta_desc)
+    if not block:
+        return body
+    anchor = '<div class="ai-content">'
+    idx = low.find(anchor)
+    if idx >= 0:
+        insert_at = idx + len(anchor)
+        return body[:insert_at] + block + body[insert_at:]
+    # アンカーが無い場合はプレペンド
+    return block + body
+
 # 投稿用のヘッダー作成（application/json 用）
 def _post_headers(username: str, app_pass: str, site_url: str) -> dict:
     token = base64.b64encode(f'{username}:{app_pass}'.encode('utf-8')).decode('utf-8')
@@ -459,7 +512,11 @@ def post_to_wp(site: Site, art: Article) -> str:
 
     post_data = {
         "title": art.title,
-        "content": f'<div class="ai-content">{_decorate_html(art.body)}</div>',
+        # 本文先頭に“非表示メタ説明ブロック”を注入（重複防止マーカー付き）
+        "content": _inject_meta_desc_into_html(
+            f'<div class="ai-content">{_decorate_html(art.body)}</div>',
+            meta_desc
+        ),
         "status": "publish",
     }
     # 保険として excerpt にもメタ説明を入れておく（多くのテーマ/SEOプラグインが拾う）
@@ -555,6 +612,18 @@ def _push_seo_meta_to_wp(site: Site, wp_post_id: int, art: Article, meta_desc: s
                 current_app.logger.info(f"[WP-SEO] meta write {list(meta_obj.keys())[0]} -> {resp.status_code}: {resp.text[:120]}")
         except Exception as e:
             current_app.logger.info(f"[WP-SEO] meta write skipped ({list(meta_obj.keys())[0]}): {e}")
+
+    # 3) 本文にも“非表示メタ説明ブロック”を注入（既存記事。内部SEOと同じレイヤーで確実に残す）
+    try:
+        post = fetch_single_post(site, wp_post_id)
+        if post and meta_desc:
+            new_html = _inject_meta_desc_into_html(post.content_html or "", meta_desc)
+            if new_html and new_html != (post.content_html or ""):
+                ok = update_post_content(site, wp_post_id, new_html)
+                if not ok:
+                    current_app.logger.info("[WP-SEO] content meta-block inject failed post_id=%s", wp_post_id)
+    except Exception as e:
+        current_app.logger.info("[WP-SEO] content inject skipped: %s", e)        
 
 # =============================================================
 # 🔸 NEW: Topicページ用の汎用投稿ヘルパ（Article不要）
@@ -666,3 +735,4 @@ def update_post_meta(site: Site, wp_post_id: int, meta_description: str) -> bool
             )
 
     return ok_any
+# （備考）本文への注入は _push_seo_meta_to_wp() 側で包括的に実施済み
