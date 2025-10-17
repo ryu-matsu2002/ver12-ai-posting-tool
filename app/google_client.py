@@ -1,6 +1,7 @@
 import os
 import requests
 import logging
+import time
 from datetime import datetime, date, timedelta, timezone
 
 from google.oauth2 import service_account
@@ -132,14 +133,41 @@ def update_gsc_metrics(site: Site):
 
 # ────── 🔁 全接続サイトを一括更新（スケジューラー用）──────
 def update_all_gsc_sites():
-    sites = Site.query.filter_by(gsc_connected=True).all()
+    """
+    すべてのGSC連携サイトを“1件ずつ・小休止しながら”安全に更新する。
+    負荷を下げるための調整値は環境変数で変更可能：
+      - GSC_DAYS                … 直近何日を見るか（default=35）
+      - GSC_SLEEP_MS            … サイト間の休憩（ミリ秒, default=200）
+      - GSC_MAX_SITES_PER_RUN   … 1回の実行で処理する最大サイト数（0=上限なし）
+    """
+    days = _get_env_int("GSC_DAYS", 35)
+    sleep_ms = _get_env_int("GSC_SLEEP_MS", 200)
+    max_sites = _get_env_int("GSC_MAX_SITES_PER_RUN", 0)
+
+    q = Site.query.filter_by(gsc_connected=True).order_by(Site.id.asc())
+    if max_sites > 0:
+        q = q.limit(max_sites)
+    sites = q.all()
+
     total_upsert = 0
-    for site in sites:
+    for i, site in enumerate(sites, 1):
         try:
-            total_upsert += update_site_daily_totals(site, days=35)
+            up = update_site_daily_totals(site, days=days)
+            total_upsert += up
+            logging.info(f"[GSC] ({i}/{len(sites)}) site={site.id} upsert={up}")
         except Exception as e:
             logging.error(f"[GSC] site batch failed: {site.url} - {e}")
-    logging.info(f"[GSC] batch done: upsert={total_upsert} rows")
+        finally:
+            # 参照を解放してメモリ膨張を防ぐ（scoped_sessionのキャッシュも軽くする）
+            try:
+                db.session.expunge_all()
+            except Exception:
+                pass
+            # 小休止でピークを平らにする
+            if sleep_ms > 0:
+                time.sleep(sleep_ms / 1000.0)
+
+    logging.info(f"[GSC] batch done: sites={len(sites)} upsert_rows={total_upsert}")
 
 
 # 追加：内部ヘルパー

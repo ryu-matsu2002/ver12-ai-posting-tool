@@ -6,6 +6,7 @@ import pytz
 import time 
 from flask import current_app
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import text  # ★ 追加
 import requests
 from urllib.parse import urlparse
@@ -959,30 +960,33 @@ def init_scheduler(app):
         max_instances=1,
     )
 
-    # ✅ GSCクリック・表示回数を毎日0時に自動更新するジョブ
+    # ✅ GSCクリック・表示回数を“JST深夜帯”に自動更新（ENVでUTC時刻を調整）
+    # 例：JST 03:10 に動かしたい ⇒ 前日 18:10 UTC を指定
+    gsc_metrics_utc_hour = int(os.getenv("GSC_METRICS_UTC_HOUR", "18"))   # default 18: JST=03
+    gsc_metrics_utc_min  = int(os.getenv("GSC_METRICS_UTC_MIN",  "5"))    # default 05
     scheduler.add_job(
         func=_gsc_metrics_job,
-        trigger="cron",
-        hour=0,
-        minute=0,
+        trigger=CronTrigger(hour=gsc_metrics_utc_hour, minute=gsc_metrics_utc_min, timezone="UTC"),
         args=[app],
         id="gsc_metrics_job",
         replace_existing=True,
-        max_instances=1
+        max_instances=1,
+        coalesce=True,               # 取りこぼしはまとめて1回だけ実行
+        misfire_grace_time=1800,     # 30分以内の遅延は許容
     )
 
-    # 🆕 ✅ GSCオートジェン（日次・新着限定）
+    # 🆕 ✅ GSCオートジェン（日次・新着限定）— 既定は JST 03:00（=UTC 18:00）
     gsc_utc_hour = int(os.getenv("GSC_AUTOGEN_UTC_HOUR", "18"))
-    gsc_utc_min  = int(os.getenv("GSC_AUTOGEN_UTC_MIN", "0"))
+    gsc_utc_min  = int(os.getenv("GSC_AUTOGEN_UTC_MIN",  "0"))
     scheduler.add_job(
         func=gsc_autogen_daily_job,
-        trigger="cron",
-        hour=gsc_utc_hour,
-        minute=gsc_utc_min,
+        trigger=CronTrigger(hour=gsc_utc_hour, minute=gsc_utc_min, timezone="UTC"),
         args=[app],
         id="gsc_autogen_daily_job",
         replace_existing=True,
-        max_instances=1
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=1800,
     )
 
     # ✅ 外部ブログ投稿ジョブ（10分おき）
@@ -1079,7 +1083,7 @@ def init_scheduler(app):
     scheduler.start()
     app.logger.info("Scheduler started: auto_post_job every 3 minutes")
     app.logger.info("Scheduler started: external_post_job every 10 minutes")
-    app.logger.info("Scheduler started: gsc_metrics_job daily at 0:00")
+    app.logger.info(f"Scheduler started: gsc_metrics_job daily at {gsc_metrics_utc_hour:02d}:{gsc_metrics_utc_min:02d} UTC")
     app.logger.info(f"Scheduler started: gsc_autogen_daily_job daily at {gsc_utc_hour:02d}:{gsc_utc_min:02d} UTC")
     app.logger.info("Scheduler started: pending_regenerator_job every 40 minutes")
     app.logger.info("Scheduler maybe started: internal_seo_user_refill_job (see env)")
