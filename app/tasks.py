@@ -1,7 +1,7 @@
 # app/tasks.py
 
 import logging
-import timezone
+from datetime import timezone
 from datetime import datetime
 import pytz
 import time 
