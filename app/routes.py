@@ -5872,7 +5872,10 @@ def log_sites(username):
         query = query.filter(subquery.c.plan_type == status_filter)
 
     if genre_id > 0:
-        query = query.join(Site, Site.id == subquery.c.id).filter(Site.genre_id == genre_id)
+        # サブクエリを左側に固定してから Site をJOIN（ON句は既に明示）
+        query = (
+            query.select_from(subquery).join(Site, Site.id == subquery.c.id).filter(Site.genre_id == genre_id)
+        )
 
     if search_query:
         query = query.filter(
