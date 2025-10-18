@@ -79,6 +79,14 @@
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full {{ request.path.startswith('/' + username + '/chatgpt') and 'font-semibold bg-[#0f2fa6]' }}">
         <span class="material-icons align-middle mr-2">smart_toy</span>ChatGPT
       </a>
+
+      <!-- ★ 新規: インデックス申請（UI補助） -->
+      <a href="{{ url_for('main.index_monitor', username=username) }}"
+         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
+                {{ request.path.startswith('/' + username + '/index-monitor') and 'font-semibold bg-[#0f2fa6]' }}">
+        <span class="material-icons align-middle mr-2">fact_check</span>インデックス申請
+      </a>
+
       <!-- ChatGPT の下あたりに追加する例 ★-->
       <a href="{{ url_for('main.external_seo_sites') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full

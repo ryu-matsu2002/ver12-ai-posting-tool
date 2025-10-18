@@ -1,6 +1,7 @@
 # app/tasks.py
 
 import logging
+import timezone
 from datetime import datetime
 import pytz
 import time 
@@ -25,6 +26,8 @@ from concurrent.futures import ThreadPoolExecutor
 from .models import (Site, Keyword, ExternalSEOJob,
                      BlogType, ExternalBlogAccount, ExternalArticleSchedule)
 from app.models import GSCAutogenDaily  # ★ 追加：日次サマリ
+from app.models import Article, Site, GSCConfig, GSCInspectionQueue, GSCUrlStatus
+from app.google_client_inspection import inspect_url_with_token, parse_inspection_payload
 
 # app/tasks.py （インポートセクションの BlogType などの下あたり）
 from app.services.blog_signup.livedoor_signup import signup as livedoor_signup
@@ -1088,7 +1091,21 @@ def init_scheduler(app):
     app.logger.info("Scheduler started: pending_regenerator_job every 40 minutes")
     app.logger.info("Scheduler maybe started: internal_seo_user_refill_job (see env)")
 
-    
+# 🆕 URL Inspection ジョブ（JST 03:20 = UTC 18:20 がデフォ）
+    inspect_utc_hour = int(os.getenv("INSPECT_UTC_HOUR", "18"))
+    inspect_utc_min  = int(os.getenv("INSPECT_UTC_MIN",  "20"))
+    scheduler.add_job(
+        func=_gsc_inspection_job,
+        trigger=CronTrigger(hour=inspect_utc_hour, minute=inspect_utc_min, timezone="UTC"),
+        args=[app],
+        id="gsc_inspection_job",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=1800,
+    )
+    app.logger.info(f"Scheduler started: gsc_inspection_job daily at {inspect_utc_hour:02d}:{inspect_utc_min:02d} UTC")
+
 # ────────────────────────────────────────────────
 # GSCオートジェン：事前フィルタ用ユーティリティ（タスク5で利用）
 # ────────────────────────────────────────────────
@@ -1436,6 +1453,149 @@ def run_title_meta_backfill(
         # ループ継続の有無をルート側が見られるように補助フラグを返す
         "done": (res.get("cursor") in (None, 0, "")),
     }
+
+
+def _pick_latest_property_uris(site_ids: list[int]) -> dict[int, str]:
+    """各サイトの最新 GSCConfig.property_uri を辞書で返す"""
+    sub = (
+        db.session.query(
+            GSCConfig.site_id,
+            func.max(GSCConfig.id).label("max_id")
+        ).filter(GSCConfig.site_id.in_(site_ids)).group_by(GSCConfig.site_id).subquery()
+    )
+    cfgs = db.session.query(GSCConfig).join(sub, ((GSCConfig.site_id == sub.c.site_id) & (GSCConfig.id == sub.c.max_id))).all()
+    return {c.site_id: c.property_uri for c in cfgs}
+
+def _enqueue_inspection_targets(site: Site, limit_urls: int, priority_base: int = 100) -> int:
+    """
+    直近の公開URL・未検査・期限切れのURLを優先してキュー補充。
+    """
+    # 直近の公開URL（posted_urlあり）を新しい順
+    q = (
+        db.session.query(Article.id, Article.posted_url)
+        .filter(Article.site_id == site.id, Article.posted_url.isnot(None))
+        .order_by(Article.posted_at.desc().nullslast(), Article.id.desc())
+        .limit(limit_urls)
+    )
+    inserted = 0
+    for aid, url in q.all():
+        if not url:
+            continue
+        # 既存キュー or 完了済みはスキップ（Unique制約でも保護される）
+        exists = GSCInspectionQueue.query.filter_by(site_id=site.id, article_id=aid, url=url).first()
+        if exists:
+            continue
+        db.session.add(GSCInspectionQueue(
+            site_id=site.id,
+            article_id=aid,
+            url=url,
+            priority=priority_base,
+            status="queued",
+        ))
+        inserted += 1
+    if inserted:
+        db.session.commit()
+    return inserted
+
+def _gsc_inspection_job(app):
+    """
+    URL Inspection を段階的に実行する日次ジョブ。
+    - 既存キュー優先で処理
+    - 足りなければ直近記事から補充
+    - サイト/URLごとの上限、スリープ、部分コミット
+    """
+    with app.app_context():
+        try:
+            max_sites = int(os.getenv("INSPECT_MAX_SITES_PER_RUN", "5"))
+            max_urls_per_site = int(os.getenv("INSPECT_MAX_URLS_PER_SITE", "200"))
+            sleep_ms = int(os.getenv("INSPECT_SLEEP_MS", "250"))
+
+            # 対象サイト（GSC接続済）
+            sites = Site.query.filter_by(gsc_connected=True).order_by(Site.id.asc()).limit(max_sites).all()
+            if not sites:
+                current_app.logger.info("[INSPECT] no gsc_connected sites")
+                return
+
+            site_ids = [s.id for s in sites]
+            prop_map = _pick_latest_property_uris(site_ids)
+
+            processed_total = 0
+            for s in sites:
+                resource_id = prop_map.get(s.id) or (s.url if s.url.endswith("/") else s.url + "/")
+                # 1) 既存キューから取得
+                queue_items = (
+                    GSCInspectionQueue.query
+                    .filter_by(site_id=s.id, status="queued")
+                    .order_by(GSCInspectionQueue.priority.asc(), GSCInspectionQueue.created_at.asc())
+                    .limit(max_urls_per_site)
+                    .all()
+                )
+                # 2) 足りなければ補充
+                if len(queue_items) == 0:
+                    _enqueue_inspection_targets(s, max_urls_per_site)
+                    queue_items = (
+                        GSCInspectionQueue.query
+                        .filter_by(site_id=s.id, status="queued")
+                        .order_by(GSCInspectionQueue.priority.asc(), GSCInspectionQueue.created_at.asc())
+                        .limit(max_urls_per_site)
+                        .all()
+                    )
+
+                batch = []
+                for item in queue_items:
+                    item.status = "running"
+                    item.attempts += 1
+                    db.session.add(item)
+                    batch.append(item)
+                if batch:
+                    db.session.commit()
+
+                # 3) 実行
+                cnt = 0
+                for item in batch:
+                    payload = inspect_url_with_token(item.site_id, item.url, resource_id)
+                    if "result" in payload:
+                        parsed = parse_inspection_payload(payload)
+                        # upsert
+                        status = GSCUrlStatus.query.filter_by(site_id=item.site_id, url=item.url).first()
+                        if not status:
+                            status = GSCUrlStatus(site_id=item.site_id, article_id=item.article_id, url=item.url)
+                            db.session.add(status)
+                        status.indexed = bool(parsed.get("indexed"))
+                        status.coverage_state = parsed.get("coverage_state")
+                        status.verdict = parsed.get("verdict")
+                        # last_crawl_time は ISO 文字列のことがある
+                        lct = parsed.get("last_crawl_time")
+                        try:
+                            if isinstance(lct, str):
+                                status.last_crawl_time = datetime.fromisoformat(lct.replace("Z", "+00:00"))
+                        except Exception:
+                            pass
+                        status.robots_txt_state = parsed.get("robots_txt_state")
+                        status.page_fetch_state = parsed.get("page_fetch_state")
+                        status.last_inspected_at = datetime.utcnow().replace(tzinfo=timezone.utc)
+                        status.raw_json = parsed.get("raw")
+                        status.error = None
+
+                        item.status = "done"
+                        item.last_error = None
+                    else:
+                        item.status = "error"
+                        item.last_error = payload.get("error", "unknown")
+                    db.session.add(item)
+
+                    cnt += 1
+                    processed_total += 1
+                    if cnt % 10 == 0:  # 部分コミット
+                        db.session.commit()
+                    time.sleep(sleep_ms / 1000.0)
+
+                if cnt % 10 != 0:
+                    db.session.commit()
+
+            current_app.logger.info(f"[INSPECT] done: processed={processed_total} sites={len(sites)}")
+        except Exception as e:
+            current_app.logger.exception(f"[INSPECT] job failed: {e}")
 
 
 # ────────────────────────────────────────────────

@@ -330,6 +330,72 @@ class GSCAuthToken(db.Model):
         if not self.token_expiry:
             return True
         return datetime.utcnow() >= self.token_expiry - timedelta(minutes=5)
+    
+# ──── NEW: URL Inspection 結果キャッシュ ────
+class GSCUrlStatus(db.Model):
+    """
+    URLごとのURL Inspection結果の軽量キャッシュ。
+    - 直近の coverage_state / verdict / last_crawl_time などを保持
+    - 生JSONは raw_json に保存（解析はアプリ側）
+    """
+    __tablename__ = "gsc_url_status"
+
+    id = db.Column(db.Integer, primary_key=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("site.id"), nullable=False, index=True)
+    article_id = db.Column(db.Integer, db.ForeignKey("articles.id"), nullable=True, index=True)
+    url = db.Column(db.String(1024), nullable=False, index=True)
+
+    indexed = db.Column(db.Boolean, nullable=False, default=False)           # verdict近似
+    coverage_state = db.Column(db.String(128), nullable=True, index=True)    # 例: "Submitted and indexed", "Discovered - currently not indexed"
+    verdict = db.Column(db.String(64), nullable=True)                        # PASS/FAIL/NEUTRAL など
+    last_crawl_time = db.Column(db.DateTime, nullable=True)                  # GSCのクロール時刻
+    robots_txt_state = db.Column(db.String(64), nullable=True)               # ALLOWED/BLOCKED など
+    page_fetch_state = db.Column(db.String(64), nullable=True)               # SUCCESS/FAILED など
+    last_inspected_at = db.Column(DateTime(timezone=True), nullable=True, index=True)
+
+    raw_json = db.Column(SA_JSON, nullable=True)                             # Inspection API の生データ
+    error = db.Column(db.Text, nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("site_id", "url", name="uq_gsc_url_status_site_url"),
+        db.Index("ix_gsc_url_status_site_article", "site_id", "article_id"),
+    )
+
+    site = db.relationship("Site", backref=db.backref("gsc_url_statuses", lazy="dynamic"))
+    article = db.relationship("Article", backref=db.backref("gsc_url_status", uselist=False))
+
+# ──── NEW: URL Inspection 取得キュー ────
+class GSCInspectionQueue(db.Model):
+    """
+    URL Inspectionを段階的に処理するためのキュー。
+    サーバ停止時も再開できるよう、statusとattemptsを持つ。
+    """
+    __tablename__ = "gsc_inspection_queue"
+
+    id = db.Column(db.Integer, primary_key=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("site.id"), nullable=False, index=True)
+    article_id = db.Column(db.Integer, db.ForeignKey("articles.id"), nullable=True, index=True)
+    url = db.Column(db.String(1024), nullable=False)
+
+    priority = db.Column(db.Integer, nullable=False, default=100)            # 小さいほど優先
+    status = db.Column(db.String(16), nullable=False, default="queued", index=True)  # queued/running/done/error
+    attempts = db.Column(db.Integer, nullable=False, default=0)
+    last_error = db.Column(db.Text, nullable=True)
+
+    scheduled_at = db.Column(DateTime(timezone=True), nullable=True, index=True)
+    updated_at = db.Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        db.UniqueConstraint("site_id", "article_id", "url", name="uq_gsc_inspect_site_article_url"),
+        db.Index("ix_gsc_inspect_status_priority", "status", "priority", "created_at"),
+    )
+
+    site = db.relationship("Site", backref=db.backref("gsc_inspection_queue", lazy="dynamic"))
+    article = db.relationship("Article")    
 
 # ──── GSC キーワード単位のパフォーマンス記録 ────
 class GSCMetric(db.Model):

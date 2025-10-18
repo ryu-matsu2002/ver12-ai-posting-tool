@@ -2162,6 +2162,59 @@ def admin_gsc_sites():
     return render_template("admin/gsc_sites.html", user_site_data=user_site_data)
 
 
+# ──────────────── NEW: インデックス進捗モニター（閲覧専用）────────────────
+@admin_bp.route("/admin/index_monitor")
+@login_required
+def admin_index_monitor():
+    """全ユーザー・全サイトのインデックス率を高速集計して表示"""
+    from datetime import date, timedelta
+    from app.models import Site, Article, GSCDailyTotal, User
+
+    date_28d_ago = date.today() - timedelta(days=28)
+
+    # 🔹 直近28日間の GSC掲載データ集計（site単位）
+    sub_gsc = (
+        db.session.query(
+            GSCDailyTotal.site_id,
+            func.count(GSCDailyTotal.id).label("indexed_count")
+        )
+        .filter(GSCDailyTotal.date >= date_28d_ago)
+        .group_by(GSCDailyTotal.site_id)
+        .subquery()
+    )
+
+    # 🔹 サイトごとの記事数＋インデックス件数
+    results = (
+        db.session.query(
+            Site.id, Site.url, Site.user_id,
+            User.username,
+            func.count(Article.id).label("article_count"),
+            func.coalesce(sub_gsc.c.indexed_count, 0).label("indexed_count")
+        )
+        .join(User, User.id == Site.user_id)
+        .outerjoin(Article, Article.site_id == Site.id)
+        .outerjoin(sub_gsc, sub_gsc.c.site_id == Site.id)
+        .group_by(Site.id, User.username, sub_gsc.c.indexed_count)
+        .order_by(func.coalesce(sub_gsc.c.indexed_count, 0).asc())  # インデックス少ない順
+        .limit(50)  # 速度重視
+        .all()
+    )
+
+    # 🔹 表示用に整形
+    data = []
+    for site_id, url, user_id, username, total, indexed in results:
+        rate = (indexed / total * 100) if total else 0
+        data.append({
+            "url": url,
+            "username": username,
+            "article_count": total,
+            "indexed_count": indexed,
+            "rate": round(rate, 1),
+        })
+
+    return render_template("admin/index_monitor.html", data=data)
+
+
 @admin_bp.get("/admin/user/<int:uid>/stuck-articles")
 @admin_required_effective
 def stuck_articles(uid):
@@ -4910,6 +4963,92 @@ def purchase_history():
     logs = SiteQuotaLog.query.filter_by(user_id=user.id).order_by(SiteQuotaLog.created_at.desc()).all()
 
     return render_template("purchase_history.html", logs=logs)
+
+
+# ──────────────── NEW: ユーザー用 インデックス申請（UI補助） ────────────────
+@bp.route("/<username>/index-monitor")
+@login_required
+def index_monitor(username):
+    """
+    自分のサイトのインデックス状況サマリ（直近28日）＋
+    申請UI補助（GSCで開くボタン）を最速表示。
+    ※GSC APIは叩かず、DBの集計値のみを使う（1秒以内）。
+    """
+    from datetime import date, timedelta
+    from app.models import Site, Article, GSCDailyTotal, GSCConfig, User
+
+    # 認可：自分のページのみ（管理者の代理ログインは既存ロジックに準拠）
+    if current_user.username != username and not (getattr(current_user, "is_admin", False) or session.get("admin_id")):
+        flash("権限がありません。", "danger")
+        return redirect(url_for("main.dashboard", username=current_user.username))
+
+    date_28d_ago = date.today() - timedelta(days=28)
+
+    # 対象サイト（自ユーザーのサイトのみ）
+    sites = Site.query.filter_by(user_id=current_user.id).order_by(Site.id.asc()).all()
+    site_ids = [s.id for s in sites]
+
+    # 最新の GSCConfig（property_uri）をサイトごとに1件取得するサブクエリ
+    # （高速：サイト数が多くても1クエリで取る）
+    sub_cfg_max = (
+        db.session.query(
+            GSCConfig.site_id,
+            func.max(GSCConfig.id).label("max_id")
+        )
+        .filter(GSCConfig.site_id.in_(site_ids))
+        .group_by(GSCConfig.site_id)
+        .subquery()
+    )
+    latest_cfg = {
+        cfg.site_id: cfg.property_uri
+        for cfg in db.session.query(GSCConfig)
+                .join(sub_cfg_max, (GSCConfig.site_id == sub_cfg_max.c.site_id) & (GSCConfig.id == sub_cfg_max.c.max_id))
+                .all()
+    } if site_ids else {}
+
+    # 直近28日間のGSC掲載（サイト単位で何日分の行があるか）= 掲載の“強さ”近似
+    sub_gsc = (
+        db.session.query(
+            GSCDailyTotal.site_id,
+            func.count(GSCDailyTotal.id).label("indexed_days")  # 表示のあった日数近似
+        )
+        .filter(GSCDailyTotal.site_id.in_(site_ids), GSCDailyTotal.date >= date_28d_ago)
+        .group_by(GSCDailyTotal.site_id)
+        .subquery()
+    )
+
+    # サイト別サマリ（記事数・掲載日数近似・率）
+    summary = []
+    for s in sites:
+        total_articles = db.session.query(func.count(Article.id)).filter(Article.site_id == s.id).scalar() or 0
+        indexed_days = db.session.query(func.coalesce(sub_gsc.c.indexed_days, 0)).outerjoin(
+            sub_gsc, sub_gsc.c.site_id == s.id
+        ).scalar() or 0
+        rate = round((indexed_days / 28.0) * 100.0, 1) if 28 > 0 else 0.0
+        summary.append({
+            "site_id": s.id,
+            "site_url": s.url,
+            "gsc_connected": s.gsc_connected,
+            "article_count": total_articles,
+            "indexed_days": int(indexed_days),
+            "rate": rate,
+            "property_uri": latest_cfg.get(s.id)  # GSC検査URLを作るのに使用
+        })
+
+    # 直近公開記事（最大50、URLがあるもののみ）— 申請ボタン用
+    recent_articles = (
+        db.session.query(Article.id, Article.title, Article.posted_url, Article.site_id, Article.posted_at)
+        .filter(Article.site_id.in_(site_ids), Article.posted_url.isnot(None))
+        .order_by(Article.posted_at.desc().nullslast(), Article.id.desc())
+        .limit(50)
+        .all()
+    )
+
+    return render_template("index_monitor.html",
+                           summary=summary,
+                           recent_articles=recent_articles,
+                           username=username)
+
 
 # ────────────── 登録サイト管理 ──────────────
 

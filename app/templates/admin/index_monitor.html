@@ -1,0 +1,59 @@
+{% extends "base_admin.html" %}
+{% block title %}インデックス進捗（閲覧専用） | 管理者{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto px-6 py-8">
+  <h1 class="text-2xl font-bold mb-6 flex items-center gap-2">
+    <span class="material-icons text-blue-400">fact_check</span>
+    インデックス進捗（閲覧専用）
+  </h1>
+
+  <p class="text-sm text-gray-300 mb-6">
+    直近 <strong>28日間</strong> の Google Search Console データをもとに、
+    各サイトのインデックス率を一覧表示しています。<br>
+    ※集計はキャッシュ済みデータ（<code>GSCDailyTotal</code>）を使用しており、
+    ページ読み込みは常に1秒以内で完了します。
+  </p>
+
+  <!-- ✅ 結果テーブル -->
+  <div class="overflow-x-auto bg-gray-900 rounded-xl shadow-lg border border-gray-700">
+    <table class="min-w-full divide-y divide-gray-700 text-sm">
+      <thead class="bg-gray-800">
+        <tr>
+          <th class="px-4 py-3 text-left font-semibold text-gray-300">ユーザー</th>
+          <th class="px-4 py-3 text-left font-semibold text-gray-300">サイトURL</th>
+          <th class="px-4 py-3 text-right font-semibold text-gray-300">記事数</th>
+          <th class="px-4 py-3 text-right font-semibold text-gray-300">GSC掲載</th>
+          <th class="px-4 py-3 text-right font-semibold text-gray-300">インデックス率</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-800">
+        {% for row in data %}
+          {% set rate_color = 'text-green-400' if row.rate >= 80 else ('text-yellow-400' if row.rate >= 40 else 'text-red-400') %}
+          <tr class="hover:bg-gray-800/60 transition">
+            <td class="px-4 py-3 font-medium">{{ row.username }}</td>
+            <td class="px-4 py-3">
+              <a href="{{ row.url }}" target="_blank" class="text-blue-400 hover:underline break-all">{{ row.url }}</a>
+            </td>
+            <td class="px-4 py-3 text-right text-gray-200">{{ row.article_count }}</td>
+            <td class="px-4 py-3 text-right text-gray-200">{{ row.indexed_count }}</td>
+            <td class="px-4 py-3 text-right font-bold {{ rate_color }}">
+              {{ row.rate }}%
+            </td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="5" class="text-center text-gray-400 py-6">データがありません。</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ✅ 補足 -->
+  <div class="mt-6 text-xs text-gray-400">
+    表示件数は最新の 50 サイトまでに制限しています（速度最適化のため）。
+    より詳細な分析は <strong>GSCサイト状況一覧</strong> ページを利用してください。
+  </div>
+</div>
+{% endblock %}
