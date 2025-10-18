@@ -438,7 +438,28 @@ def gsc_autogen_daily_job(app):
             finally:
                 _unlock_site(site.id)
 
+# ────────────────────────────────────────────────
+# CLI ヘルパ：URL Inspection 手動実行
+# ────────────────────────────────────────────────
+def run_gsc_inspection_job(app):
+    """外部から呼びやすい公開関数（内部実装は _gsc_inspection_job）。"""
+    return _gsc_inspection_job(app)
 
+
+if __name__ == "__main__":
+    # 使い方:
+    #   python -m app.tasks run_gsc_inspection_job
+    import sys
+    from app import create_app
+
+    app = create_app()
+    with app.app_context():
+        if len(sys.argv) > 1 and sys.argv[1] == "run_gsc_inspection_job":
+            print("[INSPECT] manual trigger start")
+            run_gsc_inspection_job(app)
+            print("[INSPECT] manual trigger end")
+        else:
+            print("Usage: python -m app.tasks run_gsc_inspection_job")
 # --------------------------------------------------------------------------- #
 # 🆕 Pending Regenerator Job（通常 & 外部SEO）— 手動再生成と同じフローを自動で実行
 # --------------------------------------------------------------------------- #
