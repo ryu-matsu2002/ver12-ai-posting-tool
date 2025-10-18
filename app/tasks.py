@@ -438,28 +438,8 @@ def gsc_autogen_daily_job(app):
             finally:
                 _unlock_site(site.id)
 
-# ────────────────────────────────────────────────
-# CLI ヘルパ：URL Inspection 手動実行
-# ────────────────────────────────────────────────
-def run_gsc_inspection_job(app):
-    """外部から呼びやすい公開関数（内部実装は _gsc_inspection_job）。"""
-    return _gsc_inspection_job(app)
 
 
-if __name__ == "__main__":
-    # 使い方:
-    #   python -m app.tasks run_gsc_inspection_job
-    import sys
-    from app import create_app
-
-    app = create_app()
-    with app.app_context():
-        if len(sys.argv) > 1 and sys.argv[1] == "run_gsc_inspection_job":
-            print("[INSPECT] manual trigger start")
-            run_gsc_inspection_job(app)
-            print("[INSPECT] manual trigger end")
-        else:
-            print("Usage: python -m app.tasks run_gsc_inspection_job")
 # --------------------------------------------------------------------------- #
 # 🆕 Pending Regenerator Job（通常 & 外部SEO）— 手動再生成と同じフローを自動で実行
 # --------------------------------------------------------------------------- #
@@ -1914,3 +1894,27 @@ def _internal_seo_user_apply_tick(app):
                                     picked, total_budget, remaining)
         except Exception as e:
             current_app.logger.exception("[ISEO-USER] tick error: %s", e)
+
+#######################################################################
+# CLI: URL Inspection を手動発火
+#   ここは “必ず _gsc_inspection_job 定義の後ろ（= ファイル末尾）” に置く
+#######################################################################
+def run_gsc_inspection_job(app=None):
+    """
+    手動実行エントリ。python -m app.tasks run_gsc_inspection_job
+    """
+    from app import create_app  # 遅延importで循環を防止
+    if app is None:
+        app = create_app()
+    with app.app_context():
+        current_app.logger.info("[INSPECT] manual trigger start")
+        return _gsc_inspection_job(app)
+
+if __name__ == "__main__":
+    import sys
+    cmd = (sys.argv[1] if len(sys.argv) > 1 else "").strip()
+    if cmd == "run_gsc_inspection_job":
+        from app import create_app
+        app = create_app()
+        print("[INSPECT] manual trigger start")
+        run_gsc_inspection_job(app)
