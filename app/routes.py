@@ -5858,6 +5858,7 @@ def log_sites(username):
             func.coalesce(func.max(gsc_sub.c.clicks), 0).label("clicks"),
             func.coalesce(func.max(gsc_sub.c.impressions), 0).label("impressions"),
         )
+        .select_from(Site)  # ← 左側（FROM）を明示して暗黙JOINの曖昧さを解消
         .outerjoin(Article, Site.id == Article.site_id)
         .outerjoin(gsc_sub, gsc_sub.c.site_id == Site.id)
         .filter(Site.user_id == current_user.id)
