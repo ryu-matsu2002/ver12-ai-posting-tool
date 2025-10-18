@@ -5021,9 +5021,13 @@ def index_monitor(username):
     summary = []
     for s in sites:
         total_articles = db.session.query(func.count(Article.id)).filter(Article.site_id == s.id).scalar() or 0
-        indexed_days = db.session.query(func.coalesce(sub_gsc.c.indexed_days, 0)).outerjoin(
-            sub_gsc, sub_gsc.c.site_id == s.id
-        ).scalar() or 0
+        # 左側の FROM を sub_gsc に明示し、該当 site_id で絞り込む（JOIN の曖昧さを解消）
+        indexed_days = (
+            db.session.query(func.coalesce(sub_gsc.c.indexed_days, 0))
+            .select_from(sub_gsc)
+            .filter(sub_gsc.c.site_id == s.id)
+            .scalar() or 0
+        )
         rate = round((indexed_days / 28.0) * 100.0, 1) if 28 > 0 else 0.0
         summary.append({
             "site_id": s.id,
