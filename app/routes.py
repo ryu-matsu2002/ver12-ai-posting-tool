@@ -5080,15 +5080,17 @@ def index_monitor(username):
             inspect_url = None
         else:
             # property_uri が sc-domain: か URL プレフィックスかで分岐
+            # ドメインプロパティは非エンコード、URLプレフィックスは : / を保持して渡す
             if prop.startswith("sc-domain:"):
-                resource_id = quote(prop, safe=":")  # sc-domain:example.com
+                resource_id = prop  # e.g. sc-domain:example.com
             else:
-                resource_id = quote(prop, safe="")
+                p = prop if prop.endswith("/") else (prop + "/")
+                resource_id = quote(p, safe=":/")  # 実質そのまま、: と / は保持
 
             url_encoded = quote(art.posted_url or "", safe="")
             inspect_url = (
                 f"https://search.google.com/search-console/inspect"
-                f"?resource_id={resource_id}&url={url_encoded}"
+                f"?resource_id={resource_id}&url={url_encoded}&page=inspect"
             )
         # Row は不変なので、6要素タプルへ詰め替える
         # (id, title, url, site_id, posted_at, inspect_url)
@@ -5103,13 +5105,14 @@ def index_monitor(username):
         prop = latest_cfg.get(site_id)
         if prop and url:
             if prop.startswith("sc-domain:"):
-                resource_id = quote(prop, safe=":")
+                resource_id = prop  # 非エンコードでそのまま
             else:
                 p = prop if prop.endswith("/") else (prop + "/")
-                resource_id = quote(p, safe="")
-            inspect_url = "https://search.google.com/search-console/inspect?resource_id={}&url={}".format(
-                resource_id, quote(url, safe="")
-            )
+                resource_id = quote(p, safe=":/")  # : / を保持
+            inspect_url = (
+                "https://search.google.com/search-console/inspect"
+                "?resource_id={}&url={}&page=inspect"
+            ).format(resource_id, quote(url, safe=""))
         else:
             inspect_url = None
         recent_articles_with_inspect.append((aid, title, url, site_id, posted_at, inspect_url))
