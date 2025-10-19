@@ -73,17 +73,26 @@
             {% set prop = row.property_uri if row else None %}
             {% set gsc_ok = row.gsc_connected if row else False %}
 
-            {# resource_id はエンコードしない。URL だけ urlencode。 #}
+            {# --- resource_id を決定：prop 優先。なければ URL プレフィックス推定（末尾 / 保証） --- #}
             {% if prop %}
-              {% set resource_id = prop %}
+              {% set resource_id_raw = prop %}
             {% else %}
-              {# GSCConfig未登録時は URL プレフィックスを推定（末尾 / 必須） #}
               {% set site_url = row.site_url if row else '' %}
-              {% set resource_id = site_url if site_url.endswith('/') else site_url ~ '/' %}
+              {% set resource_id_raw = site_url if site_url.endswith('/') else site_url ~ '/' %}
             {% endif %}
 
-            {% set inspect_url = "https://search.google.com/search-console/inspect?resource_id=" ~ resource_id ~ "&url=" ~ (url | urlencode) %}
+            {# --- エンコード方針：
+                 - sc-domain: はそのまま（エンコードしない）
+                 - https://.../ は urlencode する
+            #}
+            {% if resource_id_raw.startswith('sc-domain:') %}
+              {% set rid = resource_id_raw %}
+            {% else %}
+              {% set rid = resource_id_raw | urlencode %}
+            {% endif %}
 
+            {% set inspect_url = "https://search.google.com/search-console/inspect?resource_id=" ~ rid ~ "&url=" ~ (url | urlencode) %}
+ 
             <tr class="hover:bg-gray-800/60 transition">
               <td class="px-4 py-3 font-medium break-all">{{ title }}</td>
               <td class="px-4 py-3">
