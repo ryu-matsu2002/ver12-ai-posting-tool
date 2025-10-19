@@ -155,19 +155,26 @@ def update_all_gsc_sites():
     sleep_ms = _get_env_int("GSC_SLEEP_MS", 200)
     max_sites = _get_env_int("GSC_MAX_SITES_PER_RUN", 0)
 
-    q = Site.query.filter_by(gsc_connected=True).order_by(Site.id.asc())
+    # まず ID のみ確保（デタッチ耐性）
+    q = db.session.query(Site.id).filter(Site.gsc_connected.is_(True)).order_by(Site.id.asc())
     if max_sites > 0:
         q = q.limit(max_sites)
-    sites = q.all()
+    site_ids = [sid for (sid,) in q.all()]
 
     total_upsert = 0
-    for i, site in enumerate(sites, 1):
+    for i, site_id in enumerate(site_ids, 1):
         try:
+            # ループごとに “新鮮なセッションバインド済み Site” を取得
+            site = db.session.get(Site, site_id)
+            if not site:
+                continue
             up = update_site_daily_totals(site, days=days)
             total_upsert += up
-            logging.info(f"[GSC] ({i}/{len(sites)}) site={site.id} upsert={up}")
+            logging.info(f"[GSC] ({i}/{len(site_ids)}) site={site.id} upsert={up}")
         except Exception as e:
-            logging.error(f"[GSC] site batch failed: {site.url} - {e}")
+            # site が None の場合も安全にログ
+            url = getattr(site, "url", f"(site_id={site_id})")
+            logging.error(f"[GSC] site batch failed: {url} - {e}")
         finally:
             # 参照を解放してメモリ膨張を防ぐ（scoped_sessionのキャッシュも軽くする）
             try:
@@ -178,7 +185,7 @@ def update_all_gsc_sites():
             if sleep_ms > 0:
                 time.sleep(sleep_ms / 1000.0)
 
-    logging.info(f"[GSC] batch done: sites={len(sites)} upsert_rows={total_upsert}")
+    logging.info(f"[GSC] batch done: sites={len(site_ids)} upsert_rows={total_upsert}")
 
 
 # 追加：内部ヘルパー
