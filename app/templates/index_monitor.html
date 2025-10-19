@@ -68,31 +68,9 @@
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-800">
-          {% for (aid, title, url, site_id, posted_at) in recent_articles %}
+          {% for (aid, title, url, site_id, posted_at, inspect_url) in recent_articles %}
             {% set row = (summary | selectattr('site_id','equalto', site_id) | list | first) if summary else None %}
-            {% set prop = row.property_uri if row else None %}
             {% set gsc_ok = row.gsc_connected if row else False %}
-
-            {# --- resource_id を決定：prop 優先。なければ URL プレフィックス推定（末尾 / 保証） --- #}
-            {% if prop %}
-              {% set resource_id_raw = prop %}
-            {% else %}
-              {% set site_url = row.site_url if row else '' %}
-              {% set resource_id_raw = site_url if site_url.endswith('/') else site_url ~ '/' %}
-            {% endif %}
-
-            {# --- エンコード方針：
-                 - sc-domain: はそのまま（エンコードしない）
-                 - https://.../ は urlencode する
-            #}
-            {% if resource_id_raw.startswith('sc-domain:') %}
-              {% set rid = resource_id_raw %}
-            {% else %}
-              {% set rid = resource_id_raw | urlencode %}
-            {% endif %}
-
-            {% set inspect_url = "https://search.google.com/search-console/inspect?resource_id=" ~ rid ~ "&url=" ~ (url | urlencode) %}
- 
             <tr class="hover:bg-gray-800/60 transition">
               <td class="px-4 py-3 font-medium break-all">{{ title }}</td>
               <td class="px-4 py-3">
@@ -102,7 +80,7 @@
                 {{ posted_at.strftime('%Y-%m-%d %H:%M') if posted_at else '-' }}
               </td>
               <td class="px-4 py-3 text-right">
-                {% if gsc_ok %}
+                {% if gsc_ok and inspect_url %}
                   <a href="{{ inspect_url }}" target="_blank" rel="noopener"
                      class="inline-flex items-center px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-500 text-white">
                     <span class="material-icons text-sm mr-1">open_in_new</span>GSCで開く

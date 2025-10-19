@@ -38,7 +38,7 @@ import threading
 import datetime
 from .image_utils import fetch_featured_image  # ← ✅ 正しい
 from collections import defaultdict
-
+from urllib.parse import quote, urlsplit
 
 from .article_generator import (
     _unique_title,
@@ -5070,6 +5070,28 @@ def index_monitor(username):
         .limit(50)
         .all()
     )
+
+    # 🔧 検査URL生成ロジック（案B: サーバ側で正確に構築）
+    from urllib.parse import quote
+
+    for art in recent_articles:
+        prop = latest_cfg.get(art.site_id)
+        if not prop:
+            inspect_url = None
+        else:
+            # property_uri が sc-domain: か URL プレフィックスかで分岐
+            if prop.startswith("sc-domain:"):
+                resource_id = quote(prop, safe=":")  # sc-domain:example.com
+            else:
+                resource_id = quote(prop, safe="")
+
+            url_encoded = quote(art.posted_url or "", safe="")
+            inspect_url = (
+                f"https://search.google.com/search-console/inspect"
+                f"?resource_id={resource_id}&url={url_encoded}"
+            )
+        # Articleオブジェクトはnamedtupleなのでdict化して新属性を追加
+        art.inspect_url = inspect_url
 
     return render_template("index_monitor.html",
                            summary=summary,
