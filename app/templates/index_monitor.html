@@ -69,16 +69,21 @@
         </thead>
         <tbody class="divide-y divide-gray-800">
           {% for (aid, title, url, site_id, posted_at) in recent_articles %}
-            {% set prop = (summary | selectattr('site_id','equalto', site_id) | list | first).property_uri if summary else None %}
-            {% set resource_id = (prop if prop else '') %}
-            {% if resource_id %}
-              {% set inspect_url = "https://search.google.com/search-console/inspect?resource_id=" ~ resource_id | urlencode ~ "&url=" ~ url | urlencode %}
+            {% set row = (summary | selectattr('site_id','equalto', site_id) | list | first) if summary else None %}
+            {% set prop = row.property_uri if row else None %}
+            {% set gsc_ok = row.gsc_connected if row else False %}
+
+            {# resource_id はエンコードしない。URL だけ urlencode。 #}
+            {% if prop %}
+              {% set resource_id = prop %}
             {% else %}
-              {# GSCConfig未登録時はURLプレフィックス推定。最後の / を保証 #}
-              {% set site_url = (summary | selectattr('site_id','equalto', site_id) | list | first).site_url if summary else '' %}
-              {% set norm = site_url if site_url.endswith('/') else site_url ~ '/' %}
-              {% set inspect_url = "https://search.google.com/search-console/inspect?resource_id=" ~ norm | urlencode ~ "&url=" ~ url | urlencode %}
+              {# GSCConfig未登録時は URL プレフィックスを推定（末尾 / 必須） #}
+              {% set site_url = row.site_url if row else '' %}
+              {% set resource_id = site_url if site_url.endswith('/') else site_url ~ '/' %}
             {% endif %}
+
+            {% set inspect_url = "https://search.google.com/search-console/inspect?resource_id=" ~ resource_id ~ "&url=" ~ (url | urlencode) %}
+
             <tr class="hover:bg-gray-800/60 transition">
               <td class="px-4 py-3 font-medium break-all">{{ title }}</td>
               <td class="px-4 py-3">
@@ -88,10 +93,14 @@
                 {{ posted_at.strftime('%Y-%m-%d %H:%M') if posted_at else '-' }}
               </td>
               <td class="px-4 py-3 text-right">
-                <a href="{{ inspect_url }}" target="_blank"
-                   class="inline-flex items-center px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-500 text-white">
-                  <span class="material-icons text-sm mr-1">open_in_new</span>GSCで開く
-                </a>
+                {% if gsc_ok %}
+                  <a href="{{ inspect_url }}" target="_blank" rel="noopener"
+                     class="inline-flex items-center px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-500 text-white">
+                    <span class="material-icons text-sm mr-1">open_in_new</span>GSCで開く
+                  </a>
+                {% else %}
+                  <span class="text-gray-500 text-xs">GSC未接続</span>
+                {% endif %}
               </td>
             </tr>
           {% else %}
