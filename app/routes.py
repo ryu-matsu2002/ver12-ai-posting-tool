@@ -5090,13 +5090,37 @@ def index_monitor(username):
                 f"https://search.google.com/search-console/inspect"
                 f"?resource_id={resource_id}&url={url_encoded}"
             )
-        # Articleオブジェクトはnamedtupleなのでdict化して新属性を追加
-        art.inspect_url = inspect_url
+        # Row は不変なので、6要素タプルへ詰め替える
+        # (id, title, url, site_id, posted_at, inspect_url)
+        # 後段テンプレでこの順序をそのまま使う
+        pass
 
-    return render_template("index_monitor.html",
-                           summary=summary,
-                           recent_articles=recent_articles,
-                           username=username)
+    # ↑の pass は for ループを抜けるためのプレースホルダではないので注意。
+    # 実際には recent_articles を新しい配列に詰め替える：
+    from urllib.parse import quote  # 念のためスコープ維持
+    recent_articles_with_inspect = []
+    for (aid, title, url, site_id, posted_at) in recent_articles:
+        prop = latest_cfg.get(site_id)
+        if prop and url:
+            if prop.startswith("sc-domain:"):
+                resource_id = quote(prop, safe=":")
+            else:
+                p = prop if prop.endswith("/") else (prop + "/")
+                resource_id = quote(p, safe="")
+            inspect_url = "https://search.google.com/search-console/inspect?resource_id={}&url={}".format(
+                resource_id, quote(url, safe="")
+            )
+        else:
+            inspect_url = None
+        recent_articles_with_inspect.append((aid, title, url, site_id, posted_at, inspect_url))
+ 
+
+    return render_template(
+        "index_monitor.html",
+        summary=summary,
+        recent_articles=recent_articles_with_inspect,
+        username=username,
+    )
 
 
 # ────────────── 登録サイト管理 ──────────────
