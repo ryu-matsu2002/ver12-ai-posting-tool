@@ -49,6 +49,16 @@ def _jst_28d_window_end_start() -> Tuple[date, date]:
 
 # ────── ✅✅✅ 追加: GSCMetricとして保存する処理 ──────
 def store_metrics_from_gsc_rows(rows, site, metric_date: date):
+    # 同一 site×date のメトリクスが累積しないように、まず既存を掃除
+    try:
+        db.session.query(GSCMetric).filter(
+            GSCMetric.site_id == site.id,
+            GSCMetric.date == metric_date
+        ).delete(synchronize_session=False)
+        db.session.flush()
+    except Exception:
+        # 失敗しても以降のINSERTは続行（次回のジョブで再調整される）
+        logging.warning(f"[GSCMetric] cleanup skipped: site={site.id} date={metric_date}")
     for row in rows:
         query = row["keys"][0]
         impressions = row.get("impressions", 0)
@@ -78,7 +88,8 @@ def fetch_search_queries_for_site(site: Site, days: int = 28, row_limit: int = 2
         JST = timezone(timedelta(hours=9))
         today_jst = datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(JST).date()
         end_date = today_jst - timedelta(days=1)  # 昨日まで
-        start_date = end_date - timedelta(days=days)
+        # UIの「過去N日」は end を含む N 日間なので (days-1) 戻す
+        start_date = end_date - timedelta(days=days - 1)
         property_uri = _resolve_property_uri(site)
 
         logging.info(f"[GSC] クエリ取得開始: {property_uri}")
@@ -433,7 +444,8 @@ def _run_search_analytics(site: Site, days: int, dimensions: list[str], row_limi
     JST = timezone(timedelta(hours=9))
     today_jst = datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(JST).date()
     end_date = today_jst - timedelta(days=1)  # 昨日まで
-    start_date = end_date - timedelta(days=days)
+    # 期間は end を含む N 日間
+    start_date = end_date - timedelta(days=days - 1)
 
     body = {
         "startDate": start_date.isoformat(),

@@ -288,13 +288,19 @@ def run_user_tick(app, user_id: int, *, force: bool = False) -> Dict[str, Any]:
                 current_app.logger.exception(
                     "[iseo-user] tick failed (user=%s): %s (backoff=%ss)", user_id, e, ERROR_BACKOFF
                 )
+                # rollback 後はセッションからデタッチされている可能性があるため再アタッチしてから commit
                 run.status = "failed"
                 run.finished_at = datetime.now(timezone.utc)
                 backoff = ERROR_BACKOFF
                 sched.status = "error"
                 sched.last_error = str(e)[:1000]
                 sched.next_run_at = datetime.now(timezone.utc) + timedelta(seconds=backoff)
-                db.session.commit()
+                try:
+                    db.session.add(run)
+                    db.session.add(sched)
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
                 return {"ok": False, "reason": "error", "message": str(e)}
 
 

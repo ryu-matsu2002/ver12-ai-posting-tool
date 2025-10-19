@@ -64,9 +64,14 @@ def create_app() -> Flask:
         "pool_size": int(os.getenv("POOL_SIZE", 50)),
         "max_overflow": int(os.getenv("MAX_OVERFLOW", 100)),
         "pool_timeout": int(os.getenv("POOL_TIMEOUT", 60)),
-        "pool_recycle": 1800,          # 既存: 切断予防（必要に応じて環境変数化してもOK）
-        "pool_pre_ping": True,         # 既存: 取得時に死活監視して自動再接続
-        "connect_args": {  # ✅ 追加（psycopg2 keepalive）
+        # ✅ 既定 1800 を維持しつつ環境変数で上書き可能に
+        "pool_recycle": int(os.getenv("POOL_RECYCLE", 1800)),
+        # ✅ 返却時に常にロールバックを明示（既定だが明示しておく）
+        "pool_reset_on_return": "rollback",
+        # ✅ 取得時ヘルスチェックで自動再接続
+        "pool_pre_ping": True,
+        # ✅ psycopg2 の TCP keepalive を既定有効化（ENVで上書き可）
+        "connect_args": {
             "keepalives": 1,
             "keepalives_idle": int(os.getenv("PG_KEEPALIVE_IDLE", 60)),
             "keepalives_interval": int(os.getenv("PG_KEEPALIVE_INTERVAL", 30)),
@@ -80,12 +85,13 @@ def create_app() -> Flask:
     # psycopg2 の TCP keepalive（RDS/CloudSQL 等のアイドル切断対策）
     _ca = dict(_eng.get("connect_args") or {})
     _ca.setdefault("keepalives", 1)
-    _ca.setdefault("keepalives_idle", int(os.getenv("PG_KEEPALIVES_IDLE", 30)))
-    _ca.setdefault("keepalives_interval", int(os.getenv("PG_KEEPALIVES_INTERVAL", 10)))
-    _ca.setdefault("keepalives_count", int(os.getenv("PG_KEEPALIVES_COUNT", 5)))
-    # DATABASE_URL 側で sslmode が未指定なら require を既定に（既に指定されていれば尊重）
-    if "sslmode" not in _ca and "postgresql" in str(app.config.get("SQLALCHEMY_DATABASE_URI", "")):
-        _ca["sslmode"] = os.getenv("PG_SSLMODE", "require")
+    # 上の初期設定と同じ環境変数キー（PG_KEEPALIVE_*）に統一
+    _ca.setdefault("keepalives_idle", int(os.getenv("PG_KEEPALIVE_IDLE", 30)))
+    _ca.setdefault("keepalives_interval", int(os.getenv("PG_KEEPALIVE_INTERVAL", 10)))
+    _ca.setdefault("keepalives_count", int(os.getenv("PG_KEEPALIVE_COUNT", 5)))
+    # DATABASE_URL が Postgres で、sslmode 未指定なら require を既定に（既に指定されていれば尊重）
+    if "postgresql" in str(app.config.get("SQLALCHEMY_DATABASE_URI", "")).lower():
+        _ca.setdefault("sslmode", os.getenv("PG_SSLMODE", "require"))
     _eng["connect_args"] = _ca
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = _eng
 
@@ -98,10 +104,15 @@ def create_app() -> Flask:
     login_manager.login_message_category = "info"  # Bootstrapの黄色表示
 
     # ✅ ログ出力設定（logs/system.log に出力）
-    if not os.path.exists("logs"):
-        os.makedirs("logs")  # logsフォルダがなければ作成
+    os.makedirs("logs", exist_ok=True)  # logsフォルダがなければ作成（レース安全）
 
-    file_handler = RotatingFileHandler("logs/system.log", maxBytes=1024 * 1024, backupCount=3)
+    file_handler = RotatingFileHandler(
+        "logs/system.log",
+        maxBytes=1024 * 1024,
+        backupCount=3,
+        encoding="utf-8",
+        delay=True,  # 初回書き込みまで FD を開かない（多プロセス時の安定化）
+    )
     file_handler.setLevel(logging.INFO)
     formatter = logging.Formatter('%(asctime)s %(levelname)s in %(module)s: %(message)s')
     file_handler.setFormatter(formatter)
@@ -165,7 +176,30 @@ def create_app() -> Flask:
             if exception is not None:
                 db.session.rollback()
         finally:
-            db.session.remove()         
+            db.session.remove()    
+
+    # --- 運用補助: 接続プールの明示破棄ユーティリティ（安全・任意呼び出し） ---
+    def dispose_engine():
+        """Dispose SQLAlchemy connection pool safely (no functional side-effects)."""
+        try:
+            eng = db.get_engine(app)
+            eng.dispose()
+            app.logger.info("ℹ️ DB engine disposed (pool cleared)")
+        except Exception as e:
+            app.logger.exception("⚠️ DB engine dispose failed: %s", e)
+    # アプリ属性として公開（必要に応じて他モジュールから呼べる）
+    app.dispose_engine = dispose_engine  # type: ignore[attr-defined]
+
+    # CLI からも実行できるように（例: `flask db-dispose`）
+    try:
+        import click
+        @app.cli.command("db-dispose")
+        def _db_dispose_cmd():
+            """Dispose SQLAlchemy connection pool (operational helper)."""
+            dispose_engine()
+    except Exception:
+        # CLI 無効な実行環境でも問題なく起動するため握りつぶす
+        pass             
 
     # ✅ スケジューラー起動（jobsロールのプロセスだけ）
     #    systemd から JOBS_ROLE=jobs を与えたときのみ起動する

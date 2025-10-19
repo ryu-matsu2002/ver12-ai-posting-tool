@@ -13,7 +13,6 @@ import requests
 from urllib.parse import urlparse
 
 from . import db
-from .models import Article
 from .wp_client import post_to_wp  # 統一された WordPress 投稿関数
 from sqlalchemy.orm import selectinload
 from app.wp_client import normalize_url, _post_headers, TIMEOUT  # WP反映用ヘルパを再利用
@@ -23,10 +22,10 @@ from app.google_client import update_all_gsc_sites, fetch_new_queries_since
 
 # 既存 import の下あたりに追加
 from concurrent.futures import ThreadPoolExecutor
-from .models import (Site, Keyword, ExternalSEOJob,
-                     BlogType, ExternalBlogAccount, ExternalArticleSchedule)
-from app.models import GSCAutogenDaily  # ★ 追加：日次サマリ
-from app.models import Article, Site, GSCConfig, GSCInspectionQueue, GSCUrlStatus
+from app.models import (
+    Article, Site, Keyword, ExternalSEOJob, BlogType, ExternalBlogAccount,
+    ExternalArticleSchedule, GSCAutogenDaily, GSCConfig, GSCInspectionQueue, GSCUrlStatus
+)
 from app.google_client_inspection import inspect_url_with_token, parse_inspection_payload
 
 # app/tasks.py （インポートセクションの BlogType などの下あたり）
@@ -75,6 +74,26 @@ from app.services.internal_seo.enqueue import enqueue_refill_for_site  # 🆕 re
 scheduler = BackgroundScheduler(timezone="UTC")
 executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="extseo")
 
+
+# ────────────────────────────────────────────────
+# すべてのジョブで「例外時は rollback」「最後に remove」を強制する薄いセーフティ
+# ────────────────────────────────────────────────
+def _safe_job(fn):
+    def _wrap(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            try:
+                db.session.remove()
+            except Exception:
+                pass
+    return _wrap
 
 # ────────────────────────────────────────────────
 # GSCオートジェン：サイトごとの軽量ロック（PostgreSQL advisory lock）
@@ -127,6 +146,7 @@ def _unlock_user(user_id: int) -> None:
 # --------------------------------------------------------------------------- #
 # 1) WordPress 自動投稿ジョブ
 # --------------------------------------------------------------------------- #
+@_safe_job
 def _auto_post_job(app):
     with app.app_context():
         start = time.time()
@@ -172,6 +192,7 @@ def _auto_post_job(app):
 # --------------------------------------------------------------------------- #
 # 2) GSC メトリクス毎日更新
 # --------------------------------------------------------------------------- #
+@_safe_job
 def _gsc_metrics_job(app):
     """
     ✅ GSCクリック・表示回数の毎日更新ジョブ
@@ -285,6 +306,7 @@ def gsc_loop_generate(site):
         )
 
 
+@_safe_job
 def _gsc_generation_job(app):
     """
     ✅ GSC記事自動生成ジョブ
@@ -307,6 +329,7 @@ def _gsc_generation_job(app):
 # ──────────────────────────────────────────
 # 🆕 GSCオートジェン（日次・新着限定・上限・DRYRUN・見える化）
 # ──────────────────────────────────────────
+@_safe_job
 def gsc_autogen_daily_job(app):
     """
     ENVのUTC時刻に日次で起動：
@@ -443,6 +466,7 @@ def gsc_autogen_daily_job(app):
 # --------------------------------------------------------------------------- #
 # 🆕 Pending Regenerator Job（通常 & 外部SEO）— 手動再生成と同じフローを自動で実行
 # --------------------------------------------------------------------------- #
+@_safe_job
 def _pending_regenerator_job(app):
     """
     40分おきに実行:
@@ -562,6 +586,7 @@ def _pending_regenerator_job(app):
 # --------------------------------------------------------------------------- #
 # 🆕 Internal SEO Refill Job（A案）— ユーザー別に“弾（pending）”を補充するだけ
 # --------------------------------------------------------------------------- #
+@_safe_job
 def _internal_seo_user_refill_job(app):
     """
     目的:
@@ -806,6 +831,7 @@ def _finalize_external_job(job_id: int):
 # ──────────────────────────────────────────
 # 外部ブログ投稿ジョブ（外部SEO・キーワード厳密紐付け版）
 # ──────────────────────────────────────────
+@_safe_job
 def _run_external_post_job(app, schedule_id: int | None = None):
     """
     外部SEO記事を外部ブログに投稿するジョブ
@@ -949,7 +975,9 @@ def init_scheduler(app):
         args=[app],
         id="auto_post_job",
         replace_existing=True,
-        max_instances=5
+        max_instances=5,
+        coalesce=True,
+        misfire_grace_time=900,   # 15分以内の遅延は許容
     )
 
 
@@ -962,6 +990,8 @@ def init_scheduler(app):
         id="pending_regenerator_job",
         replace_existing=True,
         max_instances=1,
+        coalesce=True,
+        misfire_grace_time=1800,
     )
 
     # ✅ GSCクリック・表示回数を“JST深夜帯”に自動更新（ENVでUTC時刻を調整）
@@ -1001,7 +1031,9 @@ def init_scheduler(app):
         args=[app],
         id="external_post_job",
         replace_existing=True,
-        max_instances=1
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=1200,
     )
 
     # ✅ 内部SEO ナイトリー実行（環境変数でON/OFF可能／レガシー運用）
@@ -1018,6 +1050,8 @@ def init_scheduler(app):
             id="internal_seo_job",
             replace_existing=True,
             max_instances=1,
+            coalesce=True,
+            misfire_grace_time=1800,
         )
         app.logger.info(f"Scheduler started: internal_seo_job daily at {utc_hour:02d}:{utc_min:02d} UTC")
     else:
@@ -1034,6 +1068,8 @@ def init_scheduler(app):
             id="internal_seo_worker_tick",
             replace_existing=True,
             max_instances=1,
+            coalesce=True,
+            misfire_grace_time=600,
         )
         app.logger.info("Scheduler started: internal_seo_worker_tick every minute")
     else:
@@ -1041,14 +1077,27 @@ def init_scheduler(app):
 
     # ✅ 内部SEO ユーザーごとの自動ジョブ（ENVでON/OFF可能）
     if os.getenv("INTERNAL_SEO_USER_ENABLED", "1") == "1":
+        # ユーザースケジューラはセッションの破綻を防ぐため安全ラッパで呼ぶ
+        def _user_scheduler_job(app_):
+            with app_.app_context():
+                try:
+                    return user_scheduler.user_scheduler_tick(app_)
+                finally:
+                    try:
+                        db.session.remove()
+                    except Exception:
+                        pass
+
         scheduler.add_job(
-            func=user_scheduler.user_scheduler_tick,
+            func=_user_scheduler_job,
             trigger="interval",
             minutes=int(os.getenv("INTERNAL_SEO_USER_INTERVAL_MIN", "1")),
             args=[app],
             id="internal_seo_user_scheduler_job",
             replace_existing=True,
             max_instances=1,
+            coalesce=True,
+            misfire_grace_time=600,
         )
         app.logger.info("Scheduler started: internal_seo_user_scheduler_job (user-scope tick)")
     else:
@@ -1064,6 +1113,8 @@ def init_scheduler(app):
             id="internal_seo_user_apply_tick",
             replace_existing=True,
             max_instances=1,
+            coalesce=True,
+            misfire_grace_time=900,
         )
         app.logger.info("Scheduler started: internal_seo_user_apply_tick (user apply loop)")
     else:
@@ -1079,6 +1130,8 @@ def init_scheduler(app):
             id="internal_seo_user_refill_job",
             replace_existing=True,
             max_instances=1,
+            coalesce=True,
+            misfire_grace_time=1800,
         )
         app.logger.info("Scheduler started: internal_seo_user_refill_job (user refill)")
     else:
@@ -1498,6 +1551,7 @@ def _enqueue_inspection_targets(site: Site, limit_urls: int, priority_base: int 
         db.session.commit()
     return inserted
 
+@_safe_job
 def _gsc_inspection_job(app):
     """
     URL Inspection を段階的に実行する日次ジョブ。
@@ -1603,6 +1657,7 @@ def _gsc_inspection_job(app):
 # 内部SEO 自動化ジョブ
 # ────────────────────────────────────────────────
 @with_db_retry(max_retries=3, backoff=1.8)
+@_safe_job
 def _internal_seo_run_one(site_id: int,
                           pages: int,
                           per_page: int,
@@ -1687,6 +1742,7 @@ def _internal_seo_run_one(site_id: int,
         current_app.logger.exception(f"[internal-seo] failed for site {site_id}: {e}")
 
 @with_db_retry(max_retries=3, backoff=1.8)
+@_safe_job
 def _internal_seo_worker_tick(app):
     """
     internal_seo_job_queue から 'queued' を安全に取り出し、
@@ -1762,6 +1818,7 @@ def _internal_seo_worker_tick(app):
                 """), {"id": j_id, "msg": str(e)})
                 db.session.commit()
 
+@_safe_job
 def _internal_seo_nightly_job(app):
     """
     すべてのサイト（または ENV 指定のサイト群）について、
@@ -1831,6 +1888,7 @@ def _internal_seo_nightly_job(app):
 #   - そのユーザーに対して apply_actions_for_user() を実行
 #   - 1ティックの総予算＆ユーザー上限は ENV で制御
 # ────────────────────────────────────────────────
+@_safe_job
 def _internal_seo_user_apply_tick(app):
     with app.app_context():
         try:
