@@ -5039,10 +5039,33 @@ def index_monitor(username):
             "property_uri": latest_cfg.get(s.id)  # GSC検査URLを作るのに使用
         })
 
-    # 直近公開記事（最大50、URLがあるもののみ）— 申請ボタン用
+    # gsc_url_status に「indexed=TRUE」の行がある URL は除外し、
+    # FALSE または NULL（＝未インデックス/未検査相当）のみを出す。
+    # 結合キーは article_id が入っていればそれを優先し、なければ (site_id, url) でマッチ。
+    from app.models import GSCUrlStatus  # 既にインポート済みならこの行は自動的に冗長だが無害
+
     recent_articles = (
-        db.session.query(Article.id, Article.title, Article.posted_url, Article.site_id, Article.posted_at)
-        .filter(Article.site_id.in_(site_ids), Article.posted_url.isnot(None))
+        db.session.query(
+            Article.id, Article.title, Article.posted_url, Article.site_id, Article.posted_at
+        )
+        # URLステータスと外部結合（重複レコードがあり得るため、後段でGROUP BY）
+        .outerjoin(
+            GSCUrlStatus,
+            (
+                (GSCUrlStatus.article_id == Article.id)
+                | (
+                    (GSCUrlStatus.site_id == Article.site_id)
+                    & (GSCUrlStatus.url == Article.posted_url)
+                )
+            ),
+        )
+        .filter(
+            Article.site_id.in_(site_ids),
+            Article.posted_url.isnot(None),
+            ((GSCUrlStatus.indexed == False) | (GSCUrlStatus.indexed.is_(None))),
+        )
+        # 重複を防ぐ（PostgreSQL互換）：表示列でグルーピング
+        .group_by(Article.id, Article.title, Article.posted_url, Article.site_id, Article.posted_at)
         .order_by(Article.posted_at.desc().nullslast(), Article.id.desc())
         .limit(50)
         .all()
