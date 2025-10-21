@@ -1063,3 +1063,126 @@ class TopicAnchorLog(db.Model):
     __table_args__ = (
         db.Index("ix_topic_anchor_logs_user_event_created", "user_id", "event", "created_at"),
     )
+
+
+# =======================================================================
+# Rewriter: 自動リライト用 追加モデル（追加のみ／既存へ副作用なし）
+# =======================================================================
+
+class ArticleRewritePlan(db.Model):
+    """
+    ユーザー単位の“リライト計画”キュー。
+    - スケジューラがこの計画を取り出し、Rewrite → WP更新を実施
+    - 同一記事で複数回の計画も許容（履歴管理のため is_active で現行フラグを付与）
+    """
+    __tablename__ = "article_rewrite_plans"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    user_id    = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    site_id    = db.Column(db.Integer, db.ForeignKey("site.id"), nullable=False, index=True)
+    article_id = db.Column(db.Integer, db.ForeignKey("articles.id"), nullable=False, index=True)
+
+    # 記事選定スコア（未インデックス・CTR低・順位帯・経過日数などを合算）
+    priority_score = db.Column(db.Integer, nullable=False, default=0, index=True)
+
+    # どんな理由で選ばれたか（例: ["not_indexed","pos_8_low_ctr","age_60d"]）
+    reason_codes = db.Column(SA_JSON, nullable=True)
+
+    # 実行ステータス
+    status   = db.Column(db.String(16), nullable=False, default="queued", index=True)  # queued|running|done|error
+    attempts = db.Column(db.Integer, nullable=False, default=0)
+    last_error = db.Column(db.Text, nullable=True)
+
+    is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)  # 現行の計画フラグ
+    scheduled_by = db.Column(db.Integer, nullable=True, index=True)  # 管理者/実行者User ID（任意）
+
+    # タイミング
+    created_at = db.Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, index=True)
+    scheduled_at = db.Column(DateTime(timezone=True), nullable=True, index=True)
+    started_at = db.Column(DateTime(timezone=True), nullable=True, index=True)
+    finished_at = db.Column(DateTime(timezone=True), nullable=True, index=True)
+
+    # 関連
+    user    = db.relationship("User", backref=db.backref("rewrite_plans", lazy="dynamic"))
+    site    = db.relationship("Site", backref=db.backref("rewrite_plans", lazy="dynamic"))
+    article = db.relationship("Article", backref=db.backref("rewrite_plans", lazy="dynamic"))
+
+    __table_args__ = (
+        # 高速取得用の複合Index
+        db.Index("ix_rewrite_plans_user_status_score", "user_id", "status", "priority_score"),
+        db.Index("ix_rewrite_plans_site_article_active", "site_id", "article_id", "is_active"),
+    )
+
+
+class ArticleRewriteLog(db.Model):
+    """
+    リライト実行ログ（監査 & 迅速ロールバック用スナップショット付）
+    - policy_text: 方針（GSC指標/競合見出し/インデックス理由からの施策）
+    - diff_summary: 要約（どこをどう直したか）※UIはここを一覧に出す
+    - snapshot_*: 本文の直前/直後スナップショット（最小版）
+    - gsc_*: 実行時点のスナップショットと“後追い”での結果（後で埋める）
+    """
+    __tablename__ = "article_rewrite_logs"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    user_id    = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    site_id    = db.Column(db.Integer, db.ForeignKey("site.id"), nullable=False, index=True)
+    article_id = db.Column(db.Integer, db.ForeignKey("articles.id"), nullable=False, index=True)
+
+    plan_id = db.Column(db.Integer, db.ForeignKey("article_rewrite_plans.id"), nullable=True, index=True)
+
+    policy_text  = db.Column(db.Text, nullable=True)       # 「なぜ・何を直したか」
+    diff_summary = db.Column(db.Text, nullable=True)       # 「どこを直したか」簡潔要約（UIで表示）
+
+    snapshot_before = db.Column(db.Text, nullable=True)
+    snapshot_after  = db.Column(db.Text, nullable=True)
+
+    gsc_before = db.Column(SA_JSON, nullable=True)         # { position, ctr, impressions, ... }
+    gsc_after  = db.Column(SA_JSON, nullable=True)         # （28日後など後追いで更新予定）
+
+    # WP更新結果
+    wp_status  = db.Column(db.String(16), nullable=False, default="unknown", index=True)  # success|error|unknown
+    wp_post_id = db.Column(db.Integer, nullable=True, index=True)
+    error_message = db.Column(db.Text, nullable=True)
+
+    executed_at = db.Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, index=True)
+    duration_ms = db.Column(db.Integer, nullable=True)
+
+    # 関連
+    user    = db.relationship("User", backref=db.backref("rewrite_logs", lazy="dynamic"))
+    site    = db.relationship("Site", backref=db.backref("rewrite_logs", lazy="dynamic"))
+    article = db.relationship("Article", backref=db.backref("rewrite_logs", lazy="dynamic"))
+    plan    = db.relationship("ArticleRewritePlan", backref=db.backref("logs", lazy="dynamic"))
+
+    __table_args__ = (
+        db.Index("ix_rewrite_logs_user_exec", "user_id", "executed_at"),
+        db.Index("ix_rewrite_logs_site_article", "site_id", "article_id", "executed_at"),
+    )
+
+
+class SerpOutlineCache(db.Model):
+    """
+    競合学習用の“見出しアウトライン”軽量キャッシュ。
+    - 著作権配慮のため本文は保持しない。見出し/構造と要約のみ。
+    - クエリ or キーワード単位で 1〜n サイトのアウトラインを保持。
+    """
+    __tablename__ = "serp_outline_cache"
+
+    id = db.Column(db.Integer, primary_key=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("site.id"), nullable=True, index=True)  # なくてもよい
+    article_id = db.Column(db.Integer, db.ForeignKey("articles.id"), nullable=True, index=True)
+
+    query = db.Column(db.String(255), nullable=True, index=True)   # その記事の主キーワード等
+    outlines = db.Column(SA_JSON, nullable=True)                   # [{"url": "...", "h": ["H1","H2",...], "notes": "..."}...]
+    fetched_at = db.Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, index=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    article = db.relationship("Article", backref=db.backref("serp_outline_cache", lazy="dynamic"))
+    site    = db.relationship("Site", backref=db.backref("serp_outline_cache", lazy="dynamic"))
+
+    __table_args__ = (
+        db.Index("ix_serp_outline_query_time", "query", "fetched_at"),
+    )    
