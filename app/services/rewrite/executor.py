@@ -11,7 +11,8 @@ from typing import Dict, List, Tuple, Optional
 from flask import current_app
 from sqlalchemy import select, text
 from sqlalchemy.orm import joinedload, selectinload
-
+from urllib.parse import urlparse
+from datetime import datetime
 from openai import OpenAI, BadRequestError
 
 from app import db
@@ -311,7 +312,22 @@ def _rewrite_html(original_html: str, policy_text: str, user_id: Optional[int]) 
     # 復元
     return _unmask_links(edited, mapping)
 
-
+def _same_domain(site_url: str, posted_url: str) -> bool:
+    """
+    ザックリ比較：ホスト名の末尾一致で同一ドメインとみなす。
+    例: roof-pilates.com と www.roof-pilates.com は同一扱い。
+    livedoor.blog など別ドメインは false。
+    """
+    if not site_url or not posted_url:
+        return False
+    try:
+        s = urlparse(site_url).hostname or ""
+        p = urlparse(posted_url).hostname or ""
+        s = s.lower().lstrip("www.")
+        p = p.lower().lstrip("www.")
+        return p.endswith(s)
+    except Exception:
+        return False
 # ========== メイン：1件実行 ==========
 
 def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bool = True) -> Dict:
@@ -358,7 +374,37 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
         article: Article = plan.article
         site: Site = plan.site
 
-        # 2) 材料収集
+        # 2) ドメイン不一致の安全ガード
+        #    例: site.url=roof-pilates.com だが posted_url が livedoor.blog → WP更新対象外
+        if article.posted_url and not _same_domain(site.url, article.posted_url):
+            reason = f"domain_mismatch: site={site.url} posted={article.posted_url}"
+            current_app.logger.info(f"[rewrite] skip plan_id={plan.id} ({reason})")
+            # dry_run でも 'running' のままにしないよう終端化
+            plan.finished_at = datetime.utcnow()
+            if dry_run:
+                plan.status = "done"  # 既存の dry_run 終了と同等の扱いに寄せる
+                db.session.commit()
+                return {
+                    "status": "skipped(dry)",
+                    "reason": reason,
+                    "plan_id": plan.id,
+                    "article_id": article.id,
+                    "wp_post_id": None,
+                }
+            else:
+                # 本実行では計画をエラー終了（無効化はここでは行わない：手動判断の余地を残す）
+                plan.status = "error"
+                plan.last_error = reason
+                db.session.commit()
+                return {
+                    "status": "skipped",
+                    "reason": reason,
+                    "plan_id": plan.id,
+                    "article_id": article.id,
+                    "wp_post_id": None,
+                }
+
+        # 3) 材料収集
         wp_post_id, wp_html = _collect_wp_html(site, article)
         original_html = wp_html or (article.body or "")
         if not original_html:
@@ -371,13 +417,13 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
         gsc_snap = _collect_gsc_snapshot(site.id, article)
         outlines = _collect_serp_outline(article)
 
-        # 3) 方針作成
+        # 4) 方針作成
         policy_text = _build_policy_text(article, gsc_snap, outlines)
 
-        # 4) 本文リライト（リンク保護）
+        # 5) 本文リライト（リンク保護）
         edited_html = _rewrite_html(original_html, policy_text, user_id=article.user_id)
 
-        # 5) 監査ログ（差分要約をLLMで要約）
+        # 6) 監査ログ（差分要約をLLMで要約）
         sys = "あなたは日本語の編集者です。修正前後の本文の違いを箇条書きで簡潔に要約してください。具体的に。"
         usr = f"【修正前】\n{_strip_html_min(original_html)[:3000]}\n\n【修正後】\n{_strip_html_min(edited_html)[:3000]}"
         diff_summary = _chat(
@@ -385,7 +431,7 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
             TOKENS["summary"], TEMP["summary"], user_id=article.user_id
         )
 
-        # 6) ログ保存（WP結果は後で上書き）
+        # 7) ログ保存（WP結果は後で上書き）
         log = ArticleRewriteLog(
             user_id=article.user_id,
             site_id=site.id,
@@ -405,7 +451,7 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
         wp_ok = False
         wp_err = None
 
-        # 7) WP更新（ドライランじゃなければ反映）
+        # 8) WP更新（ドライランじゃなければ反映）
         if not dry_run:
             try:
                 # 既存の ai-content ラッパがある場合は尊重（無ければそのまま）
@@ -439,7 +485,7 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
                 log.error_message = wp_err
                 db.session.commit()
 
-        # 8) プランの終了処理
+        # 9) プランの終了処理
         plan.finished_at = datetime.utcnow()
         if dry_run:
             plan.status = "done"
