@@ -10,7 +10,7 @@ from typing import Dict, List, Tuple, Optional
 
 from flask import current_app
 from sqlalchemy import select, text
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 from openai import OpenAI, BadRequestError
 
@@ -323,11 +323,8 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
     """
     app = current_app._get_current_object()
     with app.app_context():
-        # 1) キャンディデートをロックして取得
-        q = db.session.query(ArticleRewritePlan).options(
-            joinedload(ArticleRewritePlan.article),
-            joinedload(ArticleRewritePlan.site),
-        ).filter(
+        # 1) まず ID だけを FOR UPDATE SKIP LOCKED で取得（JOINしない）
+        id_q = db.session.query(ArticleRewritePlan.id).filter(
             ArticleRewritePlan.user_id == user_id,
             ArticleRewritePlan.is_active.is_(True),
             ArticleRewritePlan.status == "queued",
@@ -335,13 +332,23 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
             ArticleRewritePlan.priority_score.desc(),
             ArticleRewritePlan.created_at.asc(),
         )
-
         if plan_id:
-            q = q.filter(ArticleRewritePlan.id == plan_id)
+            id_q = id_q.filter(ArticleRewritePlan.id == plan_id)
 
-        plan = q.with_for_update(skip_locked=True).first()
-        if not plan:
+        # Postgresに「どのテーブルをロックするか」を明示
+        id_q = id_q.with_for_update(skip_locked=True, of=ArticleRewritePlan)
+
+        target_id = id_q.limit(1).scalar()
+        if not target_id:
             return {"status": "empty", "message": "実行可能な queued 計画が見つかりません"}
+
+        # 2) 取得したIDで関連を別クエリでロード（このクエリにはロック不要）
+        plan = db.session.query(ArticleRewritePlan).options(
+            selectinload(ArticleRewritePlan.article),
+            selectinload(ArticleRewritePlan.site),
+        ).get(target_id)
+        if not plan:
+            return {"status": "empty", "message": f"ID={target_id} の計画が見つかりません"}
 
         plan.status = "running"
         plan.started_at = datetime.utcnow()
