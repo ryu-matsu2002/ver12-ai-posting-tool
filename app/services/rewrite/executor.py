@@ -12,7 +12,6 @@ from flask import current_app
 from sqlalchemy import select, text
 from sqlalchemy.orm import joinedload, selectinload
 from urllib.parse import urlparse
-from datetime import datetime
 from openai import OpenAI, BadRequestError
 
 from app import db
@@ -208,6 +207,75 @@ def _collect_serp_outline(article: Article) -> List[Dict]:
     except Exception as e:
         logging.info(f"[rewrite/_collect_serp_outline] skipped: {e}")
     return []
+
+
+# ========== 競合とのギャップ分析 & ログ用データ整形 ==========
+
+_H2_RE = re.compile(r"<h2[^>]*>(.*?)</h2>", flags=re.IGNORECASE | re.DOTALL)
+_H3_RE = re.compile(r"<h3[^>]*>(.*?)</h3>", flags=re.IGNORECASE | re.DOTALL)
+
+def _strip_tags(s: str) -> str:
+    if not s:
+        return ""
+    s = re.sub(r"<[^>]+>", "", s)
+    s = re.sub(r"\s+", " ", s)
+    return s.strip()
+
+def _extract_my_headings(html: str) -> Dict[str, List[str]]:
+    """
+    自記事のH2/H3を抽出（テキスト化）。
+    """
+    h2s = [_strip_tags(m.group(1)) for m in _H2_RE.finditer(html or "")]
+    h3s = [_strip_tags(m.group(1)) for m in _H3_RE.finditer(html or "")]
+    # 空文字を除去
+    h2s = [x for x in h2s if x]
+    h3s = [x for x in h3s if x]
+    return {"h2": h2s, "h3": h3s}
+
+def _analyze_gaps(original_html: str, outlines: List[Dict]) -> Tuple[Dict, List[str], Dict]:
+    """
+    競合アウトライン（[{url, h:[...], notes?...}]）から
+    - 参照URL一覧
+    - 自記事に不足していそうな見出し候補
+    - 補助統計（頻出上位テーマなど）
+    を返す。outlines が空なら空の結果を返す。
+    """
+    referenced_urls = []
+    comp_h2_counts = {}
+    comp_h3_counts = {}
+
+    for o in outlines or []:
+        url = o.get("url")
+        if url:
+            referenced_urls.append(url)
+        hs = o.get("h") or []
+        for h in hs:
+            t = _strip_tags(h or "")
+            # H2/H3っぽい粒度だけをカウント（H1や雑多は除外ヒューリスティック）
+            # 既に構造化済みなら "H2: xxx" 形式を想定、プレーンならそのまま扱う
+            key = t
+            if not key:
+                continue
+            # 簡易に“長めの見出し”を優先して学習（ノイズ除去）
+            if len(key) < 2:
+                continue
+            comp_h2_counts[key] = comp_h2_counts.get(key, 0) + 1
+
+    mine = _extract_my_headings(original_html or "")
+    my_set = set(mine["h2"] + mine["h3"])
+
+    # 頻度順で“自記事に無い見出し”を候補に
+    sorted_h2 = sorted(comp_h2_counts.items(), key=lambda x: (-x[1], x[0]))[:30]
+    missing = [h for h, c in sorted_h2 if h not in my_set][:15]
+
+    stats = {
+        "top_competitor_headings": [{"heading": h, "freq": c} for h, c in sorted_h2[:10]],
+        "my_h2": mine["h2"][:20],
+        "my_h3": mine["h3"][:20],
+    }
+    return stats, referenced_urls, {"missing_headings": missing}
+
+#（重複定義が後ろにあるため、この版は削除）
 
 # ========== ギャップ分析（SERP × 現本文 → 追加すべき項目の構造化） ==========
 
@@ -549,6 +617,8 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
             )
         except Exception:
             pass
+
+        # 4.5)（削除）— 以降は _build_gap_analysis の結果をそのまま使う
 
         # 5) 本文リライト（リンク保護）
         edited_html = _rewrite_html(original_html, policy_text, user_id=article.user_id)
