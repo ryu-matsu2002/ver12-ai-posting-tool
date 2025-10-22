@@ -1150,6 +1150,25 @@ class ArticleRewriteLog(db.Model):
     executed_at = db.Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, index=True)
     duration_ms = db.Column(db.Integer, nullable=True)
 
+    # === SERP参照＆ギャップ分析（UI表示・監査用） ===
+    # 参照した上位記事の件数（自サイトと広告は除外した純件数）
+    referenced_count = db.Column(db.Integer, nullable=False, default=0)
+    # 参照URLの配列（rank付き。タイトルも保持できるようにしておく）
+    # 例: [{"rank":1,"url":"https://example.com/a","title":"..."},
+    #      {"rank":2,"url":"https://example.com/b","title":"..."}]
+    referenced_urls = db.Column(SA_JSON, nullable=True)
+    # 競合の共通要素と自記事の不足点のサマリー（機械可読）
+    # 例: {"missing_h2":["注意点","FAQ"],
+    #      "thin_sections":["効果:体験談不足","料金:相場不足"],
+    #      "intent_mismatch": false,
+    #      "length_percentile": 35}
+    gap_summary = db.Column(SA_JSON, nullable=True)
+    # 人がそのままTODOとして読めるチェックリスト（短文箇条書き）
+    policy_checklist = db.Column(db.Text, nullable=True)
+    # 適用したテンプレの足跡（GSCの状態やCTRバケット等）
+    # 例: {"inspection":"DiscoveredNotIndexed","ctr_bucket":"low","applied":["FAQ追加","導入の明確化"]}
+    used_templates = db.Column(SA_JSON, nullable=True)
+
     # 関連
     user    = db.relationship("User", backref=db.backref("rewrite_logs", lazy="dynamic"))
     site    = db.relationship("Site", backref=db.backref("rewrite_logs", lazy="dynamic"))

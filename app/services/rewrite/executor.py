@@ -103,6 +103,26 @@ def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float, user_id: Optional
             retry_t = max(1, int(max_t * SHRINK))
             return _call(retry_t)
         raise
+def _safe_json_loads(s: str):
+    try:
+        return json.loads(s)
+    except Exception:
+        return None
+
+def _unique_urls(outlines: List[Dict], limit: int = 10) -> List[str]:
+    seen = set()
+    results: List[str] = []
+    for o in outlines or []:
+        u = (o or {}).get("url")
+        if not u:
+            continue
+        if u in seen:
+            continue
+        seen.add(u)
+        results.append(u)
+        if len(results) >= limit:
+            break
+    return results    
 
 
 # ========== 収集フェーズ：材料集め ==========
@@ -188,6 +208,96 @@ def _collect_serp_outline(article: Article) -> List[Dict]:
     except Exception as e:
         logging.info(f"[rewrite/_collect_serp_outline] skipped: {e}")
     return []
+
+# ========== ギャップ分析（SERP × 現本文 → 追加すべき項目の構造化） ==========
+
+def _build_gap_analysis(article: Article, original_html: str, outlines: List[Dict], gsc_snapshot: Dict) -> Tuple[Dict, str]:
+    """
+    参照SERP（見出し骨子）と現行本文を比較して、“不足/改善”を構造化JSON + チェックリストで返す。
+    - 戻り: (gap_summary_json, checklist_text)
+      gap_summary_json 例:
+        {
+          "missing_topics": ["料金比較", "効果の目安(期間・回数)"],
+          "must_add_sections": ["FAQ", "体験談/事例"],
+          "quality_issues": ["導入が抽象的", "結論が曖昧"],
+          "estimated_length_range": "2500-3500"
+        }
+    """
+    # 本文をテキスト化（トークン節約）
+    current_text = _strip_html_min(original_html)[:3500]
+    # SERP要約（冗長回避のためH2/H3中心）
+    compact_outlines = []
+    for o in (outlines or [])[:8]:
+        compact_outlines.append({
+            "url": o.get("url"),
+            "h": (o.get("h") or [])[:30],
+            "notes": o.get("notes", "")[:200]
+        })
+
+    sys = (
+        "あなたは日本語SEOの編集長です。以下の材料から“何が不足か/何を足すべきか”を構造化して返してください。"
+        "返答は厳密なJSONのみ（前後に余計な文字を入れない）。"
+        "キーは missing_topics(配列), must_add_sections(配列), quality_issues(配列), estimated_length_range(文字列)。"
+        "内部リンクや新規リンク提案は一切禁止。"
+    )
+    usr = json.dumps({
+        "article": {"id": article.id, "title": article.title, "keyword": article.keyword},
+        "gsc": gsc_snapshot,
+        "current_excerpt": current_text,
+        "serp_outlines": compact_outlines
+    }, ensure_ascii=False)
+    raw = _chat(
+        [{"role": "system", "content": sys}, {"role": "user", "content": usr}],
+        TOKENS["policy"], TEMP["policy"], user_id=article.user_id
+    )
+    gap = _safe_json_loads(raw) or {}
+    # チェックリスト文字列も（UI表示向け）
+    checklist_lines: List[str] = []
+    for k in ("missing_topics", "must_add_sections", "quality_issues"):
+        vals = gap.get(k) or []
+        if isinstance(vals, list) and vals:
+            title = {
+                "missing_topics": "不足トピック",
+                "must_add_sections": "追加必須セクション",
+                "quality_issues": "品質課題",
+            }[k]
+            checklist_lines.append(f"■{title}")
+            for v in vals:
+                checklist_lines.append(f"- {v}")
+    if gap.get("estimated_length_range"):
+        checklist_lines.append(f"■推奨文字量: {gap['estimated_length_range']}")
+    checklist = "\n".join(checklist_lines) if checklist_lines else ""
+    return gap, checklist
+
+def _derive_templates_from_gsc(gsc_snapshot: Dict) -> List[str]:
+    """
+    GSCの状態から、適用した施策テンプレートの“スラグ”を推定する軽い関数。
+    UIで『どの方針を使ったか』を見せる目的。
+    """
+    slugs: List[str] = []
+    st = ((gsc_snapshot or {}).get("url_status") or {})
+    cov = (st.get("coverage_state") or "").lower()
+    if "discovered" in cov and "not indexed" in cov:
+        slugs.append("coverage_discovered_not_indexed")
+    if "crawled" in cov and "not indexed" in cov:
+        slugs.append("coverage_crawled_not_indexed")
+    if "alternate page" in cov:
+        slugs.append("coverage_alternate_canonical")
+    # CTR/順位など簡易推定
+    metrics = (gsc_snapshot or {}).get("metrics_recent") or []
+    if metrics:
+        # ざっくり最近5件平均
+        last5 = metrics[:5]
+        try:
+            avg_pos = sum(m.get("position", 0) or 0 for m in last5) / max(1, len(last5))
+            avg_ctr = sum(m.get("ctr", 0) or 0 for m in last5) / max(1, len(last5))
+            if avg_pos <= 20 and avg_ctr < 0.01:
+                slugs.append("low_ctr_ranked_20")
+            if avg_pos > 30:
+                slugs.append("low_visibility_ranked_30plus")
+        except Exception:
+            pass
+    return slugs or None
 
 
 # ========== リンク完全保護（置換→復元） ==========
@@ -417,8 +527,28 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
         gsc_snap = _collect_gsc_snapshot(site.id, article)
         outlines = _collect_serp_outline(article)
 
+        # 3.5) SERP × 現本文のギャップ分析（不足/追加セクション/品質課題 などを構造化）
+        gap_summary_json, policy_checklist = _build_gap_analysis(article, original_html, outlines, gsc_snap)
+        used_templates = _derive_templates_from_gsc(gsc_snap)
+        referenced_urls = _unique_urls(outlines, limit=10)
+        referenced_count = len(referenced_urls)
+
         # 4) 方針作成
         policy_text = _build_policy_text(article, gsc_snap, outlines)
+        # 人が一覧で判断しやすいよう、参照件数・URL・不足の要点を方針末尾に追記
+        try:
+            missing_topics = (gap_summary_json or {}).get("missing_topics") or []
+            _mt_head = "、".join(missing_topics[:5])
+            url_lines = "\n".join(referenced_urls[:8])
+            policy_text = (
+                f"{policy_text}\n\n"
+                f"---\n"
+                f"【参照SERP件数】{referenced_count}\n"
+                f"【参照URL】\n{url_lines}\n"
+                f"【不足トピック（要点）】{_mt_head if _mt_head else '—'}\n"
+            )
+        except Exception:
+            pass
 
         # 5) 本文リライト（リンク保護）
         edited_html = _rewrite_html(original_html, policy_text, user_id=article.user_id)
@@ -444,6 +574,12 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
             wp_status="unknown",
             wp_post_id=wp_post_id,
             executed_at=datetime.utcnow(),
+            # 🔽 今回追加の監査情報
+            referenced_count=referenced_count,
+            referenced_urls=referenced_urls,
+            gap_summary=gap_summary_json,
+            policy_checklist=policy_checklist,
+            used_templates=used_templates,
         )
         db.session.add(log)
         db.session.commit()
