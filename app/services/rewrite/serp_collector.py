@@ -24,7 +24,7 @@ from urllib.parse import quote, urlparse, parse_qs, unquote
 
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 from playwright.sync_api import Error as PWError
-
+import requests
 from app import db
 from app.models import Article, SerpOutlineCache
 
@@ -42,6 +42,10 @@ _DBG_DIR = os.path.join(_BASE_DIR, "runtime", "serp_debug")
 os.makedirs(_DBG_DIR, exist_ok=True)
 _NOW = lambda: time.strftime("%Y%m%d-%H%M%S")
 
+# --- CSE(JSON API) 設定 ---
+_CSE_API_KEY = os.environ.get("GOOGLE_CSE_API_KEY")  # 例: AIzaSyXXXX...
+_CSE_CX      = os.environ.get("GOOGLE_CSE_CX")       # 例: d115155f883b1466f
+_CSE_ENDPOINT = "https://www.googleapis.com/customsearch/v1"
 
 def _strip_tags(s: str) -> str:
     if not s:
@@ -293,6 +297,52 @@ def _extract_result_links(page, *, limit: int) -> List[str]:
     # 正規化＆重複削除（上限を掛ける）
     return _unique_keep_order(urls, limit)
 
+# ---------- Google Custom Search JSON API（公式） ----------
+def _search_top_urls_cse(keyword: str, *, limit: int = 6, lang: str = "ja", gl: str = "jp") -> List[str]:
+    """
+    Google公式 Custom Search JSON API を使って上位URLを取得する。
+    失敗時は空配列。無料枠: 100クエリ/日（課金未設定なら超過時はエラーで停止）。
+    """
+    if not _CSE_API_KEY or not _CSE_CX:
+        # 設定漏れを明示的に知らせる
+        raise RuntimeError("GOOGLE_CSE_API_KEY / GOOGLE_CSE_CX が未設定です。環境変数に設定してください。")
+
+    params = {
+        "key": _CSE_API_KEY,
+        "cx": _CSE_CX,
+        "q": keyword,
+        "num": min(10, max(1, limit)),  # API仕様上の上限は10
+        "hl": lang,
+        # 備考: CSEは 'gl' や 'lr' も一部サポート。ただし結果への影響は限定的。
+        "lr": f"lang_{lang}",
+        "safe": "off",
+    }
+    try:
+        resp = requests.get(_CSE_ENDPOINT, params=params, timeout=15)
+        data = resp.json() if resp.ok else {}
+        items = data.get("items", []) or []
+        urls: List[str] = []
+        for it in items:
+            link = (it.get("link") or "").strip()
+            if link.startswith("http://") or link.startswith("https://"):
+                urls.append(link)
+        urls = _unique_keep_order(urls, limit)
+        if not urls:
+            # 何が返ってきたかの証跡保存（デバッグ用）
+            t = _NOW()
+            with open(os.path.join(_DBG_DIR, f"cse_{t}.json"), "w", encoding="utf-8") as f:
+                f.write(resp.text if resp is not None else "{}")
+        return urls
+    except Exception as e:
+        # 失敗時は空。ログだけ残す
+        try:
+            t = _NOW()
+            with open(os.path.join(_DBG_DIR, f"cse_error_{t}.txt"), "w", encoding="utf-8") as f:
+                f.write(f"error={repr(e)} keyword={keyword}\n")
+        except Exception:
+            pass
+        return []
+
 # ---------- Google 検索（上位URLだけ取る・軽量） ----------
 
 def _search_top_urls(keyword: str, *, limit: int = 6, lang: str = "ja", gl: str = "jp",
@@ -424,10 +474,11 @@ def _fetch_page_outline(url: str, *, timeout_ms: int = 18000, lang: str = "ja", 
 def collect_serp_outlines_for_keyword(keyword: str, *, limit: int = 6,
                                       lang: str = "ja", gl: str = "jp") -> List[Dict]:
     """
-    キーワードでGoogle検索 → 上位URLを巡回 → 各ページのH2/H3を抽出して返却。
+    キーワードでGoogle検索（CSE JSON API） → 上位URLを巡回 → 各ページのH2/H3を抽出して返却。
+    （SERPのHTMLスクレイピングは行わない）
     戻り値: [{url, h:[...]}, ...]
     """
-    urls = _search_top_urls(keyword, limit=limit, lang=lang, gl=gl)
+    urls = _search_top_urls_cse(keyword, limit=limit, lang=lang, gl=gl)
     outlines: List[Dict] = []
     # 1URLずつ短時間で取りにいく（並列はメモリ/帯域コストが跳ねるので避ける）
     for u in urls:
