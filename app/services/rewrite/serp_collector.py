@@ -20,7 +20,7 @@ import re
 import os
 import time
 from typing import List, Dict, Optional, Tuple, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlparse, parse_qs, unquote
 
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
@@ -679,10 +679,18 @@ def cache_outlines(article_id: int, outlines: List[Dict[str, Any]]) -> Dict[str,
 
 
 def _is_recent_cache(rec: SerpOutlineCache) -> bool:
+    """fetched_at が直近 TTL 日以内なら True（UTC/ローカル混在に強く）。"""
     try:
         if not rec or not rec.fetched_at:
             return False
-        return rec.fetched_at >= datetime.utcnow() - timedelta(days=_CACHE_TTL_DAYS)
+        ft = rec.fetched_at
+        # ft がタイムゾーン無しなら UTC とみなす／ありなら UTC に揃える
+        if ft.tzinfo is None:
+            ft_utc = ft.replace(tzinfo=timezone.utc)
+        else:
+            ft_utc = ft.astimezone(timezone.utc)
+        now_utc = datetime.now(timezone.utc)
+        return ft_utc >= now_utc - timedelta(days=_CACHE_TTL_DAYS)
     except Exception:
         return False
 
