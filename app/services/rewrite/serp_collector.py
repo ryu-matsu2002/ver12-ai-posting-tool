@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import re
+import os
 import time
 from typing import List, Dict, Optional, Tuple
 from urllib.parse import quote, urlparse, parse_qs, unquote
@@ -34,6 +35,12 @@ _H2_RE = re.compile(r"<h2[^>]*>(.*?)</h2>", flags=re.IGNORECASE | re.DOTALL)
 _H3_RE = re.compile(r"<h3[^>]*>(.*?)</h3>", flags=re.IGNORECASE | re.DOTALL)
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
+
+# --- デバッグ出力先（0件時の証拠保存） ---
+_BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+_DBG_DIR = os.path.join(_BASE_DIR, "runtime", "serp_debug")
+os.makedirs(_DBG_DIR, exist_ok=True)
+_NOW = lambda: time.strftime("%Y%m%d-%H%M%S")
 
 
 def _strip_tags(s: str) -> str:
@@ -208,6 +215,7 @@ def _extract_result_links(page, *, limit: int) -> List[str]:
     selector_sets = [
         # 1) a:has(h3) … 一般的オーガニック
         ("a:has(h3)", True),
+        ("a[jsname][href]", False),    # 取りこぼし救済
         # 2) 直下のカードに付与されることが多い yuRUbf
         ("div.yuRUbf > a", False),
         # 3) g-card内の一般枠など（保険）
@@ -293,12 +301,19 @@ def _search_top_urls(keyword: str, *, limit: int = 6, lang: str = "ja", gl: str 
     if limit <= 0:
         return []
     q = quote(keyword)
-    # num= は 10まで、pws=0 でパーソナライズ抑制のヒント
-    base = f"https://www.google.com/search?q={q}&hl={lang}&gl={gl}&num={min(limit, 10)}&pws=0"
+    # 通常Web結果を固定（udm=14）、日本語優先（lr=lang_ja）、パーソナライズ抑制（pws=0）
+    base = f"https://www.google.com/search?q={q}&hl={lang}&gl={gl}&num={min(limit, 10)}&pws=0&udm=14&lr=lang_{lang}"
+ 
 
     urls: List[str] = []
     with _PWSession(lang=lang, gl=gl) as sess:
         page = sess.new_page()
+        # NCRで国別リダイレクトを抑止
+        try:
+            page.goto("https://www.google.com/ncr", timeout=4000)
+        except Exception:
+            pass
+
         def _attempt(visit_url: str) -> List[str]:
             try:
                 page.goto(visit_url, timeout=timeout_ms, wait_until="domcontentloaded")
@@ -312,7 +327,28 @@ def _search_top_urls(keyword: str, *, limit: int = 6, lang: str = "ja", gl: str 
                     page.wait_for_selector("div#search", timeout=1000)
                 except Exception:
                     pass
-                return _extract_result_links(page, limit=limit)
+                links = _extract_result_links(page, limit=limit)
+                # 0件なら、何が表示されていたかをスナップショット保存
+                if not links:
+                    try:
+                        t = _NOW()
+                        html_path = os.path.join(_DBG_DIR, f"serp_{t}.html")
+                        txt_path  = os.path.join(_DBG_DIR, f"serp_{t}.txt")
+                        with open(html_path, "w", encoding="utf-8") as f:
+                            f.write(page.content() or "")
+                        counts = {
+                            "a_has_h3": page.locator("a:has(h3)").count(),
+                            "jsname_a": page.locator("a[jsname][href]").count(),
+                            "yuRUbf_a": page.locator("div.yuRUbf > a").count(),
+                            "div_g_a" : page.locator("div.g a[href]").count(),
+                            "h3_total": page.locator("h3").count(),
+                        }
+                        with open(txt_path, "w", encoding="utf-8") as f:
+                            f.write(f"title={title_text}\nurl={visit_url}\ncounts={counts}\n")
+                        print(f"[SERP-DEBUG] 0 links → snapshot saved: {html_path}")
+                    except Exception:
+                        pass
+                return links
             except (PWTimeout, PWError):
                 return []
 
