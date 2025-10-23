@@ -70,6 +70,7 @@ def _unique_keep_order(items: List[str], limit: int) -> List[str]:
     return out
 
 
+
 # ---------- Playwright セッション（ブロッキング軽減設定） ----------
 
 class _PWSession:
@@ -298,7 +299,58 @@ def _extract_result_links(page, *, limit: int) -> List[str]:
     return _unique_keep_order(urls, limit)
 
 # ---------- Google Custom Search JSON API（公式） ----------
-def _search_top_urls_cse(keyword: str, *, limit: int = 6, lang: str = "ja", gl: str = "jp") -> List[str]:
+def _path_depth(url: str) -> int:
+    """ドメイン直下=0, /a=1, /a/b=2 ... のようなパス深さを返す。"""
+    try:
+        p = urlparse(url)
+        segs = [s for s in (p.path or "").split("/") if s]
+        return len(segs)
+    except Exception:
+        return 0
+
+_QNA_HINTS = ("faq", "q&a", "q%26a", "よくある質問", "質問", "Q＆A", "Q&A")
+
+def _looks_like_qna_text(text: str) -> bool:
+    t = (text or "").lower()
+    return any(h in t for h in _QNA_HINTS)
+
+def _looks_like_qna_article(article_title: str) -> bool:
+    """記事タイトルから『Q&A/FAQ系か』を推定（軽量ヒューリスティック）。"""
+    return _looks_like_qna_text(article_title)
+
+def _tokenize_keywords(q: str) -> List[str]:
+    """スペース分割の緩いトークナイズ（全角/半角/連続スペース対応）。"""
+    q = (q or "").strip().replace("　", " ")
+    return [t for t in q.split(" ") if t]
+
+def _is_useful_result(url: str, title: str, snippet: str, *,
+                      qna_required: bool, keyword_tokens: List[str]) -> bool:
+    """
+    役に立たない結果（トップ/LP/無関係）を落とす。
+    - 常に: ドメイン直下（path depth==0）は除外
+    - Q&A記事モード: タイトル/スニペット/URLのいずれかがQ&A/FAQを示唆しないなら除外
+    - 最低限: タイトル/スニペットにキーワードのどれかが1つは含まれる
+    """
+    # 1) トップ/LPは除外（path深さ0）
+    if _path_depth(url) == 0:
+        return False
+
+    # 2) Q&A記事ならQ&Aらしさが必要
+    if qna_required:
+        if not (_looks_like_qna_text(title) or _looks_like_qna_text(snippet) or _looks_like_qna_text(url)):
+            return False
+
+    # 3) キーワード関連性（タイトルorスニペットに1語以上含まれる）
+    t = (title or "") + " " + (snippet or "")
+    if keyword_tokens:
+        if not any(tok in t for tok in keyword_tokens):
+            return False
+
+    return True
+
+def _search_top_urls_cse(keyword: str, *, limit: int = 6, lang: str = "ja", gl: str = "jp",
+                         qna_required: bool = False, article_title: str = "") -> List[str]:
+
     """
     Google公式 Custom Search JSON API を使って上位URLを取得する。
     失敗時は空配列。無料枠: 100クエリ/日（課金未設定なら超過時はエラーで停止）。
@@ -310,22 +362,35 @@ def _search_top_urls_cse(keyword: str, *, limit: int = 6, lang: str = "ja", gl: 
     params = {
         "key": _CSE_API_KEY,
         "cx": _CSE_CX,
-        "q": keyword,
+        # google.com系を弾きつつ通常の検索語を投げる
+        "q": f"{keyword} -site:google.com -site:*.google.com",
         "num": min(10, max(1, limit)),  # API仕様上の上限は10
         "hl": lang,
         # 備考: CSEは 'gl' や 'lr' も一部サポート。ただし結果への影響は限定的。
         "lr": f"lang_{lang}",
         "safe": "off",
+        # 二重ガード（google.com除外）
+        "siteSearch": "google.com",
+        "siteSearchFilter": "e",  # e=exclude
     }
     try:
         resp = requests.get(_CSE_ENDPOINT, params=params, timeout=15)
         data = resp.json() if resp.ok else {}
         items = data.get("items", []) or []
         urls: List[str] = []
+        kw_tokens = _tokenize_keywords(keyword)
         for it in items:
             link = (it.get("link") or "").strip()
-            if link.startswith("http://") or link.startswith("https://"):
-                urls.append(link)
+            title = (it.get("title") or "").strip()
+            snippet = (it.get("snippet") or "").strip()
+            if not (link.startswith("http://") or link.startswith("https://")):
+                continue
+            # 無関係/トップ/LPの除外
+            if not _is_useful_result(link, title, snippet, qna_required=qna_required, keyword_tokens=kw_tokens):
+                continue
+            urls.append(link)
+            if len(urls) >= limit:
+                break
         urls = _unique_keep_order(urls, limit)
         if not urls:
             # 何が返ってきたかの証跡保存（デバッグ用）
@@ -472,13 +537,15 @@ def _fetch_page_outline(url: str, *, timeout_ms: int = 18000, lang: str = "ja", 
 # ---------- 収集・保存パイプライン ----------
 
 def collect_serp_outlines_for_keyword(keyword: str, *, limit: int = 6,
-                                      lang: str = "ja", gl: str = "jp") -> List[Dict]:
+                                      lang: str = "ja", gl: str = "jp",
+                                      qna_required: bool = False, article_title: str = "") -> List[Dict]:
     """
     キーワードでGoogle検索（CSE JSON API） → 上位URLを巡回 → 各ページのH2/H3を抽出して返却。
     （SERPのHTMLスクレイピングは行わない）
     戻り値: [{url, h:[...]}, ...]
     """
-    urls = _search_top_urls_cse(keyword, limit=limit, lang=lang, gl=gl)
+    urls = _search_top_urls_cse(keyword, limit=limit, lang=lang, gl=gl,
+                                qna_required=qna_required, article_title=article_title)
     outlines: List[Dict] = []
     # 1URLずつ短時間で取りにいく（並列はメモリ/帯域コストが跳ねるので避ける）
     for u in urls:
@@ -510,6 +577,9 @@ def collect_and_cache_for_article(article_id: int, *, limit: int = 6,
     if not query:
         return {"ok": False, "error": "no keyword or title to search"}
 
-    outlines = collect_serp_outlines_for_keyword(query, limit=limit, lang=lang, gl=gl)
+    # 記事タイトルからQ&A/FAQっぽさを推定し、必要ならQ&A系ページ以外を除外
+    qna_required = _looks_like_qna_article(art.title or "")
+    outlines = collect_serp_outlines_for_keyword(query, limit=limit, lang=lang, gl=gl,
+                                                 qna_required=qna_required, article_title=art.title or "")
     saved = cache_outlines(article_id, outlines)
     return {"ok": True, "query": query, **saved}
