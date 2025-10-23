@@ -19,7 +19,8 @@ from __future__ import annotations
 import re
 import os
 import time
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
+from datetime import datetime, timedelta
 from urllib.parse import quote, urlparse, parse_qs, unquote
 
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
@@ -46,6 +47,11 @@ _NOW = lambda: time.strftime("%Y%m%d-%H%M%S")
 _CSE_API_KEY = os.environ.get("GOOGLE_CSE_API_KEY")  # 例: AIzaSyXXXX...
 _CSE_CX      = os.environ.get("GOOGLE_CSE_CX")       # 例: d115155f883b1466f
 _CSE_ENDPOINT = "https://www.googleapis.com/customsearch/v1"
+
+# 収集の鮮度(TTL)。同一記事の直近キャッシュがこの期間内なら再収集をスキップ
+_CACHE_TTL_DAYS = int(os.environ.get("SERP_CACHE_TTL_DAYS", "14"))
+# 同一ドメインから拾う最大件数（多様性確保）
+_MAX_PER_DOMAIN = int(os.environ.get("SERP_MAX_PER_DOMAIN", "2"))
 
 def _strip_tags(s: str) -> str:
     if not s:
@@ -348,8 +354,14 @@ def _is_useful_result(url: str, title: str, snippet: str, *,
 
     return True
 
+def _netloc(url: str) -> str:
+    try:
+        return urlparse(url).netloc.lower()
+    except Exception:
+        return ""
+
 def _search_top_urls_cse(keyword: str, *, limit: int = 6, lang: str = "ja", gl: str = "jp",
-                         qna_required: bool = False, article_title: str = "") -> List[str]:
+                         qna_required: bool = False, article_title: str = "") -> List[Dict[str, str]]:
 
     """
     Google公式 Custom Search JSON API を使って上位URLを取得する。
@@ -377,7 +389,8 @@ def _search_top_urls_cse(keyword: str, *, limit: int = 6, lang: str = "ja", gl: 
         resp = requests.get(_CSE_ENDPOINT, params=params, timeout=15)
         data = resp.json() if resp.ok else {}
         items = data.get("items", []) or []
-        urls: List[str] = []
+        results: List[Dict[str, str]] = []
+        per_domain: Dict[str, int] = {}
         kw_tokens = _tokenize_keywords(keyword)
         for it in items:
             link = (it.get("link") or "").strip()
@@ -388,16 +401,30 @@ def _search_top_urls_cse(keyword: str, *, limit: int = 6, lang: str = "ja", gl: 
             # 無関係/トップ/LPの除外
             if not _is_useful_result(link, title, snippet, qna_required=qna_required, keyword_tokens=kw_tokens):
                 continue
-            urls.append(link)
-            if len(urls) >= limit:
+            # 同一ドメイン多様性の確保
+            d = _netloc(link)
+            cnt = per_domain.get(d, 0)
+            if cnt >= _MAX_PER_DOMAIN:
+                continue
+            per_domain[d] = cnt + 1
+
+            results.append({"url": link, "title": title, "snippet": snippet})
+            if len(results) >= limit:
                 break
-        urls = _unique_keep_order(urls, limit)
-        if not urls:
+        # unique keep order by url
+        seen = set()
+        uniq: List[Dict[str, str]] = []
+        for r in results:
+            if r["url"] in seen:
+                continue
+            seen.add(r["url"])
+            uniq.append(r)
+        if not uniq:
             # 何が返ってきたかの証跡保存（デバッグ用）
             t = _NOW()
             with open(os.path.join(_DBG_DIR, f"cse_{t}.json"), "w", encoding="utf-8") as f:
                 f.write(resp.text if resp is not None else "{}")
-        return urls
+        return uniq
     except Exception as e:
         # 失敗時は空。ログだけ残す
         try:
@@ -515,45 +542,132 @@ def _extract_headings_from_html(html: str) -> List[str]:
     return _unique_keep_order([*h2s, *h3s], 60)
 
 
-def _fetch_page_outline(url: str, *, timeout_ms: int = 18000, lang: str = "ja", gl: str = "jp") -> Dict:
+def _detect_schema_types(page) -> List[str]:
+    """簡易：JSON-LDの@typeやmicrodataからFAQ/HowTo/Article等を拾う（過検出を避けて軽めに）。"""
+    types = set()
+    try:
+        # JSON-LDの文字列を抽出して軽く判定
+        scripts = page.locator('script[type="application/ld+json"]').all()
+        for s in scripts[:6]:  # 安全のため上限
+            try:
+                txt = s.inner_text() or ""
+            except Exception:
+                txt = ""
+            t = txt.lower()
+            if '"faqpage"' in t or "'faqpage'" in t:
+                types.add("FAQ")
+            if '"howto"' in t or "'howto'" in t:
+                types.add("HowTo")
+            if '"article"' in t or "'article'" in t:
+                types.add("Article")
+    except Exception:
+        pass
+    # microdataの痕跡（緩く）
+    try:
+        if page.locator('[itemtype*="FAQPage"]').count() > 0:
+            types.add("FAQ")
+        if page.locator('[itemtype*="HowTo"]').count() > 0:
+            types.add("HowTo")
+        if page.locator('[itemtype*="Article"]').count() > 0:
+            types.add("Article")
+    except Exception:
+        pass
+    return sorted(types)
+
+def _extract_intro_text(page, limit_chars: int = 2000) -> str:
+    """本文冒頭テキストを軽量に抽出（main/article/#content/.entry-content を優先）。"""
+    candidates = [
+        "main", "article", "#content", ".entry-content", ".post-content", ".content",
+    ]
+    text = ""
+    try:
+        for sel in candidates:
+            loc = page.locator(sel)
+            if loc.count() > 0:
+                try:
+                    t = loc.first.inner_text(timeout=1000) or ""
+                except Exception:
+                    t = ""
+                t = _WS_RE.sub(" ", t).strip()
+                if len(t) >= 80:  # あまりに短いのはスキップ
+                    text = t
+                    break
+        if not text:
+            # やむなく body 全体から
+            try:
+                t = page.locator("body").inner_text(timeout=1000) or ""
+                text = _WS_RE.sub(" ", t).strip()
+            except Exception:
+                text = ""
+    except Exception:
+        text = ""
+    return text[:limit_chars]
+
+def _fetch_page_outline(url: str, *, timeout_ms: int = 18000, lang: str = "ja", gl: str = "jp") -> Dict[str, Any]:
     """
-    URLを開いて H2/H3 の配列を返す。DOM抽出がダメでも HTML からフォールバック。
-    失敗しても {"url": url, "h": []} を返して落ちない。
+    URLを開いて見出し/冒頭/構造化データ/シグナルを抽出。
+    失敗しても {"url": url, "h": []} を返す。
     """
     with _PWSession(lang=lang, gl=gl) as sess:
         page = sess.new_page()
         try:
-            page.goto(url, timeout=timeout_ms, wait_until="domcontentloaded")
-            # DOM優先（高速）。空ならHTMLから。
+            resp = page.goto(url, timeout=timeout_ms, wait_until="domcontentloaded")
+            status = None
+            try:
+                status = resp.status if resp else None
+            except Exception:
+                status = None
+
             heads = _extract_headings_from_dom(page, timeout_ms=max(8000, timeout_ms // 2))
             if not heads:
                 html = page.content()
                 heads = _extract_headings_from_html(html or "")
-            return {"url": url, "h": heads}
+
+            intro = _extract_intro_text(page, limit_chars=2000)
+            schema_types = _detect_schema_types(page)
+
+            # 軽量シグナル
+            wc = len((intro or "").split())
+            has_table = False
+            try:
+                has_table = page.locator("table").count() > 0
+            except Exception:
+                has_table = False
+            signals = {
+                "word_count": wc,
+                "has_faq": "FAQ" in schema_types,
+                "has_howto": "HowTo" in schema_types,
+                "has_table": bool(has_table),
+            }
+            return {"url": url, "h": heads, "intro": intro, "schema": schema_types, "signals": signals, "http": {"status": status}}
         except Exception:
             return {"url": url, "h": []}
-
 
 # ---------- 収集・保存パイプライン ----------
 
 def collect_serp_outlines_for_keyword(keyword: str, *, limit: int = 6,
                                       lang: str = "ja", gl: str = "jp",
-                                      qna_required: bool = False, article_title: str = "") -> List[Dict]:
+                                      qna_required: bool = False, article_title: str = "") -> List[Dict[str, Any]]:
+
     """
     キーワードでGoogle検索（CSE JSON API） → 上位URLを巡回 → 各ページのH2/H3を抽出して返却。
     （SERPのHTMLスクレイピングは行わない）
     戻り値: [{url, h:[...]}, ...]
     """
-    urls = _search_top_urls_cse(keyword, limit=limit, lang=lang, gl=gl,
-                                qna_required=qna_required, article_title=article_title)
-    outlines: List[Dict] = []
-    # 1URLずつ短時間で取りにいく（並列はメモリ/帯域コストが跳ねるので避ける）
-    for u in urls:
-        outlines.append(_fetch_page_outline(u, lang=lang, gl=gl))
+    results = _search_top_urls_cse(keyword, limit=limit, lang=lang, gl=gl,
+                                   qna_required=qna_required, article_title=article_title)
+    outlines: List[Dict[str, Any]] = []
+    # 1URLずつ巡回（並列はリソース重いので避ける）
+    for r in results:
+        detail = _fetch_page_outline(r["url"], lang=lang, gl=gl)
+        # CSEの title/snippet を付与（後方互換のため任意項目）
+        detail["title"] = r.get("title") or ""
+        detail["snippet"] = r.get("snippet") or ""
+        outlines.append(detail)
     return outlines
 
 
-def cache_outlines(article_id: int, outlines: List[Dict]) -> Dict:
+def cache_outlines(article_id: int, outlines: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     SerpOutlineCacheに保存（新規行として追加）。
     既存キャッシュを消さず、最新を参照したい場合は executed_at/fetched_at の新しいレコードを使う想定。
@@ -564,8 +678,17 @@ def cache_outlines(article_id: int, outlines: List[Dict]) -> Dict:
     return {"article_id": article_id, "saved_count": len(outlines), "cache_id": rec.id}
 
 
+def _is_recent_cache(rec: SerpOutlineCache) -> bool:
+    try:
+        if not rec or not rec.fetched_at:
+            return False
+        return rec.fetched_at >= datetime.utcnow() - timedelta(days=_CACHE_TTL_DAYS)
+    except Exception:
+        return False
+
 def collect_and_cache_for_article(article_id: int, *, limit: int = 6,
-                                  lang: str = "ja", gl: str = "jp") -> Dict:
+                                  lang: str = "ja", gl: str = "jp",
+                                  force: bool = False) -> Dict[str, Any]:
     """
     Article.id から keyword（なければ title）を使ってSERP収集→キャッシュへ保存。
     """
@@ -576,6 +699,21 @@ def collect_and_cache_for_article(article_id: int, *, limit: int = 6,
     query = (art.keyword or art.title or "").strip()
     if not query:
         return {"ok": False, "error": "no keyword or title to search"}
+    
+    # 直近キャッシュが新鮮ならスキップ（API枠節約）
+    try:
+        latest: Optional[SerpOutlineCache] = (
+            db.session.query(SerpOutlineCache)
+            .filter(SerpOutlineCache.article_id == article_id)
+            .order_by(SerpOutlineCache.fetched_at.desc())
+            .first()
+        )
+    except Exception:
+        latest = None
+
+    if not force and latest and _is_recent_cache(latest):
+        return {"ok": True, "query": query, "skipped": "recent_cache", "cache_id": latest.id, "saved_count": len(latest.outlines or [])}
+
 
     # 記事タイトルからQ&A/FAQっぽさを推定し、必要ならQ&A系ページ以外を除外
     qna_required = _looks_like_qna_article(art.title or "")
