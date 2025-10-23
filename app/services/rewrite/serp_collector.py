@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import re
 import time
-from typing import List, Dict, Optional
-from urllib.parse import quote
+from typing import List, Dict, Optional, Tuple
+from urllib.parse import quote, urlparse, parse_qs, unquote
 
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 from playwright.sync_api import Error as PWError
@@ -137,22 +137,64 @@ def _is_consent_or_block_page(title_text: str, body_text: str) -> bool:
     ]
     return any(h in t or h in b for h in hints)
 
+def _normalize_google_redirect(href: Optional[str]) -> Tuple[Optional[str], bool]:
+    """
+    Googleの /url リダイレクトを外部の実URLに展開する。
+    戻り値: (実URL or None, 展開を行ったかどうか)
+    """
+    if not href:
+        return None, False
+    try:
+        u = urlparse(href)
+        # 典型: https://www.google.com/url?q=https://example.com/....&sa=...
+        if u.netloc.endswith("google.com") and u.path == "/url":
+            q = parse_qs(u.query).get("q", [])
+            if q:
+                # q は URL エンコードされていることが多い
+                real = unquote(q[0])
+                # 明らかに外部URLだけ採用
+                if real.startswith("http://") or real.startswith("https://"):
+                    return real, True
+    except Exception:
+        pass
+    return href, False
+
 
 def _is_google_internal(href: Optional[str]) -> bool:
     """
     Google内部/特殊枠を除外（news/maps/shopping/images 等）。
+    なお、/url?q=... は _normalize_google_redirect 側で外部URLへ展開するため、
+    ここでは「純粋に内部だけ」を弾く判定にする。
     """
     if not href:
         return True
     href_l = href.lower()
-    if "google." in href_l:
-        # ただし cache/view-source 等は論外、/url?q= は外部の実URLに解決されるがここでは弾く
-        return True
+    # /url?q=... は別途展開するので、ここでは即除外しない
+    if href_l.startswith("http://google.") or href_l.startswith("https://google."):
+        # ただし /url 以外（=純内部）は除外
+        try:
+            u = urlparse(href)
+            if u.path != "/url":
+                return True
+        except Exception:
+            return True
     # 特定サービスの痕跡（念のため二重で）
     bad_starts = (
         "/search?", "/imgres?", "/maps", "/news", "/gws/", "/shopping", "/aclk",
     )
     return href_l.startswith(("http://google.", "https://google.", *bad_starts))
+
+def _normalize_and_filter_href(href: Optional[str]) -> Optional[str]:
+    """
+    href を正規化（/url?q=... 展開）し、Google内部リンクなら None。
+    """
+    if not href:
+        return None
+    # /url?q=... を実URLに展開
+    real, expanded = _normalize_google_redirect(href)
+    if not real:
+        return None
+    return None if _is_google_internal(real) else real
 
 
 def _extract_result_links(page, *, limit: int) -> List[str]:
@@ -183,12 +225,14 @@ def _extract_result_links(page, *, limit: int) -> List[str]:
             n = min(loc.count(), limit * 3)  # 余裕を取ってからフィルタ
             for i in range(n):
                 try:
-                    href = loc.nth(i).get_attribute("href")
+                    raw = loc.nth(i).get_attribute("href")
                 except Exception:
-                    href = None
-                if not href or _is_google_internal(href):
+                    raw = None
+                href = _normalize_and_filter_href(raw)
+                if not href:
                     continue
                 urls.append(href)
+                # 早期打ち切り
                 if len(urls) >= limit:
                     break
             if len(urls) >= limit:
@@ -206,6 +250,8 @@ def _extract_result_links(page, *, limit: int) -> List[str]:
               const seen = new Set();
               const hs = document.querySelectorAll('h3');
               for (const h of hs) {
+              // 画像やニュースなど特殊枠をなるべく避ける（厳密でなくてOK）
+                if (h.closest('[role="region"][aria-label^="ニュース"]')) continue;
                 let a = h.closest('a');
                 if (!a) {
                   // 直近祖先に a が無ければ周辺を探索
@@ -217,7 +263,6 @@ def _extract_result_links(page, *, limit: int) -> List[str]:
                 }
                 if (!a) continue;
                 const href = a.getAttribute('href') || '';
-                const low = href.toLowerCase();
                 if (!href) continue;
                 if (seen.has(href)) continue;
                 seen.add(href);
@@ -226,9 +271,10 @@ def _extract_result_links(page, *, limit: int) -> List[str]:
               return out;
             }
             """
-            cand = page.evaluate(js)
-            for href in cand:
-                if not href or _is_google_internal(href):
+            cand = page.evaluate(js) or []
+            for raw in cand:
+                href = _normalize_and_filter_href(raw)
+                if not href:
                     continue
                 urls.append(href)
                 if len(urls) >= limit:
