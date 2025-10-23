@@ -316,7 +316,17 @@ def _search_top_urls(keyword: str, *, limit: int = 6, lang: str = "ja", gl: str 
 
         def _attempt(visit_url: str) -> List[str]:
             try:
-                page.goto(visit_url, timeout=timeout_ms, wait_until="domcontentloaded")
+                # JavaScript描画を確実に待つ
+                page.goto(visit_url, timeout=timeout_ms, wait_until="load")
+                # 追加の描画完了を最大2.5秒だけ待つ（新UIはSPA）
+                page.wait_for_timeout(2500)
+
+                # もしまだh3が無ければ role="heading" or aria-level="3" を待つ
+                if page.locator("h3").count() == 0:
+                    try:
+                        page.wait_for_selector("div[role='heading'], [aria-level='3']", timeout=2000)
+                    except Exception:
+                        pass
                 # 同意/ブロック画面なら空配列にして上位でリトライ判断
                 title_text = page.title() or ""
                 body_text = page.locator("body").inner_text(timeout=1000) if page.locator("body").count() else ""
@@ -328,6 +338,11 @@ def _search_top_urls(keyword: str, *, limit: int = 6, lang: str = "ja", gl: str 
                 except Exception:
                     pass
                 links = _extract_result_links(page, limit=limit)
+                # 新UIでは <a jsname> のみ出現することが多いので再取得
+                if len(links) == 0:
+                    js_links = [a.get_attribute("href") for a in page.locator("a[jsname][href]").element_handles()]
+                    from urllib.parse import unquote
+                    links = [unquote(x) for x in js_links if x and x.startswith("http")]
                 # 0件なら、何が表示されていたかをスナップショット保存
                 if not links:
                     try:
