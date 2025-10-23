@@ -1,6 +1,7 @@
 # app/services/rewrite/serp_collector.py
 # ------------------------------------------------------------
 # SERP収集器（実働版）
+# （堅牢化版：リンク抽出フェイルオーバー／同意検知／0件時ワンリトライ）
 # - キーワードでGoogle検索
 # - 上位URLを取得（既定6件）
 # - 各ページから H2/H3 見出しを軽量抽出
@@ -21,6 +22,7 @@ from typing import List, Dict, Optional
 from urllib.parse import quote
 
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+from playwright.sync_api import Error as PWError
 
 from app import db
 from app.models import Article, SerpOutlineCache
@@ -72,12 +74,18 @@ class _PWSession:
     def __enter__(self) -> "_PWSession":
         self._pw = sync_playwright().start()
         # --no-sandbox は多くのサーバ環境で必要
-        self._browser = self._pw.chromium.launch(headless=True, args=["--no-sandbox"])
+        self._browser = self._pw.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-blink-features=AutomationControlled",
+            ],
+        )
         self._ctx = self._browser.new_context(
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/121.0.0.0 Safari/537.36"
+                "Chrome/141.0.0.0 Safari/537.36"
             ),
             locale=f"{self._lang}-{self._gl.upper()}",
         )
@@ -92,6 +100,7 @@ class _PWSession:
             if any(bad in url for bad in ("/ads?", "doubleclick.net", "googletag", "analytics", "facebook.com/tr")):
                 return route.abort()
             return route.continue_()
+        # Google SERPは軽く、外部ページ巡回も同じ方針で帯域節約
         self._ctx.route("**/*", _route_interceptor)
         return self
 
@@ -111,44 +120,161 @@ class _PWSession:
         return self._ctx.new_page()
 
 
-# ---------- Google 検索（上位URLだけ取る・軽量） ----------
+# ---------- Google SERPの判定・抽出ヘルパ ----------
 
-def _search_top_urls(keyword: str, *, limit: int = 6, lang: str = "ja", gl: str = "jp",
-                     timeout_ms: int = 18000) -> List[str]:
-    """Googleでキーワード検索し、検索結果の 'h3 を持つリンク' から外部URLを抽出。"""
-    if limit <= 0:
-        return []
-    q = quote(keyword)
-    # num= は 10までしか効かないが、上限をかけておく
-    url = f"https://www.google.com/search?q={q}&hl={lang}&gl={gl}&num={min(limit, 10)}"
+def _is_consent_or_block_page(title_text: str, body_text: str) -> bool:
+    """
+    Google の同意/CAPTCHA/一時ブロック画面をざっくり検知。
+    """
+    t = (title_text or "").lower()
+    b = (body_text or "").lower()
+    hints = [
+        "before you continue to google",      # EN consent
+        "確認のためにお手伝いください",             # JA captcha-ish
+        "一時的にアクセスできません",               # JP temp block
+        "unusual traffic",                    # EN rate limit
+        "to continue, please verify",         # generic
+    ]
+    return any(h in t or h in b for h in hints)
 
+
+def _is_google_internal(href: Optional[str]) -> bool:
+    """
+    Google内部/特殊枠を除外（news/maps/shopping/images 等）。
+    """
+    if not href:
+        return True
+    href_l = href.lower()
+    if "google." in href_l:
+        # ただし cache/view-source 等は論外、/url?q= は外部の実URLに解決されるがここでは弾く
+        return True
+    # 特定サービスの痕跡（念のため二重で）
+    bad_starts = (
+        "/search?", "/imgres?", "/maps", "/news", "/gws/", "/shopping", "/aclk",
+    )
+    return href_l.startswith(("http://google.", "https://google.", *bad_starts))
+
+
+def _extract_result_links(page, *, limit: int) -> List[str]:
+    """
+    現在のGoogle SERPから、外部サイトの結果リンクを複数のセレクタで抽出してフェイルオーバ。
+    """
     urls: List[str] = []
-    with _PWSession(lang=lang, gl=gl) as sess:
-        page = sess.new_page()
+    errors: List[str] = []
+
+    # セレクタ候補（経験的に強い順）
+    selector_sets = [
+        # 1) a:has(h3) … 一般的オーガニック
+        ("a:has(h3)", True),
+        # 2) 直下のカードに付与されることが多い yuRUbf
+        ("div.yuRUbf > a", False),
+        # 3) g-card内の一般枠など（保険）
+        ("div.g a[href]", False),
+        # 4) h3の親aを辿る（JS実行）
+        #    → 下で JS 実行で追加抽出
+    ]
+
+    # まずは CSS ロケータで取れるだけ取る
+    for sel, need_wait in selector_sets:
         try:
-            page.goto(url, timeout=timeout_ms)
-            # h3要素をヘッダとして持つアンカー（一般的なオーガニック結果）
-            page.wait_for_selector("a h3", timeout=timeout_ms // 2)
-            # Playwright の locator は軽い
-            # a:has(h3) → 直近の a を取れる（google 内部リンクは除外）
-            anchors = page.locator("a:has(h3)")
-            count = min(anchors.count(), limit * 2)  # 余裕をみて取り、あとでフィルタ
-            for i in range(count):
+            if need_wait:
+                page.wait_for_selector(sel, timeout=1500)
+            loc = page.locator(sel)
+            n = min(loc.count(), limit * 3)  # 余裕を取ってからフィルタ
+            for i in range(n):
                 try:
-                    href = anchors.nth(i).get_attribute("href")
+                    href = loc.nth(i).get_attribute("href")
                 except Exception:
                     href = None
-                if not href:
-                    continue
-                # Google内部は除外
-                if "google." in href:
+                if not href or _is_google_internal(href):
                     continue
                 urls.append(href)
                 if len(urls) >= limit:
                     break
-        except PWTimeout:
-            # 部分結果でよい。空のままでもOK。
+            if len(urls) >= limit:
+                break
+        except (PWTimeout, PWError) as e:
+            errors.append(f"{sel}: {type(e).__name__}")
+            continue
+
+    # さらに空なら JS で拾う（h3 → 最近傍の a）
+    if len(urls) < limit:
+        try:
+            js = """
+            () => {
+              const out = [];
+              const seen = new Set();
+              const hs = document.querySelectorAll('h3');
+              for (const h of hs) {
+                let a = h.closest('a');
+                if (!a) {
+                  // 直近祖先に a が無ければ周辺を探索
+                  const p = h.parentElement;
+                  if (p) {
+                    const aa = p.querySelectorAll('a[href]');
+                    if (aa && aa.length) a = aa[0];
+                  }
+                }
+                if (!a) continue;
+                const href = a.getAttribute('href') || '';
+                const low = href.toLowerCase();
+                if (!href) continue;
+                if (seen.has(href)) continue;
+                seen.add(href);
+                out.push(href);
+              }
+              return out;
+            }
+            """
+            cand = page.evaluate(js)
+            for href in cand:
+                if not href or _is_google_internal(href):
+                    continue
+                urls.append(href)
+                if len(urls) >= limit:
+                    break
+        except Exception:
             pass
+
+    # 正規化＆重複削除（上限を掛ける）
+    return _unique_keep_order(urls, limit)
+
+# ---------- Google 検索（上位URLだけ取る・軽量） ----------
+
+def _search_top_urls(keyword: str, *, limit: int = 6, lang: str = "ja", gl: str = "jp",
+                     timeout_ms: int = 18000) -> List[str]:
+    """Googleでキーワード検索し、検索結果から外部URLを抽出（フェイルオーバ付き）。"""
+    if limit <= 0:
+        return []
+    q = quote(keyword)
+    # num= は 10まで、pws=0 でパーソナライズ抑制のヒント
+    base = f"https://www.google.com/search?q={q}&hl={lang}&gl={gl}&num={min(limit, 10)}&pws=0"
+
+    urls: List[str] = []
+    with _PWSession(lang=lang, gl=gl) as sess:
+        page = sess.new_page()
+        def _attempt(visit_url: str) -> List[str]:
+            try:
+                page.goto(visit_url, timeout=timeout_ms, wait_until="domcontentloaded")
+                # 同意/ブロック画面なら空配列にして上位でリトライ判断
+                title_text = page.title() or ""
+                body_text = page.locator("body").inner_text(timeout=1000) if page.locator("body").count() else ""
+                if _is_consent_or_block_page(title_text, body_text):
+                    return []
+                # 検索結果本体のコンテナが来るのを待つ（柔らかく）
+                try:
+                    page.wait_for_selector("div#search", timeout=1000)
+                except Exception:
+                    pass
+                return _extract_result_links(page, limit=limit)
+            except (PWTimeout, PWError):
+                return []
+
+        # 1回目
+        urls = _attempt(base)
+        # 0件なら、軽い再試行（hl固定・num=10・pws=0は維持）
+        if not urls:
+            urls = _attempt(base + "&source=hp")
     return _unique_keep_order(urls, limit)
 
 
