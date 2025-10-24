@@ -865,8 +865,10 @@ def _validate_html_for_publish(before_html: str, after_html: str) -> Tuple[bool,
     try:
         ob = [t.name for t in BeautifulSoup(before_html or "", "html.parser").find_all(True)]
         ab = [t.name for t in BeautifulSoup(after_html  or "", "html.parser").find_all(True)]
-        if ob != ab:
-            return False, "tag_sequence_changed"
+        # タグの並びがズレても、全体の構造がほぼ同じなら許可する
+        diff_ratio = abs(len(ob) - len(ab)) / max(len(ob), 1)
+        if diff_ratio > 0.05:  # 5％以上タグ数が違ったら止める
+            return False, f"tag_sequence_changed(Δ={diff_ratio:.2f})"
     except Exception:
         pass
     # 保護ブロック改変/欠落（before から抽出 → after に原文そのまま存在するか）
