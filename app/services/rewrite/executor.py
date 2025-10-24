@@ -7,6 +7,7 @@ import json
 import logging
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional
+import statistics
 
 from flask import current_app
 from sqlalchemy import select, text
@@ -123,6 +124,27 @@ def _unique_urls(outlines: List[Dict], limit: int = 10) -> List[str]:
             break
     return results    
 
+def _take_sources_with_titles(outlines: List[Dict], limit: int = 8) -> List[Dict]:
+    """
+    参照元を人間可読に（url, title, snippet）で最大 limit 件。
+    title/snippet が無いものは後方互換として url のみで出す。
+    """
+    out: List[Dict] = []
+    seen = set()
+    for o in outlines or []:
+        u = (o or {}).get("url")
+        if not u or u in seen:
+            continue
+        seen.add(u)
+        out.append({
+            "url": u,
+            "title": (o or {}).get("title") or "",
+            "snippet": (o or {}).get("snippet") or ""
+        })
+        if len(out) >= limit:
+            break
+    return out
+
 
 # ========== 収集フェーズ：材料集め ==========
 
@@ -209,6 +231,71 @@ def _collect_serp_outline(article: Article) -> List[Dict]:
     return []
 
 
+# ========== 競合構造シグナルの要約（FAQ/HowTo/表/語数など） ==========
+
+def _summarize_serp_signals(outlines: List[Dict]) -> Dict:
+    """
+    serp_collector が保存した signals/schema/intro を集計して、
+    - must_add_sections_suggested: ["FAQ","HowTo","Table"] のような“型”提案
+    - word_count_stats: {"median": x, "p75": y}
+    - estimated_length_range: "2500-3500" のような文字数レンジ仮説
+    を返す。データが無ければ空ベース。
+    """
+    if not outlines:
+        return {
+            "must_add_sections_suggested": [],
+            "word_count_stats": {},
+            "estimated_length_range": None
+        }
+    has_faq = 0
+    has_howto = 0
+    has_table = 0
+    wcounts: List[int] = []
+    for o in outlines:
+        schema = (o or {}).get("schema") or []
+        sig = (o or {}).get("signals") or {}
+        if "FAQ" in schema or sig.get("has_faq"):
+            has_faq += 1
+        if "HowTo" in schema or sig.get("has_howto"):
+            has_howto += 1
+        if sig.get("has_table"):
+            has_table += 1
+        wc = sig.get("word_count")
+        if isinstance(wc, int) and wc > 0:
+            wcounts.append(wc)
+    n = max(1, len(outlines))
+    suggest: List[str] = []
+    # “半数以上が採用している型”は積極提案
+    if has_faq >= (n // 2 + n % 2):
+        suggest.append("FAQ")
+    if has_howto >= (n // 2 + n % 2):
+        suggest.append("HowTo")
+    if has_table >= (n // 2 + n % 2):
+        suggest.append("Table")
+    stats = {}
+    est = None
+    try:
+        if wcounts:
+            med = int(statistics.median(wcounts))
+            p75 = int(statistics.quantiles(wcounts, n=4)[2]) if len(wcounts) >= 4 else med
+            stats = {"median": med, "p75": p75}
+            # 日本語のだいたいの文字数=単語数×1.8（_tokの逆近似）を使い、範囲に丸める
+            def _chars(words: int) -> int:
+                return int(words * 1.8)
+            low = max(1200, int(_chars(med) * 0.85))
+            high = int(_chars(p75) * 1.15)
+            # 500刻み程度に丸めて見やすく
+            def _round_500(x: int) -> int:
+                return int(round(x / 500.0) * 500)
+            est = f"{_round_500(low)}-{_round_500(high)}"
+    except Exception:
+        pass
+    return {
+        "must_add_sections_suggested": suggest,
+        "word_count_stats": stats,
+        "estimated_length_range": est
+    }
+
 # ========== 競合とのギャップ分析 & ログ用データ整形 ==========
 
 _H2_RE = re.compile(r"<h2[^>]*>(.*?)</h2>", flags=re.IGNORECASE | re.DOTALL)
@@ -293,7 +380,7 @@ def _build_gap_analysis(article: Article, original_html: str, outlines: List[Dic
     """
     # 本文をテキスト化（トークン節約）
     current_text = _strip_html_min(original_html)[:3500]
-    # SERP要約（冗長回避のためH2/H3中心）
+    # SERP要約（冗長回避のためH2/H3中心）＋ 競合の構造シグナル
     compact_outlines = []
     for o in (outlines or [])[:8]:
         compact_outlines.append({
@@ -301,6 +388,7 @@ def _build_gap_analysis(article: Article, original_html: str, outlines: List[Dic
             "h": (o.get("h") or [])[:30],
             "notes": o.get("notes", "")[:200]
         })
+    serp_signals = _summarize_serp_signals(outlines)
 
     sys = (
         "あなたは日本語SEOの編集長です。以下の材料から“何が不足か/何を足すべきか”を構造化して返してください。"
@@ -312,13 +400,24 @@ def _build_gap_analysis(article: Article, original_html: str, outlines: List[Dic
         "article": {"id": article.id, "title": article.title, "keyword": article.keyword},
         "gsc": gsc_snapshot,
         "current_excerpt": current_text,
-        "serp_outlines": compact_outlines
+        "serp_outlines": compact_outlines,
+        "serp_structure_signals": serp_signals
     }, ensure_ascii=False)
     raw = _chat(
         [{"role": "system", "content": sys}, {"role": "user", "content": usr}],
         TOKENS["policy"], TEMP["policy"], user_id=article.user_id
     )
     gap = _safe_json_loads(raw) or {}
+    # LLM出力を“データ駆動の仮説”で補強（不足していれば埋める／重複はユニーク化）
+    try:
+        ms = set((gap.get("must_add_sections") or []))
+        for s in (serp_signals.get("must_add_sections_suggested") or []):
+            ms.add(s)
+        gap["must_add_sections"] = sorted(list(ms))
+        if not gap.get("estimated_length_range") and serp_signals.get("estimated_length_range"):
+            gap["estimated_length_range"] = serp_signals["estimated_length_range"]
+    except Exception:
+        pass
     # チェックリスト文字列も（UI表示向け）
     checklist_lines: List[str] = []
     for k in ("missing_topics", "must_add_sections", "quality_issues"):
@@ -438,7 +537,7 @@ def _gen_meta_from_body(title: str, body_html: str, user_id: Optional[int]) -> s
 
 # ========== 方針生成 & 本文リライト ==========
 
-def _build_policy_text(article: Article, gsc: Dict, outlines: List[Dict]) -> str:
+def _build_policy_text(article: Article, gsc: Dict, outlines: List[Dict], gap_summary: Optional[Dict] = None) -> str:
     """
     LLMに「何を・どこを・どう直すか」の手順書を作らせる。
     ※ ここではHTMLを書かせない。あくまで“設計図”。
@@ -449,10 +548,25 @@ def _build_policy_text(article: Article, gsc: Dict, outlines: List[Dict]) -> str
         "出力は箇条書きベースで、見出し構成・導入改善・E-E-A-T・FAQ・用語説明など具体策を含めます。"
         "内部リンクの追加・変更・削除は一切提案しないでください（既存リンクは厳禁で触らない）。"
     )
+    # 競合の構造傾向を基に、出力仕様を条件付きで明示
+    gap = gap_summary or {}
+    must_sections = set((gap.get("must_add_sections") or []))
+    length_hint = gap.get("estimated_length_range") or ""
+    output_specs: List[str] = []
+    if "FAQ" in must_sections:
+        output_specs.append("FAQセクションを追加：H2配下でQを太字、Aは簡潔。最大5問。内部リンク・外部リンクは追加しない。")
+    if "HowTo" in must_sections:
+        output_specs.append("HowTo（手順）を追加：番号付きリストで3-7段階。各ステップ1-2文。")
+    if "Table" in must_sections:
+        output_specs.append("比較表を追加：<table>で列は『項目/説明/目安』の3列を基本。")
+    if length_hint:
+        output_specs.append(f"本文の総量は概ね {length_hint} 文字帯を目安（過度に盛らない）。")
+
     usr = json.dumps({
         "article": {"id": article.id, "title": article.title, "keyword": article.keyword, "url": article.posted_url},
         "gsc_snapshot": gsc,
         "serp_outlines": outlines[:8],  # 冗長回避
+        "rewrite_specs": output_specs
     }, ensure_ascii=False, indent=2)
     return _chat(
         [{"role": "system", "content": sys}, {"role": "user", "content": usr}],
@@ -600,19 +714,25 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
         used_templates = _derive_templates_from_gsc(gsc_snap)
         referenced_urls = _unique_urls(outlines, limit=10)
         referenced_count = len(referenced_urls)
+        referenced_sources = _take_sources_with_titles(outlines, limit=8)
 
         # 4) 方針作成
-        policy_text = _build_policy_text(article, gsc_snap, outlines)
+        policy_text = _build_policy_text(article, gsc_snap, outlines, gap_summary_json)
         # 人が一覧で判断しやすいよう、参照件数・URL・不足の要点を方針末尾に追記
         try:
             missing_topics = (gap_summary_json or {}).get("missing_topics") or []
             _mt_head = "、".join(missing_topics[:5])
             url_lines = "\n".join(referenced_urls[:8])
+            # タイトルも添えて人間可読に（スニペットはノイズを避けて省略/任意）
+            title_lines = "\n".join(
+                [f"- {s.get('title') or '(no title)'}\n  {s.get('url')}" for s in referenced_sources]
+            )
             policy_text = (
                 f"{policy_text}\n\n"
                 f"---\n"
                 f"【参照SERP件数】{referenced_count}\n"
                 f"【参照URL】\n{url_lines}\n"
+                f"【参照タイトル（抜粋）】\n{title_lines}\n"
                 f"【不足トピック（要点）】{_mt_head if _mt_head else '—'}\n"
             )
         except Exception:
