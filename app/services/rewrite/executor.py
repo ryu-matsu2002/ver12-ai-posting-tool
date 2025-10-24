@@ -76,7 +76,7 @@ def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float, user_id: Optional
             timeout=120,
         )
 
-        # TokenUsageLog（可能なら保存）
+        # TokenUsageLog（可能なら保存）— 失敗時は必ず rollback してセッションを健全化
         try:
             if hasattr(res, "usage") and user_id:
                 usage = res.usage
@@ -89,6 +89,11 @@ def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float, user_id: Optional
                 db.session.add(log)
                 db.session.commit()
         except Exception as e:
+            # ここが肝：例外時にロールバックしないとセッションが壊れっぱなしになる
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
             logging.warning(f"[rewrite/_chat] トークンログ保存失敗: {e}")
 
         content = (res.choices[0].message.content or "").strip()
