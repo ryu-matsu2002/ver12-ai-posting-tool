@@ -668,7 +668,7 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
 
         plan.status = "running"
         plan.started_at = datetime.utcnow()
-        plan.attempts = (plan.attempts or 0) + 1
+        plan.attempts = (plan.attempts or 0) + 1  # ※ドライランでカウントしたくない場合は後段で調整
         db.session.commit()
 
         article: Article = plan.article
@@ -682,14 +682,23 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
             # dry_run でも 'running' のままにしないよう終端化
             plan.finished_at = datetime.utcnow()
             if dry_run:
-                plan.status = "done"  # 既存の dry_run 終了と同等の扱いに寄せる
+                # ✅ ドライラン後は自動で再キュー（本番を続けて実行しやすくする）
+                plan.status = "queued"
+                plan.started_at = None
+                plan.finished_at = None
+                # （任意）ドライランではattemptsをカウントしない
+                try:
+                    if plan.attempts and plan.attempts > 0:
+                        plan.attempts -= 1
+                except Exception:
+                    pass
                 db.session.commit()
                 return {
-                    "status": "skipped(dry)",
-                    "reason": reason,
+                    "status": "done(dry)",
                     "plan_id": plan.id,
                     "article_id": article.id,
-                    "wp_post_id": None,
+                    "wp_post_id": wp_post_id,
+                    "note": "Dry-run finished and plan re-queued automatically."
                 }
             else:
                 # 本実行では計画をエラー終了（無効化はここでは行わない：手動判断の余地を残す）
