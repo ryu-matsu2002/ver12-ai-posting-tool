@@ -572,7 +572,32 @@ def _strip_new_anchors(html: str) -> str:
     # <a ...>テキスト</a> → “テキスト”のみ残す（テキスト内の他タグも除去）
     return _NEW_ANCHOR_RE.sub(lambda m: re.sub(r"<[^>]+>", "", m.group(0)), html)
 # ----------------------------------------------------------------------------------
+# --- 追加：リンク周辺の“保護ブロック”を丸ごと凍結（位置/クラス/コメント含め不変化） ----------
+# 例）<!-- ai-internal-link:... --> を含む段落や、<span class="topic">...</span> など見た目に影響するラッパ
+_PBLOCK_RE = re.compile(
+    r'(<!--\s*ai-internal-link:[^>]*-->.*?</p>)'
+    r'|(<span\s+class=["\']topic["\'][^>]*>.*?</span>)',
+    flags=re.I | re.S
+)
 
+def _mask_protected_blocks(html: str) -> Tuple[str, Dict[str, str]]:
+    mapping: Dict[str, str] = {}
+    def _repl(m):
+        idx = len(mapping)
+        key = f"[[PBLOCK_{idx}]]"
+        mapping[key] = m.group(0)
+        return key
+    masked = _PBLOCK_RE.sub(_repl, html or "")
+    return masked, mapping
+
+def _unmask_protected_blocks(html: str, mapping: Dict[str, str]) -> str:
+    if not html or not mapping:
+        return html or ""
+    out = html
+    for k, v in mapping.items():
+        out = out.replace(k, v)
+    return out
+# ----------------------------------------------------------------------------------
 # ========== メタ生成（任意・安全トリム） ==========
 
 def _strip_html_min(s: str) -> str:
@@ -662,6 +687,9 @@ def _rewrite_html(original_html: str, policy_text: str, user_id: Optional[int]) 
     戻りで [[LINK_i]] を厳密復元する。
     """
     masked, mapping = _mask_links(original_html or "")
+    # 保護ブロックも“丸ごと”凍結（リンクと同様に厳密復元）
+    p_masked, p_mapping = _mask_protected_blocks(masked)
+    masked_for_llm = p_masked
     allowed_tokens = list(mapping.keys())
 
     sys = (
@@ -670,16 +698,18 @@ def _rewrite_html(original_html: str, policy_text: str, user_id: Optional[int]) 
         "1) **リンクトークンは厳密一致で保持**：今回許可されるのは次のトークンだけです→ {ALLOWED} 。\n"
         "   これらは削除・変更・順序入れ替えをしないでください。新しい [[LINK_…]] を作らないこと。\n"
         "2) 元の本文に存在しない新しいハイパーリンク（<a>）を追加しないこと\n"
-        "3) 既存の見出し階層は概ね維持しつつ、導入・まとめ・FAQなどを改善してよい\n"
-        "4) 見出しルール：空の見出しを作らない。連続するH2/H3は禁止。新規H2は最大3つ、各H2直後に2–4文の本文を付与する\n"
-        "5) 事実に基づき、誇張・断定を避ける\n"
-        "6) 出力はHTML断片のみ。<html>や<body>は含めない\n"
+        "3) **[[PBLOCK_*]] は保護ブロック**です。中身・位置・順序・タグ・クラス・属性・コメントを一切変更/移動/複製しないこと。\n"
+        "   PBLOCKの前後のテキストのみ編集対象です。\n"
+        "4) 既存の見出し階層は概ね維持しつつ、導入・まとめ・FAQなどを改善してよい\n"
+        "5) 見出しルール：空の見出しを作らない。連続するH2/H3は禁止。新規H2は最大3つ、各H2直後に2–4文の本文を付与する\n"
+        "6) 事実に基づき、誇張・断定を避ける\n"
+        "7) 出力はHTML断片のみ。<html>や<body>は含めない\n"
     )
     usr = (
         "=== 修正方針 ===\n"
         f"{policy_text}\n\n"
         "=== 編集対象（リンクは [[LINK_i]] に置換済み） ===\n"
-        f"{masked}\n"
+        f"{masked_for_llm}\n"
         "\n---\n"
         "注意: 上記本文に含まれるリンクトークンの正確な一覧は ALLOWED と同一です。ALLOWED に無い [[LINK_…]] を新規に出力しないでください。\n"
     )
@@ -694,7 +724,8 @@ def _rewrite_html(original_html: str, policy_text: str, user_id: Optional[int]) 
     # 復元前に“不正なリンクトークン”を除去 + “素の<a>”を全面排除（リンクはトークン復元のみ許可）
     edited_clean = _sanitize_link_tokens(edited, allowed_tokens)
     edited_clean = _strip_new_anchors(edited_clean)
-    # 復元
+    # 保護ブロックを原文そのまま復元 → 既存リンクを復元
+    edited_clean = _unmask_protected_blocks(edited_clean, p_mapping)
     restored = _unmask_links(edited_clean, mapping)
     # フェイルセーフ：実質空なら元本文を返す（ログ WARNING を出す）
     try:
@@ -722,6 +753,38 @@ def _same_domain(site_url: str, posted_url: str) -> bool:
         return (p == s) or p.endswith("." + s)
     except Exception:
         return False
+    
+# ========== 追加：WP投稿前の安全バリデーション ==================================
+def _validate_html_for_publish(before_html: str, after_html: str) -> Tuple[bool, str]:
+    """
+    リンクや保護ブロック、見出しの空要素、トークン残留など“壊し”を検知して投稿を止める。
+    """
+    import re
+    # href 集合・順序チェック
+    def hrefs_with_order(h: str) -> List[str]:
+        return [m.group(1).strip() for m in re.finditer(r'href=["\']([^"\']+)["\']', h or "", flags=re.I)]
+    b_order = hrefs_with_order(before_html or "")
+    a_order = hrefs_with_order(after_html or "")
+    if set(b_order) != set(a_order):
+        missing = sorted(set(b_order) - set(a_order))[:5]
+        return False, f"links_changed_or_missing:{missing}"
+    # 保護ブロック改変/欠落（before から抽出 → after に原文そのまま存在するか）
+    _, pmap_before = _mask_protected_blocks(before_html or "")
+    for _k, raw in pmap_before.items():
+        if raw not in (after_html or ""):
+            return False, "pblock_missing_or_modified"
+    # 素の <a> 追加検知
+    if _NEW_ANCHOR_RE.search(after_html or ""):
+        return False, "new_anchor_detected"
+    # 空見出し検知
+    if re.search(r'<h[23][^>]*>\s*</h[23]>', after_html or "", flags=re.I):
+        return False, "empty_heading_detected"
+    # [[LINK_…]] 残留（復元漏れ）検知
+    if _LINK_ANY_RE.search(after_html or ""):
+        return False, "link_token_residue"
+    return True, "ok"
+# ===============================================================================
+
 # ========== メイン：1件実行 ==========
 
 def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bool = True) -> Dict:
@@ -893,13 +956,16 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
         # 8) WP更新（ドライランじゃなければ反映）
         if not dry_run:
             try:
-                # 既存の ai-content ラッパがある場合は尊重（無ければそのまま）
-                if '<div class="ai-content">' in edited_html:
-                    new_html = edited_html
+                # 見た目やクラスに触らない：LLM出力をそのまま使う
+                ok, reason = _validate_html_for_publish(original_html, edited_html)
+                if not ok:
+                    log.wp_status = "error"
+                    log.error_message = f"publish_aborted:{reason}"
+                    db.session.commit()
+                    wp_ok = False
                 else:
-                    new_html = f'<div class="ai-content">{edited_html}</div>'
-
-                wp_ok = update_post_content(site, wp_post_id, new_html) if wp_post_id else False
+                    wp_ok = update_post_content(site, wp_post_id, edited_html) if wp_post_id else False
+ 
 
                 # 任意：メタ説明を安全に生成・更新（内部リンクは一切触らない）
                 if wp_ok:
@@ -916,7 +982,8 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
                     log.snapshot_after = edited_html
                 else:
                     log.wp_status = "error"
-                    log.error_message = "WP更新に失敗しました"
+                    if not log.error_message:
+                        log.error_message = "WP更新に失敗しました"
                 db.session.commit()
             except Exception as e:
                 wp_err = str(e)
