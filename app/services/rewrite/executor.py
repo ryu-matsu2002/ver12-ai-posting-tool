@@ -609,31 +609,16 @@ def _strip_anchors_not_in(html: str, allowed_hrefs: set) -> str:
 # --- 追加：タグ構造を保ったまま「テキストだけ」入れ替えるための属性同期 ------------------------
 def _restore_attributes_preserve_text(original_html: str, edited_html: str) -> Tuple[str, bool]:
     """
-    目的：CSS/デザインを絶対壊さない。
-    手順：タグ列（順序と名前）が一致していることを確認し、
-          すべての属性（class/style/id/data-* など）を原文のものに強制同期する。
-          子テキストは edited 側を残す＝文章だけ変わる。
-    戻り： (安全化したHTML, strict_ok)
-           strict_ok=False の場合は『タグ列がずれている（追加・削除・入れ替え）』ことを示す。
+    役割変更（2025-10-24）：
+      - “文章だけ修正／リンクやデザインは一切触らない”ポリシーを厳守するため、
+        以前の『属性を原文に強制同期』ロジックを撤回。
+      - class/style/id/data-* などの属性を変更・同期・削除しない。
+      - ここでは何もしない（No-Op）で edited_html をそのまま返す。
+
+    戻り値:
+      (edited_html, True) — 処理成功扱い（構造は別の検証で見る）
     """
-    try:
-        o = BeautifulSoup(original_html or "", "html.parser")
-        e = BeautifulSoup(edited_html or "", "html.parser")
-        o_tags = o.find_all(True)
-        e_tags = e.find_all(True)
-        if len(o_tags) != len(e_tags):
-            return edited_html, False
-        for ot, et in zip(o_tags, e_tags):
-            if ot.name != et.name:
-                return edited_html, False
-            # et の属性を完全に捨てて、ot の属性を丸ごとコピー
-            et.attrs.clear()
-            for k, v in ot.attrs.items():
-                et.attrs[k] = v
-        return str(e), True
-    except Exception:
-        # 解析失敗時は edited をそのまま返し、検証で止める
-        return edited_html, False
+    return edited_html, True
 
 # --- 追加：テキストノード数の乖離チェック（文章限定リライトの逸脱を検知） ------------------------
 def _textnode_divergence_too_large(original_html: str, edited_html: str, tolerance: float = 0.15) -> bool:
