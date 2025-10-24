@@ -13,6 +13,7 @@ from flask import current_app
 from sqlalchemy import select, text
 from sqlalchemy.orm import joinedload, selectinload
 from urllib.parse import urlparse
+from bs4 import BeautifulSoup, NavigableString
 from openai import OpenAI, BadRequestError
 
 from app import db
@@ -600,6 +601,59 @@ def _strip_anchors_not_in(html: str, allowed_hrefs: set) -> str:
     return _ANCHOR_WITH_HREF_RE.sub(repl, html)
 # ----------------------------------------------------------------------------------
 
+# --- 追加：タグ構造を保ったまま「テキストだけ」入れ替えるための属性同期 ------------------------
+def _restore_attributes_preserve_text(original_html: str, edited_html: str) -> Tuple[str, bool]:
+    """
+    目的：CSS/デザインを絶対壊さない。
+    手順：タグ列（順序と名前）が一致していることを確認し、
+          すべての属性（class/style/id/data-* など）を原文のものに強制同期する。
+          子テキストは edited 側を残す＝文章だけ変わる。
+    戻り： (安全化したHTML, strict_ok)
+           strict_ok=False の場合は『タグ列がずれている（追加・削除・入れ替え）』ことを示す。
+    """
+    try:
+        o = BeautifulSoup(original_html or "", "html.parser")
+        e = BeautifulSoup(edited_html or "", "html.parser")
+        o_tags = o.find_all(True)
+        e_tags = e.find_all(True)
+        if len(o_tags) != len(e_tags):
+            return edited_html, False
+        for ot, et in zip(o_tags, e_tags):
+            if ot.name != et.name:
+                return edited_html, False
+            # et の属性を完全に捨てて、ot の属性を丸ごとコピー
+            et.attrs.clear()
+            for k, v in ot.attrs.items():
+                et.attrs[k] = v
+        return str(e), True
+    except Exception:
+        # 解析失敗時は edited をそのまま返し、検証で止める
+        return edited_html, False
+
+# --- 追加：テキストノード数の乖離チェック（文章限定リライトの逸脱を検知） ------------------------
+def _textnode_divergence_too_large(original_html: str, edited_html: str, tolerance: float = 0.15) -> bool:
+    """
+    原文と編集後の『テキストノード個数』の乖離を見て、構造が大きく揺れていないかを判定。
+    tolerance=0.15 → 15% 超の差で True（=大きすぎ）
+    """
+    try:
+        def _count(h: str) -> int:
+            s = BeautifulSoup(h or "", "html.parser")
+            n = 0
+            for d in s.descendants:
+                if isinstance(d, NavigableString) and str(d).strip():
+                    # a/PBLOCK 内の文字は既にマスク→復元済みなのでそのまま数える
+                    n += 1
+            return n
+        o_n = _count(original_html)
+        e_n = _count(edited_html)
+        if o_n == 0:
+            return False
+        return abs(e_n - o_n) / o_n > tolerance
+    except Exception:
+        return False
+
+
 # --- 追加：リンク周辺の“保護ブロック”を丸ごと凍結（位置/クラス/コメント含め不変化） ----------
 # 例）<!-- ai-internal-link:... --> を含む段落や、<span class="topic">...</span> など見た目に影響するラッパ
 _PBLOCK_RE = re.compile(
@@ -761,6 +815,11 @@ def _rewrite_html(original_html: str, policy_text: str, user_id: Optional[int]) 
         restored = _strip_anchors_not_in(restored, allowed_hrefs)
     except Exception as e:
         logging.info(f"[rewrite/_rewrite_html] skip allowlist strip: {e}")
+
+    # ★ ここが肝：タグ列は原文と同一であることを要求し、属性は“原文に強制同期”する
+    restored, strict_ok = _restore_attributes_preserve_text(original_html, restored)
+    if not strict_ok:
+        logging.warning("[rewrite] tag sequence diverged; structure lock failed (will be blocked in validate).")    
     # フェイルセーフ：実質空なら元本文を返す（ログ WARNING を出す）
     try:
         if len(_strip_html_min(restored)) < 20:
@@ -802,6 +861,14 @@ def _validate_html_for_publish(before_html: str, after_html: str) -> Tuple[bool,
     if set(b_order) != set(a_order):
         missing = sorted(set(b_order) - set(a_order))[:5]
         return False, f"links_changed_or_missing:{missing}"
+    # タグ列が一致しているか（文章限定リライトの担保）
+    try:
+        ob = [t.name for t in BeautifulSoup(before_html or "", "html.parser").find_all(True)]
+        ab = [t.name for t in BeautifulSoup(after_html  or "", "html.parser").find_all(True)]
+        if ob != ab:
+            return False, "tag_sequence_changed"
+    except Exception:
+        pass
     # 保護ブロック改変/欠落（before から抽出 → after に原文そのまま存在するか）
     _, pmap_before = _mask_protected_blocks(before_html or "")
     for _k, raw in pmap_before.items():
@@ -810,6 +877,9 @@ def _validate_html_for_publish(before_html: str, after_html: str) -> Tuple[bool,
     # 素の <a> 追加検知
     if _NEW_ANCHOR_RE.search(after_html or ""):
         return False, "new_anchor_detected"
+    # テキストノード乖離（過度な構造変化の間接指標）
+    if _textnode_divergence_too_large(before_html, after_html):
+        return False, "textnode_divergence_too_large"
     # 空見出し検知
     if re.search(r'<h[23][^>]*>\s*</h[23]>', after_html or "", flags=re.I):
         return False, "empty_heading_detected"
@@ -995,6 +1065,9 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
                 if not ok:
                     log.wp_status = "error"
                     log.error_message = f"publish_aborted:{reason}"
+                    # 監査性：停止時でも after を残す
+                    if not log.snapshot_after:
+                        log.snapshot_after = edited_html
                     db.session.commit()
                     wp_ok = False
                 else:
