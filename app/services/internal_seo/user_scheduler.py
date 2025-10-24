@@ -356,4 +356,4 @@ def user_scheduler_tick(app) -> None:
                     )
             except Exception as e:
                 current_app.logger.exception("[iseo-user-scheduler] run_user_tick error (user=%s): %s", sched.user_id, e)
-        db.session.close()
+   

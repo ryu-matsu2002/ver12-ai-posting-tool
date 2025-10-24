@@ -466,6 +466,60 @@ def _derive_templates_from_gsc(gsc_snapshot: Dict) -> List[str]:
             pass
     return slugs or None
 
+def _gsc_based_rewrite_specs(gsc_snapshot: Dict) -> List[str]:
+    """
+    GSCの状態を “具体的な編集指示” に落とす。
+    方針文 (_build_policy_text) の rewrite_specs に必ず混ぜるための関数。
+    ※ WP設定や内部リンクを直接いじらない前提で、本文リライトで打てる手に限定。
+    """
+    specs: List[str] = []
+    st = (gsc_snapshot or {}).get("url_status") or {}
+    cov = (st.get("coverage_state") or "").lower()
+
+    # --- 未インデックス系 ---
+    # Discovered - not indexed → 重複/薄い/低価値の疑いが強いので独自性と冒頭訴求を強制
+    if "discovered" in cov and "not indexed" in cov:
+        specs += [
+            "冒頭100〜150字で『誰の・どんな悩みを・どう解決する記事か』を明示（結論→具体ベネフィット→固有名詞の順）",
+            "競合と被りやすい一般論は削る。各H2のはじめに“本記事固有の視点/事例”を1行要約で置く",
+            "FAQを3問追加（検索者が迷いそうな比較/期間/金額/リスク）※リンク追加は禁止",
+            "体験談/事例/データ/表のいずれかを最低1つ追加し、重複コンテンツの疑いを下げる",
+        ]
+    # Crawled - not indexed → 薄い/品質低の疑い。情報密度と整然性を上げる
+    if "crawled" in cov and "not indexed" in cov:
+        specs += [
+            "各H2末尾に2〜3行の“要点サマリ”を追加（結論→根拠→次に読む場所）",
+            "HowTo手順を3〜7ステップの番号リストで追加。各ステップは1〜2文で具体化",
+            "比較表（<table>）を1つ追加：列は『項目/説明/目安』の3列",
+        ]
+    # Alternate page with proper canonical → 重複シグナル。独自差分を強制
+    if "alternate page" in cov:
+        specs += [
+            "他ページと差分になる具体的な『対象者・目的・使用シーン』を導入で明記",
+            "競合に無い切り口（体験談・地域性・よくある誤解の反証）を最低2つ追加",
+        ]
+
+    # --- CTR/順位系 ---
+    metrics = (gsc_snapshot or {}).get("metrics_recent") or []
+    if metrics:
+        try:
+            last5 = metrics[:5]
+            avg_pos = sum((m.get("position") or 0) for m in last5) / max(1, len(last5))
+            avg_ctr = sum((m.get("ctr") or 0) for m in last5) / max(1, len(last5))
+            # 順位は悪くないのにCTRが低い → 冒頭訴求と見出しの具体化
+            if avg_pos and avg_pos <= 20 and avg_ctr < 0.02:
+                specs += [
+                    "導入直後に『結論＋想定読者のベネフィット』を1文で置く（装飾なし・誇張なし）",
+                    "H2/H3に“検索語を含む具体語”を追加（抽象見出しは避け、数値・期間・比較軸を明記）",
+                ]
+            # 順位も低い → 情報量と網羅性を増やす
+            if avg_pos and avg_pos > 30:
+                specs += [
+                    "不足しがちな関連小見出しを2〜4個追加（用語定義/メリデメ/失敗例/よくある質問）",
+                ]
+        except Exception:
+            pass
+    return specs
 
 # ========== リンク完全保護（置換→復元） ==========
 
@@ -507,6 +561,17 @@ def _sanitize_link_tokens(html: str, allowed_keys: List[str]) -> str:
         token = m.group(0)
         return token if token in allowed else ""
     return _LINK_ANY_RE.sub(_replace, html)
+
+# --- 追加：LLMが紛れ込ませる“素の <a>…</a>”を物理的に除去するフェイルセーフ ----------------
+_NEW_ANCHOR_RE = re.compile(r"<a\b[^>]*>.*?</a>", flags=re.I | re.S)
+
+def _strip_new_anchors(html: str) -> str:
+    """マスクされていない新規<a>…</a>は中身のテキストだけ残して除去"""
+    if not html:
+        return html
+    # <a ...>テキスト</a> → “テキスト”のみ残す（テキスト内の他タグも除去）
+    return _NEW_ANCHOR_RE.sub(lambda m: re.sub(r"<[^>]+>", "", m.group(0)), html)
+# ----------------------------------------------------------------------------------
 
 # ========== メタ生成（任意・安全トリム） ==========
 
@@ -575,6 +640,10 @@ def _build_policy_text(article: Article, gsc: Dict, outlines: List[Dict], gap_su
         output_specs.append("比較表を追加：<table>で列は『項目/説明/目安』の3列を基本。")
     if length_hint:
         output_specs.append(f"本文の総量は概ね {length_hint} 文字帯を目安（過度に盛らない）。")
+    # GSCの状態を“必ず実行する編集指示”として差し込む
+    gsc_specs = _gsc_based_rewrite_specs(gsc)
+    if gsc_specs:
+        output_specs.extend(gsc_specs)    
 
     usr = json.dumps({
         "article": {"id": article.id, "title": article.title, "keyword": article.keyword, "url": article.posted_url},
@@ -622,8 +691,9 @@ def _rewrite_html(original_html: str, policy_text: str, user_id: Optional[int]) 
         TOKENS["rewrite"], TEMP["rewrite"], user_id=user_id
     )
 
-    # 復元前に“不正なリンクトークン”を除去
+    # 復元前に“不正なリンクトークン”を除去 + “素の<a>”を全面排除（リンクはトークン復元のみ許可）
     edited_clean = _sanitize_link_tokens(edited, allowed_tokens)
+    edited_clean = _strip_new_anchors(edited_clean)
     # 復元
     restored = _unmask_links(edited_clean, mapping)
     # フェイルセーフ：実質空なら元本文を返す（ログ WARNING を出す）
@@ -646,9 +716,10 @@ def _same_domain(site_url: str, posted_url: str) -> bool:
     try:
         s = urlparse(site_url).hostname or ""
         p = urlparse(posted_url).hostname or ""
-        s = s.lower().lstrip("www.")
-        p = p.lower().lstrip("www.")
-        return p.endswith(s)
+        s = s.lower().strip(".").lstrip("www.")
+        p = p.lower().strip(".").lstrip("www.")
+        # 完全一致 or ドット境界つきのサフィックスのみ許可（spoof-roof-pilates.com を排除）
+        return (p == s) or p.endswith("." + s)
     except Exception:
         return False
 # ========== メイン：1件実行 ==========
@@ -720,7 +791,7 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
                     "status": "done(dry)",
                     "plan_id": plan.id,
                     "article_id": article.id,
-                    "wp_post_id": wp_post_id,
+                    "wp_post_id": None,
                     "note": "Dry-run finished and plan re-queued automatically."
                 }
             else:
