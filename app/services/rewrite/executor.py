@@ -605,7 +605,58 @@ def _strip_anchors_not_in(html: str, allowed_hrefs: set) -> str:
         return re.sub(r"<[^>]+>", "", m.group(0))
     return _ANCHOR_WITH_HREF_RE.sub(repl, html)
 # ----------------------------------------------------------------------------------
+# --- 追加：リンクの見た目を壊す“親要素のインラインstyle”から color / text-decoration だけを除去 -----
+def _neutralize_parent_styles_affecting_links(html: str) -> str:
+    """
+    アンカー自体は復元済みでも、親の inline style が color や text-decoration を上書きして
+    青色や下線が消えることがある。直近の親〜祖父（最大2階層）から、これらの宣言だけを除去。
+    クラスや他のstyleは一切触らない。HTML以外は変更しない。
+    """
+    if not html:
+        return html
+    try:
+        soup = BeautifulSoup(html, "html.parser")
 
+        def _strip_decls(tag):
+            if not tag or not tag.has_attr("style"):
+                return
+            # style文字列から color / text-decoration の宣言だけ取り除く
+            decls = []
+            for frag in str(tag["style"]).split(";"):
+                frag = frag.strip()
+                if not frag:
+                    continue
+                k = frag.split(":", 1)[0].strip().lower()
+                if k in ("color", "text-decoration"):
+                    continue
+                decls.append(frag)
+            if decls:
+                tag["style"] = "; ".join(decls)
+            else:
+                del tag["style"]
+
+        for a in soup.find_all("a"):
+            p = a.parent
+            if p and p.name in ("span", "em", "strong", "p", "div"):
+                _strip_decls(p)
+                gp = p.parent
+                if gp and gp.name in ("span", "em", "strong", "p", "div"):
+                    _strip_decls(gp)
+        return str(soup)
+    except Exception:
+        return html
+
+# --- 追加：LLMが混入させる ```html や ``` のコードフェンスを除去 ----------------------------------
+_CODEFENCE_OPEN_RE  = re.compile(r"```+\s*html\s*", flags=re.I)
+_CODEFENCE_GENERIC_RE = re.compile(r"```+")
+def _strip_codefences(s: str) -> str:
+    if not s:
+        return s
+    s = _CODEFENCE_OPEN_RE.sub("", s)
+    s = _CODEFENCE_GENERIC_RE.sub("", s)
+    # 単独で残ったバッククォートのカケラを軽く掃除（文中の引用は温存）
+    s = re.sub(r"\n?`html\s*", "", s, flags=re.I)
+    return s
 # --- 追加：タグ構造を保ったまま「テキストだけ」入れ替えるための属性同期 ------------------------
 def _restore_attributes_preserve_text(original_html: str, edited_html: str) -> Tuple[str, bool]:
     """
@@ -806,10 +857,14 @@ def _rewrite_html(original_html: str, policy_text: str, user_id: Optional[int]) 
     except Exception as e:
         logging.info(f"[rewrite/_rewrite_html] skip allowlist strip: {e}")
 
-    # ★ ここが肝：タグ列は原文と同一であることを要求し、属性は“原文に強制同期”する
+    # コードフェンスのゴミ除去（```html など）
+    restored = _strip_codefences(restored)
+    # リンクの見た目を壊す親要素の inline style (color / text-decoration) を無効化
+    restored = _neutralize_parent_styles_affecting_links(restored)
+    # 属性同期はしない（文章だけ変更）— 互換のため関数は呼ぶが no-op
     restored, strict_ok = _restore_attributes_preserve_text(original_html, restored)
     if not strict_ok:
-        logging.warning("[rewrite] tag sequence diverged; structure lock failed (will be blocked in validate).")    
+        logging.warning("[rewrite] tag sequence diverged; structure lock flagged (soft).")
     # フェイルセーフ：実質空なら元本文を返す（ログ WARNING を出す）
     try:
         if len(_strip_html_min(restored)) < 20:
