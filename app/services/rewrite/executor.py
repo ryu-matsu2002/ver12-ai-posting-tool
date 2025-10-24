@@ -493,6 +493,20 @@ def _unmask_links(html: str, mapping: Dict[str, str]) -> str:
         out = out.replace(k, v)
     return out
 
+_LINK_ANY_RE = re.compile(r"\[\[LINK_[^\]]*\]\]")
+
+def _sanitize_link_tokens(html: str, allowed_keys: List[str]) -> str:
+    """
+    許可された [[LINK_n]] 以外の [[LINK_…]] を全て除去する安全弁。
+    - allowed_keys: 例 ["[[LINK_0]]","[[LINK_1]]",...]
+    """
+    if not html:
+        return html
+    allowed = set(allowed_keys or [])
+    def _replace(m):
+        token = m.group(0)
+        return token if token in allowed else ""
+    return _LINK_ANY_RE.sub(_replace, html)
 
 # ========== メタ生成（任意・安全トリム） ==========
 
@@ -579,31 +593,40 @@ def _rewrite_html(original_html: str, policy_text: str, user_id: Optional[int]) 
     戻りで [[LINK_i]] を厳密復元する。
     """
     masked, mapping = _mask_links(original_html or "")
+    allowed_tokens = list(mapping.keys())
 
     sys = (
         "あなたは日本語SEOの編集者です。与えられた“修正方針”に従い、HTML本文を編集し直してください。"
         "重要: 以下を厳守してください。\n"
-        "1) [[LINK_i]] というトークンは絶対に変更・削除・順序入替をしないこと（そのまま出力に残す）\n"
-        "2) 元の本文に存在しない新しいハイパーリンクを追加しないこと\n"
+        "1) **リンクトークンは厳密一致で保持**：今回許可されるのは次のトークンだけです→ {ALLOWED} 。\n"
+        "   これらは削除・変更・順序入れ替えをしないでください。新しい [[LINK_…]] を作らないこと。\n"
+        "2) 元の本文に存在しない新しいハイパーリンク（<a>）を追加しないこと\n"
         "3) 既存の見出し階層は概ね維持しつつ、導入・まとめ・FAQなどを改善してよい\n"
-        "4) 事実に基づき、誇張・断定を避ける\n"
-        "5) 出力はHTML断片のみ。<html>や<body>は含めない\n"
+        "4) 見出しルール：空の見出しを作らない。連続するH2/H3は禁止。新規H2は最大3つ、各H2直後に2–4文の本文を付与する\n"
+        "5) 事実に基づき、誇張・断定を避ける\n"
+        "6) 出力はHTML断片のみ。<html>や<body>は含めない\n"
     )
     usr = (
         "=== 修正方針 ===\n"
         f"{policy_text}\n\n"
         "=== 編集対象（リンクは [[LINK_i]] に置換済み） ===\n"
         f"{masked}\n"
+        "\n---\n"
+        "注意: 上記本文に含まれるリンクトークンの正確な一覧は ALLOWED と同一です。ALLOWED に無い [[LINK_…]] を新規に出力しないでください。\n"
     )
 
+    # プレースホルダを埋めてから呼ぶ
+    sys = sys.replace("{ALLOWED}", ", ".join(allowed_tokens) if allowed_tokens else "(なし)")
     edited = _chat(
         [{"role": "system", "content": sys}, {"role": "user", "content": usr}],
         TOKENS["rewrite"], TEMP["rewrite"], user_id=user_id
     )
 
+    # 復元前に“不正なリンクトークン”を除去
+    edited_clean = _sanitize_link_tokens(edited, allowed_tokens)
     # 復元
-    restored = _unmask_links(edited, mapping)
-    # フェイルセーフ：実質空なら元本文を返す（ログで追えるよう WARNING）
+    restored = _unmask_links(edited_clean, mapping)
+    # フェイルセーフ：実質空なら元本文を返す（ログ WARNING を出す）
     try:
         if len(_strip_html_min(restored)) < 20:
             logging.warning("[rewrite] edited_html is empty or too short; fallback to original.")
