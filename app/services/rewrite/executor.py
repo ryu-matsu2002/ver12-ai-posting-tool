@@ -572,6 +572,34 @@ def _strip_new_anchors(html: str) -> str:
     # <a ...>テキスト</a> → “テキスト”のみ残す（テキスト内の他タグも除去）
     return _NEW_ANCHOR_RE.sub(lambda m: re.sub(r"<[^>]+>", "", m.group(0)), html)
 # ----------------------------------------------------------------------------------
+
+# --- 追加：復元後の“許可外href”を持つ<a>だけを除去（中身テキストは残す） ----------------------
+_ANCHOR_WITH_HREF_RE = re.compile(r'<a\b[^>]*href=["\']([^"\']+)["\'][^>]*>.*?</a>', flags=re.I | re.S)
+
+def _allowed_hrefs_from_mapping(mapping: Dict[str, str]) -> set:
+    """マスク時に保存した元リンクHTMLから href の許可集合を作成"""
+    allowed = set()
+    if not mapping:
+        return allowed
+    for html in mapping.values():
+        m = re.search(r'href=["\']([^"\']+)["\']', html, flags=re.I)
+        if m:
+            allowed.add(m.group(1).strip())
+    return allowed
+
+def _strip_anchors_not_in(html: str, allowed_hrefs: set) -> str:
+    """許可hrefに含まれない <a href=...> はタグごと除去し、内側テキストのみ残す"""
+    if not html or not allowed_hrefs:
+        return html
+    def repl(m):
+        href = (m.group(1) or "").strip()
+        if href in allowed_hrefs:
+            return m.group(0)  # そのまま通す（クラス/スタイル含め完全保持）
+        # 許可外 → タグ除去、内側テキストのみ残す（内側にタグがあればそれも除去）
+        return re.sub(r"<[^>]+>", "", m.group(0))
+    return _ANCHOR_WITH_HREF_RE.sub(repl, html)
+# ----------------------------------------------------------------------------------
+
 # --- 追加：リンク周辺の“保護ブロック”を丸ごと凍結（位置/クラス/コメント含め不変化） ----------
 # 例）<!-- ai-internal-link:... --> を含む段落や、<span class="topic">...</span> など見た目に影響するラッパ
 _PBLOCK_RE = re.compile(
@@ -727,6 +755,12 @@ def _rewrite_html(original_html: str, policy_text: str, user_id: Optional[int]) 
     # 保護ブロックを原文そのまま復元 → 既存リンクを復元
     edited_clean = _unmask_protected_blocks(edited_clean, p_mapping)
     restored = _unmask_links(edited_clean, mapping)
+    # 復元後の最終ガード：許可href以外の<a>を除去（LLM混入や変換漏れ対策）
+    try:
+        allowed_hrefs = _allowed_hrefs_from_mapping(mapping)
+        restored = _strip_anchors_not_in(restored, allowed_hrefs)
+    except Exception as e:
+        logging.info(f"[rewrite/_rewrite_html] skip allowlist strip: {e}")
     # フェイルセーフ：実質空なら元本文を返す（ログ WARNING を出す）
     try:
         if len(_strip_html_min(restored)) < 20:
