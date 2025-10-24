@@ -602,7 +602,15 @@ def _rewrite_html(original_html: str, policy_text: str, user_id: Optional[int]) 
     )
 
     # 復元
-    return _unmask_links(edited, mapping)
+    restored = _unmask_links(edited, mapping)
+    # フェイルセーフ：実質空なら元本文を返す（ログで追えるよう WARNING）
+    try:
+        if len(_strip_html_min(restored)) < 20:
+            logging.warning("[rewrite] edited_html is empty or too short; fallback to original.")
+            return original_html
+    except Exception:
+        pass
+    return restored
 
 def _same_domain(site_url: str, posted_url: str) -> bool:
     """
@@ -708,6 +716,8 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
 
         gsc_snap = _collect_gsc_snapshot(site.id, article)
         outlines = _collect_serp_outline(article)
+        if not outlines:
+            logging.info("[rewrite] outlines empty for article_id=%s (SERP参考0件)", article.id)
 
         # 3.5) SERP × 現本文のギャップ分析（不足/追加セクション/品質課題 などを構造化）
         gap_summary_json, policy_checklist = _build_gap_analysis(article, original_html, outlines, gsc_snap)
