@@ -876,9 +876,7 @@ def _validate_html_for_publish(before_html: str, after_html: str) -> Tuple[bool,
     for _k, raw in pmap_before.items():
         if raw not in (after_html or ""):
             return False, "pblock_missing_or_modified"
-    # 素の <a> 追加検知
-    if _NEW_ANCHOR_RE.search(after_html or ""):
-        return False, "new_anchor_detected"
+    
     # テキストノード乖離（過度な構造変化の間接指標）
     if _textnode_divergence_too_large(before_html, after_html):
         return False, "textnode_divergence_too_large"
