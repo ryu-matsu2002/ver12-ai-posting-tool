@@ -4667,7 +4667,12 @@ def dashboard(username):
     # ─────────── 直近28日の「表示回数／クリック数」サイト別ランキング（管理ページと同じ：JST・前日締め）
     JST = timezone(timedelta(hours=9))
     today_jst = datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(JST).date()
-    end_date = today_jst - timedelta(days=1)      # ← 昨日を終端に固定
+    end_date = today_jst - timedelta(days=1)      # ← まずは「昨日」を終端にする
+    # NEW: DBに実在する最新日で終端をクランプ（GSC未確定日や未取得日を除外）
+    latest_db_date = db.session.query(func.max(GSCDailyTotal.date)).scalar()
+    if latest_db_date and latest_db_date < end_date:
+        end_date = latest_db_date
+    # クランプ後の end_date を基準に 28日窓を再計算
     start_date = end_date - timedelta(days=27)    # ← 28日間（両端含む）
     rank_impr_28d = []
     rank_clicks_28d = []
