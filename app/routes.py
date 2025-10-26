@@ -2170,7 +2170,8 @@ def admin_index_monitor():
     from datetime import date, timedelta
     from app.models import Site, Article, GSCDailyTotal, User
 
-    date_28d_ago = date.today() - timedelta(days=28)
+    # ✅ 直近28日の窓を統一（JSTの昨日 ∧ DB最新日）
+    start_d, end_d = _gsc_window_by_latest_db(28)
 
     # 🔹 直近28日間の GSC掲載データ集計（site単位）
     sub_gsc = (
@@ -2178,7 +2179,7 @@ def admin_index_monitor():
             GSCDailyTotal.site_id,
             func.count(GSCDailyTotal.id).label("indexed_count")
         )
-        .filter(GSCDailyTotal.date >= date_28d_ago)
+        .filter(GSCDailyTotal.date >= start_d, GSCDailyTotal.date <= end_d)
         .group_by(GSCDailyTotal.site_id)
         .subquery()
     )
@@ -2273,6 +2274,25 @@ from datetime import datetime, timedelta, timezone
 from app import db
 from app.models import User, Site, Article, GSCDailyTotal
 
+# ────────────────────────────────────────────────
+# GSC 28日などの集計窓を統一する極小ヘルパー
+# ・終端は「JSTの昨日」と「DBの最新日」の早い方
+# ・返り値: (start_date, end_date) いずれも date 型（両端含む）
+# ────────────────────────────────────────────────
+def _gsc_window_by_latest_db(days: int = 28):
+    from app import db
+    from app.models import GSCDailyTotal
+    JST = timezone(timedelta(hours=9))
+    today_jst = datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(JST).date()
+    end_by_yesterday = today_jst - timedelta(days=1)
+    latest_db_date = db.session.query(func.max(GSCDailyTotal.date)).scalar()
+    if latest_db_date:
+        end_date = min(end_by_yesterday, latest_db_date)
+    else:
+        end_date = end_by_yesterday
+    start_date = end_date - timedelta(days=max(1, int(days)) - 1)
+    return start_date, end_date
+
 
 # ← これを先頭の import セクションに追加
 from app.utils.monitor import (
@@ -2319,6 +2339,7 @@ def admin_rankings():
     }
 
     # 期間決定（JST日付で保持）
+    latest_db_date = db.session.query(func.max(GSCDailyTotal.date)).scalar()
     if period == "custom":
         try:
             # customは yyyy-mm-dd（ローカル=JST想定）をそのまま日付として使う
@@ -2327,6 +2348,13 @@ def admin_rankings():
             # ✅ GSC集計（impressions/clicks）は「昨日締め」に丸める
             if rank_type in ("impressions", "clicks") and end_jst_date >= jst_date(now_jst):
                 end_jst_date = end_jst_date - timedelta(days=1)
+            # ✅ DB最新日にクランプ（未取得・未確定日の除外）
+            if rank_type in ("impressions", "clicks") and latest_db_date:
+                if end_jst_date and latest_db_date < end_jst_date:
+                    end_jst_date = latest_db_date
+                # start未指定や start>end の場合は28日窓を補完
+                if (not start_jst_date) or (start_jst_date > end_jst_date):
+                    start_jst_date = end_jst_date - timedelta(days=27)    
         except ValueError:
             return jsonify({"error": "日付形式が不正です (YYYY-MM-DD)"}), 400
     else:
@@ -2337,6 +2365,9 @@ def admin_rankings():
             # ✅ GSC集計（impressions/clicks）は昨日で締める
             if rank_type in ("impressions", "clicks"):
                 end_dt_jst   = now_jst - timedelta(days=1)
+                # DB最新日でクランプ
+                if latest_db_date and latest_db_date < jst_date(end_dt_jst):
+                    end_dt_jst = datetime.combine(latest_db_date, datetime.min.time(), tzinfo=JST)
                 start_jst_date = jst_date(start_dt_jst if start_dt_jst < end_dt_jst else end_dt_jst)
                 end_jst_date   = jst_date(end_dt_jst)
             else:
@@ -4665,15 +4696,8 @@ def dashboard(username):
     remaining_quota = max(total_quota - used_quota, 0)
 
     # ─────────── 直近28日の「表示回数／クリック数」サイト別ランキング（管理ページと同じ：JST・前日締め）
-    JST = timezone(timedelta(hours=9))
-    today_jst = datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(JST).date()
-    end_date = today_jst - timedelta(days=1)      # ← まずは「昨日」を終端にする
-    # NEW: DBに実在する最新日で終端をクランプ（GSC未確定日や未取得日を除外）
-    latest_db_date = db.session.query(func.max(GSCDailyTotal.date)).scalar()
-    if latest_db_date and latest_db_date < end_date:
-        end_date = latest_db_date
-    # クランプ後の end_date を基準に 28日窓を再計算
-    start_date = end_date - timedelta(days=27)    # ← 28日間（両端含む）
+    # ✅ 統一窓
+    start_date, end_date = _gsc_window_by_latest_db(28)
     rank_impr_28d = []
     rank_clicks_28d = []
     if end_date:
@@ -4715,6 +4739,8 @@ def dashboard(username):
     
     return render_template(
         "dashboard.html",
+        gsc_win_start=start_date,
+        gsc_win_end=end_date,
         plan_type=quotas[0].plan_type if quotas else "未契約",
         total_quota=total_quota,
         used_quota=used_quota,
@@ -5641,10 +5667,8 @@ def gsc_connect():
         from datetime import datetime, timezone, timedelta
         from sqlalchemy import func
         from app.models import GSCDailyTotal
-        JST = timezone(timedelta(hours=9))
-        _today_jst = datetime.now(timezone.utc).astimezone(JST).date()
-        _end_d = _today_jst - timedelta(days=1)      # 昨日まで
-        _start_d = _end_d - timedelta(days=27)       # 直近28日
+        # ✅ 統一窓
+        _start_d, _end_d = _gsc_window_by_latest_db(28)
         _gsc_impr_28d = (
             db.session.query(func.coalesce(func.sum(GSCDailyTotal.impressions), 0))
             .filter(
@@ -5834,11 +5858,8 @@ def log(username, site_id):
     articles = q.all()
 
     # --- 当該サイトの直近28日合計（JST）を取得（記事行の表示＆並べ替え用） ---
-    JST = timezone(timedelta(hours=9))
-    today_jst = datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(JST).date()
-    # ✅ GSC UI と同じ「昨日までの28日」
-    end_d   = today_jst - timedelta(days=1)
-    start_d = end_d - timedelta(days=27)
+    # ✅ 統一窓（JSTの昨日 ∧ DB最新日）
+    start_d, end_d = _gsc_window_by_latest_db(28)
 
     gsc_row = (
         db.session.query(
@@ -6452,10 +6473,7 @@ def external_seo_sites():
     clicks28 = {}
     impr28   = {}
     if site_ids:
-        JST = timezone(timedelta(hours=9))
-        today_jst = datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(JST).date()
-        end_d   = today_jst - timedelta(days=1)   # 昨日まで
-        start_d = end_d - timedelta(days=27)      # 直近28日
+        start_d, end_d = _gsc_window_by_latest_db(28)
 
         rows = (
             db.session.query(
