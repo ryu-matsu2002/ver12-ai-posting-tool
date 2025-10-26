@@ -24,6 +24,11 @@ def get_search_console_service():
     service = build("searchconsole", "v1", credentials=credentials)
     return service
 
+# ─────────────────────────────────────────────────────────────────────
+# dataState(FINAL/ALL) の取得ヘルパー（デフォルトはFINAL）
+def _get_data_state() -> str:
+    ds = os.getenv("GSC_DATA_STATE", "FINAL").upper()
+    return "ALL" if ds == "ALL" else "FINAL"
 
 # ─────────────────────────────────────────────────────────────────────
 # 環境変数ヘルパー（値が無ければデフォルトにフォールバック）
@@ -104,12 +109,12 @@ def fetch_search_queries_for_site(site: Site, days: int = 28, row_limit: int = 2
                 "rowLimit": row_limit,
                 "startRow": start_row,
                 "searchType": "web",
-                "dataState": "FINAL",
+                "dataState": _get_data_state(),
             }
             resp = service.searchanalytics().query(siteUrl=property_uri, body=body).execute()
             chunk = resp.get("rows", []) or []
             rows.extend(chunk)
-            logging.info(f"[GSC] pagination: fetched={len(chunk)} total={len(rows)} startRow={start_row}")
+            logging.info(f"[GSC] pagination: fetched={len(chunk)} total={len(rows)} startRow={start_row} (dataState={_get_data_state()})")
             if len(chunk) < row_limit:
                 break
             start_row += row_limit
@@ -215,9 +220,9 @@ def _run_query_date_matrix(property_uri: str, start_d: date, end_d: date, row_li
         "dimensions": ["query", "date"],
         "rowLimit": row_limit,
         "searchType": "web",
-        "dataState": "FINAL",
+        "dataState": _get_data_state(),
     }
-    logging.info(f"[GSC] query-date matrix: {property_uri} {start_d}..{end_d}")
+    logging.info(f"[GSC] query-date matrix: {property_uri} {start_d}..{end_d} (dataState={_get_data_state()})")
     resp = service.searchanalytics().query(siteUrl=property_uri, body=body).execute()
     rows = resp.get("rows", []) or []
     logging.info(f"[GSC] query-date rows={len(rows)} {property_uri}")
@@ -314,9 +319,9 @@ def fetch_daily_totals_for_property(property_uri: str, start_d: date, end_d: dat
         "dimensions": ["date"],
         "rowLimit": 25000,
         "searchType": "web",
-        "dataState": "FINAL",
+        "dataState": _get_data_state(),
     }
-    logging.info(f"[GSC] daily totals: {property_uri} {start_d}..{end_d}")
+    logging.info(f"[GSC] daily totals: {property_uri} {start_d}..{end_d} (dataState={_get_data_state()})")
     try:
         resp = service.searchanalytics().query(siteUrl=property_uri, body=body).execute()
         rows = resp.get("rows", [])
@@ -460,7 +465,7 @@ def _run_search_analytics(site: Site, days: int, dimensions: list[str], row_limi
         "dimensions": dimensions,
         "rowLimit": row_limit,
         "searchType": "web",
-        "dataState": "FINAL",
+        "dataState": _get_data_state(),
     }
     if order_by_impressions:
         body["orderBy"] = [{"field": "impressions", "descending": True}]
@@ -523,7 +528,7 @@ def fetch_totals_direct(property_uri: str, start_d: date, end_d: date) -> dict:
         "endDate": end_d.isoformat(),
         # 無次元は避けたいが互換のため残す。APIがtotalsを返さない場合あり
         "dimensions": [],
-        "dataState": "FINAL",
+        "dataState": _get_data_state(),
         "searchType": "web",
         "rowLimit": 1,
     }
