@@ -17,6 +17,8 @@ from bs4 import BeautifulSoup, NavigableString
 from openai import OpenAI, BadRequestError
 
 from app import db
+# フォールバック収集に使用
+from app.services.rewrite import serp_collector as serp
 from app.models import (
     Article,
     Site,
@@ -990,6 +992,37 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
         outlines = _collect_serp_outline(article)
         if not outlines:
             logging.info("[rewrite] outlines empty for article_id=%s (SERP参考0件)", article.id)
+
+            # === フォールバック：キャッシュが無ければ“その場で収集→即再読込” ===
+            try:
+                fb = serp.collect_and_cache_for_article(
+                    article.id,
+                    limit=6,
+                    lang="ja",
+                    gl="jp",
+                    force=False,  # 直近キャッシュが新鮮なら収集をスキップ
+                )
+                if fb.get("ok"):
+                    # 直近キャッシュを再読込（収集成功/スキップの両方に対応）
+                    outlines = _collect_serp_outline(article) or []
+                    if fb.get("skipped") == "recent_cache":
+                        logging.info(
+                            "[rewrite/fallback] SERP skipped (recent cache) article_id=%s cache_id=%s n=%s",
+                            article.id, fb.get("cache_id"), len(outlines),
+                        )
+                    else:
+                        logging.info(
+                            "[rewrite/fallback] SERP collected: article_id=%s query=%r saved_count=%s cache_id=%s n=%s",
+                            article.id, fb.get("query"), fb.get("saved_count"), fb.get("cache_id"), len(outlines),
+                        )
+                else:
+                    logging.info(
+                        "[rewrite/fallback] SERP collect failed: article_id=%s error=%r",
+                        article.id, fb.get("error"),
+                    )
+            except Exception as e:
+                logging.info("[rewrite/fallback] exception while collecting SERP: article_id=%s err=%r", article.id, e)
+  
 
         # 3.5) SERP × 現本文のギャップ分析（不足/追加セクション/品質課題 などを構造化）
         gap_summary_json, policy_checklist = _build_gap_analysis(article, original_html, outlines, gsc_snap)
