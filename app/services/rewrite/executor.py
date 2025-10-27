@@ -41,7 +41,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 TOKENS = {
-    "policy": 1200,     # 方針テキスト
+    "policy": 1600,     # 方針テキスト（微増してcut-offを緩和）
     "rewrite": 3600,    # 本文リライト
     "summary": 400,     # diff 概要
 }
@@ -735,6 +735,7 @@ def _build_policy_text(article: Article, gsc: Dict, outlines: List[Dict], gap_su
         "から“なぜ伸びないのか”を仮説化し、どこをどう直すかの実行手順を作ってください。"
         "出力は箇条書きベースで、見出し構成・導入改善・E-E-A-T・FAQ・用語説明など具体策を含めます。"
         "内部リンクの追加・変更・削除は一切提案しないでください（既存リンクは厳禁で触らない）。"
+        "出力制約: 最大12行。各行は120字以内。冗長な説明や同義反復を避け、要点のみを簡潔に書く。"
     )
     # 競合の構造傾向を基に、出力仕様を条件付きで明示
     gap = gap_summary or {}
@@ -1022,6 +1023,17 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
                     )
             except Exception as e:
                 logging.info("[rewrite/fallback] exception while collecting SERP: article_id=%s err=%r", article.id, e)
+
+            # --- 0件継続時の通知強化（デバッグ・ハンドオフ用のヒントを添付） ---
+            if not outlines:
+                try:
+                    debug_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "runtime", "serp_debug"))
+                except Exception:
+                    debug_dir = "runtime/serp_debug"
+                logging.info(
+                    "[rewrite/fallback] outlines STILL empty after attempt: article_id=%s keyword=%r title=%r debug_dir=%s",
+                    article.id, (article.keyword or ""), (article.title or ""), debug_dir
+                )    
   
 
         # 3.5) SERP × 現本文のギャップ分析（不足/追加セクション/品質課題 などを構造化）
@@ -1037,18 +1049,12 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
         try:
             missing_topics = (gap_summary_json or {}).get("missing_topics") or []
             _mt_head = "、".join(missing_topics[:5])
-            url_lines = "\n".join(referenced_urls[:8])
-            # タイトルも添えて人間可読に（スニペットはノイズを避けて省略/任意）
-            title_lines = "\n".join(
-                [f"- {s.get('title') or '(no title)'}\n  {s.get('url')}" for s in referenced_sources]
-            )
             policy_text = (
                 f"{policy_text}\n\n"
                 f"---\n"
                 f"【参照SERP件数】{referenced_count}\n"
-                f"【参照URL】\n{url_lines}\n"
-                f"【参照タイトル（抜粋）】\n{title_lines}\n"
                 f"【不足トピック（要点）】{_mt_head if _mt_head else '—'}\n"
+                f"※ 参照URLとタイトルの詳細はダッシュボードで確認できます。\n"
             )
         except Exception:
             pass
