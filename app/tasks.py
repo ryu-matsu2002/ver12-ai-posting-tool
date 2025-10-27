@@ -66,6 +66,15 @@ from app.models import InternalLinkAction  # 🆕 refill 集計で使用
 from app.models import InternalSeoUserSchedule  # 🆕 ユーザースケジュール確認用
 from sqlalchemy import func  # 🆕 集計で使用
 from app.services.internal_seo.enqueue import enqueue_refill_for_site  # 🆕 refill投入API
+# === リライト一括実行（本丸）で使う import ===
+from app.services.rewrite import executor as rewrite_executor
+from app.services.rewrite import serp_collector as serp
+from app.services.rewrite.bulk_runner import (
+    enqueue_user_rewrite,
+    rewrite_tick_once,
+    serp_warmup_for_recent_articles,
+    retry_failed_plans,
+)
 
 # ────────────────────────────────────────────────
 # APScheduler ＋ スレッドプール
@@ -188,6 +197,61 @@ def _auto_post_job(app):
             db.session.close()
             end = time.time()
             current_app.logger.info(f"✅ [AutoPost] 自動投稿ジョブ終了（所要時間: {end - start:.1f}秒）")
+
+# --------------------------------------------------------------------------- #
+# 1.5) リライト：ユーザー一括投入のヘルパ（UIから呼ぶ想定の薄い関数）
+# --------------------------------------------------------------------------- #
+def rewrite_enqueue_for_user(user_id: int,
+                             site_ids: Optional[List[int]] = None,
+                             article_ids: Optional[List[int]] = None,
+                             priority: float = 0.0) -> dict:
+    """
+    UIの［実行］で呼ぶ入口。指定ユーザーの対象記事を queued に積む。
+    既存 queued/running はスキップされる。
+    """
+    return enqueue_user_rewrite(user_id, site_ids=site_ids, article_ids=article_ids, priority_score=priority)
+
+# --------------------------------------------------------------------------- #
+# 1.6) リライト：キュー消化（tick）
+# --------------------------------------------------------------------------- #
+@_safe_job
+def _rewrite_tick_job(app):
+    """
+    短い間隔で回し、queued の ArticleRewritePlan を順次処理する。
+    """
+    with app.app_context():
+        max_per_tick = int(os.getenv("REWRITE_MAX_PER_TICK", "3"))
+        dry_run = (os.getenv("REWRITE_DRYRUN", "0") == "1")
+        done = 0
+        for _ in range(max_per_tick):
+            res = rewrite_tick_once(app, dry_run=dry_run)
+            if not res:
+                break
+            done += 1
+        current_app.logger.info("[rewrite/tick] processed=%s dry_run=%s", done, dry_run)
+
+# --------------------------------------------------------------------------- #
+# 1.7) SERP 温め（夜間）
+# --------------------------------------------------------------------------- #
+@_safe_job
+def _serp_warmup_nightly_job(app):
+    with app.app_context():
+        days = int(os.getenv("SERP_WARMUP_DAYS", "45"))
+        limit = int(os.getenv("SERP_WARMUP_LIMIT", "30"))
+        res = serp_warmup_for_recent_articles(app, days=days, limit_per_run=limit)
+        current_app.logger.info("[rewrite/serp_warmup] %s", res)
+
+# --------------------------------------------------------------------------- #
+# 1.8) 失敗計画の再キュー（時間経過・回数上限内）
+# --------------------------------------------------------------------------- #
+@_safe_job
+def _rewrite_retry_job(app):
+    with app.app_context():
+        max_attempts = int(os.getenv("REWRITE_RETRY_MAX_ATTEMPTS", "3"))
+        min_age_min  = int(os.getenv("REWRITE_RETRY_MIN_AGE_MIN", "30"))
+        limit        = int(os.getenv("REWRITE_RETRY_LIMIT", "50"))
+        res = retry_failed_plans(app, max_attempts=max_attempts, min_age_minutes=min_age_min, to_queue_limit=limit)
+        current_app.logger.info("[rewrite/retry] %s", res)
 
 # --------------------------------------------------------------------------- #
 # 2) GSC メトリクス毎日更新
@@ -1035,6 +1099,49 @@ def init_scheduler(app):
         coalesce=True,
         misfire_grace_time=1200,
     )
+
+    # 🆕 リライト：常時キュー消化（短周期）
+    scheduler.add_job(
+        func=_rewrite_tick_job,
+        trigger="interval",
+        seconds=int(os.getenv("REWRITE_TICK_SEC", "30")),
+        args=[app],
+        id="rewrite_tick",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=300,
+    )
+    app.logger.info("Scheduler started: rewrite_tick every %ss", os.getenv("REWRITE_TICK_SEC", "30"))
+
+    # 🆕 SERP 温め（夜間）
+    serp_h = int(os.getenv("SERP_WARMUP_UTC_HOUR", "18"))
+    serp_m = int(os.getenv("SERP_WARMUP_UTC_MIN",  "40"))
+    scheduler.add_job(
+        func=_serp_warmup_nightly_job,
+        trigger=CronTrigger(hour=serp_h, minute=serp_m, timezone="UTC"),
+        args=[app],
+        id="serp_warmup_nightly",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=1800,
+    )
+    app.logger.info(f"Scheduler started: serp_warmup_nightly daily at {serp_h:02d}:{serp_m:02d} UTC")
+
+    # 🆕 リライト：失敗計画の再キュー（時間経過・回数上限内）
+    scheduler.add_job(
+        func=_rewrite_retry_job,
+        trigger="interval",
+        minutes=int(os.getenv("REWRITE_RETRY_EVERY_MIN", "20")),
+        args=[app],
+        id="rewrite_retry",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
+    )
+    app.logger.info("Scheduler started: rewrite_retry every %s minutes", os.getenv("REWRITE_RETRY_EVERY_MIN", "20"))
 
     # ✅ 内部SEO ナイトリー実行（環境変数でON/OFF可能／レガシー運用）
     #   - デフォルト: 毎日 18:15 UTC = JST 03:15
