@@ -43,10 +43,8 @@ _DBG_DIR = os.path.join(_BASE_DIR, "runtime", "serp_debug")
 os.makedirs(_DBG_DIR, exist_ok=True)
 _NOW = lambda: time.strftime("%Y%m%d-%H%M%S")
 
-# --- CSE(JSON API) 設定 ---
-_CSE_API_KEY = os.environ.get("GOOGLE_CSE_API_KEY")  # 例: AIzaSyXXXX...
-_CSE_CX      = os.environ.get("GOOGLE_CSE_CX")       # 例: d115155f883b1466f
-_CSE_ENDPOINT = "https://www.googleapis.com/customsearch/v1"
+# --- CSE（Custom Search API）は撤去 ---
+# 以後はGoogle公式CSEは使用しない。代替の検索プロバイダ（Brave/Bing/SerpAPI等）を後段で注入する。
 
 # 収集の鮮度(TTL)。同一記事の直近キャッシュがこの期間内なら再収集をスキップ
 _CACHE_TTL_DAYS = int(os.environ.get("SERP_CACHE_TTL_DAYS", "14"))
@@ -304,7 +302,7 @@ def _extract_result_links(page, *, limit: int) -> List[str]:
     # 正規化＆重複削除（上限を掛ける）
     return _unique_keep_order(urls, limit)
 
-# ---------- Google Custom Search JSON API（公式） ----------
+# ----------（CSE撤去）補助ユーティリティ ----------
 def _path_depth(url: str) -> int:
     """ドメイン直下=0, /a=1, /a/b=2 ... のようなパス深さを返す。"""
     try:
@@ -360,80 +358,12 @@ def _netloc(url: str) -> str:
     except Exception:
         return ""
 
-def _search_top_urls_cse(keyword: str, *, limit: int = 6, lang: str = "ja", gl: str = "jp",
-                         qna_required: bool = False, article_title: str = "") -> List[Dict[str, str]]:
-
+def _search_top_urls_cse(*args, **kwargs) -> List[Dict[str, str]]:
     """
-    Google公式 Custom Search JSON API を使って上位URLを取得する。
-    失敗時は空配列。無料枠: 100クエリ/日（課金未設定なら超過時はエラーで停止）。
+    CSEは廃止。呼び出されても空を返す（代替プロバイダに後で差し替える）。
+    返却スキーマの互換維持のため、[{url,title,snippet}] 形式の空配列に統一。
     """
-    if not _CSE_API_KEY or not _CSE_CX:
-        # 設定漏れを明示的に知らせる
-        raise RuntimeError("GOOGLE_CSE_API_KEY / GOOGLE_CSE_CX が未設定です。環境変数に設定してください。")
-
-    params = {
-        "key": _CSE_API_KEY,
-        "cx": _CSE_CX,
-        # google.com系を弾きつつ通常の検索語を投げる
-        "q": f"{keyword} -site:google.com -site:*.google.com",
-        "num": min(10, max(1, limit)),  # API仕様上の上限は10
-        "hl": lang,
-        # 備考: CSEは 'gl' や 'lr' も一部サポート。ただし結果への影響は限定的。
-        "lr": f"lang_{lang}",
-        "safe": "off",
-        # 二重ガード（google.com除外）
-        "siteSearch": "google.com",
-        "siteSearchFilter": "e",  # e=exclude
-    }
-    try:
-        resp = requests.get(_CSE_ENDPOINT, params=params, timeout=15)
-        data = resp.json() if resp.ok else {}
-        items = data.get("items", []) or []
-        results: List[Dict[str, str]] = []
-        per_domain: Dict[str, int] = {}
-        kw_tokens = _tokenize_keywords(keyword)
-        for it in items:
-            link = (it.get("link") or "").strip()
-            title = (it.get("title") or "").strip()
-            snippet = (it.get("snippet") or "").strip()
-            if not (link.startswith("http://") or link.startswith("https://")):
-                continue
-            # 無関係/トップ/LPの除外
-            if not _is_useful_result(link, title, snippet, qna_required=qna_required, keyword_tokens=kw_tokens):
-                continue
-            # 同一ドメイン多様性の確保
-            d = _netloc(link)
-            cnt = per_domain.get(d, 0)
-            if cnt >= _MAX_PER_DOMAIN:
-                continue
-            per_domain[d] = cnt + 1
-
-            results.append({"url": link, "title": title, "snippet": snippet})
-            if len(results) >= limit:
-                break
-        # unique keep order by url
-        seen = set()
-        uniq: List[Dict[str, str]] = []
-        for r in results:
-            if r["url"] in seen:
-                continue
-            seen.add(r["url"])
-            uniq.append(r)
-        if not uniq:
-            # 何が返ってきたかの証跡保存（デバッグ用）
-            t = _NOW()
-            with open(os.path.join(_DBG_DIR, f"cse_{t}.json"), "w", encoding="utf-8") as f:
-                f.write(resp.text if resp is not None else "{}")
-        return uniq
-    except Exception as e:
-        # 失敗時は空。ログだけ残す
-        try:
-            t = _NOW()
-            with open(os.path.join(_DBG_DIR, f"cse_error_{t}.txt"), "w", encoding="utf-8") as f:
-                f.write(f"error={repr(e)} keyword={keyword}\n")
-        except Exception:
-            pass
-        return []
+    return []
 
 # ---------- Google 検索（上位URLだけ取る・軽量） ----------
 
@@ -650,17 +580,20 @@ def collect_serp_outlines_for_keyword(keyword: str, *, limit: int = 6,
                                       qna_required: bool = False, article_title: str = "") -> List[Dict[str, Any]]:
 
     """
-    キーワードでGoogle検索（CSE JSON API） → 上位URLを巡回 → 各ページのH2/H3を抽出して返却。
-    （SERPのHTMLスクレイピングは行わない）
+    （CSE撤去版）上位URLの取得は後段で別プロバイダに差し替える前提。
+    いまは results を空にしておき、代替実装の導入後にここを切り替える。
     戻り値: [{url, h:[...]}, ...]
     """
-    results = _search_top_urls_cse(keyword, limit=limit, lang=lang, gl=gl,
-                                   qna_required=qna_required, article_title=article_title)
+    # TODO: 代替プロバイダ（Brave/Bing/SerpAPI等）へ差し替え
+    results: List[Dict[str, str]] = _search_top_urls_cse(
+        keyword, limit=limit, lang=lang, gl=gl,
+        qna_required=qna_required, article_title=article_title
+    )  # 現時点では空配列を返すスタブ
     outlines: List[Dict[str, Any]] = []
     # 1URLずつ巡回（並列はリソース重いので避ける）
     for r in results:
         detail = _fetch_page_outline(r["url"], lang=lang, gl=gl)
-        # CSEの title/snippet を付与（後方互換のため任意項目）
+        # title/snippet は代替プロバイダ実装後に付与される想定（現時点では空文字）
         detail["title"] = r.get("title") or ""
         detail["snippet"] = r.get("snippet") or ""
         outlines.append(detail)

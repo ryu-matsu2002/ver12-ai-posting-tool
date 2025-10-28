@@ -77,6 +77,19 @@ bp = Blueprint("main", __name__)
 # 必要なら app/__init__.py で admin_bp を登録
 admin_bp = Blueprint("admin", __name__)
 
+from app import db
+from app.models import User, Site, Article
+# リライト計画テーブル：存在名に合わせて import。なければ fallback で text() を使う
+try:
+    from app.models import ArticleRewritePlan
+except Exception:
+    ArticleRewritePlan = None
+from sqlalchemy import text as _sql_text
+from app.tasks import rewrite_enqueue_for_user
+from app.tasks import _rewrite_retry_job, _serp_warmup_nightly_job
+from concurrent.futures import ThreadPoolExecutor
+_ui_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ui-triggers")
+
 # --- Topic API: ヘッダトークン認証ヘルパ ---
 def _topic_api_authorized() -> tuple[bool, int | None]:
     """
@@ -1114,6 +1127,254 @@ def admin_summary():
 def job_status():
     processing_articles = Article.query.filter_by(status="gen").order_by(Article.created_at.desc()).all()
     return render_template("admin/job_status.html", articles=processing_articles)
+
+# ─────────────────────────────────────────────────────────
+# リライト ダッシュボード（管理用）
+# ─────────────────────────────────────────────────────────
+@admin_bp.route("/admin/rewrite", methods=["GET"])
+def admin_rewrite_dashboard():
+    """
+    管理UI：ユーザー選択 → 全記事リライト投入ボタン → 進捗表示（AJAX）
+    画面自体は薄く、データは下の JSON API で取得。
+    """
+    # ユーザーの軽量一覧（ID/名前/サイト数）
+    users = (
+        db.session.query(
+            User.id.label("id"),
+            User.name.label("name"),
+            func.count(Site.id).label("site_cnt"),
+        )
+        .outerjoin(Site, Site.user_id == User.id)
+        .group_by(User.id, User.name)
+        .order_by(User.id.asc())
+        .all()
+    )
+    return render_template("admin/rewrite.html", users=users)
+
+
+@admin_bp.route("/admin/rewrite/users", methods=["GET"])
+def admin_rewrite_users():
+    """
+    JSON: 管理UI用のユーザー一覧（サイト数付き）
+    """
+    rows = (
+        db.session.query(
+            User.id.label("id"),
+            User.name.label("name"),
+            func.count(Site.id).label("site_cnt"),
+        )
+        .outerjoin(Site, Site.user_id == User.id)
+        .group_by(User.id, User.name)
+        .order_by(User.id.asc())
+        .all()
+    )
+    data = [{"id": r.id, "name": r.name, "site_cnt": int(r.site_cnt or 0)} for r in rows]
+    return jsonify({"ok": True, "users": data})
+
+
+@admin_bp.route("/admin/rewrite/enqueue", methods=["POST"])
+def admin_rewrite_enqueue():
+    """
+    JSON: 全記事リライトをユーザー単位で queued に投入。
+    body: { user_id, site_ids?: [..], article_ids?: [..], priority?: number }
+    """
+    try:
+        payload = request.get_json(force=True, silent=True) or {}
+        user_id = int(payload.get("user_id"))
+        # "1,2,3" / [1,2] / "  " どれでも受ける
+        def _to_int_list(v):
+            if v is None or v == "":
+                return None
+            if isinstance(v, list):
+                return [int(x) for x in v if str(x).strip().isdigit()]
+            return [int(x) for x in str(v).replace("\n", ",").split(",") if x.strip().isdigit()]
+        site_ids = _to_int_list(payload.get("site_ids"))
+        article_ids = _to_int_list(payload.get("article_ids"))
+        priority = float(payload.get("priority", 0.0))
+        res = rewrite_enqueue_for_user(user_id, site_ids=site_ids, article_ids=article_ids, priority=priority)
+        return jsonify({"ok": True, "result": res})
+    except Exception as e:
+        current_app.logger.exception("[admin/rewrite/enqueue] failed: %s", e)
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@admin_bp.route("/admin/rewrite/progress", methods=["GET"])
+def admin_rewrite_progress():
+    """
+    JSON: 進捗サマリを返す。
+    query: user_id (optional)
+    返却: { totals: {queued,running,success,error}, recent: [...], last_updated }
+    """
+    uid = request.args.get("user_id", type=int)
+    # モデルが import できないケースに備えて SQL も用意
+    if ArticleRewritePlan is not None:
+        q = db.session.query(ArticleRewritePlan)
+        if uid:
+            q = q.filter(ArticleRewritePlan.user_id == uid)
+        # ステータス集計
+        agg = (
+            db.session.query(
+                ArticleRewritePlan.status,
+                func.count(ArticleRewritePlan.id)
+            )
+            .filter(*( [ArticleRewritePlan.user_id == uid] if uid else [] ))
+            .group_by(ArticleRewritePlan.status)
+            .all()
+        )
+        totals = {s or "": int(c or 0) for (s, c) in agg}
+        recent_plans = (q.order_by(ArticleRewritePlan.updated_at.desc().nullslast(),
+                                   ArticleRewritePlan.id.desc())
+                          .limit(30).all())
+        # Article を一括取得して posted_url を紐付け
+        a_ids = [p.article_id for p in recent_plans if getattr(p, "article_id", None)]
+        art_map = {}
+        if a_ids:
+            arts = (db.session.query(Article.id, Article.posted_url)
+                            .filter(Article.id.in_(a_ids)).all())
+            art_map = {aid: url for (aid, url) in arts}
+        recent = []
+        for r in recent_plans:
+            recent.append({
+                "id": r.id,
+                "article_id": r.article_id,
+                "status": r.status,
+                "attempts": getattr(r, "attempts", None),
+                "updated_at": (r.updated_at.isoformat() if r.updated_at else None),
+                "posted_url": art_map.get(r.article_id)
+            })
+    else:
+        # Fallback: テーブル名で素直に叩く
+        where = "WHERE user_id=:uid" if uid else ""
+        agg_rows = db.session.execute(
+            _sql_text(f"SELECT status, COUNT(*) FROM article_rewrite_plans {where} GROUP BY status"),
+            {"uid": uid} if uid else {},
+        ).fetchall()
+        totals = {r[0] or "": int(r[1] or 0) for r in agg_rows}
+        recent_rows = db.session.execute(
+            _sql_text(f"""
+              SELECT id, article_id, status, attempts, updated_at
+                FROM article_rewrite_plans
+               {where}
+            ORDER BY updated_at DESC NULLS LAST, id DESC
+               LIMIT 30
+            """),
+            {"uid": uid} if uid else {},
+        ).fetchall()
+        a_ids = [row[1] for row in recent_rows if row[1]]
+        art_map = {}
+        if a_ids:
+            arts = (db.session.query(Article.id, Article.posted_url)
+                            .filter(Article.id.in_(a_ids)).all())
+            art_map = {aid: url for (aid, url) in arts}
+        recent = []
+        for r in recent_rows:
+            recent.append({
+                "id": r[0],
+                "article_id": r[1],
+                "status": r[2],
+                "attempts": r[3],
+                "updated_at": (r[4].isoformat() if r[4] else None),
+                "posted_url": art_map.get(r[1])
+            })
+    return jsonify({
+        "ok": True,
+        "totals": {
+            "queued": int(totals.get("queued", 0)),
+            "running": int(totals.get("running", 0)),
+            "success": int(totals.get("success", 0)),
+            "error": int(totals.get("error", 0)),
+        },
+        "recent": recent,
+        "last_updated": datetime.utcnow().isoformat() + "Z",
+    })
+
+
+@admin_bp.route("/admin/rewrite/plans", methods=["GET"])
+def admin_rewrite_plans():
+    """
+    JSON: 計画一覧をページング返却。
+    query: user_id?<int>, status?<str>, page?<int>=1, per_page?<int>=50
+    """
+    uid = request.args.get("user_id", type=int)
+    status = request.args.get("status", type=str)
+    page = max(1, request.args.get("page", default=1, type=int))
+    per_page = min(200, max(1, request.args.get("per_page", default=50, type=int)))
+
+    where = []
+    params = {}
+    if uid:
+        where.append("user_id=:uid")
+        params["uid"] = uid
+    if status:
+        where.append("status=:st")
+        params["st"] = status
+    wsql = ("WHERE " + " AND ".join(where)) if where else ""
+
+    rows = db.session.execute(
+        _sql_text(f"""
+          SELECT id, user_id, article_id, status, attempts, created_at, updated_at
+            FROM article_rewrite_plans
+           {wsql}
+        ORDER BY updated_at DESC NULLS LAST, id DESC
+           LIMIT :lim OFFSET :off
+        """),
+        {**params, "lim": per_page, "off": (page-1)*per_page},
+    ).fetchall()
+    data = [
+        {
+            "id": r[0], "user_id": r[1], "article_id": r[2], "status": r[3],
+            "attempts": r[4],
+            "created_at": (r[5].isoformat() if r[5] else None),
+            "updated_at": (r[6].isoformat() if r[6] else None),
+        }
+        for r in rows
+    ]
+    return jsonify({"ok": True, "items": data, "page": page, "per_page": per_page})
+
+# ─────────────────────────────────────────
+# 管理API: retry_failed / serp_warmup
+# ─────────────────────────────────────────
+@admin_bp.route("/admin/rewrite/retry_failed", methods=["POST"])
+def admin_rewrite_retry_failed():
+    """
+    失敗プランの再キューを即時トリガ。ノンブロッキングで実行。
+    body: { max_attempts?:int, min_age_minutes?:int, limit?:int }
+    """
+    payload = request.get_json(silent=True) or {}
+    max_attempts = int(payload.get("max_attempts", 3))
+    min_age_min  = int(payload.get("min_age_minutes", 30))
+    limit        = int(payload.get("limit", 100))
+    app_obj = current_app._get_current_object()
+    def _run():
+        try:
+            # 内部はログに結果を出す
+            _rewrite_retry_job(app_obj)
+        except Exception as e:
+            current_app.logger.exception("[admin/rewrite/retry_failed] job error: %s", e)
+    _ui_executor.submit(_run)
+    return jsonify({"ok": True, "queued": True, "params": {
+        "max_attempts": max_attempts, "min_age_minutes": min_age_min, "limit": limit
+    }})
+
+@admin_bp.route("/admin/rewrite/serp_warmup", methods=["POST"])
+def admin_rewrite_serp_warmup():
+    """
+    SERP 温めを即時トリガ（夜間ジョブの手動発火相当）。ノンブロッキング。
+    body: { days?:int, limit?:int }
+    """
+    payload = request.get_json(silent=True) or {}
+    days  = int(payload.get("days", 45))
+    limit = int(payload.get("limit", 30))
+    app_obj = current_app._get_current_object()
+    def _run():
+        try:
+            # 夜間ジョブ本体を流用
+            _serp_warmup_nightly_job(app_obj)
+        except Exception as e:
+            current_app.logger.exception("[admin/rewrite/serp_warmup] job error: %s", e)
+    _ui_executor.submit(_run)
+    return jsonify({"ok": True, "queued": True, "params": {"days": days, "limit": limit}})
+
 
 import subprocess
 from flask import jsonify
@@ -9143,3 +9404,40 @@ def topic_generate_now():
         if site and post_id:
             update_post_content(site=site, post_id=post_id, new_html=html)
         return jsonify({"ok": True, "fallback_used": True}), 200
+
+
+# ─────────────────────────────────────────
+# ユーザー画面（本人専用簡易版）
+# ─────────────────────────────────────────
+@bp.route("/rewrite", defaults={"username": None}, methods=["GET"])
+@bp.route("/<username>/rewrite", methods=["GET"])
+@login_required
+def user_rewrite_dashboard(username):
+    # （username はハイライト用に受け取るだけ。本人チェックは current_user で行う）
+    site_cnt = db.session.query(func.count(Site.id)).filter(Site.user_id == current_user.id).scalar() or 0
+    return render_template("rewrite.html", site_cnt=int(site_cnt))
+
+@bp.route("/rewrite/enqueue", defaults={"username": None}, methods=["POST"])
+@bp.route("/<username>/rewrite/enqueue", methods=["POST"])
+@login_required
+def user_rewrite_enqueue_self(username):
+    payload = request.get_json(silent=True) or {}
+    def _to_int_list(v):
+        if v is None or v == "":
+            return None
+        if isinstance(v, list):
+            return [int(x) for x in v if str(x).strip().isdigit()]
+        return [int(x) for x in str(v).replace("\n", ",").split(",") if x.strip().isdigit()]
+    site_ids = _to_int_list(payload.get("site_ids"))
+    article_ids = _to_int_list(payload.get("article_ids"))
+    priority = float(payload.get("priority", 0.0))
+    res = rewrite_enqueue_for_user(current_user.id, site_ids=site_ids, article_ids=article_ids, priority=priority)
+    return jsonify({"ok": True, "result": res})
+
+@bp.route("/rewrite/progress", defaults={"username": None}, methods=["GET"])
+@bp.route("/<username>/rewrite/progress", methods=["GET"])
+@login_required
+def user_rewrite_progress_self(username):
+    # 管理APIに委譲（user_id 指定）
+    with current_app.test_request_context(f"/admin/rewrite/progress?user_id={current_user.id}"):
+        return admin_rewrite_progress()        

@@ -1,0 +1,242 @@
+<!-- templates/admin/rewrite.html -->
+{% extends "base.html" %}
+{% block title %}全記事リライト（管理）{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+  <h2 class="mb-3">全記事リライト（管理）</h2>
+  <p class="text-muted">ユーザー単位でリライト計画を投入し、進捗を監視します。投入後はバックグラウンドで処理され、ここで状態が更新されます。</p>
+
+  <div class="card mb-3">
+    <div class="card-body">
+      <form id="enqueue-form" class="row g-2">
+        <div class="col-sm-6 col-md-4">
+          <label class="form-label">ユーザー</label>
+          <select id="user-select" class="form-select" required>
+            <option value="">選択してください</option>
+            {% for u in users %}
+              <option value="{{u.id}}">#{{u.id}} {{u.name}}（サイト数: {{u.site_cnt}}）</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-sm-3 col-md-2">
+          <label class="form-label">優先度</label>
+          <input type="number" step="0.1" class="form-control" id="priority" value="0.0">
+        </div>
+        <div class="col-12"></div>
+        <div class="col-md-6">
+          <label class="form-label">対象サイトID（カンマ/改行区切り・任意）</label>
+          <textarea class="form-control" id="site-ids" rows="1" placeholder="例) 12,34"></textarea>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">対象記事ID（カンマ/改行区切り・任意）</label>
+          <textarea class="form-control" id="article-ids" rows="1" placeholder="例) 1001,1002"></textarea>
+        </div>
+        <div class="col-sm-12 col-md-6 d-flex align-items-end">
+          <button type="submit" class="btn btn-primary me-2">全記事をキュー投入</button>
+          <button type="button" id="refresh-btn" class="btn btn-outline-secondary">進捗更新</button>
+        </div>
+        <div class="col-sm-12 col-md-6 d-flex align-items-end justify-content-end">
+          <button type="button" id="retry-btn" class="btn btn-outline-warning me-2">失敗の再試行</button>
+          <button type="button" id="warmup-btn" class="btn btn-outline-info">SERP温め</button>
+        </div>
+      </form>
+      <div id="enqueue-msg" class="mt-2"></div>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-md-4">
+      <div class="card h-100">
+        <div class="card-header">進捗サマリ</div>
+        <div class="card-body">
+          <div id="totals-box">
+            <div>queued: <span id="t-queued">0</span></div>
+            <div>running: <span id="t-running">0</span></div>
+            <div>success: <span id="t-success">0</span></div>
+            <div>error: <span id="t-error">0</span></div>
+            <div class="text-muted small mt-2">最終更新: <span id="last-updated">-</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-8">
+      <div class="card h-100">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span>最近の計画（30件）</span>
+          <div>
+            <select id="filter-status" class="form-select form-select-sm">
+              <option value="">すべて</option>
+              <option value="queued">queued</option>
+              <option value="running">running</option>
+              <option value="success">success</option>
+              <option value="error">error</option>
+            </select>
+          </div>
+        </div>
+        <div class="card-body p-0">
+          <table class="table table-sm table-striped mb-0">
+            <thead>
+              <tr>
+                <th style="width: 80px;">Plan ID</th>
+                <th style="width: 100px;">Article</th>
+                <th style="width: 110px;">Status</th>
+                <th style="width: 80px;">Attempts</th>
+                <th>Updated</th>
+                <th>WP URL</th>
+              </tr>
+            </thead>
+            <tbody id="recent-tbody">
+              <tr><td colspan="5" class="text-center text-muted py-3">ユーザーを選択してください</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card-footer">
+          <button class="btn btn-outline-primary btn-sm" id="load-more">さらに読み込む</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const $ = (sel)=>document.querySelector(sel);
+  const userSel = $("#user-select");
+  const msg = $("#enqueue-msg");
+  let nextPage = 2;
+  let lastUser = null;
+
+  function setMsg(text, ok=true){
+    msg.className = ok ? "text-success" : "text-danger";
+    msg.textContent = text;
+  }
+
+  async function fetchJSON(url, opts){
+    const r = await fetch(url, opts || {});
+    const j = await r.json();
+    if(!r.ok || j.ok===false){ throw new Error(j.error || ("HTTP "+r.status)); }
+    return j;
+  }
+
+  async function refreshProgress(){
+    const uid = userSel.value;
+    if(!uid){ return; }
+    const prog = await fetchJSON(`/admin/rewrite/progress?user_id=${encodeURIComponent(uid)}`);
+    $("#t-queued").textContent  = prog.totals.queued;
+    $("#t-running").textContent = prog.totals.running;
+    $("#t-success").textContent = prog.totals.success;
+    $("#t-error").textContent   = prog.totals.error;
+    $("#last-updated").textContent = new Date(prog.last_updated).toLocaleString();
+
+    const wantStatus = $("#filter-status").value;
+    const rows = (wantStatus ? prog.recent.filter(r => r.status===wantStatus) : prog.recent);
+    const tbody = $("#recent-tbody");
+    tbody.innerHTML = "";
+    if(rows.length===0){
+      tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted py-3">なし</td></tr>`;
+    } else {
+      rows.forEach(r=>{
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${r.id}</td>
+          <td><code>${r.article_id}</code></td>
+          <td><span class="badge bg-${badgeClass(r.status)}">${r.status}</span></td>
+          <td>${r.attempts ?? ""}</td>
+          <td class="text-muted small">${r.updated_at ? new Date(r.updated_at).toLocaleString() : ""}</td>
+          <td>${linkify(r.posted_url)}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+    nextPage = 2; lastUser = uid;
+  }
+
+  function badgeClass(st){
+    switch(st){
+      case "queued": return "secondary";
+      case "running": return "warning";
+      case "success": return "success";
+      case "error": return "danger";
+      default: return "light";
+    }
+  }
+
+  function linkify(u){
+    if(!u) return "";
+    const esc = (s)=>String(s).replace(/"/g,'&quot;');
+    return `<a href="${esc(u)}" target="_blank" rel="noopener">open</a>`;
+  }
+
+  async function loadMore(){
+    const uid = userSel.value;
+    if(!uid){ return; }
+    const status = $("#filter-status").value || "";
+    const q = new URLSearchParams({ user_id: uid, page: nextPage, per_page: 50 });
+    if(status){ q.set("status", status); }
+    const res = await fetchJSON(`/admin/rewrite/plans?${q.toString()}`);
+    const tbody = $("#recent-tbody");
+    if(!res.items || res.items.length===0){ return; }
+    res.items.forEach(r=>{
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${r.id}</td>
+        <td><code>${r.article_id}</code></td>
+        <td><span class="badge bg-${badgeClass(r.status)}">${r.status}</span></td>
+        <td>${r.attempts ?? ""}</td>
+        <td class="text-muted small">${r.updated_at ? new Date(r.updated_at).toLocaleString() : ""}</td>`;
+      tbody.appendChild(tr);
+    });
+    nextPage += 1;
+  }
+
+  $("#enqueue-form").addEventListener("submit", async (e)=>{
+    e.preventDefault();
+    const uid = userSel.value;
+    if(!uid){ setMsg("ユーザーを選択してください", false); return; }
+    setMsg("投入中…");
+    try{
+      const body = {
+        user_id: Number(uid),
+        priority: Number($("#priority").value || 0.0),
+        site_ids: ($("#site-ids").value || "").trim(),
+        article_ids: ($("#article-ids").value || "").trim()
+      };
+      const j = await fetchJSON("/admin/rewrite/enqueue", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify(body)
+      });
+      setMsg(`queued: ${j.result?.queued || 0} 件（skipped: ${j.result?.skipped || 0}）`, true);
+      await refreshProgress();
+    }catch(err){
+      setMsg("投入に失敗しました: " + err.message, false);
+    }
+  });
+
+  $("#refresh-btn").addEventListener("click", refreshProgress);
+  $("#retry-btn").addEventListener("click", async ()=>{
+    try{
+      const r = await fetch("/admin/rewrite/retry_failed", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({})});
+      const j = await r.json();
+      if(!r.ok || j.ok===false) throw new Error(j.error||("HTTP "+r.status));
+      setMsg("再試行をトリガしました（バックグラウンド実行）");
+      await refreshProgress();
+    }catch(err){ setMsg("再試行失敗: "+err.message, false); }
+  });
+  $("#warmup-btn").addEventListener("click", async ()=>{
+    try{
+      const r = await fetch("/admin/rewrite/serp_warmup", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({})});
+      const j = await r.json();
+      if(!r.ok || j.ok===false) throw new Error(j.error||("HTTP "+r.status));
+      setMsg("SERP温めをトリガしました（バックグラウンド実行）");
+    }catch(err){ setMsg("温め失敗: "+err.message, false); }
+  });
+  $("#filter-status").addEventListener("change", refreshProgress);
+  $("#load-more").addEventListener("click", loadMore);
+  userSel.addEventListener("change", refreshProgress);
+
+  // 画面開いた直後に、初期選択があれば反映
+  if(userSel.value){ refreshProgress(); }
+})();
+</script>
+{% endblock %}

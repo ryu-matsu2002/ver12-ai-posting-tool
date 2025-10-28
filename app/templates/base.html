@@ -87,6 +87,13 @@
         <span class="material-icons align-middle mr-2">fact_check</span>インデックス申請
       </a>
 
+      <!-- ★ 新規: 記事リライト（全記事一括の投入＆進捗） -->
+      <a href="{{ url_for('main.user_rewrite_dashboard', username=username) }}"
+         class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
+                {{ '/rewrite' in request.path and 'font-semibold bg-[#0f2fa6]' }}">
+        <span class="material-icons align-middle mr-2">history_edu</span>記事リライト
+      </a>
+
       <!-- ChatGPT の下あたりに追加する例 ★-->
       <a href="{{ url_for('main.external_seo_sites') }}"
          class="block px-6 py-2 hover:bg-primaryHover rounded-r-full
