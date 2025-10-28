@@ -19,6 +19,7 @@ from __future__ import annotations
 import re
 import os
 import time
+import random
 from typing import List, Dict, Optional, Tuple, Any
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlparse, parse_qs, unquote
@@ -28,7 +29,7 @@ from playwright.sync_api import Error as PWError
 import requests
 from app import db
 from app.models import Article, SerpOutlineCache
-
+from html import unescape
 
 # ---------- 軽量テキストユーティリティ ----------
 
@@ -50,6 +51,15 @@ _NOW = lambda: time.strftime("%Y%m%d-%H%M%S")
 _CACHE_TTL_DAYS = int(os.environ.get("SERP_CACHE_TTL_DAYS", "14"))
 # 同一ドメインから拾う最大件数（多様性確保）
 _MAX_PER_DOMAIN = int(os.environ.get("SERP_MAX_PER_DOMAIN", "2"))
+# DuckDuckGo 検索時のローカライズ & セーフサーチ（必要に応じて .env で変更可能）
+_DDG_KL = os.environ.get("SERP_DDG_KL", "jp-ja")     # 地域/言語ヒント（日本向け）
+_DDG_SAFE = os.environ.get("SERP_DDG_SAFE", "active") # active|moderate|off → kp=1|kp=0|kp=-1 を目安に使用
+_DDG_BASE = os.environ.get("SERP_DDG_BASE", "https://html.duckduckgo.com/html/")
+# 失礼にならないスロットリング（429防止）秒
+_DDG_SLEEP_SEC = float(os.environ.get("SERP_DDG_SLEEP", "0.8"))
+_UA = os.environ.get("SERP_HTTP_UA",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36")
+ 
 
 def _strip_tags(s: str) -> str:
     if not s:
@@ -358,12 +368,83 @@ def _netloc(url: str) -> str:
     except Exception:
         return ""
 
-def _search_top_urls_cse(*args, **kwargs) -> List[Dict[str, str]]:
+def _ddg_safe_to_kp(safe: str) -> str:
+    """'active'|'moderate'|'off' → DuckDuckGoの kp パラメータへ大まかにマップ"""
+    v = (safe or "").lower()
+    if v == "active":
+        return "1"
+    if v == "off":
+        return "-1"
+    return "0"  # moderate
+
+def _search_top_urls_duckduckgo(keyword: str, *, limit: int = 6,
+                                lang: str = "ja", gl: str = "jp",
+                                qna_required: bool = False, article_title: str = "") -> List[Dict[str, str]]:
     """
-    CSEは廃止。呼び出されても空を返す（代替プロバイダに後で差し替える）。
-    返却スキーマの互換維持のため、[{url,title,snippet}] 形式の空配列に統一。
+    DuckDuckGo(HTML) からオーガニック上位URLを取得（APIキー不要・無料・規約OK）。
+    返却: [{url, title, snippet}]
     """
-    return []
+    if limit <= 0:
+        return []
+
+    # 軽いスロットリング（429対策）
+    time.sleep(_DDG_SLEEP_SEC + random.random() * 0.4)
+
+    # ローカライズとセーフサーチ
+    kp = _ddg_safe_to_kp(_DDG_SAFE)
+    q = quote((keyword or "").strip())
+    # 例: https://html.duckduckgo.com/html/?q=ピラティス&kl=jp-ja&kp=1&ia=web
+    url = f"{_DDG_BASE}?q={q}&kl={_DDG_KL}&kp={kp}&ia=web"
+
+    headers = {
+        "User-Agent": _UA,
+        "Accept-Language": f"{lang}-{gl.upper()},en;q=0.8"
+    }
+
+    try:
+        resp = requests.get(url, headers=headers, timeout=12)
+        if resp.status_code != 200:
+            return []
+        html = resp.text or ""
+    except Exception:
+        return []
+
+    # 結果ブロック（.result__body）単位で切り出し、<a.result__a ...> を抜く
+    blocks = re.findall(r'<div[^>]+class="[^"]*result__body[^"]*"[^>]*>(.*?)</div>\s*</div>',
+                        html, flags=re.DOTALL | re.IGNORECASE)
+    out: List[Dict[str, str]] = []
+    per_domain: Dict[str, int] = {}
+    kw_tokens = _tokenize_keywords(keyword)
+
+    for b in blocks:
+        # URL & タイトル
+        m = re.search(r'<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
+                      b, flags=re.DOTALL | re.IGNORECASE)
+        if not m:
+            continue
+        url = unescape(m.group(1)).strip()
+        if not (url.startswith("http://") or url.startswith("https://")):
+            continue
+        title_html = m.group(2) or ""
+        title = _strip_tags(unescape(title_html))
+        # スニペット（省略可。取得できなければ空）
+        s = re.search(r'<div[^>]+class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</div>',
+                      b, flags=re.DOTALL | re.IGNORECASE)
+        snippet = _strip_tags(unescape(s.group(1))) if s else ""
+
+        # 品質フィルタ
+        net = _netloc(url)
+        if per_domain.get(net, 0) >= _MAX_PER_DOMAIN:
+            continue
+        if not _is_useful_result(url, title, snippet, qna_required=qna_required, keyword_tokens=kw_tokens):
+            continue
+
+        out.append({"url": url, "title": title, "snippet": snippet})
+        per_domain[net] = per_domain.get(net, 0) + 1
+        if len(out) >= limit:
+            break
+
+    return out
 
 # ---------- Google 検索（上位URLだけ取る・軽量） ----------
 
@@ -580,15 +661,13 @@ def collect_serp_outlines_for_keyword(keyword: str, *, limit: int = 6,
                                       qna_required: bool = False, article_title: str = "") -> List[Dict[str, Any]]:
 
     """
-    （CSE撤去版）上位URLの取得は後段で別プロバイダに差し替える前提。
-    いまは results を空にしておき、代替実装の導入後にここを切り替える。
-    戻り値: [{url, h:[...]}, ...]
+    DuckDuckGo でキーワードの上位URLを取得し、各URLを巡回して見出し等を抽出。
+    戻り値: [{url, title, snippet, h:[...], intro, schema, signals, http:{status}} ...]
     """
-    # TODO: 代替プロバイダ（Brave/Bing/SerpAPI等）へ差し替え
-    results: List[Dict[str, str]] = _search_top_urls_cse(
+    results: List[Dict[str, str]] = _search_top_urls_duckduckgo(
         keyword, limit=limit, lang=lang, gl=gl,
         qna_required=qna_required, article_title=article_title
-    )  # 現時点では空配列を返すスタブ
+    )
     outlines: List[Dict[str, Any]] = []
     # 1URLずつ巡回（並列はリソース重いので避ける）
     for r in results:
