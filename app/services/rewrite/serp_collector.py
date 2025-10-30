@@ -453,7 +453,30 @@ def _search_top_urls_duckduckgo(keyword: str, *, limit: int = 6,
     per_domain: Dict[str, int] = {}
     out: List[Dict[str, str]] = []
 
-    # 1) /html （GET）
+    # 1) /lite （GET優先: ブロック回避しやすい）
+    try:
+        url = f"{_DDG_ALT_LITE}?q={quote(q)}&kl={_DDG_KL}&kp={kp}"
+        r = s.get(url, headers=headers, timeout=15, allow_redirects=True)
+        if r.status_code == 200 and r.text:
+            items = _parse_ddg_lite(r.text)
+            if not items:
+                _save_debug_html("lite_zero", q, r.text)
+            for u, title, snippet in items:
+                if not (u.startswith("http://") or u.startswith("https://")):
+                    continue
+                net = _netloc(u)
+                if per_domain.get(net, 0) >= _MAX_PER_DOMAIN:
+                    continue
+                if not _is_useful_result(u, title, snippet, qna_required=qna_required, keyword_tokens=kw_tokens):
+                    continue
+                out.append({"url": u, "title": title, "snippet": snippet})
+                per_domain[net] = per_domain.get(net, 0) + 1
+                if len(out) >= limit:
+                    return out
+    except Exception:
+        pass
+
+    # 2) /html （GET fallback）
     try:
         url = f"{_DDG_BASE}?q={quote(q)}&kl={_DDG_KL}&kp={kp}&ia=web"
         r = s.get(url, headers=headers, timeout=15, allow_redirects=True)
