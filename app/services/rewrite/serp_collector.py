@@ -631,6 +631,108 @@ def _search_top_urls_duckduckgo(keyword: str, *, limit: int = 6,
             keyword, limit=limit, lang=lang, gl=gl,
             qna_required=qna_required, kw_tokens=kw_tokens
         )
+    # ここまでで out が空なら、Playwright で DDG を実際に開いて「入力→Enter」で抽出（人間操作相当）
+    if not out:
+        try:
+            with _PWSession(lang=lang, gl=gl) as sess:
+                page = sess.new_page()
+                # 1) ホームへ
+                page.goto("https://duckduckgo.com/", timeout=15000, wait_until="domcontentloaded")
+                # 2) 入力して Enter
+                page.fill("input[name='q']", q, timeout=4000)
+                page.keyboard.press("Enter")
+                # 3) 結果待機（多系統セレクタ）
+                waited = False
+                for sel in ["a.result__a", "[data-testid='result'] a[href]", "[data-testid='result-title-a']"]:
+                    try:
+                        page.wait_for_selector(sel, timeout=6000)
+                        waited = True
+                        break
+                    except Exception:
+                        continue
+                if not waited:
+                    # スナップショット保存して終了
+                    try:
+                        _save_debug_html("playwright_zero", q, page.content() or "")
+                    except Exception:
+                        pass
+                    return out
+                # 4) 抽出（CSS → JS の順でフェイルオーバ）
+                urls_titles: List[Tuple[str, str]] = []
+                # 4-1 CSSロケータ系
+                css_sets = [
+                    "a.result__a",
+                    "[data-testid='result'] a[href]",
+                    "[data-testid='result-title-a']",
+                ]
+                for sel in css_sets:
+                    try:
+                        loc = page.locator(sel)
+                        n = min(loc.count(), limit * 5)
+                        for i in range(n):
+                            try:
+                                a = loc.nth(i)
+                                href = a.get_attribute("href") or ""
+                                title = (a.inner_text() or "").strip()
+                            except Exception:
+                                href, title = "", ""
+                            if href.startswith("http"):
+                                urls_titles.append((href, title))
+                    except Exception:
+                        continue
+                    if len(urls_titles) >= limit:
+                        break
+                # 4-2 JSで保険取得
+                if len(urls_titles) < limit:
+                    try:
+                        cand = page.evaluate("""
+                        () => {
+                          const out = [];
+                          const seen = new Set();
+                          const sels = [
+                            "a.result__a",
+                            "[data-testid='result'] a[href]",
+                            "[data-testid='result-title-a']"
+                          ];
+                          for (const sel of sels) {
+                            const nodes = document.querySelectorAll(sel);
+                            for (const a of nodes) {
+                              const href = a.getAttribute('href') || '';
+                              if (!href.startsWith('http')) continue;
+                              if (seen.has(href)) continue;
+                              seen.add(href);
+                              const title = (a.textContent || '').trim();
+                              out.push([href, title]);
+                            }
+                          }
+                          return out;
+                        }
+                        """) or []
+                        for href, title in cand:
+                            if href.startswith("http"):
+                                urls_titles.append((href, title or ""))
+                    except Exception:
+                        pass
+                # 5) フィルタ & ドメイン多様性
+                kw_tokens = _tokenize_keywords(keyword)
+                per_domain: Dict[str, int] = {}
+                for href, title in urls_titles:
+                    net = _netloc(href)
+                    if per_domain.get(net, 0) >= _MAX_PER_DOMAIN:
+                        continue
+                    if not _is_useful_result(href, title, "", qna_required=qna_required, keyword_tokens=kw_tokens):
+                        continue
+                    out.append({"url": href, "title": title, "snippet": ""})
+                    per_domain[net] = per_domain.get(net, 0) + 1
+                    if len(out) >= limit:
+                        break
+        except Exception:
+            # 何も取れなかった場合はスナップショットを保存
+            try:
+                _save_debug_html("playwright_except", q, page.content() if 'page' in locals() else "")
+            except Exception:
+                pass
+
     return out
 
 # ---------- Google 検索（上位URLだけ取る・軽量） ----------
