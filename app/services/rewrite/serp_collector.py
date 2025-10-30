@@ -52,10 +52,13 @@ _CACHE_TTL_DAYS = int(os.environ.get("SERP_CACHE_TTL_DAYS", "14"))
 # 同一ドメインから拾う最大件数（多様性確保）
 _MAX_PER_DOMAIN = int(os.environ.get("SERP_MAX_PER_DOMAIN", "2"))
 # DuckDuckGo 検索時のローカライズ & セーフサーチ（必要に応じて .env で変更可能）
-_DDG_KL = os.environ.get("SERP_DDG_KL", "jp-ja")     # 地域/言語ヒント（日本向け）
-_DDG_SAFE = os.environ.get("SERP_DDG_SAFE", "active") # active|moderate|off → kp=1|kp=0|kp=-1 を目安に使用
-_DDG_BASE = os.environ.get("SERP_DDG_BASE", "https://html.duckduckgo.com/html/")
-# 失礼にならないスロットリング（429防止）秒
+_DDG_KL = os.environ.get("SERP_DDG_KL", "jp-ja")       # 地域/言語ヒント（日本向け）
+_DDG_SAFE = os.environ.get("SERP_DDG_SAFE", "active")   # active|moderate|off → kp=1|kp=0|kp=-1
+# 既定は GET で安定する duckduckgo.com/html に変更（必要なら .env で上書き可）
+_DDG_BASE = os.environ.get("SERP_DDG_BASE", "https://duckduckgo.com/html/")
+# 代替候補（順に試す）：lite（GET）→ htmlサブドメイン（POST）
+_DDG_ALT_LITE = os.environ.get("SERP_DDG_ALT_LITE", "https://lite.duckduckgo.com/lite/")
+_DDG_ALT_HTML = os.environ.get("SERP_DDG_ALT_HTML", "https://html.duckduckgo.com/html/")
 _DDG_SLEEP_SEC = float(os.environ.get("SERP_DDG_SLEEP", "0.8"))
 _UA = os.environ.get("SERP_HTTP_UA",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36")
@@ -377,72 +380,155 @@ def _ddg_safe_to_kp(safe: str) -> str:
         return "-1"
     return "0"  # moderate
 
-def _search_top_urls_duckduckgo(keyword: str, *, limit: int = 6,
-                                lang: str = "ja", gl: str = "jp",
-                                qna_required: bool = False, article_title: str = "") -> List[Dict[str, str]]:
-    """
-    DuckDuckGo(HTML) からオーガニック上位URLを取得（APIキー不要・無料・規約OK）。
-    返却: [{url, title, snippet}]
-    """
-    if limit <= 0:
-        return []
-
-    # 軽いスロットリング（429対策）
-    time.sleep(_DDG_SLEEP_SEC + random.random() * 0.4)
-
-    # ローカライズとセーフサーチ
-    kp = _ddg_safe_to_kp(_DDG_SAFE)
-    q = quote((keyword or "").strip())
-    # 例: https://html.duckduckgo.com/html/?q=ピラティス&kl=jp-ja&kp=1&ia=web
-    url = f"{_DDG_BASE}?q={q}&kl={_DDG_KL}&kp={kp}&ia=web"
-
-    headers = {
+def _ddg_headers(lang: str, gl: str) -> Dict[str, str]:
+    return {
         "User-Agent": _UA,
-        "Accept-Language": f"{lang}-{gl.upper()},en;q=0.8"
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": f"{lang}-{gl.upper()},en;q=0.8",
+        "Referer": "https://duckduckgo.com/",
+        "DNT": "1",
+        "Upgrade-Insecure-Requests": "1",
     }
 
-    try:
-        resp = requests.get(url, headers=headers, timeout=12)
-        if resp.status_code != 200:
-            return []
-        html = resp.text or ""
-    except Exception:
-        return []
-
-    # 結果ブロック（.result__body）単位で切り出し、<a.result__a ...> を抜く
+def _parse_ddg_html(html: str) -> List[Tuple[str, str, str]]:
+    """DDG /html の結果パース: (url, title, snippet) のリスト"""
+    out = []
+    # ブロック抽出
     blocks = re.findall(r'<div[^>]+class="[^"]*result__body[^"]*"[^>]*>(.*?)</div>\s*</div>',
                         html, flags=re.DOTALL | re.IGNORECASE)
-    out: List[Dict[str, str]] = []
-    per_domain: Dict[str, int] = {}
-    kw_tokens = _tokenize_keywords(keyword)
-
     for b in blocks:
-        # URL & タイトル
         m = re.search(r'<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
                       b, flags=re.DOTALL | re.IGNORECASE)
         if not m:
             continue
         url = unescape(m.group(1)).strip()
-        if not (url.startswith("http://") or url.startswith("https://")):
-            continue
-        title_html = m.group(2) or ""
-        title = _strip_tags(unescape(title_html))
-        # スニペット（省略可。取得できなければ空）
+        title = _strip_tags(unescape(m.group(2) or ""))
         s = re.search(r'<div[^>]+class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</div>',
                       b, flags=re.DOTALL | re.IGNORECASE)
         snippet = _strip_tags(unescape(s.group(1))) if s else ""
+        out.append((url, title, snippet))
+    return out
 
-        # 品質フィルタ
-        net = _netloc(url)
-        if per_domain.get(net, 0) >= _MAX_PER_DOMAIN:
-            continue
-        if not _is_useful_result(url, title, snippet, qna_required=qna_required, keyword_tokens=kw_tokens):
-            continue
+def _parse_ddg_lite(html: str) -> List[Tuple[str, str, str]]:
+    """DDG /lite の結果パース: (url, title, snippet) のリスト（snippetは空になりがち）"""
+    out = []
+    # 典型：<a href="https://example.com/">タイトル</a>
+    for m in re.finditer(r'<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>', html, flags=re.DOTALL | re.IGNORECASE):
+        url = unescape(m.group(1)).strip()
+        title = _strip_tags(unescape(m.group(2) or ""))
+        if url.startswith("http://") or url.startswith("https://"):
+            out.append((url, title, ""))  # liteはスニペット貧弱
+    return out
 
-        out.append({"url": url, "title": title, "snippet": snippet})
-        per_domain[net] = per_domain.get(net, 0) + 1
-        if len(out) >= limit:
-            break
+def _save_debug_html(kind: str, kw: str, html: str) -> None:
+    try:
+        t = _NOW()
+        safe_kw = re.sub(r"[^a-zA-Z0-9_\-]+", "_", kw)[:40]
+        path = os.path.join(_DBG_DIR, f"ddg_{kind}_{safe_kw}_{t}.html")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(html or "")
+        print(f"[SERP-DEBUG] saved: {path}")
+    except Exception:
+        pass
+
+def _search_top_urls_duckduckgo(keyword: str, *, limit: int = 6,
+                                lang: str = "ja", gl: str = "jp",
+                                qna_required: bool = False, article_title: str = "") -> List[Dict[str, str]]:
+    """
+    DuckDuckGo からオーガニック上位URLを取得（マルチ候補でフォールバック）。
+    戻り値: [{url, title, snippet}]
+    """
+    if limit <= 0:
+        return []
+    time.sleep(_DDG_SLEEP_SEC + random.random() * 0.4)  # 429対策
+
+    kp = _ddg_safe_to_kp(_DDG_SAFE)
+    q = (keyword or "").strip()
+    if not q:
+        return []
+
+    s = requests.Session()
+    headers = _ddg_headers(lang, gl)
+    kw_tokens = _tokenize_keywords(keyword)
+    per_domain: Dict[str, int] = {}
+    out: List[Dict[str, str]] = []
+
+    # 1) /html （GET）
+    try:
+        url = f"{_DDG_BASE}?q={quote(q)}&kl={_DDG_KL}&kp={kp}&ia=web"
+        r = s.get(url, headers=headers, timeout=15, allow_redirects=True)
+        if r.status_code == 200 and r.text:
+            items = _parse_ddg_html(r.text)
+            if not items:
+                _save_debug_html("html_zero", q, r.text)
+            for u, title, snippet in items:
+                if not (u.startswith("http://") or u.startswith("https://")):
+                    continue
+                net = _netloc(u)
+                if per_domain.get(net, 0) >= _MAX_PER_DOMAIN:
+                    continue
+                if not _is_useful_result(u, title, snippet, qna_required=qna_required, keyword_tokens=kw_tokens):
+                    continue
+                out.append({"url": u, "title": title, "snippet": snippet})
+                per_domain[net] = per_domain.get(net, 0) + 1
+                if len(out) >= limit:
+                    return out
+    except Exception:
+        pass
+
+    # 2) /lite （GET フォールバック）
+    try:
+        url = f"{_DDG_ALT_LITE}?q={quote(q)}&kl={_DDG_KL}&kp={kp}"
+        r = s.get(url, headers=headers, timeout=15, allow_redirects=True)
+        if r.status_code == 200 and r.text:
+            items = _parse_ddg_lite(r.text)
+            if not items:
+                _save_debug_html("lite_zero", q, r.text)
+            for u, title, snippet in items:
+                if not (u.startswith("http://") or u.startswith("https://")):
+                    continue
+                net = _netloc(u)
+                if per_domain.get(net, 0) >= _MAX_PER_DOMAIN:
+                    continue
+                if not _is_useful_result(u, title, snippet, qna_required=qna_required, keyword_tokens=kw_tokens):
+                    continue
+                out.append({"url": u, "title": title, "snippet": snippet})
+                per_domain[net] = per_domain.get(net, 0) + 1
+                if len(out) >= limit:
+                    return out
+    except Exception:
+        pass
+
+    # 3) htmlサブドメイン /html （POST フォールバック）
+    try:
+        r = s.post(
+            _DDG_ALT_HTML,
+            headers=headers,
+            data={"q": q, "kl": _DDG_KL, "kp": kp, "ia": "web"},
+            timeout=20,
+            allow_redirects=True,
+        )
+        if r.status_code == 200 and r.text:
+            items = _parse_ddg_html(r.text)
+            if not items:
+                _save_debug_html("alt_html_zero", q, r.text)
+            for u, title, snippet in items:
+                if not (u.startswith("http://") or u.startswith("https://")):
+                    continue
+                net = _netloc(u)
+                if per_domain.get(net, 0) >= _MAX_PER_DOMAIN:
+                    continue
+                if not _is_useful_result(u, title, snippet, qna_required=qna_required, keyword_tokens=kw_tokens):
+                    continue
+                out.append({"url": u, "title": title, "snippet": snippet})
+                per_domain[net] = per_domain.get(net, 0) + 1
+                if len(out) >= limit:
+                    return out
+        else:
+            # 202など結果のない着地を記録
+            _save_debug_html(f"alt_html_status_{r.status_code}", q, r.text or "")
+    except Exception:
+        pass
 
     return out
 
