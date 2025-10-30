@@ -420,6 +420,78 @@ def _parse_ddg_lite(html: str) -> List[Tuple[str, str, str]]:
             out.append((url, title, ""))  # liteはスニペット貧弱
     return out
 
+def _search_ddg_with_playwright(keyword: str, *, limit: int, lang: str, gl: str,
+                                qna_required: bool, kw_tokens: List[str]) -> List[Dict[str, str]]:
+    """
+    フォールバック：Playwrightで DDG を開いてオーガニック結果を抽出。
+    GET/POSTが 202/302 で弾かれる環境でも通すための最終手段。
+    """
+    if limit <= 0:
+        return []
+    query = quote((keyword or "").strip())
+    if not query:
+        return []
+    # DDG本体（/html ではなく /?q=...）
+    ddg_url = f"https://duckduckgo.com/?q={query}&kl={_DDG_KL}&kp={_ddg_safe_to_kp(_DDG_SAFE)}&ia=web"
+
+    out: List[Dict[str, str]] = []
+    per_domain: Dict[str, int] = []
+    per_domain = {}
+    with _PWSession(lang=lang, gl=gl) as sess:
+        page = sess.new_page()
+        try:
+            page.goto(ddg_url, timeout=20000, wait_until="load")
+            # 軽く描画待ち
+            page.wait_for_timeout(1200)
+            # セレクタ候補（新UI→旧UI→保険）
+            selectors = [
+                'a[data-testid="result-title-a"][href]',      # 新UI
+                'a.result__a[href]',                          # 旧UI
+                '#links a[href]',                             # 保険（/html風）
+            ]
+            urls: List[Tuple[str, str]] = []  # (url, title)
+            for sel in selectors:
+                try:
+                    loc = page.locator(sel)
+                    n = min(loc.count(), limit * 4)
+                    for i in range(n):
+                        try:
+                            href = loc.nth(i).get_attribute("href") or ""
+                            title = (loc.nth(i).inner_text() or "").strip()
+                        except Exception:
+                            continue
+                        if not (href.startswith("http://") or href.startswith("https://")):
+                            continue
+                        urls.append((href, _strip_tags(title)))
+                        if len(urls) >= limit * 3:
+                            break
+                    if urls:
+                        break
+                except Exception:
+                    continue
+
+            results: List[Dict[str, str]] = []
+            for u, title in urls:
+                net = _netloc(u)
+                if per_domain.get(net, 0) >= _MAX_PER_DOMAIN:
+                    continue
+                # Playwright経由は snippet が取りづらいので空文字で評価
+                if not _is_useful_result(u, title, "", qna_required=qna_required, keyword_tokens=kw_tokens):
+                    continue
+                results.append({"url": u, "title": title, "snippet": ""})
+                per_domain[net] = per_domain.get(net, 0) + 1
+                if len(results) >= limit:
+                    break
+            return results
+        except Exception:
+            # デバッグHTML保存
+            try:
+                _save_debug_html("ddg_pw_error", keyword, page.content() or "")
+            except Exception:
+                pass
+            return []
+
+
 def _save_debug_html(kind: str, kw: str, html: str) -> None:
     try:
         t = _NOW()
@@ -553,6 +625,12 @@ def _search_top_urls_duckduckgo(keyword: str, *, limit: int = 6,
     except Exception:
         pass
 
+    # 直取得で0件 → Playwrightフォールバック
+    if not out:
+        out = _search_ddg_with_playwright(
+            keyword, limit=limit, lang=lang, gl=gl,
+            qna_required=qna_required, kw_tokens=kw_tokens
+        )
     return out
 
 # ---------- Google 検索（上位URLだけ取る・軽量） ----------
