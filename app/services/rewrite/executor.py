@@ -1036,6 +1036,33 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
                 )    
   
 
+        # 3.4) URLだけキャッシュされて「h（見出し配列）」が空のときの軽量補完
+        #     - OpenAI再ランキングや URL のみ保存モード(SERP_ONLY_URLS=1)運用時の安全弁
+        #     - 上位 K 件のみヘッディング抽出を行い、outlines の各要素に h を埋める
+        try:
+            # すべてのアウトラインで h が空なら発動（部分的に埋まっている場合は何もしない）
+            if outlines and all(not (o.get("h") or []) for o in outlines):
+                K = int(os.getenv("SERP_HEADINGS_FILL_K", "3"))
+                K = max(1, min(K, len(outlines)))
+                filled_cnt = 0
+                for o in outlines[:K]:
+                    url_ = (o or {}).get("url")
+                    if not url_:
+                        continue
+                    try:
+                        # serp_collector 側の軽量抽出器（本文をフル収集せず H2/H3 を中心に抜く）
+                        filled = serp._fetch_page_outline(url_, lang="ja", gl="jp")
+                        if filled and (filled.get("h") or []):
+                            o["h"] = filled["h"]
+                            filled_cnt += 1
+                    except Exception:
+                        # 1件失敗しても続行
+                        continue
+                if filled_cnt:
+                    logging.info("[rewrite] headings filled for %s/%s urls (K=%s)", filled_cnt, len(outlines), K)
+        except Exception as e:
+            logging.info("[rewrite] headings_fill skipped: %r", e)
+        
         # 3.5) SERP × 現本文のギャップ分析（不足/追加セクション/品質課題 などを構造化）
         gap_summary_json, policy_checklist = _build_gap_analysis(article, original_html, outlines, gsc_snap)
         used_templates = _derive_templates_from_gsc(gsc_snap)

@@ -20,6 +20,8 @@ import re
 import os
 import time
 import random
+import json
+import hashlib
 from typing import List, Dict, Optional, Tuple, Any
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlparse, parse_qs, unquote
@@ -51,6 +53,16 @@ _NOW = lambda: time.strftime("%Y%m%d-%H%M%S")
 _CACHE_TTL_DAYS = int(os.environ.get("SERP_CACHE_TTL_DAYS", "14"))
 # 同一ドメインから拾う最大件数（多様性確保）
 _MAX_PER_DOMAIN = int(os.environ.get("SERP_MAX_PER_DOMAIN", "2"))
+# === 新規：検索プロバイダと節約オプション ===
+_SERP_PROVIDER = os.environ.get("SERP_PROVIDER", "ddg").lower()  # ddg|openai|google
+_SERP_OPENAI_MODEL = os.environ.get("SERP_OPENAI_MODEL", "gpt-4o-mini-search-preview")
+_SERP_RESULT_LIMIT = int(os.environ.get("SERP_RESULT_LIMIT", "6"))
+# URLだけ保存（本文巡回をスキップ）: "1"/"true"/"yes" で有効
+_SERP_ONLY_URLS = str(os.environ.get("SERP_ONLY_URLS", "0")).lower() in {"1","true","yes"}
+# 同一キーワードの再検索抑止（ファイルキャッシュ）
+_KW_CACHE_DAYS = int(os.environ.get("SERP_KEYWORD_FILECACHE_DAYS", "14"))
+_KW_CACHE_DIR = os.path.join(_BASE_DIR, os.environ.get("SERP_KEYWORD_FILECACHE_DIR", "runtime/serp_kwcache"))
+os.makedirs(_KW_CACHE_DIR, exist_ok=True)
 # DuckDuckGo 検索時のローカライズ & セーフサーチ（必要に応じて .env で変更可能）
 _DDG_KL = os.environ.get("SERP_DDG_KL", "jp-ja")       # 地域/言語ヒント（日本向け）
 _DDG_SAFE = os.environ.get("SERP_DDG_SAFE", "active")   # active|moderate|off → kp=1|kp=0|kp=-1
@@ -816,7 +828,61 @@ def _search_top_urls(keyword: str, *, limit: int = 6, lang: str = "ja", gl: str 
             urls = _attempt(base + "&source=hp")
     return _unique_keep_order(urls, limit)
 
+# ---------- 新規：OpenAI 検索プロバイダ（URLだけ） ----------
+def _search_top_urls_openai(keyword: str, *, limit: int = 6) -> List[str]:
+    """
+    OpenAIの検索API（gpt-4o-mini-search-preview）で上位URLだけ取得。
+    providers/openai_search.py に実装する search_top_urls() を薄く呼び出す。
+    """
+    try:
+        # 遅延import（モジュール未作成でも本ファイルは読み込めるように）
+        from app.services.rewrite.providers.openai_search import search_top_urls as _openai_search
+    except Exception:
+        # プロバイダが未配置/失敗なら空で返す（上位でDDGへフェイルオーバ）
+        return []
+    try:
+        urls = _openai_search(keyword=keyword, limit=limit, model=_SERP_OPENAI_MODEL)
+        # 期待インタフェース：List[str]。もし dict なら url を拾う。
+        if not urls:
+            return []
+        if isinstance(urls[0], dict):
+            urls = [d.get("url") for d in urls if isinstance(d, dict) and d.get("url")]
+        urls = [u for u in urls if isinstance(u, str) and u.startswith(("http://","https://"))]
+        return _unique_keep_order(urls, limit)
+    except Exception:
+        return []
 
+# ---------- 新規：キーワード・ファイルキャッシュ ----------
+def _kw_cache_path(keyword: str) -> str:
+    norm = (keyword or "").strip().lower()
+    h = hashlib.sha1(norm.encode("utf-8")).hexdigest()
+    return os.path.join(_KW_CACHE_DIR, f"{h}.json")
+
+def _kw_cache_load(keyword: str) -> Optional[List[str]]:
+    try:
+        path = _kw_cache_path(keyword)
+        if not os.path.exists(path):
+            return None
+        mtime = datetime.fromtimestamp(os.path.getmtime(path))
+        if mtime < datetime.now() - timedelta(days=_KW_CACHE_DAYS):
+            return None
+        with open(path, "r", encoding="utf-8") as f:
+            obj = json.load(f)
+        if isinstance(obj, dict) and isinstance(obj.get("urls"), list):
+            return [u for u in obj["urls"] if isinstance(u, str)]
+        if isinstance(obj, list):
+            return [u for u in obj if isinstance(u, str)]
+        return None
+    except Exception:
+        return None
+
+def _kw_cache_save(keyword: str, urls: List[str]) -> None:
+    try:
+        path = _kw_cache_path(keyword)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"keyword": keyword, "urls": urls, "saved_at": datetime.now().isoformat()}, f, ensure_ascii=False)
+    except Exception:
+        pass
 # ---------- ページから見出し抽出（高速・省メモリ） ----------
 
 def _extract_headings_from_dom(page, *, timeout_ms: int = 16000) -> List[str]:
@@ -950,13 +1016,48 @@ def collect_serp_outlines_for_keyword(keyword: str, *, limit: int = 6,
                                       qna_required: bool = False, article_title: str = "") -> List[Dict[str, Any]]:
 
     """
-    DuckDuckGo でキーワードの上位URLを取得し、各URLを巡回して見出し等を抽出。
+    指定プロバイダでキーワードの上位URLを取得し、必要に応じて各URLを巡回して見出し等を抽出。
+    - SERP_PROVIDER=openai なら OpenAI検索（URLのみ）
+    - それ以外は従来通り DDG ロジック
+    - SERP_ONLY_URLS=1 なら本文巡回をスキップして URL 骨格だけ保存
     戻り値: [{url, title, snippet, h:[...], intro, schema, signals, http:{status}} ...]
     """
-    results: List[Dict[str, str]] = _search_top_urls_duckduckgo(
-        keyword, limit=limit, lang=lang, gl=gl,
-        qna_required=qna_required, article_title=article_title
-    )
+    # まずはキーワード・ファイルキャッシュを確認
+    limit = limit or _SERP_RESULT_LIMIT
+    cached_urls: Optional[List[str]] = _kw_cache_load(keyword)
+
+    urls: List[str] = []
+    if cached_urls:
+        urls = _unique_keep_order(cached_urls, limit)
+    else:
+        if _SERP_PROVIDER == "openai":
+            urls = _search_top_urls_openai(keyword, limit=limit)
+            if not urls:
+                # フォールバック：DDGで救済
+                ddg_results = _search_top_urls_duckduckgo(
+                    keyword, limit=limit, lang=lang, gl=gl,
+                    qna_required=qna_required, article_title=article_title
+                )
+                urls = [r["url"] for r in ddg_results]
+        else:
+            ddg_results = _search_top_urls_duckduckgo(
+                keyword, limit=limit, lang=lang, gl=gl,
+                qna_required=qna_required, article_title=article_title
+            )
+            urls = [r["url"] for r in ddg_results]
+        # 取れたらキーワード・ファイルキャッシュへ保存
+        if urls:
+            _kw_cache_save(keyword, urls)
+
+    # URLだけ保存モードなら骨格だけ作って返す
+    if _SERP_ONLY_URLS:
+        outlines = []
+        for u in _unique_keep_order(urls, limit):
+            outlines.append({"url": u, "title": "", "snippet": "", "h": [], "intro": "", "schema": [], "signals": {}, "http": {}})
+        return outlines
+
+    # ここからは従来どおり本文巡回
+    results: List[Dict[str, str]] = [{"url": u, "title": "", "snippet": ""} for u in _unique_keep_order(urls, limit)]
     outlines: List[Dict[str, Any]] = []
     # 1URLずつ巡回（並列はリソース重いので避ける）
     for r in results:
@@ -1026,7 +1127,9 @@ def collect_and_cache_for_article(article_id: int, *, limit: int = 6,
 
     # 記事タイトルからQ&A/FAQっぽさを推定し、必要ならQ&A系ページ以外を除外
     qna_required = _looks_like_qna_article(art.title or "")
-    outlines = collect_serp_outlines_for_keyword(query, limit=limit, lang=lang, gl=gl,
+    # limit が未指定なら環境変数のデフォを採用
+    eff_limit = limit or _SERP_RESULT_LIMIT
+    outlines = collect_serp_outlines_for_keyword(query, limit=eff_limit, lang=lang, gl=gl,
                                                  qna_required=qna_required, article_title=art.title or "")
     saved = cache_outlines(article_id, outlines)
     return {"ok": True, "query": query, **saved}
