@@ -17,8 +17,10 @@ from bs4 import BeautifulSoup, NavigableString
 from openai import OpenAI, BadRequestError
 
 from app import db
-# フォールバック収集に使用
-from app.services.rewrite import serp_collector as serp
+# フォールバック収集を ChatGPT検索API に切替
+from app.services.rewrite.providers import openai_search as osearch
+# 見出し抽出は自前HTTP＋BS4。serp_collectorの軽量ユーティリティだけを直接利用
+from app.services.rewrite.serp_collector import _fetch_page_outline as fetch_page_outline
 from app.models import (
     Article,
     Site,
@@ -994,35 +996,35 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
         if not outlines:
             logging.info("[rewrite] outlines empty for article_id=%s (SERP参考0件)", article.id)
 
-            # === フォールバック：キャッシュが無ければ“その場で収集→即再読込” ===
+            # === フォールバック：ChatGPT検索APIで収集→即再読込 ===
             try:
-                fb = serp.collect_and_cache_for_article(
-                    article.id,
+                fb = osearch.search_and_cache_for_article(
+                    article_id=article.id,
                     limit=6,
                     lang="ja",
                     gl="jp",
-                    force=False,  # 直近キャッシュが新鮮なら収集をスキップ
+                    force=False  # 直近キャッシュが新鮮なら収集をスキップ
                 )
                 if fb.get("ok"):
                     # 直近キャッシュを再読込（収集成功/スキップの両方に対応）
                     outlines = _collect_serp_outline(article) or []
                     if fb.get("skipped") == "recent_cache":
                         logging.info(
-                            "[rewrite/fallback] SERP skipped (recent cache) article_id=%s cache_id=%s n=%s",
+                            "[rewrite/fallback] openai_search skipped (recent cache) article_id=%s cache_id=%s n=%s",
                             article.id, fb.get("cache_id"), len(outlines),
                         )
                     else:
                         logging.info(
-                            "[rewrite/fallback] SERP collected: article_id=%s query=%r saved_count=%s cache_id=%s n=%s",
+                            "[rewrite/fallback] openai_search collected: article_id=%s query=%r saved_count=%s cache_id=%s n=%s",
                             article.id, fb.get("query"), fb.get("saved_count"), fb.get("cache_id"), len(outlines),
                         )
                 else:
                     logging.info(
-                        "[rewrite/fallback] SERP collect failed: article_id=%s error=%r",
+                        "[rewrite/fallback] openai_search failed: article_id=%s error=%r",
                         article.id, fb.get("error"),
                     )
             except Exception as e:
-                logging.info("[rewrite/fallback] exception while collecting SERP: article_id=%s err=%r", article.id, e)
+                logging.info("[rewrite/fallback] exception while openai_search: article_id=%s err=%r", article.id, e)
 
             # --- 0件継続時の通知強化（デバッグ・ハンドオフ用のヒントを添付） ---
             if not outlines:
@@ -1050,8 +1052,8 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
                     if not url_:
                         continue
                     try:
-                        # serp_collector 側の軽量抽出器（本文をフル収集せず H2/H3 を中心に抜く）
-                        filled = serp._fetch_page_outline(url_, lang="ja", gl="jp")
+                        # 軽量抽出器（本文をフル収集せず H2/H3 を中心に抜く）
+                        filled = fetch_page_outline(url_, lang="ja", gl="jp")
                         if filled and (filled.get("h") or []):
                             o["h"] = filled["h"]
                             filled_cnt += 1
