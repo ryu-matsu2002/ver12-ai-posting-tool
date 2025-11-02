@@ -5,58 +5,48 @@
 #   - 2系統を提供
 #     (A) search   : OpenAIの Search系モデル（gpt-4o(-mini)-search-preview）で直接上位URLを取得
 #     (B) rerank   : 既存の候補URL（DDGなど）を OpenAI で再ランキング/ノイズ除去
-#   - 失敗時は空リストを返し、上位でのフォールバック（DDGなど）に委ねる/もしくは本モジュール内で暫定フォールバックを実施
-
-# 使い方：
-#   .env 例：
-#     SERP_PROVIDER=openai
-#     SERP_OPENAI_MODE=none | search | rerank   # 既定: none
-#     SERP_OPENAI_MODEL=gpt-4o-mini-search-preview
-#   MODE=none   : 何もせず空を返す（呼び出し元がDDGへフォールバック）
-#   MODE=search : OpenAIのSearchモデルで直接URLを取得（推奨）
-#   MODE=rerank : DDG候補の再ランキング
+#   - 失敗時は空リストを返し、上位でのフォールバック（DDGなど）に委ねる
 #
-# インターフェース：
-#   search_top_urls(keyword: str, limit: int = 6, model: str | None = None) -> list[str]
-#
-# 注意：
-#   - ここでは「URLを返すだけ」。本文巡回や見出し抽出は serp_collector 側の責務。
-#   - OpenAIキー未設定やAPI失敗時は、静かに「空リスト」を返す（上位でDDGフォールバック）。
+# さらに executor 互換のエントリポイント：
+#   - search_and_cache_for_article(article_id, limit, lang, gl, force=False)
+#     → URL収集 → 必要ならH2/H3軽量抽出 → SerpOutlineCache 保存
 # ------------------------------------------------------------
 
 from __future__ import annotations
 
 import os
 import json
-import time
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from urllib.parse import urlsplit, urlunsplit
+from datetime import datetime, timezone, timedelta
 
 # OpenAI SDK（インストール済み前提: openai>=1.x 系）
 try:
     from openai import OpenAI
-except Exception:  # SDKが無い環境でも落ちないように
+except Exception:  # SDK が無い環境でも落ちないように
     OpenAI = None  # type: ignore
 
-# env 読み込み
+from app import db
+from app.models import Article, SerpOutlineCache
+
+log = logging.getLogger(__name__)
+
+# ===== 環境変数 =====
 _MODE = os.environ.get("SERP_OPENAI_MODE", "none").strip().lower()   # "none" | "search" | "rerank"
 _DEFAULT_MODEL = os.environ.get("SERP_OPENAI_MODEL", "gpt-4o-mini-search-preview")
 _API_KEY = os.environ.get("OPENAI_API_KEY", "")
 _BASE_URL = os.environ.get("OPENAI_BASE_URL", "").strip() or None   # Azure等で必要なら指定
 _RESULT_LIMIT_FALLBACK = 6
 _MAX_PER_DOMAIN = int(os.environ.get("SERP_MAX_PER_DOMAIN", "2") or "2")
+_CACHE_TTL_DAYS = int(os.environ.get("SERP_CACHE_TTL_DAYS", "14") or "14")
+_HEADINGS_FILL_K = int(os.environ.get("SERP_HEADINGS_FILL_K", "3") or "3")
 
-# ロガー
-log = logging.getLogger(__name__)
-
-
+# ===== OpenAI クライアント =====
 def _has_openai() -> bool:
     return bool(OpenAI and _API_KEY)
 
-
-def _mk_client() -> Any:
-    """OpenAIクライアントを生成（BASE_URL対応）。"""
+def _mk_client() -> Optional[object]:
     if not _has_openai():
         return None
     try:
@@ -66,8 +56,9 @@ def _mk_client() -> Any:
     except Exception:
         return None
 
-def _normalize_url(u: str) -> str | None:
-    """http(s)のみ許可、トラッキング最小除去の軽量正規化。"""
+# ===== 便利関数 =====
+def _normalize_url(u: str) -> Optional[str]:
+    """http(s)のみ許可、軽量のトラッキング除去。"""
     try:
         if not isinstance(u, str):
             return None
@@ -75,7 +66,6 @@ def _normalize_url(u: str) -> str | None:
         if not u.startswith(("http://", "https://")):
             return None
         sp = urlsplit(u)
-        # ごく軽いUTM類の除去（必要十分の最小）
         if sp.query:
             qs = "&".join(
                 kv for kv in sp.query.split("&")
@@ -87,9 +77,7 @@ def _normalize_url(u: str) -> str | None:
     except Exception:
         return None
 
-
 def _cap_per_domain(urls: List[str], k: int) -> List[str]:
-    """同一ドメイン上限k件。"""
     out, seen = [], {}
     for u in urls:
         try:
@@ -102,94 +90,68 @@ def _cap_per_domain(urls: List[str], k: int) -> List[str]:
         seen[host] = c + 1
         out.append(u)
     return out
-def _prompt_for_rerank(keyword: str, limit: int, items: List[Dict[str, str]]) -> str:
-    """
-    モデルに渡すプロンプト（system+user）。JSON（URL配列）だけ返すよう強制。
-    items: [{"url":..., "title":..., "snippet":...}, ...]
-    """
-    # 情報漏洩を避けた最小プロンプト：厳格にJSON配列を要求
+
+def _extract_json_url_array(text: str) -> List[str]:
+    text = (text or "").strip()
+    # 素のJSON配列
+    if text.startswith("[") and text.endswith("]"):
+        try:
+            obj = json.loads(text)
+            if isinstance(obj, list):
+                return [x for x in obj if isinstance(x, str)]
+        except Exception:
+            pass
+    # コードブロック救済
+    try:
+        start = text.find("[")
+        end = text.rfind("]")
+        if 0 <= start < end:
+            obj = json.loads(text[start:end+1])
+            if isinstance(obj, list):
+                return [x for x in obj if isinstance(x, str)]
+    except Exception:
+        pass
+    return []
+
+def _prompt_for_rerank(keyword: str, limit: int, items_len: int) -> str:
     return (
         "You are an assistant that re-ranks web results for a given Japanese query.\n"
-        "Return ONLY a JSON array of up to {limit} URLs (strings), no extra text.\n"
-        "Prefer results that are:\n"
-        "- Highly relevant to the query intent\n"
-        "- Informational (not top-level homepages or thin pages)\n"
-        "- Likely to contain thorough H2/H3 headings and substantive content\n"
-        "- Non-duplicate domains, within 2 per domain\n"
-        "Demote: category index pages, tag pages, top-level landing pages, ads/spam.\n"
-        "日本語クエリに対して関連性が高い順に、最大{limit}件のURLをJSON配列で返してください。"
-    ).format(limit=limit)
+        f"Return ONLY a JSON array of up to {limit} URLs (strings), no extra text.\n"
+        "- Prefer highly relevant, long-form article pages with substantial headings\n"
+        "- Avoid tag/category index pages or thin/ads pages\n"
+        "- Cap = 2 per domain\n"
+        "日本語クエリに対して関連性が高い順に、最大件数のURLをJSON配列で返してください。"
+    )
 
 def _prompt_for_search(keyword: str, limit: int) -> str:
-    """
-    Searchモデル向けの厳格プロンプト。純粋なURL配列のみを返すことを強制。
-    """
     return (
         "You are a Japanese web search assistant. For the given query, return ONLY a JSON array "
-        f"of up to {limit} high-quality result URLs (strings). No prose, no markdown, no code block.\n"
-        "Guidelines:\n"
-        "- Highly relevant to the query intent\n"
-        "- Prefer informative article pages with substantial headings and text\n"
-        "- Avoid thin pages, tag/category index pages, ads, or pure navigation hubs\n"
-        "- Cap: within 2 URLs per domain\n"
-        "日本語クエリに対して関連性の高い記事URLを最大{limit}件、JSON配列のみで返してください。"
-    ).replace("{limit}", str(limit))
+        f"of up to {limit} high-quality result URLs (strings). No prose, markdown or code fences.\n"
+        "- Prefer informative article pages with H2/H3 headings\n"
+        "- Avoid thin pages, tag/category index pages, ads\n"
+        "- Cap: 2 per domain\n"
+        "日本語クエリに対して関連性の高い記事URLを最大件数、JSON配列のみで返してください。"
+    )
 
-def _rerank_with_openai(keyword: str, limit: int, candidates: List[Dict[str, str]], model: str) -> List[str]:
+# ===== DDG 候補（フォールバック用） =====
+def _ddg_candidates(keyword: str, limit: int) -> List[Dict[str, str]]:
     """
-    DDG候補(candidates)をOpenAIで再ランキングし、URL配列を返す。
-    失敗時は空配列（上位フォールバックのため）。
+    serp_collector の DDG 取得関数に委譲（遅延 import でループ回避）。
+    返り値: [{"url": "...", "title": "...", "snippet": "..."}, ...]
     """
-    client = _mk_client()
-    if not client:
-        return []
-
-    prompt = _prompt_for_rerank(keyword, limit, candidates)
     try:
-        # モデルに渡すコンテキストは最小限（タイトル/スニペット/URL）
-        # Responses API（SDK 1.x）
-        content = {
-            "keyword": keyword,
-            "limit": limit,
-            "candidates": candidates[: max(limit * 4, 12)],  # 少し多めに渡して取捨選択させる
-        }
-        resp = client.responses.create(
-            model=model or _DEFAULT_MODEL,
-            input=[
-                {
-                    "role": "system",
-                    "content": prompt,
-                },
-                {
-                    "role": "user",
-                    "content": json.dumps(content, ensure_ascii=False),
-                },
-            ],
-            temperature=0.0,
-            max_output_tokens=256,
-        )
-        text = (resp.output_text if hasattr(resp, "output_text") else resp.to_dict().get("output_text", "")) or ""
-        urls = _extract_json_url_array(text)  # 期待形式： ["https://...","https://..."]
-        if urls:
-            urls = [x for x in (_normalize_url(u) for u in urls) if x]
-            urls = _cap_per_domain(urls, _MAX_PER_DOMAIN)
-            return urls[:limit]
-        return []
-    except Exception as e:
-        log.warning("[OPENAI-RERANK] failed: %s", e)
+        from app.services.rewrite.serp_collector import _search_top_urls_duckduckgo
+        return _search_top_urls_duckduckgo(keyword, limit=limit, lang="ja", gl="jp")
+    except Exception:
         return []
 
+# ===== OpenAI 実行（search / rerank） =====
 def _search_with_openai(keyword: str, limit: int, model: str) -> List[str]:
-    """
-    OpenAIの Search系モデル（chat.completions/Responses互換）で直接URL配列を取得。
-    失敗時は空配列（呼び出し元フォールバック）。
-    """
     client = _mk_client()
     if not client:
         return []
     sys_prompt = _prompt_for_search(keyword, limit)
     try:
-        # Chat Completions経由での呼び出し（SDK 1.x）
         resp = client.chat.completions.create(
             model=model or _DEFAULT_MODEL,
             messages=[
@@ -210,73 +172,62 @@ def _search_with_openai(keyword: str, limit: int, model: str) -> List[str]:
         log.warning("[OPENAI-SEARCH] failed: %s", e)
         return []
 
-
-def _extract_json_url_array(text: str) -> List[str]:
-    """
-    モデル出力から最初のJSON配列を見つけてURL配列にする。
-    """
-    text = (text or "").strip()
-    # そのままJSON配列で来た場合
-    if text.startswith("[") and text.endswith("]"):
-        try:
-            obj = json.loads(text)
-            if isinstance(obj, list):
-                return [x for x in obj if isinstance(x, str)]
-        except Exception:
-            pass
-
-    # コードブロックなどに包まれている場合の救済
-    # ```json\n[ ... ]\n```
-    try:
-        start = text.find("[")
-        end = text.rfind("]")
-        if 0 <= start < end:
-            obj = json.loads(text[start : end + 1])
-            if isinstance(obj, list):
-                return [x for x in obj if isinstance(x, str)]
-    except Exception:
-        pass
-    return []
-
-
-def _ddg_candidates(keyword: str, limit: int) -> List[Dict[str, str]]:
-    """
-    serp_collector の DDG 取得関数を使って暫定候補を得る。
-    import ループを避けるため、遅延インポート。
-    """
-    try:
-        from app.services.rewrite.serp_collector import _search_top_urls_duckduckgo
-        # DDGは title/snippet 付きの dict を返す
-        return _search_top_urls_duckduckgo(keyword, limit=limit, lang="ja", gl="jp")
-    except Exception:
+def _rerank_with_openai(keyword: str, limit: int, candidates: List[Dict[str, str]], model: str) -> List[str]:
+    client = _mk_client()
+    if not client:
         return []
 
+    prompt = _prompt_for_rerank(keyword, limit, len(candidates))
+    try:
+        content = {
+            "keyword": keyword,
+            "limit": limit,
+            "candidates": candidates[: max(limit * 4, 12)],
+        }
+        # Responses API 互換呼び出し
+        resp = client.responses.create(
+            model=model or _DEFAULT_MODEL,
+            input=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": json.dumps(content, ensure_ascii=False)},
+            ],
+            temperature=0.0,
+            max_output_tokens=256,
+        )
+        text = getattr(resp, "output_text", "") or resp.to_dict().get("output_text", "")
+        urls = _extract_json_url_array(text)
+        if urls:
+            urls = [x for x in (_normalize_url(u) for u in urls) if x]
+            urls = _cap_per_domain(urls, _MAX_PER_DOMAIN)
+            return urls[:limit]
+        return []
+    except Exception as e:
+        log.warning("[OPENAI-RERANK] failed: %s", e)
+        return []
 
+# ===== 公開：URL配列のみ返す軽量API =====
 def search_top_urls(keyword: str, limit: int = 6, model: str | None = None) -> List[str]:
     """
-    公開インターフェース：
-      - MODE=none   : 何もせず空を返す（呼び出し元がDDGフォールバック）
-      - MODE=rerank : DDG候補→OpenAIで再ランキング→URL配列
+    - MODE=none   : 何もせず空を返す（呼び出し元がDDGフォールバック）
+    - MODE=search : OpenAIのSearchモデルで直接URL取得（失敗時はDDG）
+    - MODE=rerank : DDG候補をOpenAIで再ランキング（失敗時はDDG素抜き）
     """
     limit = max(1, int(limit or _RESULT_LIMIT_FALLBACK))
 
     if _MODE not in ("none", "search", "rerank"):
-        # 未知値は安全側で none 扱い
         return []
 
     if _MODE == "none":
         return []
 
     if _MODE == "search":
-        # 直接検索（OpenAI）。失敗時はDDGへフォールバック。
         urls = _search_with_openai(keyword, limit, model or _DEFAULT_MODEL)
         if urls:
             return urls
-        # 準フォールバック：DDG上位
         cands = _ddg_candidates(keyword, max(limit * 2, 10))
         return [c["url"] for c in cands[:limit] if isinstance(c, dict) and c.get("url")]
 
-    # rerank モード
+    # rerank
     cands = _ddg_candidates(keyword, max(limit * 3, 12))
     if not cands:
         return []
@@ -286,3 +237,147 @@ def search_top_urls(keyword: str, limit: int = 6, model: str | None = None) -> L
     if urls:
         return urls
     return [c["url"] for c in cands[:limit] if isinstance(c, dict) and c.get("url")]
+
+# ===== executor 互換：URLをキャッシュに保存するエントリポイント =====
+def _recent_cache(article_id: int, ttl_days: int) -> Optional[SerpOutlineCache]:
+    rec = (
+        db.session.query(SerpOutlineCache)
+        .filter(SerpOutlineCache.article_id == article_id)
+        .order_by(SerpOutlineCache.fetched_at.desc())
+        .first()
+    )
+    if not rec:
+        return None
+    try:
+        age = datetime.now(timezone.utc) - (rec.fetched_at or datetime.now(timezone.utc))
+        if age <= timedelta(days=ttl_days):
+            return rec
+    except Exception:
+        return None
+    return None
+
+def _fill_headings_if_needed(outlines: List[Dict[str, Any]], k: int, lang: str, gl: str) -> int:
+    """
+    すべての要素で 'h' が空なら、先頭 K 件だけ軽量見出し抽出を行う。
+    返り値: 実際に見出しを埋められた件数
+    """
+    if not outlines:
+        return 0
+    if any((o.get("h") or []) for o in outlines):
+        return 0
+    filled = 0
+    try:
+        # 遅延 import（循環回避）
+        from app.services.rewrite.serp_collector import _fetch_page_outline as fetch_page_outline
+    except Exception:
+        return 0
+
+    K = max(1, min(k, len(outlines)))
+    for o in outlines[:K]:
+        url_ = (o or {}).get("url")
+        if not url_:
+            continue
+        try:
+            filled_outline = fetch_page_outline(url_, lang=lang, gl=gl)
+            if filled_outline and (filled_outline.get("h") or []):
+                o["h"] = filled_outline["h"]
+                filled += 1
+        except Exception:
+            continue
+    return filled
+
+def search_and_cache_for_article(
+    *,
+    article_id: int,
+    limit: int = 6,
+    lang: str = "ja",
+    gl: str = "jp",
+    force: bool = False,
+) -> Dict[str, Any]:
+    """
+    executor.py から呼ばれる想定の公開関数。
+    手順：
+      1) 新鮮キャッシュがあれば尊重（force=False時）
+      2) 記事の keyword/title を使って URL 収集（MODE=search or rerank。失敗時はDDGフォールバック）
+      3) outlines = [{url, title?, snippet?, h?}, ...] を生成
+      4) 全要素 h が空なら、先頭K件だけ軽量見出し抽出で h を補完
+      5) SerpOutlineCache に保存（JSON列）
+    戻り例：
+      {'ok': True, 'cache_id': 123, 'saved_count': 6, 'query': 'キーワード'}
+      {'ok': True, 'skipped': 'recent_cache', 'cache_id': 456}
+      {'ok': False, 'error': '...'}
+    """
+    try:
+        # 0) 記事取得（必要情報だけ）
+        art: Optional[Article] = db.session.query(Article).get(article_id)
+        if not art:
+            return {"ok": False, "error": f"article_not_found:{article_id}"}
+
+        q = (art.keyword or art.title or "").strip()
+        if not q:
+            return {"ok": False, "error": "empty_query"}
+
+        # 1) 新鮮キャッシュ（forceで無視可）
+        if not force:
+            fresh = _recent_cache(article_id, _CACHE_TTL_DAYS)
+            if fresh:
+                return {"ok": True, "skipped": "recent_cache", "cache_id": fresh.id}
+
+        # 2) URL 収集
+        urls: List[str] = search_top_urls(q, limit=limit, model=_DEFAULT_MODEL)
+        urls = [u for u in urls if isinstance(u, str)]
+        # DDGフォールバックとして title/snippet を持つ候補が来る場合もケア
+        outlines: List[Dict[str, Any]] = []
+
+        if urls:
+            for u in urls:
+                norm = _normalize_url(u)
+                if not norm:
+                    continue
+                outlines.append({"url": norm})
+        else:
+            # MODE=none 等で空の場合は DDG から候補を確保
+            cands = _ddg_candidates(q, max(limit * 2, 10))
+            for c in cands[:limit]:
+                if not isinstance(c, dict) or not c.get("url"):
+                    continue
+                norm = _normalize_url(c["url"])
+                if not norm:
+                    continue
+                outlines.append({
+                    "url": norm,
+                    "title": c.get("title", "") or "",
+                    "snippet": c.get("snippet", "") or "",
+                })
+
+        if not outlines:
+            return {"ok": False, "error": "no_results"}
+
+        # 3) 全要素 h が空なら、先頭K件だけ軽量見出し抽出
+        _fill_headings_if_needed(outlines, _HEADINGS_FILL_K, lang, gl)
+
+        # 4) SerpOutlineCache に保存
+        rec = SerpOutlineCache(
+            article_id=article_id,
+            fetched_at=datetime.now(timezone.utc),
+            outlines=outlines,
+            query=q,
+            provider=_MODE if _MODE in ("search", "rerank") else "ddg",
+            k=len(outlines),
+        )
+        db.session.add(rec)
+        db.session.commit()
+
+        return {
+            "ok": True,
+            "cache_id": rec.id,
+            "saved_count": len(outlines),
+            "query": q,
+        }
+    except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        log.warning("[openai_search] search_and_cache_for_article failed: %s", e)
+        return {"ok": False, "error": str(e)}
