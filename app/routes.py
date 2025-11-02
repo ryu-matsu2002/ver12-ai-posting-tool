@@ -1139,6 +1139,41 @@ def admin_rewrite_dashboard():
     # 一覧はテンプレ＋フロント側のAJAXで描画
     return render_template("admin/rewrite.html")
 
+# ─────────────────────────────────────────
+# 追加: 全体サマリ（queued/running/success/error を高速返却）
+# ─────────────────────────────────────────
+@admin_bp.route("/admin/rewrite/summary", methods=["GET"])
+def admin_rewrite_summary():
+    """
+    JSON: 全体の queued/running/success/error を一括で返す（高速）
+    5秒キャッシュ。
+    """
+    from app import redis_client
+    cache_key = "admin:rewrite:summary:v1"
+    cached = redis_client.get(cache_key)
+    if cached:
+        # 既に totals+last_updated を含むJSON文字列
+        return jsonify(json.loads(cached))
+
+    agg = db.session.execute(_sql_text("""
+        SELECT status, COUNT(*) FROM article_rewrite_plans GROUP BY status
+    """)).fetchall()
+    totals = { (r[0] or ""): int(r[1] or 0) for r in agg }
+    payload = {
+        "ok": True,
+        "totals": {
+            "queued": totals.get("queued", 0),
+            "running": totals.get("running", 0),
+            "success": totals.get("success", 0),
+            "error": totals.get("error", 0),
+        },
+        "last_updated": datetime.utcnow().isoformat() + "Z",
+    }
+    try:
+        redis_client.setex(cache_key, 5, json.dumps(payload, ensure_ascii=False))
+    except Exception:
+        pass
+    return jsonify(payload)
 
 @admin_bp.route("/admin/rewrite/users", methods=["GET"])
 def admin_rewrite_users():
@@ -1242,6 +1277,106 @@ def admin_rewrite_users():
     except Exception:
         pass
     return jsonify({"ok": True, "items": items})
+
+
+# ─────────────────────────────────────────
+# 追加: 内部SEO風の一覧API（テンプレ互換のキー名で返却）
+# ─────────────────────────────────────────
+@admin_bp.route("/admin/rewrite/users_progress", methods=["GET"])
+def admin_rewrite_users_progress():
+    """
+    JSON: 各ユーザーのサイト数とリライト進捗（queued/running/success/error/last_activity_at）
+    返却キーは { ok, users: [...] } でテンプレと一致。
+    実体は /admin/rewrite/users と同じ集計（5秒キャッシュ）。
+    """
+    from sqlalchemy import case
+    from app import redis_client
+
+    q = (request.args.get("q", type=str) or "").strip()
+    cache_key = f"admin:rewrite:users_progress:v1:q={q}"
+    cached = redis_client.get(cache_key)
+    if cached:
+        return jsonify({"ok": True, "users": json.loads(cached)})
+
+    # 表示名: (last_name + ' ' + first_name) -> username -> email
+    full_name_expr = func.trim(
+        func.concat(
+            func.coalesce(func.nullif(User.last_name, ""), ""),
+            " ",
+            func.coalesce(func.nullif(User.first_name, ""), ""),
+        )
+    )
+    name_expr = func.coalesce(func.nullif(full_name_expr, ""), User.username, User.email)
+
+    site_sq = (
+        db.session.query(Site.user_id.label("uid"), func.count(Site.id).label("site_count"))
+        .group_by(Site.user_id)
+        .subquery()
+    )
+    queued_cnt  = func.sum(case((ArticleRewritePlan.status == "queued", 1), else_=0))
+    running_cnt = func.sum(case((ArticleRewritePlan.status == "running", 1), else_=0))
+    success_cnt = func.sum(case((ArticleRewritePlan.status == "success", 1), else_=0))
+    error_cnt   = func.sum(case((ArticleRewritePlan.status == "error", 1), else_=0))
+    last_act    = func.max(ArticleRewritePlan.updated_at)
+    plan_sq = (
+        db.session.query(
+            ArticleRewritePlan.user_id.label("uid"),
+            queued_cnt.label("queued"),
+            running_cnt.label("running"),
+            success_cnt.label("success"),
+            error_cnt.label("error"),
+            last_act.label("last_activity_at"),
+        )
+        .group_by(ArticleRewritePlan.user_id)
+        .subquery()
+    )
+
+    filters = []
+    if q:
+        like = f"%{q}%"
+        filters.append(
+            name_expr.ilike(like) | User.username.ilike(like) | User.email.ilike(like)
+        )
+
+    rows = (
+        db.session.query(
+            User.id.label("user_id"),
+            name_expr.label("name"),
+            func.coalesce(site_sq.c.site_count, 0).label("site_count"),
+            func.coalesce(plan_sq.c.queued, 0).label("queued"),
+            func.coalesce(plan_sq.c.running, 0).label("running"),
+            func.coalesce(plan_sq.c.success, 0).label("success"),
+            func.coalesce(plan_sq.c.error, 0).label("error"),
+            plan_sq.c.last_activity_at.label("last_activity_at"),
+        )
+        .outerjoin(site_sq, site_sq.c.uid == User.id)
+        .outerjoin(plan_sq, plan_sq.c.uid == User.id)
+        .filter(*filters)
+        .order_by(
+            func.coalesce(plan_sq.c.queued, 0).desc(),
+            func.coalesce(plan_sq.c.running, 0).desc(),
+            plan_sq.c.last_activity_at.desc().nullslast(),
+            User.id.asc(),
+        )
+        .all()
+    )
+
+    users = [{
+        "user_id": r.user_id,
+        "name": r.name,
+        "site_count": int(r.site_count or 0),
+        "queued": int(r.queued or 0),
+        "running": int(r.running or 0),
+        "success": int(r.success or 0),
+        "error": int(r.error or 0),
+        "last_activity_at": (r.last_activity_at.isoformat() if r.last_activity_at else None),
+    } for r in rows]
+
+    try:
+        redis_client.setex(cache_key, 5, json.dumps(users, ensure_ascii=False))
+    except Exception:
+        pass
+    return jsonify({"ok": True, "users": users})
 
 
 @admin_bp.route("/admin/rewrite/enqueue", methods=["POST"])
