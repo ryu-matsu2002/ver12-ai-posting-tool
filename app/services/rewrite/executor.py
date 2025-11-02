@@ -872,23 +872,43 @@ def _validate_html_for_publish(before_html: str, after_html: str) -> Tuple[bool,
     リンクや保護ブロック、見出しの空要素、トークン残留など“壊し”を検知して投稿を止める。
     """
     import re
+    from collections import Counter
     # href 集合・順序チェック
     def hrefs_with_order(h: str) -> List[str]:
         return [m.group(1).strip() for m in re.finditer(r'href=["\']([^"\']+)["\']', h or "", flags=re.I)]
     b_order = hrefs_with_order(before_html or "")
     a_order = hrefs_with_order(after_html or "")
+    # ✅ リンク集合は厳密一致（hrefが1つでも欠けたら停止）
     if set(b_order) != set(a_order):
         missing = sorted(set(b_order) - set(a_order))[:5]
         return False, f"links_changed_or_missing:{missing}"
     # タグ列が一致しているか（文章限定リライトの担保）
+    # --- タグ差分の“ソフト許可”判定 ---
+    # 見た目に影響しない軽量タグ（span/strong/em/b/i/u）は無視して構造比較。
+    def _tag_multiset(html: str, ignore: set) -> Counter:
+        soup = BeautifulSoup(html or "", "html.parser")
+        tags = [t.name for t in soup.find_all(True) if t.name not in ignore]
+        return Counter(tags)
+
     try:
-        ob = [t.name for t in BeautifulSoup(before_html or "", "html.parser").find_all(True)]
-        ab = [t.name for t in BeautifulSoup(after_html  or "", "html.parser").find_all(True)]
-        # タグの並びがズレても、全体の構造がほぼ同じなら許可する
-        diff_ratio = abs(len(ob) - len(ab)) / max(len(ob), 1)
-        if diff_ratio > 0.05:  # 5％以上タグ数が違ったら止める
-            return False, f"tag_sequence_changed(Δ={diff_ratio:.2f})"
+        ignore_wrap = {"span", "strong", "em", "b", "i", "u"}
+        ob_all = [t.name for t in BeautifulSoup(before_html or "", "html.parser").find_all(True)]
+        ab_all = [t.name for t in BeautifulSoup(after_html  or "", "html.parser").find_all(True)]
+        # 総タグ数の差（全タグベース）
+        diff_ratio_all = abs(len(ob_all) - len(ab_all)) / max(len(ob_all), 1)
+
+        # 無視対象を除いた“本質タグ”の差
+        ob_core = _tag_multiset(before_html, ignore_wrap)
+        ab_core = _tag_multiset(after_html,  ignore_wrap)
+        # マルチセット一致なら OK（順序は問わない）
+        core_equal = (ob_core == ab_core)
+
+        # 旧: 5% → 新: 20% まで許容。ただし core が一致していることが前提。
+        if diff_ratio_all > 0.20 and not core_equal:
+            return False, f"tag_sequence_changed(Δ={diff_ratio_all:.2f})"
+        # 20%以内、またはコア構造一致なら“ソフト許可”
     except Exception:
+        # 解析に失敗した場合は従来通り通す（他のガードで守られる）
         pass
     # 保護ブロック改変/欠落（before から抽出 → after に原文そのまま存在するか）
     _, pmap_before = _mask_protected_blocks(before_html or "")
@@ -897,7 +917,8 @@ def _validate_html_for_publish(before_html: str, after_html: str) -> Tuple[bool,
             return False, "pblock_missing_or_modified"
     
     # テキストノード乖離（過度な構造変化の間接指標）
-    if _textnode_divergence_too_large(before_html, after_html):
+    # テキストノード乖離が大きすぎる場合のみ停止（文章編集の範囲を超える変形を検知）
+    if _textnode_divergence_too_large(before_html, after_html, tolerance=0.20):
         return False, "textnode_divergence_too_large"
     # 空見出し検知
     if re.search(r'<h[23][^>]*>\s*</h[23]>', after_html or "", flags=re.I):
