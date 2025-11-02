@@ -82,11 +82,16 @@
 </div>
 
 <script>
-(function(){
+window.addEventListener('DOMContentLoaded', function(){
   const $ = s => document.querySelector(s);
   const tbody = $("#user-tbody");
   const modalEl = $("#userModal");
-  const modal = new bootstrap.Modal(modalEl);
+  let modal = null;
+  if (typeof bootstrap !== "undefined") {
+    modal = new bootstrap.Modal(modalEl);
+  } else {
+    console.error("⚠️ Bootstrap未読込のためModal初期化をスキップ");
+  }
   const mUser = $("#modal-user-name");
   const mSum = $("#modal-summary");
   const mTbody = $("#modal-tbody");
@@ -210,6 +215,6 @@
 
   // 初期ロード
   loadUsers();
-})();
+});
 </script>
 {% endblock %}
