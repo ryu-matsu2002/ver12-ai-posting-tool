@@ -1144,7 +1144,7 @@ def admin_rewrite_dashboard():
 # ─────────────────────────────────────────
 from sqlalchemy import text as _sql_text  # ← これがないとsummaryが動かない
 
-@admin_bp.route("/admin/rewrite/summary/", methods=["GET"])
+@admin_bp.route("/admin/rewrite/summary", methods=["GET"])
 def admin_rewrite_summary():
     from app import redis_client
     cache_key = "admin:rewrite:summary:v1"
@@ -1285,7 +1285,7 @@ def admin_rewrite_users():
 # ─────────────────────────────────────────
 # 追加: 内部SEO風の一覧API（テンプレ互換のキー名で返却）
 # ─────────────────────────────────────────
-@admin_bp.route("/admin/rewrite/users_progress/", methods=["GET"])
+@admin_bp.route("/admin/rewrite/users_progress", methods=["GET"])
 def admin_rewrite_users_progress():
     """
     JSON: 各ユーザーのサイト数とリライト進捗（queued/running/success/error/last_activity_at）
