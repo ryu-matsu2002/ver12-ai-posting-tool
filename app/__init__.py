@@ -133,9 +133,12 @@ def create_app() -> Flask:
     # ─── Blueprints 登録とスケジューラ起動 ───────
     with app.app_context():
         # Blueprint の登録（main用 + admin用 + webhook）
+        # admin_bp は /admin プレフィックスで管理者専用ルートを提供
         from .routes import bp as main_bp, admin_bp, stripe_webhook_bp
-        app.register_blueprint(main_bp)
+
+        # 先に admin_bp を登録し、ユーザー側 /rewrite の競合を回避
         app.register_blueprint(admin_bp)
+        app.register_blueprint(main_bp)
         app.register_blueprint(stripe_webhook_bp)
 
         from .blueprints.signup_tasks import bp as signup_tasks_bp
