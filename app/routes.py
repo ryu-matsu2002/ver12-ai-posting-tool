@@ -1143,9 +1143,22 @@ def admin_rewrite_dashboard():
 @admin_bp.route("/admin/rewrite/users", methods=["GET"])
 def admin_rewrite_users():
     """
-    JSON: 管理UI用のユーザー一覧（サイト数 + リライト集計）
+    JSON: 管理UI用のユーザー一覧（サイト数 + リライト集計）高速版
+    - JOINを「事前集計サブクエリ」に分離
+    - 必要列のみ選択
+    - 5秒キャッシュ
     """
-    # 表示名の優先順位: (last_name + ' ' + first_name) -> username -> email
+    from sqlalchemy import case
+    from app import redis_client
+
+    # ---- キャッシュキー（検索ワードをキーに含める） ----
+    q = (request.args.get("q", type=str) or "").strip()
+    cache_key = f"admin:rewrite:users:v1:q={q}"
+    cached = redis_client.get(cache_key)
+    if cached:
+        return jsonify({"ok": True, "items": json.loads(cached)})
+
+    # 表示名: (last_name + ' ' + first_name) -> username -> email
     full_name_expr = func.trim(
         func.concat(
             func.coalesce(func.nullif(User.last_name, ""), ""),
@@ -1155,57 +1168,79 @@ def admin_rewrite_users():
     )
     name_expr = func.coalesce(func.nullif(full_name_expr, ""), User.username, User.email)
 
-    # フィルタ（検索）
-    q = request.args.get("q", type=str)
-    name_filter = []
+    # --- サイト数: sites を user_id で事前集計 ---
+    site_sq = (
+        db.session.query(Site.user_id.label("uid"), func.count(Site.id).label("site_count"))
+        .group_by(Site.user_id)
+        .subquery()
+    )
+
+    # --- リライト集計: plans を user_id で事前集計（ステータス別カウント＋最終更新） ---
+    queued_cnt  = func.sum(case((ArticleRewritePlan.status == "queued", 1), else_=0))
+    running_cnt = func.sum(case((ArticleRewritePlan.status == "running", 1), else_=0))
+    success_cnt = func.sum(case((ArticleRewritePlan.status == "success", 1), else_=0))
+    error_cnt   = func.sum(case((ArticleRewritePlan.status == "error", 1), else_=0))
+    last_act    = func.max(ArticleRewritePlan.updated_at)
+    plan_sq = (
+        db.session.query(
+            ArticleRewritePlan.user_id.label("uid"),
+            queued_cnt.label("queued"),
+            running_cnt.label("running"),
+            success_cnt.label("success"),
+            error_cnt.label("error"),
+            last_act.label("last_activity_at"),
+        )
+        .group_by(ArticleRewritePlan.user_id)
+        .subquery()
+    )
+
+    # --- 検索フィルタ ---
+    filters = []
     if q:
         like = f"%{q}%"
-        name_filter = [ name_expr.ilike(like) | User.username.ilike(like) | User.email.ilike(like) ]
-
-    # ステータス別集計（queued/running/success/error）と last_activity_at
-    from sqlalchemy import case
-    queued_sum  = func.coalesce(func.sum(case((ArticleRewritePlan.status == "queued", 1), else_=0)), 0)
-    running_sum = func.coalesce(func.sum(case((ArticleRewritePlan.status == "running", 1), else_=0)), 0)
-    success_sum = func.coalesce(func.sum(case((ArticleRewritePlan.status == "success", 1), else_=0)), 0)
-    error_sum   = func.coalesce(func.sum(case((ArticleRewritePlan.status == "error", 1), else_=0)), 0)
-    last_act    = func.max(ArticleRewritePlan.updated_at)
+        filters.append(
+            name_expr.ilike(like) | User.username.ilike(like) | User.email.ilike(like)
+        )
 
     rows = (
         db.session.query(
             User.id.label("user_id"),
             name_expr.label("name"),
-            func.coalesce(func.count(Site.id), 0).label("site_count"),
-            queued_sum.label("queued"),
-            running_sum.label("running"),
-            success_sum.label("success"),
-            error_sum.label("error"),
-            last_act.label("last_activity_at"),
+            func.coalesce(site_sq.c.site_count, 0).label("site_count"),
+            func.coalesce(plan_sq.c.queued, 0).label("queued"),
+            func.coalesce(plan_sq.c.running, 0).label("running"),
+            func.coalesce(plan_sq.c.success, 0).label("success"),
+            func.coalesce(plan_sq.c.error, 0).label("error"),
+            plan_sq.c.last_activity_at.label("last_activity_at"),
         )
-        .outerjoin(Site, Site.user_id == User.id)
-        .outerjoin(ArticleRewritePlan, ArticleRewritePlan.user_id == User.id)
-        .filter(*name_filter)
-        .group_by(User.id, name_expr)
+        .outerjoin(site_sq, site_sq.c.uid == User.id)
+        .outerjoin(plan_sq, plan_sq.c.uid == User.id)
+        .filter(*filters)
         .order_by(
-            queued_sum.desc(),
-            running_sum.desc(),
-            last_act.desc().nullslast(),
+            func.coalesce(plan_sq.c.queued, 0).desc(),
+            func.coalesce(plan_sq.c.running, 0).desc(),
+            plan_sq.c.last_activity_at.desc().nullslast(),
             User.id.asc(),
         )
         .all()
     )
 
-    items = []
-    for r in rows:
-        items.append({
-            "user_id": r.user_id,
-            "name": r.name,
-            "site_count": int(r.site_count or 0),
-            "queued": int(r.queued or 0),
-            "running": int(r.running or 0),
-            "success": int(r.success or 0),
-            "error": int(r.error or 0),
-            "last_activity_at": (r.last_activity_at.isoformat() if r.last_activity_at else None),
-        })
+    items = [{
+        "user_id": r.user_id,
+        "name": r.name,
+        "site_count": int(r.site_count or 0),
+        "queued": int(r.queued or 0),
+        "running": int(r.running or 0),
+        "success": int(r.success or 0),
+        "error": int(r.error or 0),
+        "last_activity_at": (r.last_activity_at.isoformat() if r.last_activity_at else None),
+    } for r in rows]
+
+    # 5秒キャッシュ
+    try:
+        redis_client.setex(cache_key, 5, json.dumps(items, ensure_ascii=False))
+    except Exception:
+        pass
     return jsonify({"ok": True, "items": items})
 
 
