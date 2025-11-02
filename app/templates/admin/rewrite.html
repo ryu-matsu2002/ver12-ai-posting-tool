@@ -96,7 +96,9 @@
   function formatDate(str){ return str ? new Date(str).toLocaleString() : "-"; }
 
   async function fetchJSON(url, opts){
-    const r = await fetch(url, opts||{});
+    // フルパス or 相対パスの両対応（オリジンを自動補完）
+    const fullUrl = url.startsWith("http") ? url : `${window.location.origin}${url}`;
+    const r = await fetch(fullUrl, opts||{});
     const j = await r.json();
     if(!r.ok || j.ok===false) throw new Error(j.error||("HTTP "+r.status));
     return j;
