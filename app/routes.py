@@ -1134,14 +1134,18 @@ def job_status():
 @admin_bp.route("/admin/rewrite", methods=["GET"])
 def admin_rewrite_dashboard():
     """
-    管理UI：ユーザー選択 → 全記事リライト投入ボタン → 進捗表示（AJAX）
-    画面自体は薄く、データは下の JSON API で取得。
+    管理UI（ユーザー行ごとの一覧）。データは JSON API で取得。
     """
-    # ユーザーの軽量一覧（ID/名前/サイト数）
-    # 表示名の優先順位:
-    # 1) trim(last_name + ' ' + first_name) が空/空白でなければそれ
-    # 2) username
-    # 3) email
+    # 一覧はテンプレ＋フロント側のAJAXで描画
+    return render_template("admin/rewrite.html")
+
+
+@admin_bp.route("/admin/rewrite/users", methods=["GET"])
+def admin_rewrite_users():
+    """
+    JSON: 管理UI用のユーザー一覧（サイト数 + リライト集計）
+    """
+    # 表示名の優先順位: (last_name + ' ' + first_name) -> username -> email
     full_name_expr = func.trim(
         func.concat(
             func.coalesce(func.nullif(User.last_name, ""), ""),
@@ -1150,38 +1154,59 @@ def admin_rewrite_dashboard():
         )
     )
     name_expr = func.coalesce(func.nullif(full_name_expr, ""), User.username, User.email)
-    users = (
-        db.session.query(
-            User.id.label("id"),
-            name_expr.label("name"),
-            func.count(Site.id).label("site_cnt"),
-        )
-        .outerjoin(Site, Site.user_id == User.id)
-        .group_by(User.id, name_expr)
-        .order_by(User.id.asc())
-        .all()
-    )
-    return render_template("admin/rewrite.html", users=users)
 
+    # フィルタ（検索）
+    q = request.args.get("q", type=str)
+    name_filter = []
+    if q:
+        like = f"%{q}%"
+        name_filter = [ name_expr.ilike(like) | User.username.ilike(like) | User.email.ilike(like) ]
 
-@admin_bp.route("/admin/rewrite/users", methods=["GET"])
-def admin_rewrite_users():
-    """
-    JSON: 管理UI用のユーザー一覧（サイト数付き）
-    """
+    # ステータス別集計（queued/running/success/error）と last_activity_at
+    from sqlalchemy import case
+    queued_sum  = func.coalesce(func.sum(case((ArticleRewritePlan.status == "queued", 1), else_=0)), 0)
+    running_sum = func.coalesce(func.sum(case((ArticleRewritePlan.status == "running", 1), else_=0)), 0)
+    success_sum = func.coalesce(func.sum(case((ArticleRewritePlan.status == "success", 1), else_=0)), 0)
+    error_sum   = func.coalesce(func.sum(case((ArticleRewritePlan.status == "error", 1), else_=0)), 0)
+    last_act    = func.max(ArticleRewritePlan.updated_at)
+
     rows = (
         db.session.query(
-            User.id.label("id"),
-            User.name.label("name"),
-            func.count(Site.id).label("site_cnt"),
+            User.id.label("user_id"),
+            name_expr.label("name"),
+            func.coalesce(func.count(Site.id), 0).label("site_count"),
+            queued_sum.label("queued"),
+            running_sum.label("running"),
+            success_sum.label("success"),
+            error_sum.label("error"),
+            last_act.label("last_activity_at"),
         )
         .outerjoin(Site, Site.user_id == User.id)
-        .group_by(User.id, User.name)
-        .order_by(User.id.asc())
+        .outerjoin(ArticleRewritePlan, ArticleRewritePlan.user_id == User.id)
+        .filter(*name_filter)
+        .group_by(User.id, name_expr)
+        .order_by(
+            queued_sum.desc(),
+            running_sum.desc(),
+            last_act.desc().nullslast(),
+            User.id.asc(),
+        )
         .all()
     )
-    data = [{"id": r.id, "name": r.name, "site_cnt": int(r.site_cnt or 0)} for r in rows]
-    return jsonify({"ok": True, "users": data})
+
+    items = []
+    for r in rows:
+        items.append({
+            "user_id": r.user_id,
+            "name": r.name,
+            "site_count": int(r.site_count or 0),
+            "queued": int(r.queued or 0),
+            "running": int(r.running or 0),
+            "success": int(r.success or 0),
+            "error": int(r.error or 0),
+            "last_activity_at": (r.last_activity_at.isoformat() if r.last_activity_at else None),
+        })
+    return jsonify({"ok": True, "items": items})
 
 
 @admin_bp.route("/admin/rewrite/enqueue", methods=["POST"])
@@ -1350,42 +1375,51 @@ def admin_rewrite_plans():
 def admin_rewrite_retry_failed():
     """
     失敗プランの再キューを即時トリガ。ノンブロッキングで実行。
-    body: { max_attempts?:int, min_age_minutes?:int, limit?:int }
+    body: { user_id?:int, max_attempts?:int, min_age_minutes?:int, limit?:int }
     """
     payload = request.get_json(silent=True) or {}
+    user_id      = payload.get("user_id")  # 受け取りのみ（ジョブが対応していれば利用）
     max_attempts = int(payload.get("max_attempts", 3))
     min_age_min  = int(payload.get("min_age_minutes", 30))
     limit        = int(payload.get("limit", 100))
     app_obj = current_app._get_current_object()
     def _run():
         try:
-            # 内部はログに結果を出す
-            _rewrite_retry_job(app_obj)
+            # 内部はログに結果を出す（user_id対応の実装があれば渡す）
+            try:
+                _rewrite_retry_job(app_obj, user_id=user_id, max_attempts=max_attempts, min_age_minutes=min_age_min, limit=limit)
+            except TypeError:
+                # 旧シグネチャ互換
+                _rewrite_retry_job(app_obj)
         except Exception as e:
             current_app.logger.exception("[admin/rewrite/retry_failed] job error: %s", e)
     _ui_executor.submit(_run)
     return jsonify({"ok": True, "queued": True, "params": {
-        "max_attempts": max_attempts, "min_age_minutes": min_age_min, "limit": limit
+        "user_id": user_id, "max_attempts": max_attempts, "min_age_minutes": min_age_min, "limit": limit
     }})
 
 @admin_bp.route("/admin/rewrite/serp_warmup", methods=["POST"])
 def admin_rewrite_serp_warmup():
     """
     SERP 温めを即時トリガ（夜間ジョブの手動発火相当）。ノンブロッキング。
-    body: { days?:int, limit?:int }
+    body: { user_id?:int, days?:int, limit?:int }
     """
     payload = request.get_json(silent=True) or {}
+    user_id = payload.get("user_id")
     days  = int(payload.get("days", 45))
     limit = int(payload.get("limit", 30))
     app_obj = current_app._get_current_object()
     def _run():
         try:
-            # 夜間ジョブ本体を流用
-            _serp_warmup_nightly_job(app_obj)
+            # 夜間ジョブ本体を流用（user_id対応の実装があれば渡す）
+            try:
+                _serp_warmup_nightly_job(app_obj, user_id=user_id, days=days, limit=limit)
+            except TypeError:
+                _serp_warmup_nightly_job(app_obj)
         except Exception as e:
             current_app.logger.exception("[admin/rewrite/serp_warmup] job error: %s", e)
     _ui_executor.submit(_run)
-    return jsonify({"ok": True, "queued": True, "params": {"days": days, "limit": limit}})
+    return jsonify({"ok": True, "queued": True, "params": {"user_id": user_id, "days": days, "limit": limit}})
 
 
 import subprocess
