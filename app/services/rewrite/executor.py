@@ -55,6 +55,7 @@ TEMP = {
 TOP_P = 0.9
 CTX_LIMIT = 12000
 SHRINK = 0.85
+SERP_REQUIRED_FOR_REWRITE = os.getenv("SERP_REQUIRED_FOR_REWRITE", "0") == "1"
 
 META_MAX = 180  # メタ説明最大長（wp_clientのポリシーと整合）
 
@@ -71,14 +72,24 @@ def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float, user_id: Optional
         raise ValueError("Calculated max_tokens is below minimum.")
 
     def _call(m: int) -> str:
-        res = client.chat.completions.create(
-            model=MODEL,
-            messages=msgs,
-            max_tokens=m,
-            temperature=temp,
-            top_p=TOP_P,
-            timeout=120,
-        )
+        # 一部SDKで timeout キーワード未対応 → フォールバック
+        try:
+            res = client.chat.completions.create(
+                model=MODEL,
+                messages=msgs,
+                max_tokens=m,
+                temperature=temp,
+                top_p=TOP_P,
+                timeout=120,
+            )
+        except TypeError:
+            res = client.chat.completions.create(
+                model=MODEL,
+                messages=msgs,
+                max_tokens=m,
+                temperature=temp,
+                top_p=TOP_P,
+            )
 
         # TokenUsageLog（可能なら保存）— 失敗時は必ず rollback してセッションを健全化
         try:
@@ -474,7 +485,8 @@ def _derive_templates_from_gsc(gsc_snapshot: Dict) -> List[str]:
                 slugs.append("low_visibility_ranked_30plus")
         except Exception:
             pass
-    return slugs or None
+    # 型を常に List[str] に統一（NULL混入での落ちを防ぐ）
+    return slugs
 
 def _gsc_based_rewrite_specs(gsc_snapshot: Dict) -> List[str]:
     """
@@ -1035,7 +1047,41 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
                 logging.info(
                     "[rewrite/fallback] outlines STILL empty after attempt: article_id=%s keyword=%r title=%r debug_dir=%s",
                     article.id, (article.keyword or ""), (article.title or ""), debug_dir
-                )    
+                )
+
+                # ここで“停止するか/続行するか”を環境変数で切り替え
+                if SERP_REQUIRED_FOR_REWRITE:
+                    reason = "serp_outlines_empty"
+                    if dry_run:
+                        # ドライラン時は再キューして早期終了（attemptsは加算しない）
+                        plan.status = "queued"
+                        plan.started_at = None
+                        plan.finished_at = None
+                        try:
+                            if plan.attempts and plan.attempts > 0:
+                                plan.attempts -= 1
+                        except Exception:
+                            pass
+                        db.session.commit()
+                        return {
+                            "status": "done(dry)",
+                            "plan_id": plan.id,
+                            "article_id": article.id,
+                            "wp_post_id": None,
+                            "note": "SERP=0件のため停止（再キュー済み）"
+                        }
+                    else:
+                        plan.status = "error"
+                        plan.last_error = reason
+                        plan.finished_at = datetime.utcnow()
+                        db.session.commit()
+                        return {
+                            "status": "error",
+                            "plan_id": plan.id,
+                            "article_id": article.id,
+                            "wp_post_id": None,
+                            "error": reason
+                        } 
   
 
         # 3.4) URLだけキャッシュされて「h（見出し配列）」が空のときの軽量補完
@@ -1084,6 +1130,7 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
                 f"【参照SERP件数】{referenced_count}\n"
                 f"【不足トピック（要点）】{_mt_head if _mt_head else '—'}\n"
                 f"※ 参照URLとタイトルの詳細はダッシュボードで確認できます。\n"
+                f"{'(SERP参照0件: GSCのみで方針策定)' if referenced_count == 0 else ''}"
             )
         except Exception:
             pass

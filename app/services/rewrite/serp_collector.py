@@ -447,8 +447,7 @@ def _search_ddg_with_playwright(keyword: str, *, limit: int, lang: str, gl: str,
     ddg_url = f"https://duckduckgo.com/?q={query}&kl={_DDG_KL}&kp={_ddg_safe_to_kp(_DDG_SAFE)}&ia=web"
 
     out: List[Dict[str, str]] = []
-    per_domain: Dict[str, int] = []
-    per_domain = {}
+    per_domain: Dict[str, int] = {}
     with _PWSession(lang=lang, gl=gl) as sess:
         page = sess.new_page()
         try:
