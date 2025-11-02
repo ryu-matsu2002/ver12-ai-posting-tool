@@ -1008,35 +1008,42 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
         if not outlines:
             logging.info("[rewrite] outlines empty for article_id=%s (SERP参考0件)", article.id)
 
-            # === フォールバック：ChatGPT検索APIで収集→即再読込 ===
+            # === 修正版: OpenAI Search APIで直接URL収集しキャッシュ ===
             try:
-                fb = osearch.search_and_cache_for_article(
-                    article_id=article.id,
-                    limit=6,
-                    lang="ja",
-                    gl="jp",
-                    force=False  # 直近キャッシュが新鮮なら収集をスキップ
-                )
-                if fb.get("ok"):
-                    # 直近キャッシュを再読込（収集成功/スキップの両方に対応）
-                    outlines = _collect_serp_outline(article) or []
-                    if fb.get("skipped") == "recent_cache":
+                urls = osearch.search_top_urls(article.keyword or article.title or "", limit=6)
+                if urls:
+                    saved_outlines = []
+                    for u in urls:
+                        outline = fetch_page_outline(u, lang="ja", gl="jp")
+                        if outline:
+                            saved_outlines.append(outline)
+
+                    if saved_outlines:
+                        cache = SerpOutlineCache(
+                            article_id=article.id,
+                            outlines=saved_outlines,
+                            fetched_at=datetime.utcnow()
+                        )
+                        db.session.add(cache)
+                        db.session.commit()
+
+                        outlines = saved_outlines
                         logging.info(
-                            "[rewrite/fallback] openai_search skipped (recent cache) article_id=%s cache_id=%s n=%s",
-                            article.id, fb.get("cache_id"), len(outlines),
+                            "[rewrite/fallback] ✅ OpenAI search success: article_id=%s keyword=%r n=%s",
+                            article.id, (article.keyword or ""), len(saved_outlines),
                         )
                     else:
-                        logging.info(
-                            "[rewrite/fallback] openai_search collected: article_id=%s query=%r saved_count=%s cache_id=%s n=%s",
-                            article.id, fb.get("query"), fb.get("saved_count"), fb.get("cache_id"), len(outlines),
+                        logging.warning(
+                            "[rewrite/fallback] ⚠️ OpenAI search returned URLs but no outlines could be fetched (article_id=%s)",
+                            article.id,
                         )
                 else:
-                    logging.info(
-                        "[rewrite/fallback] openai_search failed: article_id=%s error=%r",
-                        article.id, fb.get("error"),
+                    logging.warning(
+                        "[rewrite/fallback] ⚠️ OpenAI search returned no URLs for article_id=%s keyword=%r",
+                        article.id, (article.keyword or ""),
                     )
             except Exception as e:
-                logging.info("[rewrite/fallback] exception while openai_search: article_id=%s err=%r", article.id, e)
+                logging.exception("[rewrite/fallback] ❌ Exception during OpenAI search for article_id=%s: %r", article.id, e)
 
             # --- 0件継続時の通知強化（デバッグ・ハンドオフ用のヒントを添付） ---
             if not outlines:
