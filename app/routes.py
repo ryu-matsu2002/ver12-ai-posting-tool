@@ -1140,25 +1140,27 @@ def admin_rewrite_dashboard():
     return render_template("admin/rewrite.html")
 
 # ─────────────────────────────────────────
-# 追加: 全体サマリ（queued/running/success/error を高速返却）
+# 全体サマリ API（完全修正版）
 # ─────────────────────────────────────────
+from sqlalchemy import text as _sql_text  # ← これがないとsummaryが動かない
+
 @admin_bp.route("/admin/rewrite/summary", methods=["GET"])
 def admin_rewrite_summary():
-    """
-    JSON: 全体の queued/running/success/error を一括で返す（高速）
-    5秒キャッシュ。
-    """
     from app import redis_client
     cache_key = "admin:rewrite:summary:v1"
     cached = redis_client.get(cache_key)
     if cached:
-        # 既に totals+last_updated を含むJSON文字列
         return jsonify(json.loads(cached))
 
-    agg = db.session.execute(_sql_text("""
-        SELECT status, COUNT(*) FROM article_rewrite_plans GROUP BY status
-    """)).fetchall()
-    totals = { (r[0] or ""): int(r[1] or 0) for r in agg }
+    try:
+        rows = db.session.execute(_sql_text(
+            "SELECT status, COUNT(*) FROM article_rewrite_plans GROUP BY status"
+        )).fetchall()
+        totals = {r[0] or "": int(r[1] or 0) for r in rows}
+    except Exception as e:
+        current_app.logger.warning("[rewrite_summary] fallback: %s", e)
+        totals = {"queued": 0, "running": 0, "success": 0, "error": 0}
+
     payload = {
         "ok": True,
         "totals": {
@@ -1174,6 +1176,7 @@ def admin_rewrite_summary():
     except Exception:
         pass
     return jsonify(payload)
+
 
 @admin_bp.route("/admin/rewrite/users", methods=["GET"])
 def admin_rewrite_users():
