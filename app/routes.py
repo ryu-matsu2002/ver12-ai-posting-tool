@@ -1138,14 +1138,26 @@ def admin_rewrite_dashboard():
     画面自体は薄く、データは下の JSON API で取得。
     """
     # ユーザーの軽量一覧（ID/名前/サイト数）
+    # 表示名の優先順位:
+    # 1) trim(last_name + ' ' + first_name) が空/空白でなければそれ
+    # 2) username
+    # 3) email
+    full_name_expr = func.trim(
+        func.concat(
+            func.coalesce(func.nullif(User.last_name, ""), ""),
+            " ",
+            func.coalesce(func.nullif(User.first_name, ""), ""),
+        )
+    )
+    name_expr = func.coalesce(func.nullif(full_name_expr, ""), User.username, User.email)
     users = (
         db.session.query(
             User.id.label("id"),
-            User.name.label("name"),
+            name_expr.label("name"),
             func.count(Site.id).label("site_cnt"),
         )
         .outerjoin(Site, Site.user_id == User.id)
-        .group_by(User.id, User.name)
+        .group_by(User.id, name_expr)
         .order_by(User.id.asc())
         .all()
     )
