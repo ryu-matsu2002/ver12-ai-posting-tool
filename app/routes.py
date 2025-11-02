@@ -1218,7 +1218,7 @@ def admin_rewrite_users():
     running_cnt = func.sum(case((ArticleRewritePlan.status == "running", 1), else_=0))
     success_cnt = func.sum(case((ArticleRewritePlan.status == "success", 1), else_=0))
     error_cnt   = func.sum(case((ArticleRewritePlan.status == "error", 1), else_=0))
-    last_act    = func.max(ArticleRewritePlan.updated_at)
+    last_act    = func.max(ArticleRewritePlan.created_at)
     plan_sq = (
         db.session.query(
             ArticleRewritePlan.user_id.label("uid"),
