@@ -158,7 +158,6 @@ def _search_with_openai(keyword: str, limit: int, model: str) -> List[str]:
                 {"role": "system", "content": sys_prompt},
                 {"role": "user", "content": keyword},
             ],
-            temperature=0.0,
             max_tokens=256,
         )
         text = resp.choices[0].message.content if resp and resp.choices else ""
