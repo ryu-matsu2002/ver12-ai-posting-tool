@@ -5,28 +5,56 @@
 {% block content %}
 <div class="container-fluid mt-4">
   <h2 class="mb-3">全記事リライト（管理）</h2>
-  <p class="text-muted">
-    ユーザーごとのリライト計画を一覧表示します。各行から全記事投入・進捗確認・再試行・SERP温めを操作できます。
+  <p class="text-muted mb-3">
+    ユーザーごとのリライト計画を一覧表示します。各行から全記事投入・進捗確認・再試行を操作できます。
   </p>
 
   <!-- 検索と更新 -->
   <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-    <div class="input-group" style="max-width: 320px;">
+    <div class="input-group" style="max-width: 340px;">
       <input type="text" id="search-box" class="form-control" placeholder="ユーザー名・メールで検索">
       <button class="btn btn-outline-secondary" id="search-btn">検索</button>
     </div>
-    <div>
+    <div class="d-flex gap-2">
       <button class="btn btn-outline-primary btn-sm" id="refresh-all">一覧更新</button>
       <button class="btn btn-outline-success btn-sm" id="auto-refresh-toggle" data-active="0">自動更新:OFF</button>
     </div>
   </div>
 
   <!-- 全体統計 -->
-  <div class="row text-center mb-4">
-    <div class="col-md-3 mb-2"><div class="card"><div class="card-body p-2"><strong>queued</strong><br><span id="sum-queued">0</span></div></div></div>
-    <div class="col-md-3 mb-2"><div class="card"><div class="card-body p-2"><strong>running</strong><br><span id="sum-running">0</span></div></div></div>
-    <div class="col-md-3 mb-2"><div class="card"><div class="card-body p-2"><strong>success</strong><br><span id="sum-success">0</span></div></div></div>
-    <div class="col-md-3 mb-2"><div class="card"><div class="card-body p-2"><strong>error</strong><br><span id="sum-error">0</span></div></div></div>
+  <div class="row text-center mb-4 g-2">
+    <div class="col-md-3 col-6">
+      <div class="card h-100">
+        <div class="card-body p-2">
+          <strong>待機中</strong><br>
+          <span id="sum-queued" class="fw-bold text-secondary">0</span>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3 col-6">
+      <div class="card h-100">
+        <div class="card-body p-2">
+          <strong>実行中</strong><br>
+          <span id="sum-running" class="fw-bold text-warning">0</span>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3 col-6">
+      <div class="card h-100">
+        <div class="card-body p-2">
+          <strong>成功</strong><br>
+          <span id="sum-success" class="fw-bold text-success">0</span>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3 col-6">
+      <div class="card h-100">
+        <div class="card-body p-2">
+          <strong>失敗</strong><br>
+          <span id="sum-error" class="fw-bold text-danger">0</span>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- ユーザー別テーブル -->
@@ -39,15 +67,15 @@
       <table class="table table-striped align-middle mb-0">
         <thead class="table-light">
           <tr>
-            <th style="width:60px;">ID</th>
+            <th class="text-center" style="width:72px;">ID</th>
             <th>ユーザー</th>
-            <th style="width:80px;">サイト</th>
-            <th style="width:100px;">Queued</th>
-            <th style="width:100px;">Running</th>
-            <th style="width:100px;">Success</th>
-            <th style="width:100px;">Error</th>
-            <th style="width:160px;">最終更新</th>
-            <th style="width:220px;">操作</th>
+            <th class="text-center" style="width:160px;">サイト数 / 対象記事数</th>
+            <th class="text-center" style="width:110px;">待機中</th>
+            <th class="text-center" style="width:110px;">実行中</th>
+            <th class="text-center" style="width:110px;">成功</th>
+            <th class="text-center" style="width:110px;">失敗</th>
+            <th class="text-center" style="width:170px;">最終更新</th>
+            <th class="text-center" style="width:240px;">操作</th>
           </tr>
         </thead>
         <tbody id="user-tbody">
@@ -59,7 +87,7 @@
 </div>
 
 <!-- 詳細モーダル -->
-<div class="modal fade" id="userModal" tabindex="-1">
+<div class="modal fade" id="userModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content">
       <div class="modal-header">
@@ -68,10 +96,21 @@
       </div>
       <div class="modal-body">
         <div id="modal-summary" class="mb-3 text-muted small">読込中…</div>
-        <table class="table table-sm table-striped">
-          <thead><tr><th>ID</th><th>Article</th><th>Status</th><th>Attempts</th><th>Updated</th><th>WP URL</th></tr></thead>
-          <tbody id="modal-tbody"><tr><td colspan="6" class="text-center text-muted py-3">読込中…</td></tr></tbody>
-        </table>
+        <div class="table-responsive">
+          <table class="table table-sm table-striped">
+            <thead>
+              <tr>
+                <th class="text-center" style="width:90px;">ID</th>
+                <th class="text-center" style="width:120px;">Article</th>
+                <th class="text-center" style="width:120px;">Status</th>
+                <th class="text-center" style="width:120px;">Attempts</th>
+                <th class="text-center" style="width:180px;">Updated</th>
+                <th style="min-width:120px;">WP URL</th>
+              </tr>
+            </thead>
+            <tbody id="modal-tbody"><tr><td colspan="6" class="text-center text-muted py-3">読込中…</td></tr></tbody>
+          </table>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-outline-primary btn-sm" id="modal-refresh">更新</button>
@@ -81,135 +120,212 @@
   </div>
 </div>
 
+<style>
+  /* 数字を常に中央＆太字にする補助クラス */
+  .num-cell { text-align: center; font-weight: 700; }
+  .cell-muted { font-size: .875rem; color: #6c757d; }
+</style>
+
 <script>
-window.addEventListener('DOMContentLoaded', function(){
+window.addEventListener('DOMContentLoaded', () => {
   const $ = s => document.querySelector(s);
   const tbody = $("#user-tbody");
   const modalEl = $("#userModal");
   let modal = null;
-  if (typeof bootstrap !== "undefined") {
+  if (typeof bootstrap !== "undefined" && modalEl) {
     modal = new bootstrap.Modal(modalEl);
-  } else {
-    console.error("⚠️ Bootstrap未読込のためModal初期化をスキップ");
   }
-  const mUser = $("#modal-user-name");
-  const mSum = $("#modal-summary");
+
+  const mUser  = $("#modal-user-name");
+  const mSum   = $("#modal-summary");
   const mTbody = $("#modal-tbody");
+
   let autoRefresh = false, timer = null;
 
-  function badge(val, cls){ return `<span class="badge bg-${cls}">${val}</span>`; }
-  function formatDate(str){ return str ? new Date(str).toLocaleString() : "-"; }
+  const badge = (val, cls) => `<span class="badge bg-${cls}">${val}</span>`;
+  const formatDate = (str) => str ? new Date(str).toLocaleString() : "-";
 
-  async function fetchJSON(url, opts){
-    // フルパス or 相対パスの両対応（オリジンを自動補完）
+  async function fetchJSON(url, opts) {
     const fullUrl = url.startsWith("http") ? url : `${window.location.origin}${url}`;
-    const r = await fetch(fullUrl, opts||{});
+    const r = await fetch(fullUrl, opts || {});
+    // HTMLが返ってきた場合の保険（JSON.parseが失敗する＝先頭が"<"など）
+    const ct = r.headers.get("content-type") || "";
+    if (!ct.includes("application/json")) {
+      throw new Error("Unexpected non-JSON response");
+    }
     const j = await r.json();
-    if(!r.ok || j.ok===false) throw new Error(j.error||("HTTP "+r.status));
+    if (!r.ok || j.ok === false) throw new Error(j.error || ("HTTP " + r.status));
     return j;
   }
+
+  // 「履歴吸収」ルール：成功分を古い失敗から差し引いて見せる
+  const effectiveError = (error, success) => Math.max(0, (Number(error)||0) - (Number(success)||0));
+
+  // 行ハイライト保持（ページ更新しても直近がわかるようにセッションストレージ）
+  const HILITE_KEY = "rewrite_last_started_user_id";
+  const markStarted = (uid) => sessionStorage.setItem(HILITE_KEY, String(uid));
+  const getMarked   = () => sessionStorage.getItem(HILITE_KEY);
 
   async function loadUsers(){
     try{
       const q = $("#search-box").value.trim();
       const url = q ? `/admin/rewrite/users?q=${encodeURIComponent(q)}` : `/admin/rewrite/users`;
       const data = await fetchJSON(url);
+
+      // ID昇順でクライアントソート（API順に依存しない）
+      const items = (data.items || []).slice().sort((a,b) => (a.user_id||0) - (b.user_id||0));
+
       tbody.innerHTML = "";
-      let sumQ=0,sumR=0,sumS=0,sumE=0;
-      data.items.forEach(u=>{
-        sumQ += u.queued; sumR += u.running; sumS += u.success; sumE += u.error;
+      let sumQ=0, sumR=0, sumS=0, sumE=0;
+
+      const lastStarted = getMarked();
+
+      items.forEach(u=>{
+        const queued  = Number(u.queued)  || 0;
+        const running = Number(u.running) || 0;
+        const success = Number(u.success) || 0;
+        const error   = effectiveError(u.error, success); // 履歴吸収して表示
+        const siteCnt = (typeof u.site_count === "number") ? u.site_count : (u.site_cnt || u.sites || 0);
+        const targetArticles = (typeof u.target_articles === "number")
+          ? u.target_articles
+          : (u.article_count ?? u.total_articles ?? u.articles ?? "-");
+
+        sumQ += queued; sumR += running; sumS += success; sumE += error;
+
         const tr = document.createElement("tr");
+        if (lastStarted && String(u.user_id) === String(lastStarted)) {
+          tr.classList.add("table-primary"); // 直近で「開始」を押したユーザーを可視化
+        }
+
         tr.innerHTML = `
-          <td>${u.user_id}</td>
+          <td class="num-cell">${u.user_id}</td>
           <td><strong>${u.name}</strong></td>
-          <td>${u.site_count}</td>
-          <td>${badge(u.queued,"secondary")}</td>
-          <td>${badge(u.running,"warning")}</td>
-          <td>${badge(u.success,"success")}</td>
-          <td>${badge(u.error,"danger")}</td>
-          <td class="small text-muted">${formatDate(u.last_activity_at)}</td>
-          <td>
-            <button class="btn btn-sm btn-primary me-1" data-action="enqueue" data-id="${u.user_id}">開始</button>
-            <button class="btn btn-sm btn-outline-warning me-1" data-action="retry" data-id="${u.user_id}">再試行</button>
-            <button class="btn btn-sm btn-outline-info me-1" data-action="warmup" data-id="${u.user_id}">温め</button>
-            <button class="btn btn-sm btn-outline-secondary" data-action="detail" data-id="${u.user_id}" data-name="${u.name}">詳細</button>
-          </td>`;
+          <td class="num-cell">
+            <span class="text-primary">${siteCnt}</span>
+            <span class="cell-muted"> / </span>
+            <span class="text-muted">${targetArticles ?? '-'}</span>
+          </td>
+          <td class="num-cell text-secondary">${queued}</td>
+          <td class="num-cell text-warning">${running}</td>
+          <td class="num-cell text-success">${success}</td>
+          <td class="num-cell text-danger">${error}</td>
+          <td class="num-cell small text-muted">${formatDate(u.last_activity_at)}</td>
+          <td class="text-center">
+            <div class="d-flex gap-2 justify-content-center align-items-center flex-wrap">
+              <button class="btn btn-sm btn-primary" data-action="enqueue" data-id="${u.user_id}">開始</button>
+              <button class="btn btn-sm btn-outline-warning" data-action="retry" data-id="${u.user_id}">再試行</button>
+              <button class="btn btn-sm btn-outline-secondary" data-action="detail" data-id="${u.user_id}" data-name="${u.name}">詳細</button>
+              <span class="d-none" data-role="running-badge"><span class="badge rounded-pill text-bg-primary">実行中</span></span>
+            </div>
+          </td>
+        `;
         tbody.appendChild(tr);
       });
-      $("#sum-queued").textContent = sumQ;
+
+      $("#sum-queued").textContent  = sumQ;
       $("#sum-running").textContent = sumR;
       $("#sum-success").textContent = sumS;
-      $("#sum-error").textContent = sumE;
-      $("#last-updated").textContent = "更新: "+new Date().toLocaleString();
+      $("#sum-error").textContent   = sumE;
+      $("#last-updated").textContent = "更新: " + new Date().toLocaleString();
     }catch(err){
       tbody.innerHTML = `<tr><td colspan="9" class="text-danger text-center py-3">読み込み失敗: ${err.message}</td></tr>`;
     }
   }
 
   async function openDetail(uid, name){
+    if (!modal) return;
     mUser.textContent = `#${uid} ${name}`;
     mSum.textContent = "読込中…";
     mTbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-3">読込中…</td></tr>`;
     modal.show();
     try{
       const prog = await fetchJSON(`/admin/rewrite/progress?user_id=${encodeURIComponent(uid)}`);
-      mSum.textContent = `queued:${prog.totals.queued}, running:${prog.totals.running}, success:${prog.totals.success}, error:${prog.totals.error}`;
+      const eErr = effectiveError(prog.totals.error, prog.totals.success);
+      mSum.textContent =
+        `待機中:${prog.totals.queued}, 実行中:${prog.totals.running}, 成功:${prog.totals.success}, 失敗:${eErr}`;
       mTbody.innerHTML = "";
-      prog.recent.forEach(r=>{
+      (prog.recent || []).forEach(r=>{
+        const cls =
+          (r.status === "success") ? "success" :
+          (r.status === "error")   ? "danger"  :
+          (r.status === "running") ? "warning" : "secondary";
         const tr = document.createElement("tr");
         tr.innerHTML = `
-          <td>${r.id}</td><td>${r.article_id}</td>
-          <td><span class="badge bg-${r.status==="success"?"success":r.status==="error"?"danger":r.status==="running"?"warning":"secondary"}">${r.status}</span></td>
-          <td>${r.attempts||""}</td>
-          <td class="small text-muted">${formatDate(r.updated_at)}</td>
-          <td>${r.posted_url?`<a href="${r.posted_url}" target="_blank">open</a>`:""}</td>`;
+          <td class="num-cell">${r.id}</td>
+          <td class="num-cell">${r.article_id}</td>
+          <td class="num-cell"><span class="badge bg-${cls}">${r.status}</span></td>
+          <td class="num-cell">${r.attempts ?? ""}</td>
+          <td class="num-cell small text-muted">${formatDate(r.updated_at)}</td>
+          <td>${r.posted_url ? `<a href="${r.posted_url}" target="_blank" rel="noopener">open</a>` : ""}</td>
+        `;
         mTbody.appendChild(tr);
       });
     }catch(err){
-      mSum.textContent = "取得失敗: "+err.message;
+      mSum.textContent = "取得失敗: " + err.message;
     }
   }
 
-  tbody.addEventListener("click", async e=>{
+  tbody.addEventListener("click", async (e)=>{
     const btn = e.target.closest("button[data-action]");
     if(!btn) return;
     const uid = btn.dataset.id;
     const act = btn.dataset.action;
-    if(act==="detail") return openDetail(uid, btn.dataset.name);
+
+    if(act === "detail") {
+      return openDetail(uid, btn.dataset.name);
+    }
+
+    // クリックした行（開始のハイライトやバッジ更新に使う）
+    const row = btn.closest("tr");
+    const runningBadge = row?.querySelector('[data-role="running-badge"]');
 
     try{
       btn.disabled = true;
-      if(act==="enqueue"){
+
+      if(act === "enqueue"){
         await fetchJSON("/admin/rewrite/enqueue",{
-          method:"POST", headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({user_id:Number(uid),priority:0.0,site_ids:"",article_ids:""})
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({user_id:Number(uid), priority:0.0, site_ids:"", article_ids:""})
         });
-        alert("全記事をキュー投入しました");
-      }else if(act==="retry"){
-        await fetchJSON("/admin/rewrite/retry_failed",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:Number(uid)})});
-        alert("失敗の再試行をトリガしました");
-      }else if(act==="warmup"){
-        await fetchJSON("/admin/rewrite/serp_warmup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:Number(uid)})});
-        alert("SERP温めをトリガしました");
+        // 視覚的に「開始した」ことを示す
+        markStarted(uid);
+        if (row) row.classList.add("table-primary");
+        if (runningBadge) runningBadge.classList.remove("d-none");
       }
+      else if(act === "retry"){
+        await fetchJSON("/admin/rewrite/retry_failed",{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({user_id:Number(uid)})
+        });
+      }
+
       await loadUsers();
-    }catch(err){ alert("操作失敗: "+err.message); }
-    finally{ btn.disabled = false; }
+    }catch(err){
+      alert("操作失敗: " + err.message);
+    }finally{
+      btn.disabled = false;
+    }
   });
 
   $("#refresh-all").addEventListener("click", loadUsers);
   $("#search-btn").addEventListener("click", loadUsers);
-  $("#modal-refresh").addEventListener("click", ()=>openDetail(mUser.textContent.split(" ")[0].replace("#",""),mUser.textContent));
+  $("#modal-refresh").addEventListener("click", ()=>{
+    const uid = (mUser.textContent || "").split(" ")[0].replace("#","");
+    openDetail(uid, mUser.textContent);
+  });
 
   $("#auto-refresh-toggle").addEventListener("click",()=>{
     autoRefresh = !autoRefresh;
-    const btn=$("#auto-refresh-toggle");
-    btn.dataset.active = autoRefresh?1:0;
-    btn.textContent = "自動更新:"+(autoRefresh?"ON":"OFF");
+    const btn = $("#auto-refresh-toggle");
+    btn.dataset.active = autoRefresh ? 1 : 0;
+    btn.textContent = "自動更新:" + (autoRefresh ? "ON" : "OFF");
     if(autoRefresh){
-      timer=setInterval(loadUsers,10000);
+      timer = setInterval(loadUsers, 10000);
     }else{
       clearInterval(timer);
+      timer = null;
     }
   });
 
