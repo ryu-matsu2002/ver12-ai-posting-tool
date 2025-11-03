@@ -1296,23 +1296,42 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
     plan_ids = [p.id for p in plans]
     urls_map = {}
     if plan_ids:
-        sub = (
-            db.session.query(
-                ArticleRewriteLog.plan_id,
-                func.max(ArticleRewriteLog.executed_at).label("mx"),
-            )
-            .filter(ArticleRewriteLog.plan_id.in_(plan_ids),
-                    ArticleRewriteLog.wp_status == "success")
-            .group_by(ArticleRewriteLog.plan_id)
-            .subquery()
-        )
-        rows = (
-            db.session.query(ArticleRewriteLog.plan_id, ArticleRewriteLog.posted_url)
-            .join(sub, (sub.c.plan_id == ArticleRewriteLog.plan_id) &
-                       (sub.c.mx == ArticleRewriteLog.executed_at))
-            .all()
-        )
-        urls_map = {r.plan_id: r.posted_url for r in rows}
+        # 最新の成功ログ（executed_at 最大）を拾う
+          sub = (
+              db.session.query(
+                  ArticleRewriteLog.plan_id,
+                  func.max(ArticleRewriteLog.executed_at).label("mx"),
+              )
+              .filter(
+                  ArticleRewriteLog.plan_id.in_(plan_ids),
+                  ArticleRewriteLog.wp_status == "success",
+              )
+              .group_by(ArticleRewriteLog.plan_id)
+          ).subquery()
+
+          last_logs = (
+              db.session.query(
+                  ArticleRewriteLog.plan_id,
+                  ArticleRewriteLog.wp_post_id,
+                  ArticleRewriteLog.executed_at,
+              )
+              .join(
+                  sub,
+                  (ArticleRewriteLog.plan_id == sub.c.plan_id)
+                  & (ArticleRewriteLog.executed_at == sub.c.mx),
+              )
+          ).all()
+
+          # wp_post_id → WordPressのpermalinkに解決
+          for pid, wp_post_id, _ in last_logs:
+              link = None
+              if wp_post_id:
+                  try:
+                      post = fetch_single_post(site, wp_post_id)
+                      link = post.get("link") if isinstance(post, dict) else None
+                  except Exception:
+                      link = None
+              urls_map[pid] = link
 
     return render_template(
         "admin/rewrite_site_articles.html",
