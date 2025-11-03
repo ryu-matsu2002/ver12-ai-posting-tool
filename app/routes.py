@@ -27,7 +27,7 @@ from .forms import (
     ProfileForm
 )
 from .article_generator import enqueue_generation
-from .wp_client import post_to_wp, _decorate_html
+from .wp_client import post_to_wp, _decorate_html, fetch_single_post
 
 # --- 既存の import の下に追加 ---
 import re
@@ -1278,9 +1278,12 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
 
     q = (
         db.session.query(ArticleRewritePlan)
-        .filter(ArticleRewritePlan.user_id == user_id,
-                ArticleRewritePlan.site_id == site_id)
-        .order_by(ArticleRewritePlan.created_at.desc().nullslast(),
+        .filter(
+            ArticleRewritePlan.user_id == user_id,
+            ArticleRewritePlan.site_id == site_id
+        )
+        # モデルに updated_at は無いので created_at で新しい順
+        .order_by(ArticleRewritePlan.created_at.desc(),
                   ArticleRewritePlan.id.desc())
     )
     if status in ("queued","running","success","error"):
@@ -1291,6 +1294,28 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
         q.options(joinedload(ArticleRewritePlan.article))
          .limit(per).offset((page-1)*per).all()
     )
+
+    # ---- テンプレで使う stats を集計（queued/running/success/error）
+    from sqlalchemy import case
+    queued_cnt  = func.sum(case((ArticleRewritePlan.status == "queued",  1), else_=0)).label("queued")
+    running_cnt = func.sum(case((ArticleRewritePlan.status == "running", 1), else_=0)).label("running")
+    success_cnt = func.sum(case((ArticleRewritePlan.status == "success", 1), else_=0)).label("success")
+    error_cnt   = func.sum(case((ArticleRewritePlan.status == "error",   1), else_=0)).label("error")
+
+    stats_row = (
+        db.session.query(queued_cnt, running_cnt, success_cnt, error_cnt)
+        .filter(
+            ArticleRewritePlan.user_id == user_id,
+            ArticleRewritePlan.site_id == site_id
+        )
+        .one()
+    )
+    stats = {
+        "queued":  int(stats_row.queued  or 0),
+        "running": int(stats_row.running or 0),
+        "success": int(stats_row.success or 0),
+        "error":   int(stats_row.error   or 0),
+    }
 
     # 各planのWP URL（成功ログの最新）を引き当てる軽量ヘルパ
     plan_ids = [p.id for p in plans]
@@ -1333,11 +1358,19 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
                       link = None
               urls_map[pid] = link
 
+    back_url = url_for("admin.admin_rewrite_user_sites", user_id=user_id)
     return render_template(
         "admin/rewrite_site_articles.html",
-        user=user, site=site,
-        plans=plans, total=total, page=page, per=per, status=status,
+        user=user,
+        site=site,
+        plans=plans,
+        total=total,
+        page=page,
+        per=per,
+        status=status,
         urls_map=urls_map,
+        stats=stats,
+        back_url=back_url,
     )
 
 @admin_bp.route("/admin/rewrite/users", methods=["GET"])
