@@ -1213,12 +1213,13 @@ def admin_rewrite_users():
         .subquery()
     )
 
-    # --- リライト集計: plans を user_id で事前集計（ステータス別カウント＋最終更新） ---
-    queued_cnt  = func.sum(case((ArticleRewritePlan.status == "queued", 1), else_=0))
-    running_cnt = func.sum(case((ArticleRewritePlan.status == "running", 1), else_=0))
-    success_cnt = func.sum(case((ArticleRewritePlan.status == "success", 1), else_=0))
-    error_cnt   = func.sum(case((ArticleRewritePlan.status == "error", 1), else_=0))
-    last_act    = func.max(ArticleRewritePlan.created_at)
+    # --- リライト集計: plans を user_id で事前集計（ステータス別カウント＋最終更新＋対象記事数） ---
+    queued_cnt   = func.sum(case((ArticleRewritePlan.status == "queued", 1), else_=0))
+    running_cnt  = func.sum(case((ArticleRewritePlan.status == "running", 1), else_=0))
+    success_cnt  = func.sum(case((ArticleRewritePlan.status == "success", 1), else_=0))
+    error_cnt    = func.sum(case((ArticleRewritePlan.status == "error", 1), else_=0))
+    last_act     = func.max(ArticleRewritePlan.created_at)
+    total_cnt    = func.count(ArticleRewritePlan.id)  # 対象記事数
     plan_sq = (
         db.session.query(
             ArticleRewritePlan.user_id.label("uid"),
@@ -1227,6 +1228,7 @@ def admin_rewrite_users():
             success_cnt.label("success"),
             error_cnt.label("error"),
             last_act.label("last_activity_at"),
+            total_cnt.label("target_articles"),
         )
         .group_by(ArticleRewritePlan.user_id)
         .subquery()
@@ -1250,16 +1252,13 @@ def admin_rewrite_users():
             func.coalesce(plan_sq.c.success, 0).label("success"),
             func.coalesce(plan_sq.c.error, 0).label("error"),
             plan_sq.c.last_activity_at.label("last_activity_at"),
+            func.coalesce(plan_sq.c.target_articles, 0).label("target_articles"),
         )
         .outerjoin(site_sq, site_sq.c.uid == User.id)
         .outerjoin(plan_sq, plan_sq.c.uid == User.id)
         .filter(*filters)
-        .order_by(
-            func.coalesce(plan_sq.c.queued, 0).desc(),
-            func.coalesce(plan_sq.c.running, 0).desc(),
-            plan_sq.c.last_activity_at.desc().nullslast(),
-            User.id.asc(),
-        )
+        # ユーザーは id 1 から順に上から並べる
+        .order_by(User.id.asc())
         .all()
     )
 
@@ -1272,6 +1271,7 @@ def admin_rewrite_users():
         "success": int(r.success or 0),
         "error": int(r.error or 0),
         "last_activity_at": (r.last_activity_at.isoformat() if r.last_activity_at else None),
+        "target_articles": int(r.target_articles or 0),
     } for r in rows]
 
     # 5秒キャッシュ
