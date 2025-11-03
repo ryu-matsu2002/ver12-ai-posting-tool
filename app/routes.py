@@ -1244,6 +1244,7 @@ def admin_rewrite_user_sites(user_id: int):
         "admin/rewrite_user.html",
         user=user,
         rows=rows,
+        back_url="/admin/rewrite",
         # 「履歴吸収」の見せ方はテンプレ側で実装（error - success のクリップ）
     )
 
