@@ -44,9 +44,10 @@
           <tr>
             <td class="text-center fw-bold">{{ r.site_id }}</td>
             <td>
-              <div class="fw-semibold">{{ r.site_name or '-' }}</div>
-              {% if r.site_url %}
-                <a href="{{ r.site_url }}" target="_blank" rel="noopener">{{ r.site_url }}</a>
+              <div class="fw-semibold">{{ (r.site_name or r.name) or '-' }}</div>
+              {% set _url = r.site_url or r.url %}
+              {% if _url %}
+                <a href="{{ _url }}" target="_blank" rel="noopener">{{ _url }}</a>
               {% endif %}
             </td>
             <td class="text-center"><span class="fw-bold text-primary">{{ r.target_articles or 0 }}</span></td>
