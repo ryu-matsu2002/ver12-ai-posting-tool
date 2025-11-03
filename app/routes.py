@@ -1177,6 +1177,148 @@ def admin_rewrite_summary():
         pass
     return jsonify(payload)
 
+# ─────────────────────────────────────────
+# 追加: ユーザー別サイト一覧（HTML）
+# URL: /admin/rewrite/user/<user_id>
+# ─────────────────────────────────────────
+@admin_bp.route("/admin/rewrite/user/<int:user_id>", methods=["GET"])
+@login_required
+def admin_rewrite_user_sites(user_id: int):
+    if not current_user.is_admin:
+        abort(403)
+    """
+    指定ユーザーの全サイトを1行で表示するページ。
+    サイトごとに ArticleRewritePlan を事前集計（queued/running/success/error/last_activity/target_articles）。
+    """
+    from sqlalchemy import case
+    from sqlalchemy.orm import joinedload
+    # モデル
+    from app.models import User, Site, ArticleRewritePlan
+
+    user = db.session.get(User, user_id)
+    if not user:
+        abort(404)
+
+    # サイトごとのリライト集計（該当ユーザーで絞る）
+    queued_cnt  = func.sum(case((ArticleRewritePlan.status == "queued", 1),  else_=0))
+    running_cnt = func.sum(case((ArticleRewritePlan.status == "running", 1), else_=0))
+    success_cnt = func.sum(case((ArticleRewritePlan.status == "success", 1), else_=0))
+    error_cnt   = func.sum(case((ArticleRewritePlan.status == "error", 1),  else_=0))
+    last_act    = func.max(ArticleRewritePlan.created_at)
+
+    plan_sq = (
+        db.session.query(
+            ArticleRewritePlan.site_id.label("site_id"),
+            func.count(ArticleRewritePlan.id).label("target_articles"),
+            queued_cnt.label("queued"),
+            running_cnt.label("running"),
+            success_cnt.label("success"),
+            error_cnt.label("error"),
+            last_act.label("last_activity_at"),
+        )
+        .filter(ArticleRewritePlan.user_id == user_id)
+        .group_by(ArticleRewritePlan.site_id)
+        .subquery()
+    )
+
+    rows = (
+        db.session.query(
+            Site.id.label("site_id"),
+            Site.site_name,
+            Site.site_url,
+            func.coalesce(plan_sq.c.target_articles, 0).label("target_articles"),
+            func.coalesce(plan_sq.c.queued, 0).label("queued"),
+            func.coalesce(plan_sq.c.running, 0).label("running"),
+            func.coalesce(plan_sq.c.success, 0).label("success"),
+            func.coalesce(plan_sq.c.error, 0).label("error"),
+            plan_sq.c.last_activity_at.label("last_activity_at"),
+        )
+        .filter(Site.user_id == user_id)
+        .outerjoin(plan_sq, plan_sq.c.site_id == Site.id)
+        .order_by(Site.id.asc())
+        .all()
+    )
+
+    # 画面は後続手順で作る（admin/rewrite_user.html）
+    return render_template(
+        "admin/rewrite_user.html",
+        user=user,
+        rows=rows,
+        # 「履歴吸収」の見せ方はテンプレ側で実装（error - success のクリップ）
+    )
+
+
+# ─────────────────────────────────────────
+# 追加: サイト別のリライト記事一覧（HTML）
+# URL: /admin/rewrite/user/<user_id>/site/<site_id>
+# ─────────────────────────────────────────
+@admin_bp.route("/admin/rewrite/user/<int:user_id>/site/<int:site_id>", methods=["GET"])
+@login_required
+def admin_rewrite_site_articles(user_id: int, site_id: int):
+    if not current_user.is_admin:
+        abort(403)
+    """
+    指定ユーザー×サイトの ArticleRewritePlan を一覧表示するページ。
+    ステータス絞り込み・簡易ページネーション（クエリパラメータ）に対応。
+    """
+    from sqlalchemy import case
+    from sqlalchemy.orm import joinedload
+    from app.models import User, Site, Article, ArticleRewritePlan, ArticleRewriteLog
+
+    user = db.session.get(User, user_id)
+    site = db.session.get(Site, site_id)
+    if not user or not site or site.user_id != user_id:
+        abort(404)
+
+    # クエリパラメータ
+    status = (request.args.get("status") or "").strip().lower()
+    page   = max(1, request.args.get("page", type=int) or 1)
+    per    = min(100, max(10, request.args.get("per", type=int) or 50))
+
+    q = (
+        db.session.query(ArticleRewritePlan)
+        .filter(ArticleRewritePlan.user_id == user_id,
+                ArticleRewritePlan.site_id == site_id)
+        .order_by(ArticleRewritePlan.updated_at.desc().nullslast(),
+                  ArticleRewritePlan.id.desc())
+    )
+    if status in ("queued","running","success","error"):
+        q = q.filter(ArticleRewritePlan.status == status)
+
+    total = q.count()
+    plans = (
+        q.options(joinedload(ArticleRewritePlan.article))
+         .limit(per).offset((page-1)*per).all()
+    )
+
+    # 各planのWP URL（成功ログの最新）を引き当てる軽量ヘルパ
+    plan_ids = [p.id for p in plans]
+    urls_map = {}
+    if plan_ids:
+        sub = (
+            db.session.query(
+                ArticleRewriteLog.plan_id,
+                func.max(ArticleRewriteLog.executed_at).label("mx"),
+            )
+            .filter(ArticleRewriteLog.plan_id.in_(plan_ids),
+                    ArticleRewriteLog.wp_status == "success")
+            .group_by(ArticleRewriteLog.plan_id)
+            .subquery()
+        )
+        rows = (
+            db.session.query(ArticleRewriteLog.plan_id, ArticleRewriteLog.posted_url)
+            .join(sub, (sub.c.plan_id == ArticleRewriteLog.plan_id) &
+                       (sub.c.mx == ArticleRewriteLog.executed_at))
+            .all()
+        )
+        urls_map = {r.plan_id: r.posted_url for r in rows}
+
+    return render_template(
+        "admin/rewrite_site_articles.html",
+        user=user, site=site,
+        plans=plans, total=total, page=page, per=per, status=status,
+        urls_map=urls_map,
+    )
 
 @admin_bp.route("/admin/rewrite/users", methods=["GET"])
 def admin_rewrite_users():

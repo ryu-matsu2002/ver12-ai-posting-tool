@@ -214,7 +214,7 @@ window.addEventListener('DOMContentLoaded', () => {
             <div class="d-flex gap-2 justify-content-center align-items-center flex-wrap">
               <button class="btn btn-sm btn-primary" data-action="enqueue" data-id="${u.user_id}">開始</button>
               <button class="btn btn-sm btn-outline-warning" data-action="retry" data-id="${u.user_id}">再試行</button>
-              <button class="btn btn-sm btn-outline-secondary" data-action="detail" data-id="${u.user_id}" data-name="${u.name}">詳細</button>
+              <a class="btn btn-sm btn-outline-secondary" href="/admin/rewrite/user/${u.user_id}">詳細</a>
               <span class="d-none" data-role="running-badge"><span class="badge rounded-pill text-bg-primary">実行中</span></span>
             </div>
           </td>
@@ -271,9 +271,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const uid = btn.dataset.id;
     const act = btn.dataset.action;
 
-    if(act === "detail") {
-      return openDetail(uid, btn.dataset.name);
-    }
+    
 
     // クリックした行（開始のハイライトやバッジ更新に使う）
     const row = btn.closest("tr");

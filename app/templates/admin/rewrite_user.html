@@ -1,0 +1,75 @@
+{% extends "base_admin.html" %}
+{% block title %}ユーザー別サイト一覧 | 全記事リライト{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h2 class="mb-0">ユーザー別サイト一覧</h2>
+    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('admin_bp.admin_rewrite') if 'admin_bp.admin_rewrite' in current_app.view_functions else '/admin/rewrite' }}">
+      ← 全記事リライト（管理）に戻る
+    </a>
+  </div>
+  <div class="mb-2">
+    <span class="text-muted">ユーザー:</span>
+    <strong>#{{ user.id }} {{ user.last_name or '' }} {{ user.first_name or '' }} {{ '(' + user.username + ')' if user.username else '' }}</strong>
+  </div>
+
+  <div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span>サイトごとの進捗</span>
+      <small class="text-muted">ID昇順</small>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th class="text-center" style="width:80px;">サイトID</th>
+            <th>サイト名 / URL</th>
+            <th class="text-center" style="width:160px;">対象記事数</th>
+            <th class="text-center" style="width:110px;">待機中</th>
+            <th class="text-center" style="width:110px;">実行中</th>
+            <th class="text-center" style="width:110px;">成功</th>
+            <th class="text-center" style="width:110px;">失敗</th>
+            <th class="text-center" style="width:180px;">最終更新</th>
+            <th class="text-center" style="width:160px;">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          {% set queued  = (r.queued or 0) | int %}
+          {% set running = (r.running or 0) | int %}
+          {% set success = (r.success or 0) | int %}
+          {% set error   = (r.error   or 0) | int %}
+          {% set eerror  = [0, error - success]|max %}
+          <tr>
+            <td class="text-center fw-bold">{{ r.site_id }}</td>
+            <td>
+              <div class="fw-semibold">{{ r.site_name or '-' }}</div>
+              {% if r.site_url %}
+                <a href="{{ r.site_url }}" target="_blank" rel="noopener">{{ r.site_url }}</a>
+              {% endif %}
+            </td>
+            <td class="text-center"><span class="fw-bold text-primary">{{ r.target_articles or 0 }}</span></td>
+            <td class="text-center"><span class="fw-bold text-secondary">{{ queued }}</span></td>
+            <td class="text-center"><span class="fw-bold text-warning">{{ running }}</span></td>
+            <td class="text-center"><span class="fw-bold text-success">{{ success }}</span></td>
+            <td class="text-center"><span class="fw-bold text-danger">{{ eerror }}</span></td>
+            <td class="text-center small text-muted">
+              {{ (r.last_activity_at.isoformat() if r.last_activity_at else '') or '-' }}
+            </td>
+            <td class="text-center">
+              <a class="btn btn-sm btn-outline-primary"
+                 href="{{ url_for('admin_bp.admin_rewrite_site_articles', user_id=user.id, site_id=r.site_id) }}">
+                記事一覧
+              </a>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="9" class="text-center text-muted py-3">サイトが見つかりません。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

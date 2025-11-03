@@ -1,0 +1,132 @@
+{% extends "base_admin.html" %}
+{% block title %}サイト別 リライト済み記事一覧{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+  <!-- パンくず -->
+  <nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="/admin/rewrite">全記事リライト（管理）</a></li>
+      {% if user_id %}
+      <li class="breadcrumb-item"><a href="/admin/rewrite/user/{{ user_id }}">ユーザーのサイト一覧</a></li>
+      {% endif %}
+      <li class="breadcrumb-item active" aria-current="page">サイト別記事一覧</li>
+    </ol>
+  </nav>
+
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+    <h3 class="mb-0">
+      {{ site.site_name or site.name or "サイト" }}
+      <small class="text-muted ms-2" style="font-size:.9rem;">(ID: {{ site.id }})</small>
+    </h3>
+    <a class="btn btn-outline-secondary btn-sm" href="{{ request.referrer or '/admin/rewrite' }}">戻る</a>
+  </div>
+  {% if site.site_url %}
+    <div class="mb-3">
+      <a href="{{ site.site_url }}" target="_blank" rel="noopener" class="link-secondary">{{ site.site_url }}</a>
+    </div>
+  {% endif %}
+
+  <!-- 統計カード -->
+  <div class="row g-2 text-center mb-3">
+    <div class="col-6 col-md-3">
+      <div class="card h-100"><div class="card-body p-2">
+        <div class="fw-bold">待機中</div>
+        <div class="fs-5 text-secondary">{{ (stats.queued or 0) }}</div>
+      </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card h-100"><div class="card-body p-2">
+        <div class="fw-bold">実行中</div>
+        <div class="fs-5 text-warning">{{ (stats.running or 0) }}</div>
+      </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card h-100"><div class="card-body p-2">
+        <div class="fw-bold">成功</div>
+        <div class="fs-5 text-success">{{ (stats.success or 0) }}</div>
+      </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card h-100"><div class="card-body p-2">
+        <div class="fw-bold">失敗</div>
+        <div class="fs-5 text-danger">
+          {# “履歴吸収”で成功分を引いた見せ方（ルートで計算済みならそのまま表示） #}
+          {{ (stats.display_error if stats and stats.display_error is not none else (stats.error or 0)) }}
+        </div>
+      </div></div>
+    </div>
+  </div>
+
+  <!-- 記事テーブル -->
+  <div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span>リライト済み記事一覧</span>
+      <small class="text-muted">更新: {{ (last_updated or '') }}</small>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th class="text-center" style="width:90px;">ID</th>
+            <th>タイトル</th>
+            <th class="text-center" style="width:120px;">ステータス</th>
+            <th class="text-center" style="width:120px;">試行回数</th>
+            <th class="text-center" style="width:180px;">最終更新</th>
+            <th style="min-width:120px;">WPリンク</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if articles and articles|length %}
+            {% for a in articles %}
+              {% set st = a.status or a.plan_status or "-" %}
+              {% set cls = "secondary" %}
+              {% if st == "success" %}{% set cls = "success" %}
+              {% elif st == "error" %}{% set cls = "danger" %}
+              {% elif st == "running" %}{% set cls = "warning" %}
+              {% elif st == "queued" %}{% set cls = "secondary" %}{% endif %}
+              <tr>
+                <td class="text-center fw-bold">{{ a.id }}</td>
+                <td>
+                  {{ a.title or a.article_title or ("記事ID " ~ (a.article_id or "")) }}
+                  {% if a.article_id %}<span class="text-muted ms-2">(#{{ a.article_id }})</span>{% endif %}
+                </td>
+                <td class="text-center"><span class="badge bg-{{ cls }}">{{ st }}</span></td>
+                <td class="text-center">{{ a.attempts or 0 }}</td>
+                <td class="text-center text-muted">
+                  {% if a.updated_at %}{{ a.updated_at|tojson|safe|replace('"','')|replace('T',' ') }}{% else %}-{% endif %}
+                </td>
+                <td>
+                  {% if a.posted_url %}
+                    <a href="{{ a.posted_url }}" target="_blank" rel="noopener">open</a>
+                  {% elif a.wp_url %}
+                    <a href="{{ a.wp_url }}" target="_blank" rel="noopener">open</a>
+                  {% else %}
+                    <span class="text-muted">-</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td colspan="6" class="text-center text-muted py-4">データがありません</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if pagination %}
+      <div class="card-footer d-flex justify-content-between align-items-center">
+        <div class="text-muted small">
+          {{ pagination.total or 0 }} 件中 {{ pagination.first or 0 }}–{{ pagination.last or 0 }} を表示
+        </div>
+        <div class="btn-group">
+          <a class="btn btn-outline-secondary btn-sm {% if not pagination.prev_url %}disabled{% endif %}"
+             href="{{ pagination.prev_url or '#' }}">前へ</a>
+          <a class="btn btn-outline-secondary btn-sm {% if not pagination.next_url %}disabled{% endif %}"
+             href="{{ pagination.next_url or '#' }}">次へ</a>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
