@@ -487,8 +487,8 @@ def enqueue_generation(
 
     app = current_app._get_current_object()
     if copies is None:
-        # 従来通り：キーワードごとに 2〜3 本ランダム
-        copies = [random.randint(2, 3) for _ in keywords[:40]]
+        # 修正版：キーワードごとに必ず1記事のみ生成
+        copies = [1 for _ in keywords[:40]]
     else:
         # 外部 SEO などから明示されたパターンをそのまま使う
         # キーワード数と copies 数がずれていたら 1 本で埋める
