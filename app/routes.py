@@ -1349,14 +1349,12 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
 
           # wp_post_id → WordPressのpermalinkに解決
           for pid, wp_post_id, _ in last_logs:
-              link = None
-              if wp_post_id:
-                  try:
-                      post = fetch_single_post(site, wp_post_id)
-                      link = post.get("link") if isinstance(post, dict) else None
-                  except Exception:
-                      link = None
-              urls_map[pid] = link
+                # 速度改善: 外部HTTP(fetch_single_post)を即時呼ばず、仮リンクを設定
+                # テンプレート側で後からAjaxで取得できるように構造を残す
+                if wp_post_id:
+                    urls_map[pid] = f"/admin/wp_link_placeholder/{site.id}/{wp_post_id}"
+                else:
+                    urls_map[pid] = None
 
     back_url = url_for("admin.admin_rewrite_user_sites", user_id=user_id)
     return render_template(
