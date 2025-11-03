@@ -1224,7 +1224,7 @@ def admin_rewrite_user_sites(user_id: int):
     rows = (
         db.session.query(
             Site.id.label("site_id"),
-            Site.site_name,
+            Site.name.label("site_name"),
             Site.site_url,
             func.coalesce(plan_sq.c.target_articles, 0).label("target_articles"),
             func.coalesce(plan_sq.c.queued, 0).label("queued"),
