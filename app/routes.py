@@ -1280,7 +1280,7 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
         db.session.query(ArticleRewritePlan)
         .filter(ArticleRewritePlan.user_id == user_id,
                 ArticleRewritePlan.site_id == site_id)
-        .order_by(ArticleRewritePlan.updated_at.desc().nullslast(),
+        .order_by(ArticleRewritePlan.created_at.desc().nullslast(),
                   ArticleRewritePlan.id.desc())
     )
     if status in ("queued","running","success","error"):
