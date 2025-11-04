@@ -1202,7 +1202,10 @@ def admin_rewrite_user_sites(user_id: int):
     # サイトごとのリライト集計（該当ユーザーで絞る）
     queued_cnt  = func.sum(case((ArticleRewritePlan.status == "queued", 1),  else_=0))
     running_cnt = func.sum(case((ArticleRewritePlan.status == "running", 1), else_=0))
-    success_cnt = func.sum(case((ArticleRewritePlan.status == "success", 1), else_=0))
+    # 成功は "success" と "done" の両方を成功扱いにする
+    success_cnt = func.sum(
+        case((ArticleRewritePlan.status.in_(["success", "done"]), 1), else_=0)
+    )
     error_cnt   = func.sum(case((ArticleRewritePlan.status == "error", 1),  else_=0))
     last_act    = func.max(ArticleRewritePlan.created_at)
 
