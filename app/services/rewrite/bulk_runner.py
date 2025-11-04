@@ -134,14 +134,23 @@ def retry_failed_plans(
     """
     with app.app_context():
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=min_age_minutes)
+        # updated_at はテーブルに無いので、終了時刻/開始時刻/作成時刻のいずれかが十分古いものを対象にする
         rows = (
             db.session.query(ArticleRewritePlan)
             .filter(
                 ArticleRewritePlan.status == "error",
-                (ArticleRewritePlan.attempts.is_(None)) | (ArticleRewritePlan.attempts < max_attempts),
-                ArticleRewritePlan.updated_at <= cutoff,
+                or_(ArticleRewritePlan.attempts.is_(None), ArticleRewritePlan.attempts < max_attempts),
+                or_(
+                    ArticleRewritePlan.finished_at <= cutoff,
+                    ArticleRewritePlan.started_at  <= cutoff,
+                    ArticleRewritePlan.created_at  <= cutoff,
+                ),
             )
-            .order_by(ArticleRewritePlan.updated_at.asc())
+            .order_by(
+                ArticleRewritePlan.finished_at.asc().nullslast(),
+                ArticleRewritePlan.started_at.asc().nullslast(),
+                ArticleRewritePlan.created_at.asc(),
+            )
             .limit(to_queue_limit)
             .all()
         )
@@ -149,5 +158,6 @@ def retry_failed_plans(
             p.status = "queued"
             p.started_at = None
             p.finished_at = None
+            # attempts は実行側でインクリメントされる想定のまま維持
         db.session.commit()
         return {"requeued": len(rows)}
