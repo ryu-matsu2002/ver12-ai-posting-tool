@@ -1143,7 +1143,7 @@ def admin_rewrite_dashboard():
 # 全体サマリ API（完全修正版）
 # ─────────────────────────────────────────
 from sqlalchemy import text as _sql_text  # ← これがないとsummaryが動かない
-
+from sqlalchemy import func, case
 @admin_bp.route("/admin/rewrite/summary", methods=["GET"])
 def admin_rewrite_summary():
     from app import redis_client
@@ -1154,21 +1154,31 @@ def admin_rewrite_summary():
         return jsonify(json.loads(cached))
 
     try:
-        # success と done を success バケットに折り畳む
-        rows = db.session.execute(_sql_text("""
-            SELECT
-              CASE
-                WHEN status IN ('success','done') THEN 'success'
-                ELSE status
-              END AS bucket,
-              COUNT(*) AS cnt
-            FROM article_rewrite_plans
-            GROUP BY 1
-        """)).fetchall()
-        totals = {r[0] or "": int(r[1] or 0) for r in rows}
+        from app.models import ArticleRewritePlan
+        SUCCESS_IN = ("done", "success")
+        # 統一ロジック：成功=done or success
+        totals_row = db.session.query(
+            func.sum(case((ArticleRewritePlan.status == "queued", 1), else_=0)).label("queued"),
+            func.sum(case((ArticleRewritePlan.status == "running", 1), else_=0)).label("running"),
+            func.sum(case((ArticleRewritePlan.status.in_(SUCCESS_IN), 1), else_=0)).label("success"),
+            func.sum(case((ArticleRewritePlan.status == "error", 1), else_=0)).label("error"),
+            func.max(func.greatest(
+                func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.created_at),
+                func.coalesce(ArticleRewritePlan.updated_at, ArticleRewritePlan.created_at),
+                ArticleRewritePlan.created_at
+            )).label("last_activity_at"),
+        ).one()
+        totals = {
+            "queued":  int(totals_row.queued or 0),
+            "running": int(totals_row.running or 0),
+            "success": int(totals_row.success or 0),
+            "error":   int(totals_row.error or 0),
+        }
+        last_activity_at = totals_row.last_activity_at.isoformat() if totals_row.last_activity_at else None
     except Exception as e:
         current_app.logger.warning("[rewrite_summary] fallback: %s", e)
         totals = {"queued": 0, "running": 0, "success": 0, "error": 0}
+        last_activity_at = None
 
     payload = {
         "ok": True,
@@ -1396,10 +1406,12 @@ def admin_rewrite_users():
 
     # ---- キャッシュキー（検索ワードをキーに含める） ----
     q = (request.args.get("q", type=str) or "").strip()
-    cache_key = f"admin:rewrite:users:v1:q={q}"
-    cached = redis_client.get(cache_key)
-    if cached:
-        return jsonify({"ok": True, "items": json.loads(cached)})
+    nocache = request.args.get("nocache", type=int) == 1
+    cache_key = f"admin:rewrite:users:v2:q={q}"
+    if not nocache:
+        cached = redis_client.get(cache_key)
+        if cached:
+            return jsonify({"ok": True, "items": json.loads(cached)})
 
     # 表示名: (last_name + ' ' + first_name) -> username -> email
     full_name_expr = func.trim(
@@ -1419,11 +1431,16 @@ def admin_rewrite_users():
     )
 
     # --- リライト集計: plans を user_id で事前集計（ステータス別カウント＋最終更新＋対象記事数） ---
+    SUCCESS_IN   = ("done", "success")
     queued_cnt   = func.sum(case((ArticleRewritePlan.status == "queued", 1), else_=0))
     running_cnt  = func.sum(case((ArticleRewritePlan.status == "running", 1), else_=0))
-    success_cnt  = func.sum(case((ArticleRewritePlan.status == "success", 1), else_=0))
+    success_cnt  = func.sum(case((ArticleRewritePlan.status.in_(SUCCESS_IN), 1), else_=0))
     error_cnt    = func.sum(case((ArticleRewritePlan.status == "error", 1), else_=0))
-    last_act     = func.max(ArticleRewritePlan.created_at)
+    last_act     = func.max(func.greatest(
+                        func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.created_at),
+                        func.coalesce(ArticleRewritePlan.updated_at,  ArticleRewritePlan.created_at),
+                        ArticleRewritePlan.created_at
+                    ))
     total_cnt    = func.count(ArticleRewritePlan.id)  # 対象記事数
     plan_sq = (
         db.session.query(
@@ -1479,11 +1496,12 @@ def admin_rewrite_users():
         "target_articles": int(r.target_articles or 0),
     } for r in rows]
 
-    # 5秒キャッシュ
-    try:
-        redis_client.setex(cache_key, 5, json.dumps(items, ensure_ascii=False))
-    except Exception:
-        pass
+    # 2秒キャッシュ（?nocache=1 でスキップ）
+    if not nocache:
+        try:
+            redis_client.setex(cache_key, 2, json.dumps(items, ensure_ascii=False))
+        except Exception:
+            pass
     return jsonify({"ok": True, "items": items})
 
 
@@ -1501,10 +1519,12 @@ def admin_rewrite_users_progress():
     from app import redis_client
 
     q = (request.args.get("q", type=str) or "").strip()
-    cache_key = f"admin:rewrite:users_progress:v1:q={q}"
-    cached = redis_client.get(cache_key)
-    if cached:
-        return jsonify({"ok": True, "users": json.loads(cached)})
+    nocache = request.args.get("nocache", type=int) == 1
+    cache_key = f"admin:rewrite:users_progress:v2:q={q}"
+    if not nocache:
+        cached = redis_client.get(cache_key)
+        if cached:
+            return jsonify({"ok": True, "users": json.loads(cached)})
 
     # 表示名: (last_name + ' ' + first_name) -> username -> email
     full_name_expr = func.trim(
@@ -1521,11 +1541,16 @@ def admin_rewrite_users_progress():
         .group_by(Site.user_id)
         .subquery()
     )
+    SUCCESS_IN  = ("done", "success")
     queued_cnt  = func.sum(case((ArticleRewritePlan.status == "queued", 1), else_=0))
     running_cnt = func.sum(case((ArticleRewritePlan.status == "running", 1), else_=0))
-    success_cnt = func.sum(case((ArticleRewritePlan.status == "success", 1), else_=0))
+    success_cnt = func.sum(case((ArticleRewritePlan.status.in_(SUCCESS_IN), 1), else_=0))
     error_cnt   = func.sum(case((ArticleRewritePlan.status == "error", 1), else_=0))
-    last_act    = func.max(ArticleRewritePlan.updated_at)
+    last_act    = func.max(func.greatest(
+                        func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.created_at),
+                        func.coalesce(ArticleRewritePlan.updated_at,  ArticleRewritePlan.created_at),
+                        ArticleRewritePlan.created_at
+                    ))
     plan_sq = (
         db.session.query(
             ArticleRewritePlan.user_id.label("uid"),
@@ -1580,10 +1605,11 @@ def admin_rewrite_users_progress():
         "last_activity_at": (r.last_activity_at.isoformat() if r.last_activity_at else None),
     } for r in rows]
 
-    try:
-        redis_client.setex(cache_key, 5, json.dumps(users, ensure_ascii=False))
-    except Exception:
-        pass
+    if not nocache:
+        try:
+            redis_client.setex(cache_key, 2, json.dumps(users, ensure_ascii=False))
+        except Exception:
+            pass
     return jsonify({"ok": True, "users": users})
 
 
@@ -1637,6 +1663,8 @@ def admin_rewrite_progress():
             .all()
         )
         totals = {s or "": int(c or 0) for (s, c) in agg}
+        # UIは success に done を吸収して表示（定義統一）
+        totals["success"] = int(totals.get("success", 0)) + int(totals.get("done", 0))
         recent_plans = (q.order_by(ArticleRewritePlan.updated_at.desc().nullslast(),
                                    ArticleRewritePlan.id.desc())
                           .limit(30).all())
@@ -1665,6 +1693,7 @@ def admin_rewrite_progress():
             {"uid": uid} if uid else {},
         ).fetchall()
         totals = {r[0] or "": int(r[1] or 0) for r in agg_rows}
+        totals["success"] = int(totals.get("success", 0)) + int(totals.get("done", 0))
         recent_rows = db.session.execute(
             _sql_text(f"""
               SELECT id, article_id, status, attempts, updated_at
