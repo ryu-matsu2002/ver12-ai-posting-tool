@@ -1147,15 +1147,24 @@ from sqlalchemy import text as _sql_text  # ← これがないとsummaryが動�
 @admin_bp.route("/admin/rewrite/summary", methods=["GET"])
 def admin_rewrite_summary():
     from app import redis_client
-    cache_key = "admin:rewrite:summary:v1"
+    # 成功 = success or done に統一したため、キャッシュキーを更新
+    cache_key = "admin:rewrite:summary:v2"
     cached = redis_client.get(cache_key)
     if cached:
         return jsonify(json.loads(cached))
 
     try:
-        rows = db.session.execute(_sql_text(
-            "SELECT status, COUNT(*) FROM article_rewrite_plans GROUP BY status"
-        )).fetchall()
+        # success と done を success バケットに折り畳む
+        rows = db.session.execute(_sql_text("""
+            SELECT
+              CASE
+                WHEN status IN ('success','done') THEN 'success'
+                ELSE status
+              END AS bucket,
+              COUNT(*) AS cnt
+            FROM article_rewrite_plans
+            GROUP BY 1
+        """)).fetchall()
         totals = {r[0] or "": int(r[1] or 0) for r in rows}
     except Exception as e:
         current_app.logger.warning("[rewrite_summary] fallback: %s", e)
