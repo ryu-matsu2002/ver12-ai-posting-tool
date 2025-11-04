@@ -13,7 +13,7 @@ from flask import current_app
 from sqlalchemy import select, text
 from sqlalchemy.orm import joinedload, selectinload
 from urllib.parse import urlparse
-from bs4 import BeautifulSoup, NavigableString
+from bs4 import BeautifulSoup, NavigableString, Comment
 from openai import OpenAI, BadRequestError
 
 from app import db
@@ -866,6 +866,13 @@ def _same_domain(site_url: str, posted_url: str) -> bool:
     except Exception:
         return False
     
+def _is_http_url(s: str) -> bool:
+    try:
+        return isinstance(s, str) and s.lower().startswith(("http://", "https://"))
+    except Exception:
+        return False
+
+
 # ========== 追加：WP投稿前の安全バリデーション ==================================
 def _validate_html_for_publish(before_html: str, after_html: str) -> Tuple[bool, str]:
     """
@@ -873,11 +880,31 @@ def _validate_html_for_publish(before_html: str, after_html: str) -> Tuple[bool,
     """
     import re
     from collections import Counter
-    # href 集合・順序チェック
+    # 比較専用の軽い正規化（公開HTMLは触らない）
+    # ・<div class="ai-meta-desc"> と <!-- ai-meta... --> コメントだけを除去
+    def _normalize_for_diff_only(html: str) -> str:
+        if not html:
+            return html
+        try:
+            soup = BeautifulSoup(html, "html.parser")
+            # 1) <div class="ai-meta-desc" ...> を比較から除外
+            for node in soup.find_all("div", class_=lambda c: c and "ai-meta-desc" in (c if isinstance(c, list) else str(c))):
+                node.decompose()
+            # 2) <!-- ai-meta... --> コメントを比較から除外
+            for c in soup.find_all(string=lambda t: isinstance(t, Comment) and "ai-meta" in t.lower()):
+                c.extract()
+            return str(soup)
+        except Exception:
+            return html
+
+    cmp_before = _normalize_for_diff_only(before_html)
+    cmp_after  = _normalize_for_diff_only(after_html)
+
+    # href 集合・順序チェック（※比較は正規化したコピーで行う）
     def hrefs_with_order(h: str) -> List[str]:
         return [m.group(1).strip() for m in re.finditer(r'href=["\']([^"\']+)["\']', h or "", flags=re.I)]
-    b_order = hrefs_with_order(before_html or "")
-    a_order = hrefs_with_order(after_html or "")
+    b_order = hrefs_with_order(cmp_before or "")
+    a_order = hrefs_with_order(cmp_after  or "")
     # ✅ リンク集合は厳密一致（hrefが1つでも欠けたら停止）
     if set(b_order) != set(a_order):
         missing = sorted(set(b_order) - set(a_order))[:5]
@@ -892,14 +919,14 @@ def _validate_html_for_publish(before_html: str, after_html: str) -> Tuple[bool,
 
     try:
         ignore_wrap = {"span", "strong", "em", "b", "i", "u"}
-        ob_all = [t.name for t in BeautifulSoup(before_html or "", "html.parser").find_all(True)]
-        ab_all = [t.name for t in BeautifulSoup(after_html  or "", "html.parser").find_all(True)]
+        ob_all = [t.name for t in BeautifulSoup(cmp_before or "", "html.parser").find_all(True)]
+        ab_all = [t.name for t in BeautifulSoup(cmp_after  or "", "html.parser").find_all(True)]
         # 総タグ数の差（全タグベース）
         diff_ratio_all = abs(len(ob_all) - len(ab_all)) / max(len(ob_all), 1)
 
         # 無視対象を除いた“本質タグ”の差
-        ob_core = _tag_multiset(before_html, ignore_wrap)
-        ab_core = _tag_multiset(after_html,  ignore_wrap)
+        ob_core = _tag_multiset(cmp_before, ignore_wrap)
+        ab_core = _tag_multiset(cmp_after,  ignore_wrap)
         # マルチセット一致なら OK（順序は問わない）
         core_equal = (ob_core == ab_core)
 
@@ -975,9 +1002,9 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
         article: Article = plan.article
         site: Site = plan.site
 
-        # 2) ドメイン不一致の安全ガード
+        # 2) ドメイン不一致の安全ガード（posted_url がURLのときだけ判定）
         #    例: site.url=roof-pilates.com だが posted_url が livedoor.blog → WP更新対象外
-        if article.posted_url and not _same_domain(site.url, article.posted_url):
+        if article.posted_url and _is_http_url(article.posted_url) and not _same_domain(site.url, article.posted_url):
             reason = f"domain_mismatch: site={site.url} posted={article.posted_url}"
             current_app.logger.info(f"[rewrite] skip plan_id={plan.id} ({reason})")
             # dry_run でも 'running' のままにしないよう終端化
