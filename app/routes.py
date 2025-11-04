@@ -1399,10 +1399,12 @@ def admin_rewrite_users():
     JSON: 管理UI用のユーザー一覧（サイト数 + リライト集計）高速版
     - JOINを「事前集計サブクエリ」に分離
     - 必要列のみ選択
-    - 5秒キャッシュ
+    - 2秒キャッシュ（?nocache=1 で無効）
     """
     from sqlalchemy import case
     from app import redis_client
+    # ★ 関数スコープで確実に参照できるようにローカルimport（NameError対策）
+    from app.models import User, Site, ArticleRewritePlan
 
     # ---- キャッシュキー（検索ワードをキーに含める） ----
     q = (request.args.get("q", type=str) or "").strip()
@@ -1464,25 +1466,28 @@ def admin_rewrite_users():
             name_expr.ilike(like) | User.username.ilike(like) | User.email.ilike(like)
         )
 
-    rows = (
-        db.session.query(
-            User.id.label("user_id"),
-            name_expr.label("name"),
-            func.coalesce(site_sq.c.site_count, 0).label("site_count"),
-            func.coalesce(plan_sq.c.queued, 0).label("queued"),
-            func.coalesce(plan_sq.c.running, 0).label("running"),
-            func.coalesce(plan_sq.c.success, 0).label("success"),
-            func.coalesce(plan_sq.c.error, 0).label("error"),
-            plan_sq.c.last_activity_at.label("last_activity_at"),
-            func.coalesce(plan_sq.c.target_articles, 0).label("target_articles"),
+    try:
+        rows = (
+            db.session.query(
+                User.id.label("user_id"),
+                name_expr.label("name"),
+                func.coalesce(site_sq.c.site_count, 0).label("site_count"),
+                func.coalesce(plan_sq.c.queued, 0).label("queued"),
+                func.coalesce(plan_sq.c.running, 0).label("running"),
+                func.coalesce(plan_sq.c.success, 0).label("success"),
+                func.coalesce(plan_sq.c.error, 0).label("error"),
+                plan_sq.c.last_activity_at.label("last_activity_at"),
+                func.coalesce(plan_sq.c.target_articles, 0).label("target_articles"),
+            )
+            .outerjoin(site_sq, site_sq.c.uid == User.id)
+            .outerjoin(plan_sq, plan_sq.c.uid == User.id)
+            .filter(*filters)
+            .order_by(User.id.asc())
+            .all()
         )
-        .outerjoin(site_sq, site_sq.c.uid == User.id)
-        .outerjoin(plan_sq, plan_sq.c.uid == User.id)
-        .filter(*filters)
-        # ユーザーは id 1 から順に上から並べる
-        .order_by(User.id.asc())
-        .all()
-    )
+    except Exception as e:
+        current_app.logger.exception("[admin/rewrite/users] query failed: %s", e)
+        return jsonify({"ok": False, "items": [], "error": str(e)}), 500
 
     items = [{
         "user_id": r.user_id,
@@ -1517,6 +1522,8 @@ def admin_rewrite_users_progress():
     """
     from sqlalchemy import case
     from app import redis_client
+    # ★ NameError対策
+    from app.models import User, Site, ArticleRewritePlan
 
     q = (request.args.get("q", type=str) or "").strip()
     nocache = request.args.get("nocache", type=int) == 1
@@ -1571,28 +1578,32 @@ def admin_rewrite_users_progress():
             name_expr.ilike(like) | User.username.ilike(like) | User.email.ilike(like)
         )
 
-    rows = (
-        db.session.query(
-            User.id.label("user_id"),
-            name_expr.label("name"),
-            func.coalesce(site_sq.c.site_count, 0).label("site_count"),
-            func.coalesce(plan_sq.c.queued, 0).label("queued"),
-            func.coalesce(plan_sq.c.running, 0).label("running"),
-            func.coalesce(plan_sq.c.success, 0).label("success"),
-            func.coalesce(plan_sq.c.error, 0).label("error"),
-            plan_sq.c.last_activity_at.label("last_activity_at"),
+    try:
+        rows = (
+            db.session.query(
+                User.id.label("user_id"),
+                name_expr.label("name"),
+                func.coalesce(site_sq.c.site_count, 0).label("site_count"),
+                func.coalesce(plan_sq.c.queued, 0).label("queued"),
+                func.coalesce(plan_sq.c.running, 0).label("running"),
+                func.coalesce(plan_sq.c.success, 0).label("success"),
+                func.coalesce(plan_sq.c.error, 0).label("error"),
+                plan_sq.c.last_activity_at.label("last_activity_at"),
+            )
+            .outerjoin(site_sq, site_sq.c.uid == User.id)
+            .outerjoin(plan_sq, plan_sq.c.uid == User.id)
+            .filter(*filters)
+            .order_by(
+                func.coalesce(plan_sq.c.queued, 0).desc(),
+                func.coalesce(plan_sq.c.running, 0).desc(),
+                plan_sq.c.last_activity_at.desc().nullslast(),
+                User.id.asc(),
+            )
+            .all()
         )
-        .outerjoin(site_sq, site_sq.c.uid == User.id)
-        .outerjoin(plan_sq, plan_sq.c.uid == User.id)
-        .filter(*filters)
-        .order_by(
-            func.coalesce(plan_sq.c.queued, 0).desc(),
-            func.coalesce(plan_sq.c.running, 0).desc(),
-            plan_sq.c.last_activity_at.desc().nullslast(),
-            User.id.asc(),
-        )
-        .all()
-    )
+    except Exception as e:
+        current_app.logger.exception("[admin/rewrite/users_progress] query failed: %s", e)
+        return jsonify({"ok": False, "users": [], "error": str(e)}), 500
 
     users = [{
         "user_id": r.user_id,
@@ -1663,6 +1674,7 @@ def admin_rewrite_progress():
             .all()
         )
         totals = {s or "": int(c or 0) for (s, c) in agg}
+        totals["success"] = int(totals.get("success", 0)) + int(totals.get("done", 0))
         # UIは success に done を吸収して表示（定義統一）
         totals["success"] = int(totals.get("success", 0)) + int(totals.get("done", 0))
         recent_plans = (q.order_by(ArticleRewritePlan.updated_at.desc().nullslast(),
