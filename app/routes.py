@@ -1162,11 +1162,9 @@ def admin_rewrite_summary():
             func.sum(case((ArticleRewritePlan.status == "running", 1), else_=0)).label("running"),
             func.sum(case((ArticleRewritePlan.status.in_(SUCCESS_IN), 1), else_=0)).label("success"),
             func.sum(case((ArticleRewritePlan.status == "error", 1), else_=0)).label("error"),
-            func.max(func.greatest(
-                func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.created_at),
-                func.coalesce(ArticleRewritePlan.updated_at, ArticleRewritePlan.created_at),
-                ArticleRewritePlan.created_at
-            )).label("last_activity_at"),
+            func.max(
+                func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.created_at)
+            ).label("last_activity_at"),
         ).one()
         totals = {
             "queued":  int(totals_row.queued or 0),
@@ -1440,11 +1438,9 @@ def admin_rewrite_users():
     running_cnt  = func.sum(case((ArticleRewritePlan.status == "running", 1), else_=0))
     success_cnt  = func.sum(case((ArticleRewritePlan.status.in_(SUCCESS_IN), 1), else_=0))
     error_cnt    = func.sum(case((ArticleRewritePlan.status == "error", 1), else_=0))
-    last_act     = func.max(func.greatest(
-                        func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.created_at),
-                        func.coalesce(ArticleRewritePlan.updated_at,  ArticleRewritePlan.created_at),
-                        ArticleRewritePlan.created_at
-                    ))
+    last_act     = func.max(
+                        func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.created_at)
+                    )
     total_cnt    = func.count(ArticleRewritePlan.id)  # 対象記事数
     plan_sq = (
         db.session.query(
@@ -1555,11 +1551,9 @@ def admin_rewrite_users_progress():
     running_cnt = func.sum(case((ArticleRewritePlan.status == "running", 1), else_=0))
     success_cnt = func.sum(case((ArticleRewritePlan.status.in_(SUCCESS_IN), 1), else_=0))
     error_cnt   = func.sum(case((ArticleRewritePlan.status == "error", 1), else_=0))
-    last_act    = func.max(func.greatest(
-                        func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.created_at),
-                        func.coalesce(ArticleRewritePlan.updated_at,  ArticleRewritePlan.created_at),
-                        ArticleRewritePlan.created_at
-                    ))
+    last_act    = func.max(
+                        func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.created_at)
+                    )
     plan_sq = (
         db.session.query(
             ArticleRewritePlan.user_id.label("uid"),
@@ -1686,7 +1680,8 @@ def admin_rewrite_progress():
         totals = {s or "": int(c or 0) for (s, c) in agg}
         # UIは success に done を吸収して表示（定義統一）※二重加算を修正
         totals["success"] = int(totals.get("success", 0)) + int(totals.get("done", 0))
-        recent_plans = (q.order_by(ArticleRewritePlan.updated_at.desc().nullslast(),
+        recent_plans = (q.order_by(
+                                   func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.created_at).desc(),
                                    ArticleRewritePlan.id.desc())
                           .limit(30).all())
         # Article を一括取得して posted_url を紐付け
