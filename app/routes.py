@@ -1321,7 +1321,10 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
     from sqlalchemy import case
     queued_cnt  = func.sum(case((ArticleRewritePlan.status == "queued",  1), else_=0)).label("queued")
     running_cnt = func.sum(case((ArticleRewritePlan.status == "running", 1), else_=0)).label("running")
-    success_cnt = func.sum(case((ArticleRewritePlan.status == "success", 1), else_=0)).label("success")
+    # "success" と "done" は成功扱い
+    success_cnt = func.sum(
+        case((ArticleRewritePlan.status.in_(["success", "done"]), 1), else_=0)
+    ).label("success")
     error_cnt   = func.sum(case((ArticleRewritePlan.status == "error",   1), else_=0)).label("error")
 
     stats_row = (
@@ -1345,38 +1348,37 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
     if plan_ids:
         # 最新の成功ログ（executed_at 最大）を拾う
           sub = (
-              db.session.query(
-                  ArticleRewriteLog.plan_id,
-                  func.max(ArticleRewriteLog.executed_at).label("mx"),
-              )
-              .filter(
-                  ArticleRewriteLog.plan_id.in_(plan_ids),
-                  ArticleRewriteLog.wp_status == "success",
-              )
-              .group_by(ArticleRewriteLog.plan_id)
-          ).subquery()
+            db.session.query(
+                ArticleRewriteLog.plan_id,
+                func.max(ArticleRewriteLog.executed_at).label("mx"),
+            )
+            .filter(
+                ArticleRewriteLog.plan_id.in_(plan_ids),
+                ArticleRewriteLog.wp_status == "success",
+            )
+            .group_by(ArticleRewriteLog.plan_id)
+        ).subquery()
 
           last_logs = (
-              db.session.query(
-                  ArticleRewriteLog.plan_id,
-                  ArticleRewriteLog.wp_post_id,
-                  ArticleRewriteLog.executed_at,
-              )
-              .join(
-                  sub,
-                  (ArticleRewriteLog.plan_id == sub.c.plan_id)
-                  & (ArticleRewriteLog.executed_at == sub.c.mx),
-              )
-          ).all()
+            db.session.query(
+                ArticleRewriteLog.plan_id,
+                ArticleRewriteLog.wp_post_id,
+                ArticleRewriteLog.executed_at,
+            )
+            .join(
+                sub,
+                (ArticleRewriteLog.plan_id == sub.c.plan_id)
+                & (ArticleRewriteLog.executed_at == sub.c.mx),
+            )
+        ).all()
 
-          # wp_post_id → WordPressのpermalinkに解決
+          # wp_post_id → WordPressのpermalinkに解決（ここでは仮リンク）
           for pid, wp_post_id, _ in last_logs:
-                # 速度改善: 外部HTTP(fetch_single_post)を即時呼ばず、仮リンクを設定
-                # テンプレート側で後からAjaxで取得できるように構造を残す
-                if wp_post_id:
-                    urls_map[pid] = f"/admin/wp_link_placeholder/{site.id}/{wp_post_id}"
-                else:
-                    urls_map[pid] = None
+              # 速度改善: 外部HTTP呼び出しは後段Ajaxで
+              urls_map[pid] = (
+                  f"/admin/wp_link_placeholder/{site.id}/{wp_post_id}"
+                  if wp_post_id else None
+              )
 
     back_url = url_for("admin.admin_rewrite_user_sites", user_id=user_id)
     return render_template(
@@ -1657,6 +1659,14 @@ def admin_rewrite_progress():
     query: user_id (optional)
     返却: { totals: {queued,running,success,error}, recent: [...], last_updated }
     """
+
+    # ここで確実にモデルを読み込む（NameError対策）
+    try:
+        from app.models import ArticleRewritePlan, Article
+    except Exception:
+        ArticleRewritePlan = None
+        Article = None
+
     uid = request.args.get("user_id", type=int)
     # モデルが import できないケースに備えて SQL も用意
     if ArticleRewritePlan is not None:
@@ -1674,8 +1684,7 @@ def admin_rewrite_progress():
             .all()
         )
         totals = {s or "": int(c or 0) for (s, c) in agg}
-        totals["success"] = int(totals.get("success", 0)) + int(totals.get("done", 0))
-        # UIは success に done を吸収して表示（定義統一）
+        # UIは success に done を吸収して表示（定義統一）※二重加算を修正
         totals["success"] = int(totals.get("success", 0)) + int(totals.get("done", 0))
         recent_plans = (q.order_by(ArticleRewritePlan.updated_at.desc().nullslast(),
                                    ArticleRewritePlan.id.desc())
@@ -1839,7 +1848,6 @@ def admin_rewrite_serp_warmup():
             current_app.logger.exception("[admin/rewrite/serp_warmup] job error: %s", e)
     _ui_executor.submit(_run)
     return jsonify({"ok": True, "queued": True, "params": {"user_id": user_id, "days": days, "limit": limit}})
-
 
 import subprocess
 from flask import jsonify
