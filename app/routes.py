@@ -1316,7 +1316,7 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
          .limit(per).offset((page-1)*per).all()
     )
 
-    # ---- サマリを「各記事の最新ログ」基準に統一（queued/running/success/error/unknown）
+    # ---- サマリ: 成功/失敗は「最新ログ（WP成功/失敗）」、待機/実行中は「plans.status」を採用（リアルタイム整合）
     from sqlalchemy import text as _sql
     latest_sql = _sql("""
       WITH latest AS (
@@ -1338,11 +1338,21 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
       WHERE rn = 1
     """)
     _sr = db.session.execute(latest_sql, {"site_id": site_id}).mappings().first() or {}
+    # plans 側で「待機/実行中」の現在数を集計（running は in_progress も吸収）
+    plan_stat_row = (
+        db.session.query(
+            func.sum(case((ArticleRewritePlan.status == "queued", 1), else_=0)).label("queued"),
+            func.sum(case((ArticleRewritePlan.status.in_(["running","in_progress"]), 1), else_=0)).label("running"),
+        )
+        .filter(ArticleRewritePlan.user_id == user_id,
+                ArticleRewritePlan.site_id == site_id)
+        .one()
+    )
     stats = {
-        "queued":  int(_sr.get("queued", 0)),
-        "running": int(_sr.get("running", 0)),
-        "success": int(_sr.get("success", 0)),   # ← ここが UI の「成功」に対応（最新ログ success）
-        "error":   int(_sr.get("error", 0)),
+        "queued":  int(plan_stat_row.queued or 0),
+        "running": int(plan_stat_row.running or 0),
+        "success": int(_sr.get("success", 0)),   # WP 本番更新成功のみ
+        "error":   int(_sr.get("error", 0)),     # 直近ログが error/failed
         "unknown": int(_sr.get("unknown", 0)),
     }
 
@@ -1377,6 +1387,28 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
       LIMIT 200
     """)
     success_rows = list(db.session.execute(success_rows_sql, {"site_id": site_id}).mappings())
+
+    # テンプレ互換：articles 配列を用意（id/title/status/updated_at/wp_url/posted_url…）
+    articles = []
+    _last_dt = None
+    for r in success_rows:
+        dt = r.get("executed_at")
+        if dt and (_last_dt is None or dt > _last_dt):
+            _last_dt = dt
+        wp_post_id = r.get("wp_post_id")
+        wp_url = f"/admin/wp_link_placeholder/{site.id}/{wp_post_id}" if wp_post_id else None
+        articles.append({
+            "id": r.get("article_id"),              # 一覧のID列は記事IDを表示
+            "article_id": r.get("article_id"),
+            "title": r.get("title"),
+            "status": "success",
+            "attempts": None,
+            "updated_at": (dt.isoformat() if dt else None),
+            "posted_url": None,
+            "wp_url": wp_url,
+            "plan_id": r.get("plan_id"),
+        })
+    last_updated = _last_dt.isoformat() if _last_dt else None
 
     # 一覧はテンプレ互換のため「plans」に差し替える（最新ログ success の plan_id を採用）
     from sqlalchemy import literal
@@ -1418,9 +1450,10 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
         status=status,
         urls_map=urls_map,
         stats=stats,
-        # テンプレ互換のため両方渡す（どちらの変数名でも描画できる）
-        success_rows=success_rows,
-        rows=success_rows,
+        # テンプレが参照する配列名
+        articles=articles,
+        last_updated=last_updated,
+        user_id=user_id,
         back_url=back_url,
     )
 
