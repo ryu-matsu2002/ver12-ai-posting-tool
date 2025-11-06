@@ -1363,6 +1363,7 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
     success_rows_sql = _sql("""
       WITH latest AS (
         SELECT
+          l.id         AS log_id,
           l.article_id,
           l.plan_id,
           l.wp_status,
@@ -1374,6 +1375,7 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
         WHERE a.site_id = :site_id
       )
       SELECT
+        lt.log_id   AS log_id,
         a.id         AS article_id,
         a.title      AS title,
         lt.plan_id   AS plan_id,
@@ -1413,6 +1415,7 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
             "posted_url": None,
             "wp_url": wp_url,   # ← ここが「open」で飛ぶリンクになる
             "plan_id": r.get("plan_id"),
+            "log_id": r.get("log_id"),  # ← 詳細ページへのキー
         })
     last_updated = _last_dt.isoformat() if _last_dt else None
 
@@ -1461,6 +1464,32 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
         last_updated=last_updated,
         user_id=user_id,
         back_url=back_url,
+    )
+
+# ─────────────────────────────────────────
+# リライト詳細（修正方針 / ログ詳細）
+# URL: /admin/rewrite/log/<log_id>
+# ─────────────────────────────────────────
+@admin_bp.route("/admin/rewrite/log/<int:log_id>", methods=["GET"])
+@login_required
+def admin_rewrite_log_detail(log_id: int):
+    if not current_user.is_admin:
+        abort(403)
+
+    from app.models import ArticleRewriteLog, Article
+
+    log = db.session.get(ArticleRewriteLog, log_id)
+    if not log:
+        abort(404)
+
+    article = None
+    if log.article_id:
+        article = db.session.get(Article, log.article_id)
+
+    return render_template(
+        "admin/rewrite_log_detail.html",
+        log=log,
+        article=article,
     )
 
 @admin_bp.route("/admin/rewrite/users", methods=["GET"])

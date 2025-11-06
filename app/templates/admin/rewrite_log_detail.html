@@ -1,0 +1,44 @@
+{% extends "base_admin.html" %}
+{% block title %}修正方針の詳細{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+
+  <nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="/admin/rewrite">全記事リライト（管理）</a></li>
+      {% if user_id %}
+      <li class="breadcrumb-item"><a href="/admin/rewrite/user/{{ user_id }}">ユーザーのサイト一覧</a></li>
+      {% endif %}
+      {% if site_id %}
+      <li class="breadcrumb-item"><a href="/admin/rewrite/user/{{ user_id }}/site/{{ site_id }}">サイト別記事一覧</a></li>
+      {% endif %}
+      <li class="breadcrumb-item active" aria-current="page">修正方針</li>
+    </ol>
+  </nav>
+
+  <h4 class="mb-3">
+    修正方針
+    <small class="text-muted ms-2">(Plan ID: {{ plan.id }})</small>
+  </h4>
+
+  <div class="card mb-4">
+    <div class="card-header fw-bold">修正方針（policy_text）</div>
+    <div class="card-body" style="white-space: pre-wrap;">
+      {{ plan.policy_text or "（データなし）" }}
+    </div>
+  </div>
+
+  {% if plan.gap_summary %}
+  <div class="card mb-4">
+    <div class="card-header fw-bold">差分要約（gap_summary）</div>
+    <div class="card-body" style="white-space: pre-wrap;">
+      {{ plan.gap_summary }}
+    </div>
+  </div>
+  {% endif %}
+
+  <a class="btn btn-secondary" href="{{ request.referrer or '/admin/rewrite' }}">戻る</a>
+
+</div>
+{% endblock %}

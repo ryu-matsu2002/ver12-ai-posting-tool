@@ -73,6 +73,7 @@
             <th class="text-center" style="width:120px;">ステータス</th>
             <th class="text-center" style="width:180px;">最終更新</th>
             <th style="min-width:120px;">WPリンク</th>
+            <th class="text-center" style="width:140px;">修正方針</th>
           </tr>
         </thead>
         <tbody>
@@ -103,10 +104,19 @@
                     <span class="text-muted">-</span>
                   {% endif %}
                 </td>
+                <td class="text-center">
+                  {% if a.log_id %}
+                    <a class="btn btn-outline-primary btn-sm"
+                       href="{{ url_for('admin.admin_rewrite_log_detail', log_id=a.log_id) }}"
+                       target="_blank" rel="noopener">修正方針</a>
+                  {% else %}
+                    <span class="text-muted">-</span>
+                  {% endif %}
+                </td>
               </tr>
             {% endfor %}
           {% else %}
-            <tr><td colspan="5" class="text-center text-muted py-4">データがありません</td></tr>
+            <tr><td colspan="6" class="text-center text-muted py-4">データがありません</td></tr>
           {% endif %}
         </tbody>
       </table>
