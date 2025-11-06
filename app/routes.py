@@ -1309,6 +1309,7 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
     if status in ("queued","running","success","error"):
         q = q.filter(ArticleRewritePlan.status == status)
 
+    # いったん従来の plans を用意するが、後段で「最新 success ログ」に基づき上書きする
     total = q.count()
     plans = (
         q.options(joinedload(ArticleRewritePlan.article))
@@ -1345,39 +1346,8 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
         "unknown": int(_sr.get("unknown", 0)),
     }
 
-    # 各planのWP URL（成功ログの最新）を引き当てる軽量ヘルパ
-    # 既存 plans の URL 解決は維持（後方互換）
-    plan_ids = [p.id for p in plans]
+    # WPリンクは後段の success_rows を用いて作る（外部JOINを減らして高速化）
     urls_map = {}
-    if plan_ids:
-        sub = (
-          db.session.query(
-              ArticleRewriteLog.plan_id,
-              func.max(ArticleRewriteLog.executed_at).label("mx"),
-          )
-          .filter(
-              ArticleRewriteLog.plan_id.in_(plan_ids),
-              ArticleRewriteLog.wp_status == "success",
-          )
-          .group_by(ArticleRewriteLog.plan_id)
-        ).subquery()
-        last_logs = (
-          db.session.query(
-              ArticleRewriteLog.plan_id,
-              ArticleRewriteLog.wp_post_id,
-              ArticleRewriteLog.executed_at,
-          )
-          .join(
-              sub,
-              (ArticleRewriteLog.plan_id == sub.c.plan_id)
-              & (ArticleRewriteLog.executed_at == sub.c.mx),
-          )
-        ).all()
-        for pid, wp_post_id, _ in last_logs:
-            urls_map[pid] = (
-                f"/admin/wp_link_placeholder/{site.id}/{wp_post_id}"
-                if wp_post_id else None
-            )
 
     # ---- 「リライト済み記事一覧」 = 最新ログが success の記事だけを抽出（executed_at DESC）
     success_rows_sql = _sql("""
@@ -1407,6 +1377,33 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
       LIMIT 200
     """)
     success_rows = list(db.session.execute(success_rows_sql, {"site_id": site_id}).mappings())
+
+    # 一覧はテンプレ互換のため「plans」に差し替える（最新ログ success の plan_id を採用）
+    from sqlalchemy import literal
+    success_plan_ids = [r["plan_id"] for r in success_rows if r.get("plan_id")]
+    if success_plan_ids:
+        # 並び順は最新実行時刻順（success_rows の順）に合わせる
+        plans = (
+            db.session.query(ArticleRewritePlan)
+            .options(joinedload(ArticleRewritePlan.article))
+            .filter(
+                ArticleRewritePlan.user_id == user_id,
+                ArticleRewritePlan.site_id == site_id,
+                ArticleRewritePlan.id.in_(success_plan_ids),
+            )
+            .order_by(func.array_position(literal(success_plan_ids), ArticleRewritePlan.id))
+            .all()
+        )
+        total = len(success_plan_ids)
+        # WPリンクも success_rows から復元
+        for row in success_rows:
+            pid = row.get("plan_id")
+            wp_post_id = row.get("wp_post_id")
+            if pid and wp_post_id:
+                urls_map[pid] = f"/admin/wp_link_placeholder/{site.id}/{wp_post_id}"
+    else:
+        # 成功がまだ無い場合は従来の plans/total をそのまま使用
+        pass
 
 
     back_url = url_for("admin.admin_rewrite_user_sites", user_id=user_id)
