@@ -71,7 +71,6 @@
             <th class="text-center" style="width:90px;">ID</th>
             <th>タイトル</th>
             <th class="text-center" style="width:120px;">ステータス</th>
-            <th class="text-center" style="width:120px;">試行回数</th>
             <th class="text-center" style="width:180px;">最終更新</th>
             <th style="min-width:120px;">WPリンク</th>
           </tr>
@@ -92,7 +91,6 @@
                   {% if a.article_id %}<span class="text-muted ms-2">(#{{ a.article_id }})</span>{% endif %}
                 </td>
                 <td class="text-center"><span class="badge bg-{{ cls }}">{{ st }}</span></td>
-                <td class="text-center">{{ a.attempts or 0 }}</td>
                 <td class="text-center text-muted">
                   {% if a.updated_at %}{{ a.updated_at|tojson|safe|replace('"','')|replace('T',' ') }}{% else %}-{% endif %}
                 </td>
@@ -108,7 +106,7 @@
               </tr>
             {% endfor %}
           {% else %}
-            <tr><td colspan="6" class="text-center text-muted py-4">データがありません</td></tr>
+            <tr><td colspan="5" class="text-center text-muted py-4">データがありません</td></tr>
           {% endif %}
         </tbody>
       </table>

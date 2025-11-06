@@ -1398,9 +1398,9 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
         wp_post_id = r.get("wp_post_id")
         # WordPressの実URLに直接飛べる形で生成
         if wp_post_id:
-            # site.site_url は「https://example.com」形式を想定
-            base = site.site_url.rstrip("/")
-            wp_url = f"{base}/?p={wp_post_id}"
+            # Site.url / Site.site_url の両対応（どちらも無い場合はリンク無し）
+            base = (getattr(site, "site_url", None) or getattr(site, "url", "") or "").rstrip("/")
+            wp_url = f"{base}/?p={wp_post_id}" if base else None
         else:
             wp_url = None
         articles.append({
