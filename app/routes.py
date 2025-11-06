@@ -1315,68 +1315,99 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
          .limit(per).offset((page-1)*per).all()
     )
 
-    # ---- テンプレで使う stats を集計（queued/running/success/error）
-    from sqlalchemy import case
-    queued_cnt  = func.sum(case((ArticleRewritePlan.status == "queued",  1), else_=0)).label("queued")
-    running_cnt = func.sum(case((ArticleRewritePlan.status == "running", 1), else_=0)).label("running")
-    # "success" と "done" は成功扱い
-    success_cnt = func.sum(
-        case((ArticleRewritePlan.status.in_(["success", "done"]), 1), else_=0)
-    ).label("success")
-    error_cnt   = func.sum(case((ArticleRewritePlan.status == "error",   1), else_=0)).label("error")
-
-    stats_row = (
-        db.session.query(queued_cnt, running_cnt, success_cnt, error_cnt)
-        .filter(
-            ArticleRewritePlan.user_id == user_id,
-            ArticleRewritePlan.site_id == site_id
-        )
-        .one()
-    )
+    # ---- サマリを「各記事の最新ログ」基準に統一（queued/running/success/error/unknown）
+    from sqlalchemy import text as _sql
+    latest_sql = _sql("""
+      WITH latest AS (
+        SELECT
+          l.article_id,
+          l.wp_status,
+          ROW_NUMBER() OVER (PARTITION BY l.article_id ORDER BY l.executed_at DESC) AS rn
+        FROM article_rewrite_logs l
+        JOIN articles a ON a.id = l.article_id
+        WHERE a.site_id = :site_id
+      )
+      SELECT
+        SUM(CASE WHEN wp_status IN ('queued') THEN 1 ELSE 0 END) AS queued,
+        SUM(CASE WHEN wp_status IN ('running','in_progress') THEN 1 ELSE 0 END) AS running,
+        SUM(CASE WHEN wp_status IN ('success') THEN 1 ELSE 0 END) AS success,
+        SUM(CASE WHEN wp_status IN ('error','failed') THEN 1 ELSE 0 END) AS error,
+        SUM(CASE WHEN wp_status NOT IN ('queued','running','in_progress','success','error','failed') THEN 1 ELSE 0 END) AS unknown
+      FROM latest
+      WHERE rn = 1
+    """)
+    _sr = db.session.execute(latest_sql, {"site_id": site_id}).mappings().first() or {}
     stats = {
-        "queued":  int(stats_row.queued  or 0),
-        "running": int(stats_row.running or 0),
-        "success": int(stats_row.success or 0),
-        "error":   int(stats_row.error   or 0),
+        "queued":  int(_sr.get("queued", 0)),
+        "running": int(_sr.get("running", 0)),
+        "success": int(_sr.get("success", 0)),   # ← ここが UI の「成功」に対応（最新ログ success）
+        "error":   int(_sr.get("error", 0)),
+        "unknown": int(_sr.get("unknown", 0)),
     }
 
     # 各planのWP URL（成功ログの最新）を引き当てる軽量ヘルパ
+    # 既存 plans の URL 解決は維持（後方互換）
     plan_ids = [p.id for p in plans]
     urls_map = {}
     if plan_ids:
-        # 最新の成功ログ（executed_at 最大）を拾う
-          sub = (
-            db.session.query(
-                ArticleRewriteLog.plan_id,
-                func.max(ArticleRewriteLog.executed_at).label("mx"),
-            )
-            .filter(
-                ArticleRewriteLog.plan_id.in_(plan_ids),
-                ArticleRewriteLog.wp_status == "success",
-            )
-            .group_by(ArticleRewriteLog.plan_id)
+        sub = (
+          db.session.query(
+              ArticleRewriteLog.plan_id,
+              func.max(ArticleRewriteLog.executed_at).label("mx"),
+          )
+          .filter(
+              ArticleRewriteLog.plan_id.in_(plan_ids),
+              ArticleRewriteLog.wp_status == "success",
+          )
+          .group_by(ArticleRewriteLog.plan_id)
         ).subquery()
-
-          last_logs = (
-            db.session.query(
-                ArticleRewriteLog.plan_id,
-                ArticleRewriteLog.wp_post_id,
-                ArticleRewriteLog.executed_at,
-            )
-            .join(
-                sub,
-                (ArticleRewriteLog.plan_id == sub.c.plan_id)
-                & (ArticleRewriteLog.executed_at == sub.c.mx),
-            )
+        last_logs = (
+          db.session.query(
+              ArticleRewriteLog.plan_id,
+              ArticleRewriteLog.wp_post_id,
+              ArticleRewriteLog.executed_at,
+          )
+          .join(
+              sub,
+              (ArticleRewriteLog.plan_id == sub.c.plan_id)
+              & (ArticleRewriteLog.executed_at == sub.c.mx),
+          )
         ).all()
+        for pid, wp_post_id, _ in last_logs:
+            urls_map[pid] = (
+                f"/admin/wp_link_placeholder/{site.id}/{wp_post_id}"
+                if wp_post_id else None
+            )
 
-          # wp_post_id → WordPressのpermalinkに解決（ここでは仮リンク）
-          for pid, wp_post_id, _ in last_logs:
-              # 速度改善: 外部HTTP呼び出しは後段Ajaxで
-              urls_map[pid] = (
-                  f"/admin/wp_link_placeholder/{site.id}/{wp_post_id}"
-                  if wp_post_id else None
-              )
+    # ---- 「リライト済み記事一覧」 = 最新ログが success の記事だけを抽出（executed_at DESC）
+    success_rows_sql = _sql("""
+      WITH latest AS (
+        SELECT
+          l.article_id,
+          l.plan_id,
+          l.wp_status,
+          l.wp_post_id,
+          l.executed_at,
+          ROW_NUMBER() OVER (PARTITION BY l.article_id ORDER BY l.executed_at DESC) AS rn
+        FROM article_rewrite_logs l
+        JOIN articles a ON a.id = l.article_id
+        WHERE a.site_id = :site_id
+      )
+      SELECT
+        a.id         AS article_id,
+        a.title      AS title,
+        lt.plan_id   AS plan_id,
+        lt.wp_post_id AS wp_post_id,
+        lt.executed_at AS executed_at
+      FROM latest lt
+      JOIN articles a ON a.id = lt.article_id
+      WHERE lt.rn = 1
+        AND lt.wp_status = 'success'
+      ORDER BY lt.executed_at DESC
+      LIMIT 200
+    """)
+    success_rows = list(db.session.execute(success_rows_sql, {"site_id": site_id}).mappings())
+
 
     back_url = url_for("admin.admin_rewrite_user_sites", user_id=user_id)
     return render_template(
@@ -1390,6 +1421,9 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
         status=status,
         urls_map=urls_map,
         stats=stats,
+        # テンプレ互換のため両方渡す（どちらの変数名でも描画できる）
+        success_rows=success_rows,
+        rows=success_rows,
         back_url=back_url,
     )
 
