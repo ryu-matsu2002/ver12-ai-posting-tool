@@ -1396,7 +1396,13 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
         if dt and (_last_dt is None or dt > _last_dt):
             _last_dt = dt
         wp_post_id = r.get("wp_post_id")
-        wp_url = f"/admin/wp_link_placeholder/{site.id}/{wp_post_id}" if wp_post_id else None
+        # WordPressの実URLに直接飛べる形で生成
+        if wp_post_id:
+            # site.site_url は「https://example.com」形式を想定
+            base = site.site_url.rstrip("/")
+            wp_url = f"{base}/?p={wp_post_id}"
+        else:
+            wp_url = None
         articles.append({
             "id": r.get("article_id"),              # 一覧のID列は記事IDを表示
             "article_id": r.get("article_id"),
@@ -1405,7 +1411,7 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
             "attempts": None,
             "updated_at": (dt.isoformat() if dt else None),
             "posted_url": None,
-            "wp_url": wp_url,
+            "wp_url": wp_url,   # ← ここが「open」で飛ぶリンクになる
             "plan_id": r.get("plan_id"),
         })
     last_updated = _last_dt.isoformat() if _last_dt else None
