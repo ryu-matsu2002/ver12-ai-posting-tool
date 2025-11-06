@@ -1680,10 +1680,12 @@ def admin_rewrite_progress():
         totals = {s or "": int(c or 0) for (s, c) in agg}
         # UIは success に done を吸収して表示（定義統一）※二重加算を修正
         totals["success"] = int(totals.get("success", 0)) + int(totals.get("done", 0))
-        recent_plans = (q.order_by(
-                                   func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.created_at).desc(),
-                                   ArticleRewritePlan.id.desc())
-                          .limit(30).all())
+        recent_plans = (
+            q.order_by(
+                func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.started_at, ArticleRewritePlan.scheduled_at, ArticleRewritePlan.created_at).desc(),
+                ArticleRewritePlan.id.desc()
+            ).limit(30).all()
+        )
         # Article を一括取得して posted_url を紐付け
         a_ids = [p.article_id for p in recent_plans if getattr(p, "article_id", None)]
         art_map = {}
@@ -1693,13 +1695,14 @@ def admin_rewrite_progress():
             art_map = {aid: url for (aid, url) in arts}
         recent = []
         for r in recent_plans:
+            best_ts = r.finished_at or r.started_at or r.scheduled_at or r.created_at
             recent.append({
                 "id": r.id,
                 "article_id": r.article_id,
                 "status": r.status,
                 "attempts": getattr(r, "attempts", None),
-                "updated_at": (r.updated_at.isoformat() if r.updated_at else None),
-                "posted_url": art_map.get(r.article_id)
+                "updated_at": (best_ts.isoformat() if best_ts else None),
+                "posted_url": art_map.get(r.article_id),
             })
     else:
         # Fallback: テーブル名で素直に叩く
@@ -1712,11 +1715,16 @@ def admin_rewrite_progress():
         totals["success"] = int(totals.get("success", 0)) + int(totals.get("done", 0))
         recent_rows = db.session.execute(
             _sql_text(f"""
-              SELECT id, article_id, status, attempts, updated_at
-                FROM article_rewrite_plans
-               {where}
-            ORDER BY updated_at DESC NULLS LAST, id DESC
-               LIMIT 30
+              SELECT
+                  id,
+                  article_id,
+                  status,
+                  attempts,
+                  COALESCE(finished_at, started_at, scheduled_at, created_at) AS updated_at
+              FROM article_rewrite_plans
+              {where}
+              ORDER BY updated_at DESC NULLS LAST, id DESC
+              LIMIT 30
             """),
             {"uid": uid} if uid else {},
         ).fetchall()
@@ -1728,13 +1736,14 @@ def admin_rewrite_progress():
             art_map = {aid: url for (aid, url) in arts}
         recent = []
         for r in recent_rows:
+            best_ts = r[4]
             recent.append({
                 "id": r[0],
                 "article_id": r[1],
                 "status": r[2],
                 "attempts": r[3],
-                "updated_at": (r[4].isoformat() if r[4] else None),
-                "posted_url": art_map.get(r[1])
+                "updated_at": (best_ts.isoformat() if best_ts else None),
+                "posted_url": art_map.get(r[1]),
             })
     return jsonify({
         "ok": True,
