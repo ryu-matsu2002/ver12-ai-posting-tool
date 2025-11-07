@@ -1553,26 +1553,26 @@ def admin_rewrite_log_detail(log_id: int):
 @admin_bp.route("/admin/rewrite/users", methods=["GET"])
 def admin_rewrite_users():
     """
-    JSON: 管理UI用のユーザー一覧（サイト数 + リライト集計）高速版
-    - JOINを「事前集計サブクエリ」に分離
-    - 必要列のみ選択
-    - 2秒キャッシュ（?nocache=1 で無効）
+    JSON: 管理UI用のユーザー一覧（サイト数 + リライト集計）完全統一版
+    定義：
+      - queued/running = plans.status
+      - success/error = 最新logs.wp_status
+      - unknownはrunningに吸収
     """
-    from sqlalchemy import case
+    from sqlalchemy import case, text as _sql
     from app import redis_client
-    # ★ 関数スコープで確実に参照できるようにローカルimport（NameError対策）
     from app.models import User, Site, ArticleRewritePlan
+    import json
 
-    # ---- キャッシュキー（検索ワードをキーに含める） ----
     q = (request.args.get("q", type=str) or "").strip()
     nocache = request.args.get("nocache", type=int) == 1
-    cache_key = f"admin:rewrite:users:v3:q={q}"
+    cache_key = f"admin:rewrite:users:v4:q={q}"
     if not nocache:
         cached = redis_client.get(cache_key)
         if cached:
             return jsonify({"ok": True, "items": json.loads(cached)})
 
-    # 表示名: (last_name + ' ' + first_name) -> username -> email
+    # 表示名生成
     full_name_expr = func.trim(
         func.concat(
             func.coalesce(func.nullif(User.last_name, ""), ""),
@@ -1582,32 +1582,27 @@ def admin_rewrite_users():
     )
     name_expr = func.coalesce(func.nullif(full_name_expr, ""), User.username, User.email)
 
-    # --- サイト数: sites を user_id で事前集計 ---
+    # --- サイト数 ---
     site_sq = (
         db.session.query(Site.user_id.label("uid"), func.count(Site.id).label("site_count"))
         .group_by(Site.user_id)
         .subquery()
     )
 
-    # --- リライト集計（plans側）: queued/running + 最終活動 + 対象記事数 ---
-    queued_cnt   = func.sum(case((ArticleRewritePlan.status == "queued", 1), else_=0))
-    running_cnt  = func.sum(case((ArticleRewritePlan.status.in_(["running","in_progress"]), 1), else_=0))
-    last_act     = func.max(func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.created_at))
-    total_cnt    = func.count(ArticleRewritePlan.id)  # 対象記事数
+    # --- plans 側集計（queued / running / target_articles）---
     plan_sq = (
         db.session.query(
             ArticleRewritePlan.user_id.label("uid"),
-            queued_cnt.label("queued"),
-            running_cnt.label("running"),
-            last_act.label("last_activity_at"),
-            total_cnt.label("target_articles"),
+            func.sum(case((ArticleRewritePlan.status == "queued", 1), else_=0)).label("queued"),
+            func.sum(case((ArticleRewritePlan.status.in_(["running", "in_progress"]), 1), else_=0)).label("running"),
+            func.max(func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.created_at)).label("last_activity_at"),
+            func.count(ArticleRewritePlan.id).label("target_articles"),
         )
         .group_by(ArticleRewritePlan.user_id)
         .subquery()
     )
 
-    # --- リライト集計（logs側）: 各ユーザーの最新ログで success/error をカウント ---
-    from sqlalchemy import text as _sql
+    # --- logs 側（最新ログで success / error / unknown をカウント）---
     logs_user_sql = _sql("""
       WITH latest AS (
         SELECT
@@ -1620,23 +1615,32 @@ def admin_rewrite_users():
       )
       SELECT
         user_id AS uid,
-        SUM(CASE WHEN wp_status = 'success' THEN 1 ELSE 0 END)               AS success,
-        SUM(CASE WHEN wp_status IN ('error','failed') THEN 1 ELSE 0 END)     AS error
+        SUM(CASE WHEN wp_status = 'success' THEN 1 ELSE 0 END) AS success,
+        SUM(CASE WHEN wp_status IN ('error','failed') THEN 1 ELSE 0 END) AS error,
+        SUM(CASE WHEN wp_status NOT IN ('queued','running','in_progress','success','error','failed') THEN 1 ELSE 0 END) AS unknown
       FROM latest
       WHERE rn = 1
       GROUP BY user_id
     """)
     logs_user_sq = db.session.execute(logs_user_sql).mappings().all()
-    logs_user_map = { r["uid"]: {"success": int(r["success"] or 0), "error": int(r["error"] or 0)} for r in logs_user_sq }
-
+    logs_user_map = {}
+    for r in logs_user_sq:
+        uid = r["uid"]
+        success = int(r.get("success") or 0)
+        error = int(r.get("error") or 0)
+        unknown = int(r.get("unknown") or 0)
+        # unknownはrunningに吸収
+        logs_user_map[uid] = {
+            "success": success,
+            "error": max(0, error - success),  # 履歴吸収
+            "unknown": unknown
+        }
 
     # --- 検索フィルタ ---
     filters = []
     if q:
         like = f"%{q}%"
-        filters.append(
-            name_expr.ilike(like) | User.username.ilike(like) | User.email.ilike(like)
-        )
+        filters.append(name_expr.ilike(like) | User.username.ilike(like) | User.email.ilike(like))
 
     try:
         rows = (
@@ -1659,26 +1663,35 @@ def admin_rewrite_users():
         current_app.logger.exception("[admin/rewrite/users] query failed: %s", e)
         return jsonify({"ok": False, "items": [], "error": str(e)}), 500
 
-    items = [{
-        "user_id": r.user_id,
-        "name": r.name,
-        "site_count": int(r.site_count or 0),
-        "queued": int(r.queued or 0),
-        "running": int(r.running or 0),
-        "success": int(logs_user_map.get(r.user_id, {}).get("success", 0)),
-        "error":   int(logs_user_map.get(r.user_id, {}).get("error", 0)),
-        "last_activity_at": (r.last_activity_at.isoformat() if r.last_activity_at else None),
-        "target_articles": int(r.target_articles or 0),
-    } for r in rows]
+    # --- 結果整形 ---
+    items = []
+    for r in rows:
+        uid = r.user_id
+        logs_row = logs_user_map.get(uid, {})
+        success = logs_row.get("success", 0)
+        error = logs_row.get("error", 0)
+        unknown = logs_row.get("unknown", 0)
+        items.append({
+            "user_id": uid,
+            "name": r.name,
+            "site_count": int(r.site_count or 0),
+            "queued": int(r.queued or 0),
+            # runningにunknownを加算
+            "running": int(r.running or 0) + int(unknown),
+            "success": success,
+            "error": error,
+            "last_activity_at": (r.last_activity_at.isoformat() if r.last_activity_at else None),
+            "target_articles": int(r.target_articles or 0),
+        })
 
-    # 2秒キャッシュ（?nocache=1 でスキップ）
+    # --- キャッシュ ---
     if not nocache:
         try:
             redis_client.setex(cache_key, 2, json.dumps(items, ensure_ascii=False))
         except Exception:
             pass
-    return jsonify({"ok": True, "items": items})
 
+    return jsonify({"ok": True, "items": items})
 
 # ─────────────────────────────────────────
 # 追加: 内部SEO風の一覧API（テンプレ互換のキー名で返却）
