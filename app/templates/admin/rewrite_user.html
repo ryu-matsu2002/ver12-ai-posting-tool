@@ -34,10 +34,10 @@
         </thead>
         <tbody>
           {% for r in rows %}
-          {% set queued  = (r.queued or 0) | int %}
+          {% set queued  = (r.waiting or 0) | int %}
           {% set running = (r.running or 0) | int %}
           {% set success = (r.success or 0) | int %}
-          {% set error   = (r.error   or 0) | int %}
+          {% set error   = (r.failed  or 0) | int %}
           {# 失敗は最新ログの失敗をそのまま見せる #}
           <tr>
             <td class="text-center fw-bold">{{ r.site_id }}</td>
@@ -54,7 +54,7 @@
             <td class="text-center"><span class="fw-bold text-success">{{ success }}</span></td>
             <td class="text-center"><span class="fw-bold text-danger">{{ error }}</span></td>
             <td class="text-center small text-muted">
-              {{ (r.last_activity_at.isoformat() if r.last_activity_at else '') or '-' }}
+              {{ (r.last_update.isoformat() if r.last_update else '') or '-' }}
             </td>
             <td class="text-center">
               <a class="btn btn-sm btn-outline-primary"
