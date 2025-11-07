@@ -1306,12 +1306,17 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
 
     # 全期間・統一定義でのヘッダ4指標＋unknown
     header_counts = _rewrite_counts_for_site(user_id, site_id)
-    scope = "all"  # 全期間    
+    scope = "all"  # 全期間
 
     # クエリパラメータ
     status = (request.args.get("status") or "").strip().lower()
     page   = max(1, request.args.get("page", type=int) or 1)
     per    = min(100, max(10, request.args.get("per", type=int) or 50))
+
+    # 許容ステータス（まずは success / failed の2系統に対応）
+    allowed = {"success", "failed"}
+    if status not in allowed:
+        status = "success"
 
     # ── 統一ビューからサイトのサマリ（waiting/running/success/failed/other）
     from app.services.rewrite.state_view import fetch_site_totals
@@ -1324,101 +1329,127 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
         "unknown": int(totals.get("other", 0)),
     }
 
-    # WPリンクは後段の success_rows を用いて作る（外部JOINを減らして高速化）
-    urls_map = {}
-
-    # ---- 「リライト済み記事一覧」= 統一ビューで success を抽出（ページング対応）
-    # まず success 記事の article_id を新しい順に取得（log_executed_at / plan_created_at の降順）
-    success_ids_sql = _sql("""
+    # ─────────────────────────────────────────
+    # 一覧用IDを final_bucket で抽出（新しい順）
+    # ─────────────────────────────────────────
+    bucket = "success" if status == "success" else "failed"
+    ids_sql = _sql("""
       SELECT article_id
       FROM vw_rewrite_state
-      WHERE user_id = :uid AND site_id = :sid AND final_bucket = 'success'
+      WHERE user_id = :uid AND site_id = :sid AND final_bucket = :bucket
       ORDER BY log_executed_at DESC NULLS LAST, plan_created_at DESC NULLS LAST, article_id DESC
       LIMIT :limit OFFSET :offset
     """)
-    success_id_rows = db.session.execute(
-        success_ids_sql,
-        {"uid": user_id, "sid": site_id, "limit": per, "offset": (page-1)*per}
+    id_rows = db.session.execute(
+        ids_sql,
+        {"uid": user_id, "sid": site_id, "bucket": bucket, "limit": per, "offset": (page-1)*per}
     ).fetchall()
-    success_article_ids = [int(r[0]) for r in success_id_rows]
+    article_ids = [int(r[0]) for r in id_rows]
 
-    # 表示用に title / 最新成功ログの wp_post_id, executed_at を取得
-    success_rows = []
-    if success_article_ids:
-        detail_sql = _sql("""
-          WITH latest AS (
-            SELECT
-              l.id         AS log_id,
-              l.article_id,
-              l.plan_id,
-              l.wp_post_id,
-              l.executed_at,
-              ROW_NUMBER() OVER (PARTITION BY l.article_id ORDER BY l.executed_at DESC, l.id DESC) AS rn
-            FROM article_rewrite_logs l
-            WHERE l.article_id = ANY(:ids) AND l.wp_status = 'success'
-          )
-          SELECT
-            lt.log_id,
-            a.id          AS article_id,
-            a.title       AS title,
-            lt.plan_id    AS plan_id,
-            lt.wp_post_id AS wp_post_id,
-            lt.executed_at AS executed_at
-          FROM latest lt
-          JOIN articles a ON a.id = lt.article_id
-          WHERE lt.rn = 1
-          ORDER BY lt.executed_at DESC NULLS LAST, a.id DESC
-        """)
-        success_rows = list(
-            db.session.execute(detail_sql, {"ids": success_article_ids}).mappings()
-        )
+    # 表示用の詳細（最新 success / 失敗系ログ）を取得
+    rows = []
+    if article_ids:
+        if status == "success":
+            # 最新 success ログ
+            detail_sql = _sql("""
+              WITH latest AS (
+                SELECT
+                  l.id         AS log_id,
+                  l.article_id,
+                  l.plan_id,
+                  l.wp_post_id,
+                  l.executed_at,
+                  ROW_NUMBER() OVER (PARTITION BY l.article_id ORDER BY l.executed_at DESC, l.id DESC) AS rn
+                FROM article_rewrite_logs l
+                WHERE l.article_id = ANY(:ids) AND l.wp_status = 'success'
+              )
+              SELECT
+                lt.log_id,
+                a.id          AS article_id,
+                a.title       AS title,
+                lt.plan_id    AS plan_id,
+                lt.wp_post_id AS wp_post_id,
+                lt.executed_at AS executed_at
+              FROM latest lt
+              JOIN articles a ON a.id = lt.article_id
+              WHERE lt.rn = 1
+              ORDER BY lt.executed_at DESC NULLS LAST, a.id DESC
+            """)
+            rows = list(db.session.execute(detail_sql, {"ids": article_ids}).mappings())
+        else:
+            # 最新 failed 系ログ
+            detail_sql = _sql("""
+              WITH latest AS (
+                SELECT
+                  l.id         AS log_id,
+                  l.article_id,
+                  l.plan_id,
+                  l.wp_post_id,
+                  l.executed_at,
+                  l.wp_status,
+                  ROW_NUMBER() OVER (PARTITION BY l.article_id ORDER BY l.executed_at DESC, l.id DESC) AS rn
+                FROM article_rewrite_logs l
+                WHERE l.article_id = ANY(:ids)
+                  AND l.wp_status IN ('failed','error','canceled','aborted','timeout','stale')
+              )
+              SELECT
+                lt.log_id,
+                a.id          AS article_id,
+                a.title       AS title,
+                lt.plan_id    AS plan_id,
+                lt.wp_post_id AS wp_post_id,
+                lt.executed_at AS executed_at,
+                lt.wp_status  AS wp_status
+              FROM latest lt
+              JOIN articles a ON a.id = lt.article_id
+              WHERE lt.rn = 1
+              ORDER BY lt.executed_at DESC NULLS LAST, a.id DESC
+            """)
+            rows = list(db.session.execute(detail_sql, {"ids": article_ids}).mappings())
 
     # テンプレ互換：articles 配列を用意（id/title/status/updated_at/wp_url/posted_url…）
     articles = []
     _last_dt = None
-    for r in success_rows:
+    for r in rows:
         dt = r.get("executed_at")
         if dt and (_last_dt is None or dt > _last_dt):
             _last_dt = dt
-        wp_post_id = r.get("wp_post_id")
-        # WordPressの実URLに直接飛べる形で生成
-        if wp_post_id:
-            # Site.url / Site.site_url の両対応（どちらも無い場合はリンク無し）
+
+        # 成功時のみWPリンク生成。失敗はリンク無し。
+        if status == "success" and r.get("wp_post_id"):
             base = (getattr(site, "site_url", None) or getattr(site, "url", "") or "").rstrip("/")
-            wp_url = f"{base}/?p={wp_post_id}" if base else None
+            wp_url = f"{base}/?p={r.get('wp_post_id')}" if base else None
         else:
             wp_url = None
+
         articles.append({
             "id": r.get("article_id"),              # 一覧のID列は記事IDを表示
             "article_id": r.get("article_id"),
             "title": r.get("title"),
-            "status": "success",
+            "status": status,                       # ← 固定 'success' から実値へ
             "attempts": None,
             "updated_at": (dt.isoformat() if dt else None),
             "posted_url": None,
-            "wp_url": wp_url,   # ← ここが「open」で飛ぶリンクになる
+            "wp_url": wp_url,
             "plan_id": r.get("plan_id"),
-            "log_id": r.get("log_id"),  # ← 詳細ページへのキー
+            "log_id": r.get("log_id"),
         })
     last_updated = _last_dt.isoformat() if _last_dt else None
 
-    # 一覧はテンプレ互換のため「plans」に差し替える（最新ログ success の plan_id を採用）
-    # plans 相当は使わず、articles テーブルを success_rows から構築（テンプレ互換）
-    total = int(stats["success"])
-    plans = []  # テンプレ互換のため残すが、ここでは未使用
+    # テンプレ互換：plans は未使用のまま残す
+    # total は使用箇所が無いので触らない
 
-
-    back_url = url_for("admin.admin_rewrite_user_sites", user_id=user_id)
     return render_template(
         "admin/rewrite_site_articles.html",
         user_id=user_id,
         site_id=site_id,
         site=site,
-        articles=articles,   # 既存の一覧取得ロジックはこのまま
+        articles=articles,
         header_counts=header_counts,
         scope=scope,
         stats=stats,
         last_updated=last_updated,
+        status=status,  # ← 現在の表示ステータスをテンプレへ
     )
 
 # ─────────────────────────────────────────

@@ -18,6 +18,10 @@
     <h3 class="mb-0">
       {{ site.site_name or site.name or "サイト" }}
       <small class="text-muted ms-2" style="font-size:.9rem;">(ID: {{ site.id }})</small>
+      {# 現在表示中のステータスを視覚化 #}
+      {% if status %}
+        <span class="badge ms-2 {% if status=='success' %}bg-success{% elif status=='failed' %}bg-danger{% else %}bg-secondary{% endif %}">{{ status }}</span>
+      {% endif %}
     </h3>
     <a class="btn btn-outline-secondary btn-sm" href="{{ request.referrer or '/admin/rewrite' }}">戻る</a>
   </div>
@@ -27,41 +31,66 @@
     </div>
   {% endif %}
 
-  <!-- 統計カード -->
-  <div class="row g-2 text-center mb-3">
+  <!-- 統計カード（成功/失敗カードはフィルタとして動作するようリンク化） -->
+  <div class="row g-2 text-center mb-2">
     <div class="col-6 col-md-3">
-      <div class="card h-100"><div class="card-body p-2">
-        <div class="fw-bold">待機中</div>
-        <div class="fs-5 text-secondary">{{ (stats.queued or 0) }}</div>
-      </div></div>
-    </div>
-    <div class="col-6 col-md-3">
-      <div class="card h-100"><div class="card-body p-2">
-        <div class="fw-bold">実行中</div>
-        <div class="fs-5 text-warning">{{ (stats.running or 0) }}</div>
-      </div></div>
-    </div>
-    <div class="col-6 col-md-3">
-      <div class="card h-100"><div class="card-body p-2">
-        <div class="fw-bold">成功</div>
-        <div class="fs-5 text-success">{{ (stats.success or 0) }}</div>
-      </div></div>
-    </div>
-    <div class="col-6 col-md-3">
-      <div class="card h-100"><div class="card-body p-2">
-        <div class="fw-bold">失敗</div>
-        <div class="fs-5 text-danger">
-          {# “履歴吸収”で成功分を引いた見せ方（ルートで計算済みならそのまま表示） #}
-          {{ (stats.display_error if stats and stats.display_error is not none else (stats.error or 0)) }}
+      <div class="card h-100 position-relative">
+        <div class="card-body p-2">
+          <div class="fw-bold">待機中</div>
+          <div class="fs-5 text-secondary">{{ (stats.queued or 0) }}</div>
         </div>
-      </div></div>
+      </div>
     </div>
+    <div class="col-6 col-md-3">
+      <div class="card h-100 position-relative">
+        <div class="card-body p-2">
+          <div class="fw-bold">実行中</div>
+          <div class="fs-5 text-warning">{{ (stats.running or 0) }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card h-100 position-relative">
+        <div class="card-body p-2">
+          <div class="fw-bold">成功</div>
+          <div class="fs-5 text-success">{{ (stats.success or 0) }}</div>
+        </div>
+        <a class="stretched-link" href="{{ url_for('admin.admin_rewrite_site_articles', user_id=user_id, site_id=site_id, status='success') }}"></a>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card h-100 position-relative">
+        <div class="card-body p-2">
+          <div class="fw-bold">失敗</div>
+          <div class="fs-5 text-danger">
+            {{ (stats.display_error if stats and stats.display_error is not none else (stats.error or 0)) }}
+          </div>
+        </div>
+        <a class="stretched-link" href="{{ url_for('admin.admin_rewrite_site_articles', user_id=user_id, site_id=site_id, status='failed') }}"></a>
+      </div>
+    </div>
+  </div>
+
+  <!-- 追加：簡易フィルタトグル -->
+  <div class="mb-3">
+    <div class="btn-group">
+      <a class="btn btn-sm {% if status=='success' or not status %}btn-primary{% else %}btn-outline-primary{% endif %}"
+         href="{{ url_for('admin.admin_rewrite_site_articles', user_id=user_id, site_id=site_id, status='success') }}">成功のみ</a>
+      <a class="btn btn-sm {% if status=='failed' %}btn-danger{% else %}btn-outline-danger{% endif %}"
+         href="{{ url_for('admin.admin_rewrite_site_articles', user_id=user_id, site_id=site_id, status='failed') }}">失敗のみ</a>
+    </div>
+    {% if last_updated %}
+      <small class="text-muted ms-2">更新: {{ last_updated }}</small>
+    {% endif %}
   </div>
 
   <!-- 記事テーブル -->
   <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
-      <span>リライト済み記事一覧</span>
+      <span>
+        リライト済み記事一覧
+        {% if status=='failed' %}<small class="text-danger">(失敗)</small>{% elif status=='success' %}<small class="text-success">(成功)</small>{% endif %}
+      </span>
       <small class="text-muted">更新: {{ (last_updated or '') }}</small>
     </div>
     <div class="table-responsive">
@@ -81,10 +110,16 @@
             {% for a in articles %}
               {% set st = a.status or a.plan_status or "-" %}
               {% set cls = "secondary" %}
-              {% if st == "success" %}{% set cls = "success" %}
-              {% elif st == "error" %}{% set cls = "danger" %}
-              {% elif st == "running" %}{% set cls = "warning" %}
-              {% elif st == "queued" %}{% set cls = "secondary" %}{% endif %}
+              {# 失敗は 'failed' も 'error' も danger 扱いに統一 #}
+              {% if st == "success" %}
+                {% set cls = "success" %}
+              {% elif st in ["error","failed"] %}
+                {% set cls = "danger" %}
+              {% elif st == "running" %}
+                {% set cls = "warning" %}
+              {% elif st == "queued" %}
+                {% set cls = "secondary" %}
+              {% endif %}
               <tr>
                 <td class="text-center fw-bold">{{ a.id }}</td>
                 <td>
