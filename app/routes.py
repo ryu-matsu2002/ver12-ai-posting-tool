@@ -1441,6 +1441,8 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
         articles=articles,   # 既存の一覧取得ロジックはこのまま
         header_counts=header_counts,
         scope=scope,
+        stats=stats,
+        last_updated=last_updated,
     )
 
 # ─────────────────────────────────────────
