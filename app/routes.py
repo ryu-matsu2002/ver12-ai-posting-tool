@@ -1147,47 +1147,31 @@ from sqlalchemy import func, case, text
 @admin_bp.route("/admin/rewrite/summary", methods=["GET"])
 def admin_rewrite_summary():
     from app import redis_client
-    # 定義統一につきキャッシュキーを更新
-    cache_key = "admin:rewrite:summary:v3"
+    # 定義を vw_rewrite_state に一本化（キャッシュキーも更新）
+    cache_key = "admin:rewrite:summary:v4"
     cached = redis_client.get(cache_key)
     if cached:
         return jsonify(json.loads(cached))
 
     try:
-        from app.models import ArticleRewritePlan
-        # plans 側（queued/running と plan 側の最終アクティビティ）
-        plans_row = db.session.query(
-            func.sum(case((ArticleRewritePlan.status == "queued", 1), else_=0)).label("queued"),
-            func.sum(case((ArticleRewritePlan.status.in_(["running","in_progress"]), 1), else_=0)).label("running"),
-            func.max(func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.created_at)).label("plan_last"),
-        ).one()
-        # logs 側（最新ログで success/error を数える）
-        logs_sql = _sql_text("""
-          WITH latest AS (
-            SELECT l.article_id,
-                   l.wp_status,
-                   l.executed_at,
-                   ROW_NUMBER() OVER (PARTITION BY l.article_id ORDER BY l.executed_at DESC) AS rn
-            FROM article_rewrite_logs l
-          )
+        # 統一ビューから一撃集計（waiting→queued, failed→error の語彙マップ）
+        agg_sql = _sql_text("""
           SELECT
-            SUM(CASE WHEN wp_status = 'success' THEN 1 ELSE 0 END)                       AS success,
-            SUM(CASE WHEN wp_status IN ('error','failed') THEN 1 ELSE 0 END)             AS error,
-            MAX(executed_at)                                                              AS log_last
-          FROM latest
-          WHERE rn = 1
+            SUM(CASE WHEN final_bucket = 'waiting' THEN 1 ELSE 0 END) AS queued,
+            SUM(CASE WHEN final_bucket = 'running' THEN 1 ELSE 0 END) AS running,
+            SUM(CASE WHEN final_bucket = 'success' THEN 1 ELSE 0 END) AS success,
+            SUM(CASE WHEN final_bucket = 'failed'  THEN 1 ELSE 0 END) AS error,
+            MAX(COALESCE(log_executed_at, plan_created_at))           AS last_activity_at
+          FROM vw_rewrite_state
         """)
-        logs_row = db.session.execute(logs_sql).mappings().first() or {}
+        row = db.session.execute(agg_sql).mappings().first() or {}
         totals = {
-            "queued":  int(plans_row.queued or 0),
-            "running": int(plans_row.running or 0),
-            "success": int(logs_row.get("success", 0) or 0),
-            "error":   int(logs_row.get("error", 0) or 0),
+            "queued":  int(row.get("queued", 0) or 0),
+            "running": int(row.get("running", 0) or 0),
+            "success": int(row.get("success", 0) or 0),
+            "error":   int(row.get("error", 0) or 0),
         }
-        # 最終活動時刻は plans/logs の大きい方
-        _pl = plans_row.plan_last.isoformat() if getattr(plans_row, "plan_last", None) else None
-        _ll = logs_row.get("log_last").isoformat() if logs_row.get("log_last") else None
-        last_activity_at = max(filter(None, [_pl, _ll]), default=None)
+        last_activity_at = row.get("last_activity_at").isoformat() if row.get("last_activity_at") else None
     except Exception as e:
         current_app.logger.warning("[rewrite_summary] fallback: %s", e)
         totals = {"queued": 0, "running": 0, "success": 0, "error": 0}
@@ -1220,94 +1204,53 @@ def admin_rewrite_user_sites(user_id: int):
         abort(403)
     """
     指定ユーザーの全サイトを1行で表示するページ。
-    サイトごとに ArticleRewritePlan を事前集計（queued/running/success/error/last_activity/target_articles）。
+    数値は vw_rewrite_state を唯一の真実として集計（waiting/running/success/failed/other）。
     """
-    from sqlalchemy import case
-    from sqlalchemy.orm import joinedload
+    from sqlalchemy import text as _sql
     # モデル
-    from app.models import User, Site, ArticleRewritePlan
+    from app.models import User, Site
+    # 統一ビュー読み出しサービス
+    from app.services.rewrite.state_view import fetch_user_site_breakdown
 
     user = db.session.get(User, user_id)
     if not user:
         abort(404)
 
-    # サイトごとのリライト集計（該当ユーザーで絞る）
-    queued_cnt  = func.sum(case((ArticleRewritePlan.status == "queued", 1),  else_=0))
-    running_cnt = func.sum(case((ArticleRewritePlan.status.in_(["running","in_progress"]), 1), else_=0))
-    last_act    = func.max(func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.created_at))
-
-    plan_sq = (
-        db.session.query(
-            ArticleRewritePlan.site_id.label("site_id"),
-            func.count(ArticleRewritePlan.id).label("target_articles"),
-            queued_cnt.label("queued"),
-            running_cnt.label("running"),
-            last_act.label("last_activity_at"),
-        )
-        .filter(ArticleRewritePlan.user_id == user_id)
-        .group_by(ArticleRewritePlan.site_id)
-        .subquery()
-    )
-
-    # logs 側: 各サイトの「最新ログ（記事単位）」で success/error をカウント
-    from sqlalchemy import text as _sql
-    logs_site_sql = _sql("""
-      WITH latest AS (
-        SELECT
-          l.article_id,
-          l.wp_status,
-          a.site_id,
-          ROW_NUMBER() OVER (PARTITION BY l.article_id ORDER BY l.executed_at DESC) AS rn
-        FROM article_rewrite_logs l
-        JOIN articles a ON a.id = l.article_id
-        WHERE a.user_id = :user_id
-      )
-      SELECT
-        site_id,
-        SUM(CASE WHEN wp_status = 'success' THEN 1 ELSE 0 END)                   AS success,
-        SUM(CASE WHEN wp_status IN ('error','failed') THEN 1 ELSE 0 END)         AS error,
-        SUM(CASE WHEN wp_status NOT IN ('success','error','failed') THEN 1 ELSE 0 END) AS unknown
-      FROM latest
-      WHERE rn = 1
-      GROUP BY site_id
-    """)
-    logs_site_sq = db.session.execute(logs_site_sql, {"user_id": user_id}).mappings().all()
-    # dict に整形（site_id -> {success, error, unknown}）
-    logs_map = { r["site_id"]: {"success": int(r["success"] or 0),
-                                "error":   int(r["error"]   or 0),
-                                "unknown": int(r["unknown"] or 0)} for r in logs_site_sq }
-
-    rows = (
-        db.session.query(
-            Site.id.label("site_id"),
-            Site.name.label("site_name"),
-            Site.url.label("site_url"),
-            func.coalesce(plan_sq.c.target_articles, 0).label("target_articles"),
-            func.coalesce(plan_sq.c.queued, 0).label("queued"),
-            func.coalesce(plan_sq.c.running, 0).label("running"),
-            plan_sq.c.last_activity_at.label("last_activity_at"),
-        )
+    # 1) サイト一覧（メタ情報）
+    sites = (
+        db.session.query(Site.id.label("site_id"), Site.name.label("site_name"), Site.url.label("site_url"))
         .filter(Site.user_id == user_id)
-        .outerjoin(plan_sq, plan_sq.c.site_id == Site.id)
         .order_by(Site.id.asc())
         .all()
     )
+    # 2) 統一ビューからサイト別の件数（waiting/running/success/failed/other）
+    breakdown = fetch_user_site_breakdown(user_id)  # [{site_id, waiting, running, success, failed, other}, ...]
+    bmap = {row["site_id"]: row for row in breakdown}
+    # 3) 最終アクティビティ時刻（ログ or プランのどちらか最新）
+    last_sql = _sql("""
+      SELECT site_id, MAX(COALESCE(log_executed_at, plan_created_at)) AS last_activity_at
+      FROM vw_rewrite_state
+      WHERE user_id = :uid
+      GROUP BY site_id
+    """)
+    last_rows = db.session.execute(last_sql, {"uid": user_id}).mappings().all()
+    last_map = {r["site_id"]: r["last_activity_at"] for r in last_rows}
 
-    # 画面は後続手順で作る（admin/rewrite_user.html）
-    # logs の success/error を反映（テンプレ互換の rows に post-process で注入）
     fixed_rows = []
-    for r in rows:
-        m = logs_map.get(r.site_id, {"success":0,"error":0,"unknown":0})
+    for s in sites:
+        counts = bmap.get(s.site_id, {"waiting":0,"running":0,"success":0,"failed":0,"other":0})
+        target_articles = sum(counts.values())  # ＝最新状態で存在する記事総数
         fixed_rows.append(type("Row", (), {
-            "site_id": r.site_id,
-            "site_name": r.site_name,
-            "site_url": r.site_url,
-            "target_articles": int(r.target_articles or 0),
-            "queued": int(r.queued or 0),
-            "running": int(r.running or 0),
-            "success": int(m["success"]),
-            "error": int(m["error"]),
-            "last_activity_at": r.last_activity_at,
+            "site_id": s.site_id,
+            "site_name": s.site_name,
+            "site_url": s.site_url,
+            # 旧テンプレ互換：queued/running/success/error/target_articles/last_activity_at
+            "queued": int(counts.get("waiting", 0)),
+            "running": int(counts.get("running", 0)),
+            "success": int(counts.get("success", 0)),
+            "error":   int(counts.get("failed", 0)),
+            "target_articles": int(target_articles),
+            "last_activity_at": last_map.get(s.site_id),
         }))
 
     return render_template(
@@ -1329,12 +1272,11 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
     if not current_user.is_admin:
         abort(403)
     """
-    指定ユーザー×サイトの ArticleRewritePlan を一覧表示するページ。
-    ステータス絞り込み・簡易ページネーション（クエリパラメータ）に対応。
+    指定ユーザー×サイトの “最新状態” を一覧表示（統一ビュー基準）。
+    ステータス絞り込み・簡易ページネーションに対応。
     """
-    from sqlalchemy import case
-    from sqlalchemy.orm import joinedload
-    from app.models import User, Site, Article, ArticleRewritePlan, ArticleRewriteLog
+    from sqlalchemy import text as _sql
+    from app.models import User, Site, Article
 
     user = db.session.get(User, user_id)
     site = db.session.get(Site, site_id)
@@ -1346,99 +1288,65 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
     page   = max(1, request.args.get("page", type=int) or 1)
     per    = min(100, max(10, request.args.get("per", type=int) or 50))
 
-    q = (
-        db.session.query(ArticleRewritePlan)
-        .filter(
-            ArticleRewritePlan.user_id == user_id,
-            ArticleRewritePlan.site_id == site_id
-        )
-        # モデルに updated_at は無いので created_at で新しい順
-        .order_by(ArticleRewritePlan.created_at.desc(),
-                  ArticleRewritePlan.id.desc())
-    )
-    if status in ("queued","running","success","error"):
-        q = q.filter(ArticleRewritePlan.status == status)
-
-    # いったん従来の plans を用意するが、後段で「最新 success ログ」に基づき上書きする
-    total = q.count()
-    plans = (
-        q.options(joinedload(ArticleRewritePlan.article))
-         .limit(per).offset((page-1)*per).all()
-    )
-
-    # ---- サマリ: 成功/失敗は「最新ログ（WP成功/失敗）」、待機/実行中は「plans.status」を採用（リアルタイム整合）
-    from sqlalchemy import text as _sql
-    latest_sql = _sql("""
-      WITH latest AS (
-        SELECT
-          l.article_id,
-          l.wp_status,
-          ROW_NUMBER() OVER (PARTITION BY l.article_id ORDER BY l.executed_at DESC) AS rn
-        FROM article_rewrite_logs l
-        JOIN articles a ON a.id = l.article_id
-        WHERE a.site_id = :site_id
-      )
-      SELECT
-        SUM(CASE WHEN wp_status IN ('queued') THEN 1 ELSE 0 END) AS queued,
-        SUM(CASE WHEN wp_status IN ('running','in_progress') THEN 1 ELSE 0 END) AS running,
-        SUM(CASE WHEN wp_status IN ('success') THEN 1 ELSE 0 END) AS success,
-        SUM(CASE WHEN wp_status IN ('error','failed') THEN 1 ELSE 0 END) AS error,
-        SUM(CASE WHEN wp_status NOT IN ('queued','running','in_progress','success','error','failed') THEN 1 ELSE 0 END) AS unknown
-      FROM latest
-      WHERE rn = 1
-    """)
-    _sr = db.session.execute(latest_sql, {"site_id": site_id}).mappings().first() or {}
-    # plans 側で「待機/実行中」の現在数を集計（running は in_progress も吸収）
-    plan_stat_row = (
-        db.session.query(
-            func.sum(case((ArticleRewritePlan.status == "queued", 1), else_=0)).label("queued"),
-            func.sum(case((ArticleRewritePlan.status.in_(["running","in_progress"]), 1), else_=0)).label("running"),
-        )
-        .filter(ArticleRewritePlan.user_id == user_id,
-                ArticleRewritePlan.site_id == site_id)
-        .one()
-    )
+    # ── 統一ビューからサイトのサマリ（waiting/running/success/failed/other）
+    from app.services.rewrite.state_view import fetch_site_totals
+    totals = fetch_site_totals(user_id=user_id, site_id=site_id)
     stats = {
-        "queued":  int(plan_stat_row.queued or 0),
-        "running": int(plan_stat_row.running or 0),
-        "success": int(_sr.get("success", 0)),   # WP 本番更新成功のみ
-        "error":   int(_sr.get("error", 0)),     # 直近ログが error/failed
-        "unknown": int(_sr.get("unknown", 0)),
+        "queued":  int(totals.get("waiting", 0)),
+        "running": int(totals.get("running", 0)),
+        "success": int(totals.get("success", 0)),
+        "error":   int(totals.get("failed", 0)),
+        "unknown": int(totals.get("other", 0)),
     }
 
     # WPリンクは後段の success_rows を用いて作る（外部JOINを減らして高速化）
     urls_map = {}
 
-    # ---- 「リライト済み記事一覧」 = 最新ログが success の記事だけを抽出（executed_at DESC）
-    success_rows_sql = _sql("""
-      WITH latest AS (
-        SELECT
-          l.id         AS log_id,
-          l.article_id,
-          l.plan_id,
-          l.wp_status,
-          l.wp_post_id,
-          l.executed_at,
-          ROW_NUMBER() OVER (PARTITION BY l.article_id ORDER BY l.executed_at DESC) AS rn
-        FROM article_rewrite_logs l
-        JOIN articles a ON a.id = l.article_id
-        WHERE a.site_id = :site_id
-      )
-      SELECT
-        lt.log_id   AS log_id,
-        a.id         AS article_id,
-        a.title      AS title,
-        lt.plan_id   AS plan_id,
-        lt.wp_post_id AS wp_post_id,
-        lt.executed_at AS executed_at
-      FROM latest lt
-      JOIN articles a ON a.id = lt.article_id
-      WHERE lt.rn = 1
-        AND lt.wp_status = 'success'
-      ORDER BY lt.executed_at DESC
-      LIMIT 200
+    # ---- 「リライト済み記事一覧」= 統一ビューで success を抽出（ページング対応）
+    # まず success 記事の article_id を新しい順に取得（log_executed_at / plan_created_at の降順）
+    success_ids_sql = _sql("""
+      SELECT article_id
+      FROM vw_rewrite_state
+      WHERE user_id = :uid AND site_id = :sid AND final_bucket = 'success'
+      ORDER BY log_executed_at DESC NULLS LAST, plan_created_at DESC NULLS LAST, article_id DESC
+      LIMIT :limit OFFSET :offset
     """)
-    success_rows = list(db.session.execute(success_rows_sql, {"site_id": site_id}).mappings())
+    success_id_rows = db.session.execute(
+        success_ids_sql,
+        {"uid": user_id, "sid": site_id, "limit": per, "offset": (page-1)*per}
+    ).fetchall()
+    success_article_ids = [int(r[0]) for r in success_id_rows]
+
+    # 表示用に title / 最新成功ログの wp_post_id, executed_at を取得
+    success_rows = []
+    if success_article_ids:
+        detail_sql = _sql("""
+          WITH latest AS (
+            SELECT
+              l.id         AS log_id,
+              l.article_id,
+              l.plan_id,
+              l.wp_post_id,
+              l.executed_at,
+              ROW_NUMBER() OVER (PARTITION BY l.article_id ORDER BY l.executed_at DESC, l.id DESC) AS rn
+            FROM article_rewrite_logs l
+            WHERE l.article_id = ANY(:ids) AND l.wp_status = 'success'
+          )
+          SELECT
+            lt.log_id,
+            a.id          AS article_id,
+            a.title       AS title,
+            lt.plan_id    AS plan_id,
+            lt.wp_post_id AS wp_post_id,
+            lt.executed_at AS executed_at
+          FROM latest lt
+          JOIN articles a ON a.id = lt.article_id
+          WHERE lt.rn = 1
+          ORDER BY lt.executed_at DESC NULLS LAST, a.id DESC
+        """)
+        success_rows = list(
+            db.session.execute(detail_sql, {"ids": success_article_ids}).mappings()
+        )
 
     # テンプレ互換：articles 配列を用意（id/title/status/updated_at/wp_url/posted_url…）
     articles = []
@@ -1470,31 +1378,9 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
     last_updated = _last_dt.isoformat() if _last_dt else None
 
     # 一覧はテンプレ互換のため「plans」に差し替える（最新ログ success の plan_id を採用）
-    from sqlalchemy import literal
-    success_plan_ids = [r["plan_id"] for r in success_rows if r.get("plan_id")]
-    if success_plan_ids:
-        # 並び順は最新実行時刻順（success_rows の順）に合わせる
-        plans = (
-            db.session.query(ArticleRewritePlan)
-            .options(joinedload(ArticleRewritePlan.article))
-            .filter(
-                ArticleRewritePlan.user_id == user_id,
-                ArticleRewritePlan.site_id == site_id,
-                ArticleRewritePlan.id.in_(success_plan_ids),
-            )
-            .order_by(func.array_position(literal(success_plan_ids), ArticleRewritePlan.id))
-            .all()
-        )
-        total = len(success_plan_ids)
-        # WPリンクも success_rows から復元
-        for row in success_rows:
-            pid = row.get("plan_id")
-            wp_post_id = row.get("wp_post_id")
-            if pid and wp_post_id:
-                urls_map[pid] = f"/admin/wp_link_placeholder/{site.id}/{wp_post_id}"
-    else:
-        # 成功がまだ無い場合は従来の plans/total をそのまま使用
-        pass
+    # plans 相当は使わず、articles テーブルを success_rows から構築（テンプレ互換）
+    total = int(stats["success"])
+    plans = []  # テンプレ互換のため残すが、ここでは未使用
 
 
     back_url = url_for("admin.admin_rewrite_user_sites", user_id=user_id)
