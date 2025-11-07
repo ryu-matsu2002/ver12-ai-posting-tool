@@ -1147,42 +1147,36 @@ from sqlalchemy import func, case, text
 @admin_bp.route("/admin/rewrite/summary", methods=["GET"])
 def admin_rewrite_summary():
     from app import redis_client
-    # 全期間・統一定義（期間フィルタなし）に固定。キャッシュキーも全期間用に更新。
-    cache_key = "admin:rewrite:summary:v5:scope=all"
+    # 全期間・統一定義（期間フィルタなし）。唯一の真実源は vw_rewrite_state
+    cache_key = "admin:rewrite:summary:v7:scope=all"
     cached = redis_client.get(cache_key)
     if cached:
         return jsonify(json.loads(cached))
 
     try:
-        # ビュー非依存：plans と「記事ごとの最新ログ」を直接集計（全期間）
+        # 統一定義：vw_rewrite_state から全期間集計
         agg_sql = _sql_text("""
-            WITH latest_log AS (
-              SELECT DISTINCT ON (site_id, article_id)
-                     site_id, article_id, wp_status, executed_at
-              FROM public.article_rewrite_logs
-              ORDER BY site_id, article_id, executed_at DESC
-            )
             SELECT
-              -- plans は is_active=TRUE の現在値（期間なし）
-              (SELECT COUNT(*) FROM public.article_rewrite_plans WHERE is_active = TRUE AND status='queued')  AS queued,
-              (SELECT COUNT(*) FROM public.article_rewrite_plans WHERE is_active = TRUE AND status='running') AS running,
-              -- logs は記事ごとの最新ログ（期間なし）
-              (SELECT COUNT(*) FROM latest_log WHERE wp_status='success')  AS success,
-              (SELECT COUNT(*) FROM latest_log WHERE wp_status='error')    AS error,
-              (SELECT COUNT(*) FROM latest_log WHERE wp_status='unknown')  AS unknown,
-              GREATEST(
-                COALESCE((SELECT MAX(created_at)  FROM public.article_rewrite_plans), 'epoch'::timestamptz),
-                COALESCE((SELECT MAX(executed_at) FROM public.article_rewrite_logs ), 'epoch'::timestamptz)
-              ) AS last_activity_at
+              COUNT(*)                                                     AS target_articles,
+              SUM((final_bucket='waiting')::int)                           AS queued,
+              SUM((final_bucket='running')::int)                           AS running,
+              SUM((final_bucket='success')::int)                           AS success,
+              SUM((final_bucket='failed')::int)                            AS failed,
+              SUM((final_bucket NOT IN ('waiting','running','success','failed')
+                   OR final_bucket IS NULL)::int)                          AS unknown,
+              MAX(GREATEST(COALESCE(log_executed_at, 'epoch'::timestamptz),
+                           COALESCE(plan_created_at,'epoch'::timestamptz))) AS last_activity_at
+            FROM vw_rewrite_state
         """)
-        row = db.session.execute(agg_sql).mappings().first() or {}
+        row = dict(db.session.execute(agg_sql).mappings().first() or {})
         totals = {
-            "queued":  int(row.get("queued", 0) or 0),
-            "running": int(row.get("running", 0) or 0),
-            "success": int(row.get("success", 0) or 0),
-            "error":   int(row.get("error", 0) or 0),
+            "target_articles": int(row.get("target_articles", 0) or 0),
+            "queued":          int(row.get("queued", 0) or 0),
+            "running":         int(row.get("running", 0) or 0),
+            "success":         int(row.get("success", 0) or 0),
+            # 既存フロント互換のためキー名は "error" を維持（failed を error に載せ替え）
+            "error":           int(row.get("failed", 0) or 0),
         }
-        # 参考：unknown も返却（UIが未対応なら無視されるだけ）
         unknown = int(row.get("unknown", 0) or 0)
         last_activity_at = row.get("last_activity_at").isoformat() if row.get("last_activity_at") else None
     except Exception as e:
@@ -1197,16 +1191,18 @@ def admin_rewrite_summary():
         "unknown": unknown,
         "last_activity_at": last_activity_at,
         "scope": "all",  # 全期間
-        "version": 5
+        "version": 7
     }
-    # 任意：TTLを短くしてもOK（例: 60秒）。既存ポリシーに合わせてください。
-    redis_client.set(cache_key, json.dumps(payload), ex=60)
+    # TTL は短め（並行実行の揺れ吸収＋負荷軽減）
+    redis_client.set(cache_key, json.dumps(payload, ensure_ascii=False), ex=20)
     return jsonify(payload)
 
 # ─────────────────────────────────────────
 # 共通集計ヘルパ：サイト単位の集計（全期間・統一定義）
 # queued/running = plans(is_active=TRUE)
 # success/error/unknown = logs(記事ごとの最新ログ)
+# ─────────────────────────────────────────
+
 def _rewrite_counts_for_site(user_id: int, site_id: int):
     agg_sql = _sql_text("""
         WITH latest_log AS (
