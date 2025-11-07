@@ -38,7 +38,7 @@
           {% set running = (r.running or 0) | int %}
           {% set success = (r.success or 0) | int %}
           {% set error   = (r.error   or 0) | int %}
-          {% set eerror  = [0, error - success]|max %}
+          {# 失敗は最新ログの失敗をそのまま見せる #}
           <tr>
             <td class="text-center fw-bold">{{ r.site_id }}</td>
             <td>
@@ -52,7 +52,7 @@
             <td class="text-center"><span class="fw-bold text-secondary">{{ queued }}</span></td>
             <td class="text-center"><span class="fw-bold text-warning">{{ running }}</span></td>
             <td class="text-center"><span class="fw-bold text-success">{{ success }}</span></td>
-            <td class="text-center"><span class="fw-bold text-danger">{{ eerror }}</span></td>
+            <td class="text-center"><span class="fw-bold text-danger">{{ error }}</span></td>
             <td class="text-center small text-muted">
               {{ (r.last_activity_at.isoformat() if r.last_activity_at else '') or '-' }}
             </td>

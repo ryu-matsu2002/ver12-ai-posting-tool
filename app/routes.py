@@ -1861,48 +1861,73 @@ def admin_rewrite_progress():
         Article = None
 
     uid = request.args.get("user_id", type=int)
-    # モデルが import できないケースに備えて SQL も用意
-    if ArticleRewritePlan is not None:
-        q = db.session.query(ArticleRewritePlan)
-        if uid:
-            q = q.filter(ArticleRewritePlan.user_id == uid)
-        # ステータス集計
-        agg = (
-            db.session.query(
-                ArticleRewritePlan.status,
-                func.count(ArticleRewritePlan.id)
-            )
-            .filter(*( [ArticleRewritePlan.user_id == uid] if uid else [] ))
-            .group_by(ArticleRewritePlan.status)
-            .all()
+
+    # ---- queued / running は plans からリアルタイム集計
+    plans_q = db.session.query(ArticleRewritePlan)
+    if uid:
+        plans_q = plans_q.filter(ArticleRewritePlan.user_id == uid)
+    plan_agg = (
+        db.session.query(
+            func.sum(case((ArticleRewritePlan.status == "queued", 1), else_=0)).label("queued"),
+            func.sum(case((ArticleRewritePlan.status.in_(["running","in_progress"]), 1), else_=0)).label("running"),
         )
-        totals = {s or "": int(c or 0) for (s, c) in agg}
-        # UIは success に done を吸収して表示（定義統一）※二重加算を修正
-        totals["success"] = int(totals.get("success", 0)) + int(totals.get("done", 0))
-        recent_plans = (
-            q.order_by(
-                func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.started_at, ArticleRewritePlan.scheduled_at, ArticleRewritePlan.created_at).desc(),
-                ArticleRewritePlan.id.desc()
-            ).limit(30).all()
-        )
-        # Article を一括取得して posted_url を紐付け
-        a_ids = [p.article_id for p in recent_plans if getattr(p, "article_id", None)]
-        art_map = {}
-        if a_ids:
-            arts = (db.session.query(Article.id, Article.posted_url)
-                            .filter(Article.id.in_(a_ids)).all())
-            art_map = {aid: url for (aid, url) in arts}
-        recent = []
-        for r in recent_plans:
-            best_ts = r.finished_at or r.started_at or r.scheduled_at or r.created_at
-            recent.append({
-                "id": r.id,
-                "article_id": r.article_id,
-                "status": r.status,
-                "attempts": getattr(r, "attempts", None),
-                "updated_at": (best_ts.isoformat() if best_ts else None),
-                "posted_url": art_map.get(r.article_id),
-            })
+        .filter(*( [ArticleRewritePlan.user_id == uid] if uid else [] ))
+        .one()
+    )
+
+    # ---- success / error は“最新ログのみ”でカウント（uid があればユーザーの article に限定）
+    where_by_user = "JOIN articles a ON a.id = l.article_id" + (" AND a.user_id = :uid" if uid else "")
+    logs_sql = _sql_text(f"""
+      WITH latest AS (
+        SELECT
+          l.article_id,
+          l.wp_status,
+          l.executed_at,
+          ROW_NUMBER() OVER (PARTITION BY l.article_id ORDER BY l.executed_at DESC) AS rn
+        FROM article_rewrite_logs l
+        {where_by_user}
+      )
+      SELECT
+        SUM(CASE WHEN wp_status = 'success' THEN 1 ELSE 0 END)                   AS success,
+        SUM(CASE WHEN wp_status IN ('error','failed') THEN 1 ELSE 0 END)         AS error,
+        MAX(executed_at)                                                          AS last_log_ts
+      FROM latest
+      WHERE rn = 1
+    """)
+    logs_row = db.session.execute(logs_sql, {"uid": uid} if uid else {}).mappings().first() or {}
+
+    totals = {
+        "queued":  int(getattr(plan_agg, "queued", 0) or 0),
+        "running": int(getattr(plan_agg, "running", 0) or 0),
+        "success": int(logs_row.get("success", 0) or 0),
+        "error":   int(logs_row.get("error", 0) or 0),
+    }
+
+    # 最近30件は従来どおり plans を表示（UIのテーブル互換）
+    recent_plans = (
+        plans_q.order_by(
+            func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.started_at, ArticleRewritePlan.scheduled_at, ArticleRewritePlan.created_at).desc(),
+            ArticleRewritePlan.id.desc()
+        ).limit(30).all()
+    )
+    # posted_url を紐付け
+    a_ids = [p.article_id for p in recent_plans if getattr(p, "article_id", None)]
+    art_map = {}
+    if a_ids:
+        arts = (db.session.query(Article.id, Article.posted_url)
+                        .filter(Article.id.in_(a_ids)).all())
+        art_map = {aid: url for (aid, url) in arts}
+    recent = []
+    for r in recent_plans:
+        best_ts = r.finished_at or r.started_at or r.scheduled_at or r.created_at
+        recent.append({
+            "id": r.id,
+            "article_id": r.article_id,
+            "status": r.status,
+            "attempts": getattr(r, "attempts", None),
+            "updated_at": (best_ts.isoformat() if best_ts else None),
+            "posted_url": art_map.get(r.article_id),
+        })
     else:
         # Fallback: テーブル名で素直に叩く
         where = "WHERE user_id=:uid" if uid else ""

@@ -158,8 +158,8 @@ window.addEventListener('DOMContentLoaded', () => {
     return j;
   }
 
-  // 「履歴吸収」ルール：成功分を古い失敗から差し引いて見せる
-  const effectiveError = (error, success) => Math.max(0, (Number(error)||0) - (Number(success)||0));
+  // 失敗は“最新ログの失敗”をそのまま表示（履歴吸収は廃止）
+  const rawError = (error) => Number(error) || 0;
 
   // 行ハイライト保持（ページ更新しても直近がわかるようにセッションストレージ）
   const HILITE_KEY = "rewrite_last_started_user_id";
@@ -184,7 +184,7 @@ window.addEventListener('DOMContentLoaded', () => {
         const queued  = Number(u.queued)  || 0;
         const running = Number(u.running) || 0;
         const success = Number(u.success) || 0;
-        const error   = effectiveError(u.error, success); // 履歴吸収して表示
+        const error   = rawError(u.error); // 最新ログベースの失敗をそのまま
         const siteCnt = (typeof u.site_count === "number") ? u.site_count : (u.site_cnt || u.sites || 0);
         const targetArticles = (typeof u.target_articles === "number")
           ? u.target_articles
@@ -242,7 +242,7 @@ window.addEventListener('DOMContentLoaded', () => {
       const prog = await fetchJSON(`/admin/rewrite/progress?user_id=${encodeURIComponent(uid)}`);
       const eErr = effectiveError(prog.totals.error, prog.totals.success);
       mSum.textContent =
-        `待機中:${prog.totals.queued}, 実行中:${prog.totals.running}, 成功:${prog.totals.success}, 失敗:${eErr}`;
+          `待機中:${prog.totals.queued}, 実行中:${prog.totals.running}, 成功:${prog.totals.success}, 失敗:${rawError(prog.totals.error)}`;
       mTbody.innerHTML = "";
       (prog.recent || []).forEach(r=>{
         const cls =
