@@ -25,7 +25,9 @@
   <div class="card mb-4">
     <div class="card-header fw-bold">修正方針（policy_text）</div>
     <div class="card-body" style="white-space: pre-wrap;">
-      {% if plan and plan.policy_text %}
+      {% if log and log.policy_text %}
+        {{ log.policy_text }}
+      {% elif plan and plan.policy_text %}
         {{ plan.policy_text }}
       {% else %}
         （データなし）
@@ -33,11 +35,11 @@
     </div>
   </div>
 
-  {% if plan and plan.gap_summary %}
+  {% if log and log.diff_summary %}
   <div class="card mb-4">
-    <div class="card-header fw-bold">差分要約（gap_summary）</div>
+    <div class="card-header fw-bold">差分要約（diff_summary）</div>
     <div class="card-body" style="white-space: pre-wrap;">
-      {{ plan.gap_summary }}
+      {{ log.diff_summary }}
     </div>
   </div>
   {% endif %}
