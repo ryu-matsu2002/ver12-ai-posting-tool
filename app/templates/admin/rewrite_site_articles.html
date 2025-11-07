@@ -55,7 +55,7 @@
           <div class="fw-bold">成功</div>
           <div class="fs-5 text-success">{{ (stats.success or 0) }}</div>
         </div>
-        <a class="stretched-link" href="{{ url_for('admin.admin_rewrite_site_articles', user_id=user_id, site_id=site_id, status='success') }}"></a>
+        <a class="stretched-link" href="{{ url_for('admin.admin_rewrite_site_articles', user_id=user_id, site_id=site_id, status='success', per=(per or 50), page=1) }}"></a>
       </div>
     </div>
     <div class="col-6 col-md-3">
@@ -66,7 +66,7 @@
             {{ (stats.display_error if (stats.display_error is defined and stats.display_error is not none) else (stats.error or 0)) }}
           </div>
         </div>
-        <a class="stretched-link" href="{{ url_for('admin.admin_rewrite_site_articles', user_id=user_id, site_id=site_id, status='failed') }}"></a>
+        <a class="stretched-link" href="{{ url_for('admin.admin_rewrite_site_articles', user_id=user_id, site_id=site_id, status='failed', per=(per or 50), page=1) }}"></a>
       </div>
     </div>
   </div>
@@ -75,9 +75,9 @@
   <div class="mb-3">
     <div class="btn-group">
       <a class="btn btn-sm {% if status=='success' or not status %}btn-primary{% else %}btn-outline-primary{% endif %}"
-         href="{{ url_for('admin.admin_rewrite_site_articles', user_id=user_id, site_id=site_id, status='success') }}">成功のみ</a>
+         href="{{ url_for('admin.admin_rewrite_site_articles', user_id=user_id, site_id=site_id, status='success', per=(per or 50), page=1) }}">成功のみ</a>
       <a class="btn btn-sm {% if status=='failed' %}btn-danger{% else %}btn-outline-danger{% endif %}"
-         href="{{ url_for('admin.admin_rewrite_site_articles', user_id=user_id, site_id=site_id, status='failed') }}">失敗のみ</a>
+         href="{{ url_for('admin.admin_rewrite_site_articles', user_id=user_id, site_id=site_id, status='failed', per=(per or 50), page=1) }}">失敗のみ</a>
     </div>
     {% if last_updated %}
       <small class="text-muted ms-2">更新: {{ last_updated }}</small>

@@ -1348,6 +1348,15 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
     ).fetchall()
     article_ids = [int(r[0]) for r in id_rows]
 
+    # 総件数（ページネーション用）
+    total_sql = _sql("""
+      SELECT COUNT(*) FROM vw_rewrite_state
+       WHERE user_id = :uid AND site_id = :sid AND final_bucket = :bucket
+    """)
+    total_count = int(db.session.execute(
+        total_sql, {"uid": user_id, "sid": site_id, "bucket": bucket}
+    ).scalar() or 0)
+
     # 表示用の詳細（最新 success / 失敗系ログ）を取得
     rows = []
     if article_ids:
@@ -1438,8 +1447,28 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
         })
     last_updated = _last_dt.isoformat() if _last_dt else None
 
-    # テンプレ互換：plans は未使用のまま残す
-    # total は使用箇所が無いので触らない
+    # ページネーション情報を構築
+    total_pages = (total_count + per - 1) // per if per > 0 else 1
+    first_idx = ((page - 1) * per + 1) if total_count > 0 else 0
+    last_idx  = min(page * per, total_count)
+    prev_url = (url_for("admin.admin_rewrite_site_articles",
+                        user_id=user_id, site_id=site_id,
+                        status=status, page=page-1, per=per)
+                if page > 1 else None)
+    next_url = (url_for("admin.admin_rewrite_site_articles",
+                        user_id=user_id, site_id=site_id,
+                        status=status, page=page+1, per=per)
+                if page * per < total_count else None)
+    pagination = {
+        "total": total_count,
+        "page": page,
+        "per": per,
+        "pages": total_pages,
+        "first": first_idx,
+        "last": last_idx,
+        "prev_url": prev_url,
+        "next_url": next_url,
+    }
 
     return render_template(
         "admin/rewrite_site_articles.html",
@@ -1451,7 +1480,9 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
         scope=scope,
         stats=stats,
         last_updated=last_updated,
-        status=status,  # ← 現在の表示ステータスをテンプレへ
+        status=status,      # ← 現在の表示ステータスをテンプレへ
+        pagination=pagination,  # ← 追加
+        per=per,            # ← 明示的に渡しておく（リンク引継ぎ用）
     )
 
 # ─────────────────────────────────────────
