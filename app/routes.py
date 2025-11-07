@@ -1140,39 +1140,54 @@ def admin_rewrite_dashboard():
     return render_template("admin/rewrite.html")
 
 # ─────────────────────────────────────────
-# 全体サマリ API（完全修正版）
+# 全体サマリ API（統一定義：queued/running=plans, success/error=logs）
 # ─────────────────────────────────────────
-from sqlalchemy import text as _sql_text  # ← これがないとsummaryが動かない
-from sqlalchemy import func, case
+from sqlalchemy import text as _sql_text  # ← raw SQL 用
+from sqlalchemy import func, case, text
 @admin_bp.route("/admin/rewrite/summary", methods=["GET"])
 def admin_rewrite_summary():
     from app import redis_client
-    # 成功 = success or done に統一したため、キャッシュキーを更新
-    cache_key = "admin:rewrite:summary:v2"
+    # 定義統一につきキャッシュキーを更新
+    cache_key = "admin:rewrite:summary:v3"
     cached = redis_client.get(cache_key)
     if cached:
         return jsonify(json.loads(cached))
 
     try:
         from app.models import ArticleRewritePlan
-        SUCCESS_IN = ("done", "success")
-        # 統一ロジック：成功=done or success
-        totals_row = db.session.query(
+        # plans 側（queued/running と plan 側の最終アクティビティ）
+        plans_row = db.session.query(
             func.sum(case((ArticleRewritePlan.status == "queued", 1), else_=0)).label("queued"),
-            func.sum(case((ArticleRewritePlan.status == "running", 1), else_=0)).label("running"),
-            func.sum(case((ArticleRewritePlan.status.in_(SUCCESS_IN), 1), else_=0)).label("success"),
-            func.sum(case((ArticleRewritePlan.status == "error", 1), else_=0)).label("error"),
-            func.max(
-                func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.created_at)
-            ).label("last_activity_at"),
+            func.sum(case((ArticleRewritePlan.status.in_(["running","in_progress"]), 1), else_=0)).label("running"),
+            func.max(func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.created_at)).label("plan_last"),
         ).one()
+        # logs 側（最新ログで success/error を数える）
+        logs_sql = _sql_text("""
+          WITH latest AS (
+            SELECT l.article_id,
+                   l.wp_status,
+                   l.executed_at,
+                   ROW_NUMBER() OVER (PARTITION BY l.article_id ORDER BY l.executed_at DESC) AS rn
+            FROM article_rewrite_logs l
+          )
+          SELECT
+            SUM(CASE WHEN wp_status = 'success' THEN 1 ELSE 0 END)                       AS success,
+            SUM(CASE WHEN wp_status IN ('error','failed') THEN 1 ELSE 0 END)             AS error,
+            MAX(executed_at)                                                              AS log_last
+          FROM latest
+          WHERE rn = 1
+        """)
+        logs_row = db.session.execute(logs_sql).mappings().first() or {}
         totals = {
-            "queued":  int(totals_row.queued or 0),
-            "running": int(totals_row.running or 0),
-            "success": int(totals_row.success or 0),
-            "error":   int(totals_row.error or 0),
+            "queued":  int(plans_row.queued or 0),
+            "running": int(plans_row.running or 0),
+            "success": int(logs_row.get("success", 0) or 0),
+            "error":   int(logs_row.get("error", 0) or 0),
         }
-        last_activity_at = totals_row.last_activity_at.isoformat() if totals_row.last_activity_at else None
+        # 最終活動時刻は plans/logs の大きい方
+        _pl = plans_row.plan_last.isoformat() if getattr(plans_row, "plan_last", None) else None
+        _ll = logs_row.get("log_last").isoformat() if logs_row.get("log_last") else None
+        last_activity_at = max(filter(None, [_pl, _ll]), default=None)
     except Exception as e:
         current_app.logger.warning("[rewrite_summary] fallback: %s", e)
         totals = {"queued": 0, "running": 0, "success": 0, "error": 0}
@@ -1218,13 +1233,8 @@ def admin_rewrite_user_sites(user_id: int):
 
     # サイトごとのリライト集計（該当ユーザーで絞る）
     queued_cnt  = func.sum(case((ArticleRewritePlan.status == "queued", 1),  else_=0))
-    running_cnt = func.sum(case((ArticleRewritePlan.status == "running", 1), else_=0))
-    # 成功は "success" と "done" の両方を成功扱いにする
-    success_cnt = func.sum(
-        case((ArticleRewritePlan.status.in_(["success", "done"]), 1), else_=0)
-    )
-    error_cnt   = func.sum(case((ArticleRewritePlan.status == "error", 1),  else_=0))
-    last_act    = func.max(ArticleRewritePlan.created_at)
+    running_cnt = func.sum(case((ArticleRewritePlan.status.in_(["running","in_progress"]), 1), else_=0))
+    last_act    = func.max(func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.created_at))
 
     plan_sq = (
         db.session.query(
@@ -1232,14 +1242,40 @@ def admin_rewrite_user_sites(user_id: int):
             func.count(ArticleRewritePlan.id).label("target_articles"),
             queued_cnt.label("queued"),
             running_cnt.label("running"),
-            success_cnt.label("success"),
-            error_cnt.label("error"),
             last_act.label("last_activity_at"),
         )
         .filter(ArticleRewritePlan.user_id == user_id)
         .group_by(ArticleRewritePlan.site_id)
         .subquery()
     )
+
+    # logs 側: 各サイトの「最新ログ（記事単位）」で success/error をカウント
+    from sqlalchemy import text as _sql
+    logs_site_sql = _sql("""
+      WITH latest AS (
+        SELECT
+          l.article_id,
+          l.wp_status,
+          a.site_id,
+          ROW_NUMBER() OVER (PARTITION BY l.article_id ORDER BY l.executed_at DESC) AS rn
+        FROM article_rewrite_logs l
+        JOIN articles a ON a.id = l.article_id
+        WHERE a.user_id = :user_id
+      )
+      SELECT
+        site_id,
+        SUM(CASE WHEN wp_status = 'success' THEN 1 ELSE 0 END)                   AS success,
+        SUM(CASE WHEN wp_status IN ('error','failed') THEN 1 ELSE 0 END)         AS error,
+        SUM(CASE WHEN wp_status NOT IN ('success','error','failed') THEN 1 ELSE 0 END) AS unknown
+      FROM latest
+      WHERE rn = 1
+      GROUP BY site_id
+    """)
+    logs_site_sq = db.session.execute(logs_site_sql, {"user_id": user_id}).mappings().all()
+    # dict に整形（site_id -> {success, error, unknown}）
+    logs_map = { r["site_id"]: {"success": int(r["success"] or 0),
+                                "error":   int(r["error"]   or 0),
+                                "unknown": int(r["unknown"] or 0)} for r in logs_site_sq }
 
     rows = (
         db.session.query(
@@ -1249,8 +1285,6 @@ def admin_rewrite_user_sites(user_id: int):
             func.coalesce(plan_sq.c.target_articles, 0).label("target_articles"),
             func.coalesce(plan_sq.c.queued, 0).label("queued"),
             func.coalesce(plan_sq.c.running, 0).label("running"),
-            func.coalesce(plan_sq.c.success, 0).label("success"),
-            func.coalesce(plan_sq.c.error, 0).label("error"),
             plan_sq.c.last_activity_at.label("last_activity_at"),
         )
         .filter(Site.user_id == user_id)
@@ -1260,10 +1294,26 @@ def admin_rewrite_user_sites(user_id: int):
     )
 
     # 画面は後続手順で作る（admin/rewrite_user.html）
+    # logs の success/error を反映（テンプレ互換の rows に post-process で注入）
+    fixed_rows = []
+    for r in rows:
+        m = logs_map.get(r.site_id, {"success":0,"error":0,"unknown":0})
+        fixed_rows.append(type("Row", (), {
+            "site_id": r.site_id,
+            "site_name": r.site_name,
+            "site_url": r.site_url,
+            "target_articles": int(r.target_articles or 0),
+            "queued": int(r.queued or 0),
+            "running": int(r.running or 0),
+            "success": int(m["success"]),
+            "error": int(m["error"]),
+            "last_activity_at": r.last_activity_at,
+        }))
+
     return render_template(
         "admin/rewrite_user.html",
         user=user,
-        rows=rows,
+        rows=fixed_rows,
         back_url="/admin/rewrite",
         # 「履歴吸収」の見せ方はテンプレ側で実装（error - success のクリップ）
     )
@@ -1516,7 +1566,7 @@ def admin_rewrite_users():
     # ---- キャッシュキー（検索ワードをキーに含める） ----
     q = (request.args.get("q", type=str) or "").strip()
     nocache = request.args.get("nocache", type=int) == 1
-    cache_key = f"admin:rewrite:users:v2:q={q}"
+    cache_key = f"admin:rewrite:users:v3:q={q}"
     if not nocache:
         cached = redis_client.get(cache_key)
         if cached:
@@ -1539,29 +1589,46 @@ def admin_rewrite_users():
         .subquery()
     )
 
-    # --- リライト集計: plans を user_id で事前集計（ステータス別カウント＋最終更新＋対象記事数） ---
-    SUCCESS_IN   = ("done", "success")
+    # --- リライト集計（plans側）: queued/running + 最終活動 + 対象記事数 ---
     queued_cnt   = func.sum(case((ArticleRewritePlan.status == "queued", 1), else_=0))
-    running_cnt  = func.sum(case((ArticleRewritePlan.status == "running", 1), else_=0))
-    success_cnt  = func.sum(case((ArticleRewritePlan.status.in_(SUCCESS_IN), 1), else_=0))
-    error_cnt    = func.sum(case((ArticleRewritePlan.status == "error", 1), else_=0))
-    last_act     = func.max(
-                        func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.created_at)
-                    )
+    running_cnt  = func.sum(case((ArticleRewritePlan.status.in_(["running","in_progress"]), 1), else_=0))
+    last_act     = func.max(func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.created_at))
     total_cnt    = func.count(ArticleRewritePlan.id)  # 対象記事数
     plan_sq = (
         db.session.query(
             ArticleRewritePlan.user_id.label("uid"),
             queued_cnt.label("queued"),
             running_cnt.label("running"),
-            success_cnt.label("success"),
-            error_cnt.label("error"),
             last_act.label("last_activity_at"),
             total_cnt.label("target_articles"),
         )
         .group_by(ArticleRewritePlan.user_id)
         .subquery()
     )
+
+    # --- リライト集計（logs側）: 各ユーザーの最新ログで success/error をカウント ---
+    from sqlalchemy import text as _sql
+    logs_user_sql = _sql("""
+      WITH latest AS (
+        SELECT
+          l.article_id,
+          l.wp_status,
+          a.user_id,
+          ROW_NUMBER() OVER (PARTITION BY l.article_id ORDER BY l.executed_at DESC) AS rn
+        FROM article_rewrite_logs l
+        JOIN articles a ON a.id = l.article_id
+      )
+      SELECT
+        user_id AS uid,
+        SUM(CASE WHEN wp_status = 'success' THEN 1 ELSE 0 END)               AS success,
+        SUM(CASE WHEN wp_status IN ('error','failed') THEN 1 ELSE 0 END)     AS error
+      FROM latest
+      WHERE rn = 1
+      GROUP BY user_id
+    """)
+    logs_user_sq = db.session.execute(logs_user_sql).mappings().all()
+    logs_user_map = { r["uid"]: {"success": int(r["success"] or 0), "error": int(r["error"] or 0)} for r in logs_user_sq }
+
 
     # --- 検索フィルタ ---
     filters = []
@@ -1579,8 +1646,6 @@ def admin_rewrite_users():
                 func.coalesce(site_sq.c.site_count, 0).label("site_count"),
                 func.coalesce(plan_sq.c.queued, 0).label("queued"),
                 func.coalesce(plan_sq.c.running, 0).label("running"),
-                func.coalesce(plan_sq.c.success, 0).label("success"),
-                func.coalesce(plan_sq.c.error, 0).label("error"),
                 plan_sq.c.last_activity_at.label("last_activity_at"),
                 func.coalesce(plan_sq.c.target_articles, 0).label("target_articles"),
             )
@@ -1600,8 +1665,8 @@ def admin_rewrite_users():
         "site_count": int(r.site_count or 0),
         "queued": int(r.queued or 0),
         "running": int(r.running or 0),
-        "success": int(r.success or 0),
-        "error": int(r.error or 0),
+        "success": int(logs_user_map.get(r.user_id, {}).get("success", 0)),
+        "error":   int(logs_user_map.get(r.user_id, {}).get("error", 0)),
         "last_activity_at": (r.last_activity_at.isoformat() if r.last_activity_at else None),
         "target_articles": int(r.target_articles or 0),
     } for r in rows]
@@ -1632,7 +1697,7 @@ def admin_rewrite_users_progress():
 
     q = (request.args.get("q", type=str) or "").strip()
     nocache = request.args.get("nocache", type=int) == 1
-    cache_key = f"admin:rewrite:users_progress:v2:q={q}"
+    cache_key = f"admin:rewrite:users_progress:v3:q={q}"
     if not nocache:
         cached = redis_client.get(cache_key)
         if cached:
@@ -1653,26 +1718,42 @@ def admin_rewrite_users_progress():
         .group_by(Site.user_id)
         .subquery()
     )
-    SUCCESS_IN  = ("done", "success")
     queued_cnt  = func.sum(case((ArticleRewritePlan.status == "queued", 1), else_=0))
-    running_cnt = func.sum(case((ArticleRewritePlan.status == "running", 1), else_=0))
-    success_cnt = func.sum(case((ArticleRewritePlan.status.in_(SUCCESS_IN), 1), else_=0))
-    error_cnt   = func.sum(case((ArticleRewritePlan.status == "error", 1), else_=0))
-    last_act    = func.max(
-                        func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.created_at)
-                    )
+    running_cnt = func.sum(case((ArticleRewritePlan.status.in_(["running","in_progress"]), 1), else_=0))
+    last_act    = func.max(func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.created_at))
     plan_sq = (
         db.session.query(
             ArticleRewritePlan.user_id.label("uid"),
             queued_cnt.label("queued"),
             running_cnt.label("running"),
-            success_cnt.label("success"),
-            error_cnt.label("error"),
             last_act.label("last_activity_at"),
         )
         .group_by(ArticleRewritePlan.user_id)
         .subquery()
     )
+
+    # logs 側：ユーザー別 success/error
+    from sqlalchemy import text as _sql
+    logs_user_sql = _sql("""
+      WITH latest AS (
+        SELECT
+          l.article_id,
+          l.wp_status,
+          a.user_id,
+          ROW_NUMBER() OVER (PARTITION BY l.article_id ORDER BY l.executed_at DESC) AS rn
+        FROM article_rewrite_logs l
+        JOIN articles a ON a.id = l.article_id
+      )
+      SELECT
+        user_id AS uid,
+        SUM(CASE WHEN wp_status = 'success' THEN 1 ELSE 0 END)               AS success,
+        SUM(CASE WHEN wp_status IN ('error','failed') THEN 1 ELSE 0 END)     AS error
+      FROM latest
+      WHERE rn = 1
+      GROUP BY user_id
+    """)
+    logs_user_sq = db.session.execute(logs_user_sql).mappings().all()
+    logs_user_map = { r["uid"]: {"success": int(r["success"] or 0), "error": int(r["error"] or 0)} for r in logs_user_sq }
 
     filters = []
     if q:
@@ -1689,8 +1770,6 @@ def admin_rewrite_users_progress():
                 func.coalesce(site_sq.c.site_count, 0).label("site_count"),
                 func.coalesce(plan_sq.c.queued, 0).label("queued"),
                 func.coalesce(plan_sq.c.running, 0).label("running"),
-                func.coalesce(plan_sq.c.success, 0).label("success"),
-                func.coalesce(plan_sq.c.error, 0).label("error"),
                 plan_sq.c.last_activity_at.label("last_activity_at"),
             )
             .outerjoin(site_sq, site_sq.c.uid == User.id)
@@ -1714,8 +1793,8 @@ def admin_rewrite_users_progress():
         "site_count": int(r.site_count or 0),
         "queued": int(r.queued or 0),
         "running": int(r.running or 0),
-        "success": int(r.success or 0),
-        "error": int(r.error or 0),
+        "success": int(logs_user_map.get(r.user_id, {}).get("success", 0)),
+        "error":   int(logs_user_map.get(r.user_id, {}).get("error", 0)),
         "last_activity_at": (r.last_activity_at.isoformat() if r.last_activity_at else None),
     } for r in rows]
 
