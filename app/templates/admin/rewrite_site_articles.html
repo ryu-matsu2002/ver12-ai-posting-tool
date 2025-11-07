@@ -63,7 +63,7 @@
         <div class="card-body p-2">
           <div class="fw-bold">失敗</div>
           <div class="fs-5 text-danger">
-            {{ (stats.display_error if stats and stats.display_error is not none else (stats.error or 0)) }}
+            {{ (stats.display_error if (stats.display_error is defined and stats.display_error is not none) else (stats.error or 0)) }}
           </div>
         </div>
         <a class="stretched-link" href="{{ url_for('admin.admin_rewrite_site_articles', user_id=user_id, site_id=site_id, status='failed') }}"></a>

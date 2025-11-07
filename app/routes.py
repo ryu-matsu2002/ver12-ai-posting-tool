@@ -1328,6 +1328,8 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
         "error":   int(totals.get("failed", 0)),
         "unknown": int(totals.get("other", 0)),
     }
+    # 互換：テンプレが期待する display_error を常に数値で渡す
+    stats["display_error"] = stats.get("error", 0)
 
     # ─────────────────────────────────────────
     # 一覧用IDを final_bucket で抽出（新しい順）
