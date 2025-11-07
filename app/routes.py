@@ -1280,13 +1280,15 @@ def _rewrite_counts_for_user_sites(user_id: int):
 # ─────────────────────────────────────────
 @admin_bp.route("/admin/rewrite/user/<int:user_id>", methods=["GET"])
 def admin_rewrite_user_sites(user_id: int):
-    # 新：全期間・統一定義での集計に一本化
+    # 全期間・統一定義での集計に一本化（既存テンプレに合わせて描画）
     sites_summary = _rewrite_counts_for_user_sites(user_id)
     scope = "all"  # 全期間
+    # 既存テンプレ互換：sites でも参照できるよう二重で渡す
     return render_template(
-        "admin/rewrite_user_sites.html",
+        "admin/rewrite_user.html",
         user_id=user_id,
         sites_summary=sites_summary,
+        sites=sites_summary,   # 既存の変数名に互換
         scope=scope,
     )
 
