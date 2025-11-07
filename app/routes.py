@@ -1204,6 +1204,42 @@ def admin_rewrite_summary():
     return jsonify(payload)
 
 # ─────────────────────────────────────────
+# 共通集計ヘルパ：サイト単位の集計（全期間・統一定義）
+# queued/running = plans(is_active=TRUE)
+# success/error/unknown = logs(記事ごとの最新ログ)
+def _rewrite_counts_for_site(user_id: int, site_id: int):
+    agg_sql = _sql_text("""
+        WITH latest_log AS (
+          SELECT DISTINCT ON (site_id, article_id)
+                 user_id, site_id, article_id, wp_status, executed_at
+          FROM public.article_rewrite_logs
+          ORDER BY site_id, article_id, executed_at DESC
+        )
+        SELECT
+          COUNT(*) FILTER (WHERE p.is_active AND p.status = 'queued')  AS queued,
+          COUNT(*) FILTER (WHERE p.is_active AND p.status = 'running') AS running,
+          COUNT(*) FILTER (WHERE ll.wp_status = 'success')             AS success,
+          COUNT(*) FILTER (WHERE ll.wp_status = 'error')               AS error,
+          COUNT(*) FILTER (WHERE ll.wp_status = 'unknown')             AS unknown
+        FROM public.article_rewrite_plans p
+        LEFT JOIN latest_log ll
+          ON ll.user_id    = p.user_id
+         AND ll.site_id    = p.site_id
+         AND ll.article_id = p.article_id
+        WHERE p.user_id = :uid
+          AND p.site_id = :sid
+    """)
+    row = db.session.execute(agg_sql, {"uid": user_id, "sid": site_id}).mappings().first() or {}
+    return {
+        "queued":  int(row.get("queued", 0) or 0),
+        "running": int(row.get("running", 0) or 0),
+        "success": int(row.get("success", 0) or 0),
+        "error":   int(row.get("error", 0) or 0),
+        "unknown": int(row.get("unknown", 0) or 0),
+    }
+
+
+# ─────────────────────────────────────────
 # 共通集計ヘルパ：ユーザー別のサイト集計（全期間・統一定義）
 # queued/running = plans(is_active=TRUE)
 # success/error/unknown = logs(記事ごとの最新ログ)
@@ -1275,6 +1311,10 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
     site = db.session.get(Site, site_id)
     if not user or not site or site.user_id != user_id:
         abort(404)
+
+    # 全期間・統一定義でのヘッダ4指標＋unknown
+    header_counts = _rewrite_counts_for_site(user_id, site_id)
+    scope = "all"  # 全期間    
 
     # クエリパラメータ
     status = (request.args.get("status") or "").strip().lower()
@@ -1379,20 +1419,12 @@ def admin_rewrite_site_articles(user_id: int, site_id: int):
     back_url = url_for("admin.admin_rewrite_user_sites", user_id=user_id)
     return render_template(
         "admin/rewrite_site_articles.html",
-        user=user,
-        site=site,
-        plans=plans,
-        total=total,
-        page=page,
-        per=per,
-        status=status,
-        urls_map=urls_map,
-        stats=stats,
-        # テンプレが参照する配列名
-        articles=articles,
-        last_updated=last_updated,
         user_id=user_id,
-        back_url=back_url,
+        site_id=site_id,
+        site=site,
+        articles=articles,   # 既存の一覧取得ロジックはこのまま
+        header_counts=header_counts,
+        scope=scope,
     )
 
 # ─────────────────────────────────────────
