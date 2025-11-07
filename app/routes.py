@@ -1250,29 +1250,41 @@ def _rewrite_counts_for_user_sites(user_id: int):
                  user_id, site_id, article_id, wp_status, executed_at
           FROM public.article_rewrite_logs
           ORDER BY site_id, article_id, executed_at DESC
+        ),
+        plan_base AS (
+          SELECT
+            user_id, site_id,
+            status,
+            is_active,
+            COALESCE(finished_at, created_at) AS act_ts
+          FROM public.article_rewrite_plans
+          WHERE user_id = :uid
         )
         SELECT
-          p.site_id,
+          pb.site_id,
           s.name AS site_name,
-          COUNT(*) FILTER (WHERE p.is_active AND p.status = 'queued')  AS queued,
-          COUNT(*) FILTER (WHERE p.is_active AND p.status = 'running') AS running,
-          COUNT(*) FILTER (WHERE ll.wp_status = 'success')             AS success,
-          COUNT(*) FILTER (WHERE ll.wp_status = 'error')               AS error,
-          COUNT(*) FILTER (WHERE ll.wp_status = 'unknown')             AS unknown
-        FROM public.article_rewrite_plans p
+          -- plans 側
+          COUNT(*) FILTER (WHERE pb.is_active AND pb.status = 'queued')               AS queued,
+          COUNT(*) FILTER (WHERE pb.is_active AND pb.status IN ('running','in_progress')) AS running,
+          COUNT(*) AS target_articles,
+          MAX(pb.act_ts) AS last_activity_at,
+          -- logs 側（記事ごとの最新）
+          COUNT(*) FILTER (WHERE ll.wp_status = 'success') AS success,
+          COUNT(*) FILTER (WHERE ll.wp_status = 'error')   AS error,
+          COUNT(*) FILTER (WHERE ll.wp_status = 'unknown') AS unknown
+        FROM plan_base pb
         LEFT JOIN latest_log ll
-          ON ll.user_id    = p.user_id
-         AND ll.site_id    = p.site_id
-         AND ll.article_id = p.article_id
+          ON ll.user_id    = pb.user_id
+         AND ll.site_id    = pb.site_id
+         AND ll.article_id = ll.article_id
         LEFT JOIN public.site s
-          ON s.id = p.site_id
-        WHERE p.user_id = :uid
-        GROUP BY p.site_id, s.name
-        ORDER BY p.site_id
+          ON s.id = pb.site_id
+        GROUP BY pb.site_id, s.name
+        ORDER BY pb.site_id
     """)
     rows = db.session.execute(agg_sql, {"uid": user_id}).mappings().all()
+    # dict 化して last_activity_at はそのまま datetime/None を保持
     return [dict(r) for r in rows]
-
 
 # ─────────────────────────────────────────
 # 追加: ユーザー別サイト一覧（HTML）
@@ -1280,16 +1292,18 @@ def _rewrite_counts_for_user_sites(user_id: int):
 # ─────────────────────────────────────────
 @admin_bp.route("/admin/rewrite/user/<int:user_id>", methods=["GET"])
 def admin_rewrite_user_sites(user_id: int):
-    # 全期間・統一定義での集計に一本化（既存テンプレに合わせて描画）
-    sites_summary = _rewrite_counts_for_user_sites(user_id)
-    scope = "all"  # 全期間
-    # 既存テンプレ互換：sites でも参照できるよう二重で渡す
+    # ユーザー情報をテンプレに渡す
+    from app.models import User
+    user = db.session.get(User, user_id)
+    if not user:
+        abort(404)
+    # 全期間・統一定義での集計（テンプレ要件に合わせて rows を渡す）
+    rows = _rewrite_counts_for_user_sites(user_id)
     return render_template(
         "admin/rewrite_user.html",
-        user_id=user_id,
-        sites_summary=sites_summary,
-        sites=sites_summary,   # 既存の変数名に互換
-        scope=scope,
+        user=user,
+        rows=rows,
+        back_url=url_for("admin.admin_rewrite_dashboard"),
     )
 
 
@@ -1817,31 +1831,37 @@ def admin_rewrite_progress():
     }
 
     # 最近30件は従来どおり plans を表示（UIのテーブル互換）
-    recent_plans = (
-        plans_q.order_by(
-            func.coalesce(ArticleRewritePlan.finished_at, ArticleRewritePlan.started_at, ArticleRewritePlan.scheduled_at, ArticleRewritePlan.created_at).desc(),
-            ArticleRewritePlan.id.desc()
-        ).limit(30).all()
-    )
-    # posted_url を紐付け
-    a_ids = [p.article_id for p in recent_plans if getattr(p, "article_id", None)]
-    art_map = {}
-    if a_ids:
-        arts = (db.session.query(Article.id, Article.posted_url)
-                        .filter(Article.id.in_(a_ids)).all())
-        art_map = {aid: url for (aid, url) in arts}
-    recent = []
-    for r in recent_plans:
-        best_ts = r.finished_at or r.started_at or r.scheduled_at or r.created_at
-        recent.append({
-            "id": r.id,
-            "article_id": r.article_id,
-            "status": r.status,
-            "attempts": getattr(r, "attempts", None),
-            "updated_at": (best_ts.isoformat() if best_ts else None),
-            "posted_url": art_map.get(r.article_id),
-        })
-    else:
+    try:
+        recent_plans = (
+            plans_q.order_by(
+                func.coalesce(
+                    ArticleRewritePlan.finished_at,
+                    ArticleRewritePlan.started_at,
+                    ArticleRewritePlan.scheduled_at,
+                    ArticleRewritePlan.created_at
+                ).desc(),
+                ArticleRewritePlan.id.desc()
+            ).limit(30).all()
+        )
+        # posted_url を紐付け
+        a_ids = [p.article_id for p in recent_plans if getattr(p, "article_id", None)]
+        art_map = {}
+        if a_ids:
+            arts = (db.session.query(Article.id, Article.posted_url)
+                            .filter(Article.id.in_(a_ids)).all())
+            art_map = {aid: url for (aid, url) in arts}
+        recent = []
+        for r in recent_plans:
+            best_ts = r.finished_at or r.started_at or r.scheduled_at or r.created_at
+            recent.append({
+                "id": r.id,
+                "article_id": r.article_id,
+                "status": r.status,
+                "attempts": getattr(r, "attempts", None),
+                "updated_at": (best_ts.isoformat() if best_ts else None),
+                "posted_url": art_map.get(r.article_id),
+            })
+    except Exception:
         # Fallback: テーブル名で素直に叩く
         where = "WHERE user_id=:uid" if uid else ""
         agg_rows = db.session.execute(
