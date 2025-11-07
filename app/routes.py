@@ -1241,49 +1241,29 @@ def _rewrite_counts_for_site(user_id: int, site_id: int):
 
 # ─────────────────────────────────────────
 # 共通集計ヘルパ：ユーザー別のサイト集計（全期間・統一定義）
-# queued/running = plans(is_active=TRUE)
-# success/error/unknown = logs(記事ごとの最新ログ)
+# ─────────────────────────────────────────
 def _rewrite_counts_for_user_sites(user_id: int):
-    agg_sql = _sql_text("""
-        WITH latest_log AS (
-          SELECT DISTINCT ON (site_id, article_id)
-                 user_id, site_id, article_id, wp_status, executed_at
-          FROM public.article_rewrite_logs
-          ORDER BY site_id, article_id, executed_at DESC
-        ),
-        plan_base AS (
-          SELECT
-            user_id, site_id,
-            status,
-            is_active,
-            COALESCE(finished_at, created_at) AS act_ts
-          FROM public.article_rewrite_plans
-          WHERE user_id = :uid
-        )
-        SELECT
-          pb.site_id,
-          s.name AS site_name,
-          -- plans 側
-          COUNT(*) FILTER (WHERE pb.is_active AND pb.status = 'queued')               AS queued,
-          COUNT(*) FILTER (WHERE pb.is_active AND pb.status IN ('running','in_progress')) AS running,
-          COUNT(*) AS target_articles,
-          MAX(pb.act_ts) AS last_activity_at,
-          -- logs 側（記事ごとの最新）
-          COUNT(*) FILTER (WHERE ll.wp_status = 'success') AS success,
-          COUNT(*) FILTER (WHERE ll.wp_status = 'error')   AS error,
-          COUNT(*) FILTER (WHERE ll.wp_status = 'unknown') AS unknown
-        FROM plan_base pb
-        LEFT JOIN latest_log ll
-          ON ll.user_id    = pb.user_id
-         AND ll.site_id    = pb.site_id
-         AND ll.article_id = ll.article_id
-        LEFT JOIN public.site s
-          ON s.id = pb.site_id
-        GROUP BY pb.site_id, s.name
-        ORDER BY pb.site_id
-    """)
+    # 統一定義：vw_rewrite_state を唯一の真実源にする
+    from sqlalchemy import text as _sql  # ← 既にモジュール上部で定義済みなら不要
+    agg_sql = _sql("""
+       SELECT
+         v.site_id,
+         COALESCE(s.name, '') AS site_name,
+         COUNT(*)                                                  AS target_articles,
+         SUM((v.final_bucket = 'waiting')::int)                    AS waiting,
+         SUM((v.final_bucket = 'running')::int)                    AS running,
+         SUM((v.final_bucket = 'success')::int)                    AS success,
+         SUM((v.final_bucket = 'failed')::int)                     AS failed,
+         MAX(GREATEST(COALESCE(v.log_executed_at, 'epoch'::timestamp),
+                      COALESCE(v.plan_created_at, 'epoch'::timestamp))) AS last_update
+       FROM vw_rewrite_state v
+       LEFT JOIN public.site s
+         ON s.id = v.site_id
+       WHERE v.user_id = :uid
+       GROUP BY v.site_id, s.name
+       ORDER BY v.site_id
+     """)
     rows = db.session.execute(agg_sql, {"uid": user_id}).mappings().all()
-    # dict 化して last_activity_at はそのまま datetime/None を保持
     return [dict(r) for r in rows]
 
 # ─────────────────────────────────────────
