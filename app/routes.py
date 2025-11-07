@@ -1486,10 +1486,18 @@ def admin_rewrite_log_detail(log_id: int):
     if log.article_id:
         article = db.session.get(Article, log.article_id)
 
+    # 関連とパンくず用の派生値を明示的に渡す
+    plan = getattr(log, "plan", None)
+    user_id = getattr(article, "user_id", None) if article else None
+    site_id = getattr(article, "site_id", None) if article else None
+
     return render_template(
         "admin/rewrite_log_detail.html",
         log=log,
         article=article,
+        plan=plan,
+        user_id=user_id,
+        site_id=site_id,
     )
 
 @admin_bp.route("/admin/rewrite/users", methods=["GET"])
