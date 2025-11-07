@@ -1140,29 +1140,40 @@ def admin_rewrite_dashboard():
     return render_template("admin/rewrite.html")
 
 # ─────────────────────────────────────────
-# 全体サマリ API（統一定義：queued/running=plans, success/error=logs）
+# 全体サマリ API（統一定義：queued/running=plans[is_active=TRUE], success/error/unknown=logs[記事ごとの最新版]）
 # ─────────────────────────────────────────
 from sqlalchemy import text as _sql_text  # ← raw SQL 用
 from sqlalchemy import func, case, text
 @admin_bp.route("/admin/rewrite/summary", methods=["GET"])
 def admin_rewrite_summary():
     from app import redis_client
-    # 定義を vw_rewrite_state に一本化（キャッシュキーも更新）
-    cache_key = "admin:rewrite:summary:v4"
+    # 全期間・統一定義（期間フィルタなし）に固定。キャッシュキーも全期間用に更新。
+    cache_key = "admin:rewrite:summary:v5:scope=all"
     cached = redis_client.get(cache_key)
     if cached:
         return jsonify(json.loads(cached))
 
     try:
-        # 統一ビューから一撃集計（waiting→queued, failed→error の語彙マップ）
+        # ビュー非依存：plans と「記事ごとの最新ログ」を直接集計（全期間）
         agg_sql = _sql_text("""
-          SELECT
-            SUM(CASE WHEN final_bucket = 'waiting' THEN 1 ELSE 0 END) AS queued,
-            SUM(CASE WHEN final_bucket = 'running' THEN 1 ELSE 0 END) AS running,
-            SUM(CASE WHEN final_bucket = 'success' THEN 1 ELSE 0 END) AS success,
-            SUM(CASE WHEN final_bucket = 'failed'  THEN 1 ELSE 0 END) AS error,
-            MAX(COALESCE(log_executed_at, plan_created_at))           AS last_activity_at
-          FROM vw_rewrite_state
+            WITH latest_log AS (
+              SELECT DISTINCT ON (site_id, article_id)
+                     site_id, article_id, wp_status, executed_at
+              FROM public.article_rewrite_logs
+              ORDER BY site_id, article_id, executed_at DESC
+            )
+            SELECT
+              -- plans は is_active=TRUE の現在値（期間なし）
+              (SELECT COUNT(*) FROM public.article_rewrite_plans WHERE is_active = TRUE AND status='queued')  AS queued,
+              (SELECT COUNT(*) FROM public.article_rewrite_plans WHERE is_active = TRUE AND status='running') AS running,
+              -- logs は記事ごとの最新ログ（期間なし）
+              (SELECT COUNT(*) FROM latest_log WHERE wp_status='success')  AS success,
+              (SELECT COUNT(*) FROM latest_log WHERE wp_status='error')    AS error,
+              (SELECT COUNT(*) FROM latest_log WHERE wp_status='unknown')  AS unknown,
+              GREATEST(
+                COALESCE((SELECT MAX(created_at)  FROM public.article_rewrite_plans), 'epoch'::timestamptz),
+                COALESCE((SELECT MAX(executed_at) FROM public.article_rewrite_logs ), 'epoch'::timestamptz)
+              ) AS last_activity_at
         """)
         row = db.session.execute(agg_sql).mappings().first() or {}
         totals = {
@@ -1171,26 +1182,25 @@ def admin_rewrite_summary():
             "success": int(row.get("success", 0) or 0),
             "error":   int(row.get("error", 0) or 0),
         }
+        # 参考：unknown も返却（UIが未対応なら無視されるだけ）
+        unknown = int(row.get("unknown", 0) or 0)
         last_activity_at = row.get("last_activity_at").isoformat() if row.get("last_activity_at") else None
     except Exception as e:
         current_app.logger.warning("[rewrite_summary] fallback: %s", e)
         totals = {"queued": 0, "running": 0, "success": 0, "error": 0}
+        unknown = 0
         last_activity_at = None
 
+    # レスポンス整形（unknown を追加しても既存UIに影響なし／欲しければ利用可能）
     payload = {
-        "ok": True,
-        "totals": {
-            "queued": totals.get("queued", 0),
-            "running": totals.get("running", 0),
-            "success": totals.get("success", 0),
-            "error": totals.get("error", 0),
-        },
-        "last_updated": datetime.utcnow().isoformat() + "Z",
+        "totals": totals,
+        "unknown": unknown,
+        "last_activity_at": last_activity_at,
+        "scope": "all",  # 全期間
+        "version": 5
     }
-    try:
-        redis_client.setex(cache_key, 5, json.dumps(payload, ensure_ascii=False))
-    except Exception:
-        pass
+    # 任意：TTLを短くしてもOK（例: 60秒）。既存ポリシーに合わせてください。
+    redis_client.set(cache_key, json.dumps(payload), ex=60)
     return jsonify(payload)
 
 # ─────────────────────────────────────────
