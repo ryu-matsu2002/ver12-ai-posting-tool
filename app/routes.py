@@ -1204,71 +1204,54 @@ def admin_rewrite_summary():
     return jsonify(payload)
 
 # ─────────────────────────────────────────
+# 共通集計ヘルパ：ユーザー別のサイト集計（全期間・統一定義）
+# queued/running = plans(is_active=TRUE)
+# success/error/unknown = logs(記事ごとの最新ログ)
+def _rewrite_counts_for_user_sites(user_id: int):
+    agg_sql = _sql_text("""
+        WITH latest_log AS (
+          SELECT DISTINCT ON (site_id, article_id)
+                 user_id, site_id, article_id, wp_status, executed_at
+          FROM public.article_rewrite_logs
+          ORDER BY site_id, article_id, executed_at DESC
+        )
+        SELECT
+          p.site_id,
+          s.name AS site_name,
+          COUNT(*) FILTER (WHERE p.is_active AND p.status = 'queued')  AS queued,
+          COUNT(*) FILTER (WHERE p.is_active AND p.status = 'running') AS running,
+          COUNT(*) FILTER (WHERE ll.wp_status = 'success')             AS success,
+          COUNT(*) FILTER (WHERE ll.wp_status = 'error')               AS error,
+          COUNT(*) FILTER (WHERE ll.wp_status = 'unknown')             AS unknown
+        FROM public.article_rewrite_plans p
+        LEFT JOIN latest_log ll
+          ON ll.user_id    = p.user_id
+         AND ll.site_id    = p.site_id
+         AND ll.article_id = p.article_id
+        LEFT JOIN public.site s
+          ON s.id = p.site_id
+        WHERE p.user_id = :uid
+        GROUP BY p.site_id, s.name
+        ORDER BY p.site_id
+    """)
+    rows = db.session.execute(agg_sql, {"uid": user_id}).mappings().all()
+    return [dict(r) for r in rows]
+
+
+# ─────────────────────────────────────────
 # 追加: ユーザー別サイト一覧（HTML）
 # URL: /admin/rewrite/user/<user_id>
 # ─────────────────────────────────────────
 @admin_bp.route("/admin/rewrite/user/<int:user_id>", methods=["GET"])
-@login_required
 def admin_rewrite_user_sites(user_id: int):
-    if not current_user.is_admin:
-        abort(403)
-    """
-    指定ユーザーの全サイトを1行で表示するページ。
-    数値は vw_rewrite_state を唯一の真実として集計（waiting/running/success/failed/other）。
-    """
-    from sqlalchemy import text as _sql
-    # モデル
-    from app.models import User, Site
-    # 統一ビュー読み出しサービス
-    from app.services.rewrite.state_view import fetch_user_site_breakdown
-
-    user = db.session.get(User, user_id)
-    if not user:
-        abort(404)
-
-    # 1) サイト一覧（メタ情報）
-    sites = (
-        db.session.query(Site.id.label("site_id"), Site.name.label("site_name"), Site.url.label("site_url"))
-        .filter(Site.user_id == user_id)
-        .order_by(Site.id.asc())
-        .all()
-    )
-    # 2) 統一ビューからサイト別の件数（waiting/running/success/failed/other）
-    breakdown = fetch_user_site_breakdown(user_id)  # [{site_id, waiting, running, success, failed, other}, ...]
-    bmap = {row["site_id"]: row for row in breakdown}
-    # 3) 最終アクティビティ時刻（ログ or プランのどちらか最新）
-    last_sql = _sql("""
-      SELECT site_id, MAX(COALESCE(log_executed_at, plan_created_at)) AS last_activity_at
-      FROM vw_rewrite_state
-      WHERE user_id = :uid
-      GROUP BY site_id
-    """)
-    last_rows = db.session.execute(last_sql, {"uid": user_id}).mappings().all()
-    last_map = {r["site_id"]: r["last_activity_at"] for r in last_rows}
-
-    fixed_rows = []
-    for s in sites:
-        counts = bmap.get(s.site_id, {"waiting":0,"running":0,"success":0,"failed":0,"other":0})
-        target_articles = sum(counts.values())  # ＝最新状態で存在する記事総数
-        fixed_rows.append(type("Row", (), {
-            "site_id": s.site_id,
-            "site_name": s.site_name,
-            "site_url": s.site_url,
-            # 旧テンプレ互換：queued/running/success/error/target_articles/last_activity_at
-            "queued": int(counts.get("waiting", 0)),
-            "running": int(counts.get("running", 0)),
-            "success": int(counts.get("success", 0)),
-            "error":   int(counts.get("failed", 0)),
-            "target_articles": int(target_articles),
-            "last_activity_at": last_map.get(s.site_id),
-        }))
-
+    # 新：全期間・統一定義での集計に一本化
+    sites_summary = _rewrite_counts_for_user_sites(user_id)
+    scope = "all"  # 全期間
     return render_template(
-        "admin/rewrite_user.html",
-        user=user,
-        rows=fixed_rows,
-        back_url="/admin/rewrite",
-        # 「履歴吸収」の見せ方はテンプレ側で実装（error - success のクリップ）
+        "admin/rewrite_user_sites.html",
+        user_id=user_id,
+        sites_summary=sites_summary,
+        scope=scope,
     )
 
 
