@@ -38,6 +38,52 @@ from app.wp_client import (
     update_post_meta,
 )
 
+def _ensure_wp_post_id(site, article) -> Optional[int]:
+    """
+    内部SEOと同様の手順で、更新前に必ず wp_post_id を解決する。
+    - article.wp_post_id が空なら resolve_wp_post_id(site, article, save=True)
+    - 解決できなければ None
+    """
+    wp_id = getattr(article, "wp_post_id", None)
+    if not wp_id:
+        try:
+            wp_id = resolve_wp_post_id(site=site, art=article, save=True)
+        except Exception as e:
+            current_app.logger.warning("[rewrite] resolve_wp_post_id failed article_id=%s err=%s", getattr(article, "id", None), e)
+            wp_id = None
+    return wp_id
+
+def _update_wp_with_retry(site, wp_post_id: int, new_html: str, *, max_retry: Optional[int] = None) -> tuple[bool, Optional[int]]:
+    """
+    内部SEO相当の“軽い”再試行。401/429/408/5xx 等の一時失敗を想定して最大 (1+max_retry) 回まで。
+    戻り値: (ok, last_status_code)
+    """
+    attempt = 0
+    if max_retry is None:
+        max_retry = REWRITE_IMMEDIATE_RETRY
+    last_status = None
+    while True:
+        ok = False
+        try:
+            ok = update_post_content(site, wp_post_id, new_html)
+        except Exception as e:
+            last_status = getattr(getattr(e, "response", None), "status_code", None)
+            if last_status:
+                current_app.logger.warning("[rewrite] WP update error status=%s post_id=%s err=%s", last_status, wp_post_id, e)
+            else:
+                current_app.logger.warning("[rewrite] WP update error post_id=%s err=%s", wp_post_id, e)
+        else:
+            # update_post_content が False を返すケースでは HTTP ステータスは取得できない
+            # last_status は None のまま（＝分類は後段で推定）
+            pass
+
+        if ok:
+            return True, last_status
+        if attempt >= max_retry:
+            return False, last_status
+        attempt += 1
+        # 短い間隔での軽い再試行（sleepは入れずに即時リトライ。ジョブのスループットを優先）
+
 # === OpenAI 設定（article_generator.py と同じ流儀） ===
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
@@ -58,6 +104,26 @@ SHRINK = 0.85
 SERP_REQUIRED_FOR_REWRITE = os.getenv("SERP_REQUIRED_FOR_REWRITE", "0") == "1"
 
 META_MAX = 180  # メタ説明最大長（wp_clientのポリシーと整合）
+
+# === 運用しきい値を環境変数化（既定は現行値と同等〜やや緩め） ===
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except Exception:
+        return default
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except Exception:
+        return default
+
+# 例）VALIDATION_TAG_DIFF_MAX_RATIO=0.20, VALIDATION_TEXTNODE_TOLERANCE=0.20
+VALIDATION_TAG_DIFF_MAX_RATIO = _env_float("VALIDATION_TAG_DIFF_MAX_RATIO", 0.20)
+VALIDATION_TEXTNODE_TOLERANCE = _env_float("VALIDATION_TEXTNODE_TOLERANCE", 0.20)
+# WP即時リトライ回数（1+N回試す）。既定は従来の2（=最大3回）
+REWRITE_IMMEDIATE_RETRY = _env_int("REWRITE_IMMEDIATE_RETRY", 2)
+REWRITE_MAX_ATTEMPTS     = _env_int("REWRITE_MAX_ATTEMPTS", 6)
 
 # ========== ユーティリティ（article_generator.py と同系の振る舞い） ==========
 
@@ -172,19 +238,15 @@ def _take_sources_with_titles(outlines: List[Dict], limit: int = 8) -> List[Dict
 def _collect_wp_html(site: Site, article: Article) -> Tuple[Optional[int], Optional[str]]:
     """
     WP上の最新本文HTMLを取得。戻り値: (wp_post_id, content_html or None)
+    ※ wp_post_id の解決は常に _ensure_wp_post_id を経由（例外ログを含め一元化）。
     """
-    wp_id = article.wp_post_id
-    if not wp_id:
-        wp_id = resolve_wp_post_id(site, article, save=True)
-
+    wp_id = _ensure_wp_post_id(site, article)
     if not wp_id:
         return None, None
-
     post = fetch_single_post(site, wp_id)
     if post and post.content_html:
         return wp_id, post.content_html
     return wp_id, None
-
 
 def _collect_gsc_snapshot(site_id: int, article: Article) -> Dict:
     """
@@ -647,12 +709,14 @@ def _restore_attributes_preserve_text(original_html: str, edited_html: str) -> T
     return edited_html, True
 
 # --- 追加：テキストノード数の乖離チェック（文章限定リライトの逸脱を検知） ------------------------
-def _textnode_divergence_too_large(original_html: str, edited_html: str, tolerance: float = 0.15) -> bool:
+def _textnode_divergence_too_large(original_html: str, edited_html: str, tolerance: Optional[float] = None) -> bool:
     """
     原文と編集後の『テキストノード個数』の乖離を見て、構造が大きく揺れていないかを判定。
-    tolerance=0.15 → 15% 超の差で True（=大きすぎ）
+    tolerance が None の場合は環境変数 VALIDATION_TEXTNODE_TOLERANCE を使用。
     """
     try:
+        if tolerance is None:
+            tolerance = VALIDATION_TEXTNODE_TOLERANCE
         def _count(h: str) -> int:
             s = BeautifulSoup(h or "", "html.parser")
             n = 0
@@ -930,8 +994,8 @@ def _validate_html_for_publish(before_html: str, after_html: str) -> Tuple[bool,
         # マルチセット一致なら OK（順序は問わない）
         core_equal = (ob_core == ab_core)
 
-        # 旧: 5% → 新: 20% まで許容。ただし core が一致していることが前提。
-        if diff_ratio_all > 0.20 and not core_equal:
+        # 許容差は環境変数 VALIDATION_TAG_DIFF_MAX_RATIO。core が一致しない場合のみ停止。
+        if diff_ratio_all > VALIDATION_TAG_DIFF_MAX_RATIO and not core_equal:
             return False, f"tag_sequence_changed(Δ={diff_ratio_all:.2f})"
         # 20%以内、またはコア構造一致なら“ソフト許可”
     except Exception:
@@ -945,7 +1009,7 @@ def _validate_html_for_publish(before_html: str, after_html: str) -> Tuple[bool,
     
     # テキストノード乖離（過度な構造変化の間接指標）
     # テキストノード乖離が大きすぎる場合のみ停止（文章編集の範囲を超える変形を検知）
-    if _textnode_divergence_too_large(before_html, after_html, tolerance=0.20):
+    if _textnode_divergence_too_large(before_html, after_html, tolerance=VALIDATION_TEXTNODE_TOLERANCE):
         return False, "textnode_divergence_too_large"
     # 空見出し検知
     if re.search(r'<h[23][^>]*>\s*</h[23]>', after_html or "", flags=re.I):
@@ -1031,7 +1095,7 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
             else:
                 # 本実行では計画をエラー終了（無効化はここでは行わない：手動判断の余地を残す）
                 plan.status = "error"
-                plan.last_error = reason
+                plan.last_error = f"permanent:{reason}"
                 db.session.commit()
                 return {
                     "status": "skipped",
@@ -1127,7 +1191,7 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
                         }
                     else:
                         plan.status = "error"
-                        plan.last_error = reason
+                        plan.last_error = f"permanent:{reason}"
                         plan.finished_at = datetime.utcnow()
                         db.session.commit()
                         return {
@@ -1232,6 +1296,10 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
         # 8) WP更新（ドライランじゃなければ反映）
         if not dry_run:
             try:
+                # 念押し：直前でもう一度だけ ID を解決（WP側の状態変化に追随）
+                # 例：直前の別処理で wp_post_id が付与された／変更された場合など。
+                if not wp_post_id:
+                    wp_post_id = _ensure_wp_post_id(site, article)
                 # 見た目やクラスに触らない：LLM出力をそのまま使う
                 ok, reason = _validate_html_for_publish(original_html, edited_html)
                 if not ok:
@@ -1243,7 +1311,11 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
                     db.session.commit()
                     wp_ok = False
                 else:
-                    wp_ok = update_post_content(site, wp_post_id, edited_html) if wp_post_id else False
+                    # ✅ 本番反映は必ず“軽量リトライ”経由に統一
+                    if wp_post_id:
+                        wp_ok, last_status = _update_wp_with_retry(site, wp_post_id, edited_html)
+                    else:
+                        wp_ok, last_status = (False, None)
  
 
                 # 任意：メタ説明を安全に生成・更新（内部リンクは一切触らない）
@@ -1255,15 +1327,56 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
                         except Exception as e:
                             logging.info(f"[rewrite/meta] meta push skipped: {e}")
 
-                # 成功ならログを確定
-                if wp_ok:
+                # 失敗時の“全自動”自己復旧（UI不要）
+                if not wp_ok:
+                    # 一時失敗（transient）を分類：429/408/5xx/ステータス不明(None)
+                    status = last_status
+                    is_transient = (
+                        (status is None) or
+                        (status == 429) or
+                        (status == 408) or
+                        (500 <= int(status or 0) <= 599)
+                    )
+                    if is_transient:
+                        # バックオフ：attempts に応じて優先度を軽く下げて再キュー（マイグレーション不要）
+                        try:
+                            # 既存 priority_score を軽く減点（例: 試行回数 × 0.5）
+                            dec = float((plan.attempts or 1)) * 0.5
+                            plan.priority_score = (plan.priority_score or 0.0) - dec
+                        except Exception:
+                            pass
+                        # ステータスを queued に戻し、終了印を消す（完全自動復帰）
+                        plan.status = "queued"
+                        plan.started_at = None
+                        plan.finished_at = None
+                        # ログは “retry_queued” で確定（UIなしで追える）
+                        log.wp_status = "retry_queued"
+                        if not log.error_message:
+                            log.error_message = f"transient_wp_error:{status}"
+                        # 監査ログに分類を明示
+                        if not log.error_message:
+                            log.error_message = f"transient_wp_error:{status}"
+                        db.session.commit()
+                        return {
+                            "status": "retry_queued",
+                            "plan_id": plan.id,
+                            "article_id": article.id,
+                            "wp_post_id": wp_post_id,
+                            "error": f"transient_wp_error:{status}",
+                        }
+                    else:
+                        # 恒久的（permanent）と判断：通常の error 終了
+                        log.wp_status = "error"
+                        if not log.error_message:
+                            log.error_message = f"permanent_wp_error:{status}"
+                        # plan 側にも分類を明示
+                        plan.last_error = f"permanent:wp_status={status}"
+                        db.session.commit()
+                else:
+                    # 成功ならログを確定
                     log.wp_status = "success"
                     log.snapshot_after = edited_html
-                else:
-                    log.wp_status = "error"
-                    if not log.error_message:
-                        log.error_message = "WP更新に失敗しました"
-                db.session.commit()
+                    db.session.commit()
             except Exception as e:
                 wp_err = str(e)
                 log.wp_status = "error"
@@ -1282,17 +1395,30 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
                 "wp_post_id": wp_post_id,
             }
         else:
-            plan.status = "done" if wp_ok else "error"
-            if not wp_ok and not plan.last_error:
-                plan.last_error = wp_err or "WP更新に失敗"
-            db.session.commit()
-            return {
-                "status": "success" if wp_ok else "error",
-                "plan_id": plan.id,
-                "article_id": article.id,
-                "wp_post_id": wp_post_id,
-                "error": wp_err,
-            }
+            # 本番（dry_run=False）
+            if wp_ok:
+                plan.status = "done"
+                db.session.commit()
+                return {
+                    "status": "success",
+                    "plan_id": plan.id,
+                    "article_id": article.id,
+                    "wp_post_id": wp_post_id,
+                    "error": None,
+                }
+            else:
+                # ここに来るのは permanent 扱いで確定させたケース
+                plan.status = "error"
+                if not plan.last_error:
+                    plan.last_error = f"permanent:{wp_err or getattr(log, 'error_message', 'WP更新に失敗')}"
+                db.session.commit()
+                return {
+                    "status": "error",
+                    "plan_id": plan.id,
+                    "article_id": article.id,
+                    "wp_post_id": wp_post_id,
+                    "error": wp_err,
+                }
 
 
 # ========== CLI/ワンライナー補助（任意） ==========

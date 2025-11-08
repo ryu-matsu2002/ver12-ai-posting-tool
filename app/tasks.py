@@ -254,6 +254,41 @@ def _rewrite_retry_job(app):
         current_app.logger.info("[rewrite/retry] %s", res)
 
 # --------------------------------------------------------------------------- #
+# 🆕 リライト：エラー自動回収スイーパー（専用ENVで制御）
+#   - 役割：status=failed（実装によってはerror相当を含む）を一定時間後に再キュー
+#   - 既存の _rewrite_retry_job には手を触れず、別ジョブとして独立運用
+#   - 既存の retry_failed_plans() を利用（安全・副作用限定）
+#   - ENV（既定値は控えめ）：
+#       REWRITE_ERR_SWEEP_ENABLED          = "1"   (0で無効)
+#       REWRITE_ERR_SWEEP_EVERY_MIN        = "12"  (実行間隔 分)
+#       REWRITE_ERR_SWEEP_MAX_ATTEMPTS     = "3"   (再挑戦の上限)
+#       REWRITE_ERR_SWEEP_MIN_AGE_MIN      = "20"  (最後の失敗から何分寝かせるか)
+#       REWRITE_ERR_SWEEP_LIMIT            = "80"  (1回の再キュー上限)
+# --------------------------------------------------------------------------- #
+@_safe_job
+def _rewrite_error_sweeper_job(app):
+    with app.app_context():
+        if os.getenv("REWRITE_ERR_SWEEP_ENABLED", "1") != "1":
+            current_app.logger.debug("[rewrite/error-sweeper] disabled by env")
+            return
+        max_attempts = int(os.getenv("REWRITE_ERR_SWEEP_MAX_ATTEMPTS", "3"))
+        min_age_min  = int(os.getenv("REWRITE_ERR_SWEEP_MIN_AGE_MIN", "20"))
+        limit        = int(os.getenv("REWRITE_ERR_SWEEP_LIMIT", "80"))
+        try:
+            res = retry_failed_plans(
+                app,
+                max_attempts=max_attempts,
+                min_age_minutes=min_age_min,
+                to_queue_limit=limit,
+            )
+            current_app.logger.info(
+                "[rewrite/error-sweeper] requeued=%s scanned=%s skipped=%s",
+                res.get("requeued"), res.get("scanned"), res.get("skipped"),
+            )
+        except Exception as e:
+            current_app.logger.exception(f"[rewrite/error-sweeper] failed: {e}")        
+
+# --------------------------------------------------------------------------- #
 # 2) GSC メトリクス毎日更新
 # --------------------------------------------------------------------------- #
 @_safe_job
@@ -1142,6 +1177,23 @@ def init_scheduler(app):
         misfire_grace_time=600,
     )
     app.logger.info("Scheduler started: rewrite_retry every %s minutes", os.getenv("REWRITE_RETRY_EVERY_MIN", "20"))
+
+    # 🆕 リライト：エラー自動回収スイーパー（専用ENVで間隔/条件を独立制御）
+    if os.getenv("REWRITE_ERR_SWEEP_ENABLED", "1") == "1":
+        scheduler.add_job(
+            func=_rewrite_error_sweeper_job,
+            trigger="interval",
+            minutes=int(os.getenv("REWRITE_ERR_SWEEP_EVERY_MIN", "12")),
+            args=[app],
+            id="rewrite_error_sweeper",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=600,
+        )
+        app.logger.info("Scheduler started: rewrite_error_sweeper every %s minutes", os.getenv("REWRITE_ERR_SWEEP_EVERY_MIN", "12"))
+    else:
+        app.logger.info("Scheduler skipped: rewrite_error_sweeper (REWRITE_ERR_SWEEP_ENABLED!=1)")
 
     # ✅ 内部SEO ナイトリー実行（環境変数でON/OFF可能／レガシー運用）
     #   - デフォルト: 毎日 18:15 UTC = JST 03:15
