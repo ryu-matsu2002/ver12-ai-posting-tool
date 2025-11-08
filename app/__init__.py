@@ -90,8 +90,18 @@ def create_app() -> Flask:
     _ca.setdefault("keepalives_interval", int(os.getenv("PG_KEEPALIVE_INTERVAL", 10)))
     _ca.setdefault("keepalives_count", int(os.getenv("PG_KEEPALIVE_COUNT", 5)))
     # DATABASE_URL が Postgres で、sslmode 未指定なら require を既定に（既に指定されていれば尊重）
-    if "postgresql" in str(app.config.get("SQLALCHEMY_DATABASE_URI", "")).lower():
-        _ca.setdefault("sslmode", os.getenv("PG_SSLMODE", "require"))
+    _uri = str(app.config.get("SQLALCHEMY_DATABASE_URI", "") or "")
+    if "postgresql" in _uri.lower():
+        # ローカル接続（localhost/127.0.0.1/UNIXソケット）なら SSL を既定で無効化。
+        # 環境変数 PG_SSLMODE があればそれを優先（既存運用を壊さない）。
+        _is_local = (
+            ("localhost" in _uri)
+            or ("127.0.0.1" in _uri)
+            or ("host=/" in _uri)                # DSN のクエリに host=/var/run/postgresql 等
+            or ("/var/run/postgresql" in _uri)   # 直接記述されている場合
+        )
+        _default_sslmode = os.getenv("PG_SSLMODE", "disable" if _is_local else "require")
+        _ca.setdefault("sslmode", _default_sslmode)
     _eng["connect_args"] = _ca
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = _eng
 
