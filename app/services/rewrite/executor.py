@@ -17,6 +17,7 @@ from bs4 import BeautifulSoup, NavigableString, Comment
 from openai import OpenAI, BadRequestError
 
 from app import db
+from app import redis_client  # ← 追加：サイト隔離フラグの持続化に利用
 # フォールバック収集を ChatGPT検索API に切替
 from app.services.rewrite.providers import openai_search as osearch
 # 見出し抽出は自前HTTP＋BS4。serp_collectorの軽量ユーティリティだけを直接利用
@@ -124,6 +125,47 @@ VALIDATION_TEXTNODE_TOLERANCE = _env_float("VALIDATION_TEXTNODE_TOLERANCE", 0.20
 # WP即時リトライ回数（1+N回試す）。既定は従来の2（=最大3回）
 REWRITE_IMMEDIATE_RETRY = _env_int("REWRITE_IMMEDIATE_RETRY", 2)
 REWRITE_MAX_ATTEMPTS     = _env_int("REWRITE_MAX_ATTEMPTS", 6)
+# 401/403 の自動隔離 TTL（秒）。既定 24h
+AUTH_BLOCK_TTL_SEC       = _env_int("REWRITE_AUTH_BLOCK_TTL_SEC", 24 * 60 * 60)
+
+# ========== 401/403 サイト隔離（Redis） ==========
+def _auth_block_key(site_id: int) -> str:
+    return f"rewrite:auth_block:{int(site_id)}"
+
+def _is_site_auth_blocked(site_id: int) -> bool:
+    try:
+        return bool(redis_client.get(_auth_block_key(site_id)))
+    except Exception:
+        # Redis不調時は“ブロックしない”で進め、可用性を優先
+        return False
+
+def _set_site_auth_block(site_id: int, reason_code: int, ttl_sec: int = AUTH_BLOCK_TTL_SEC) -> None:
+    try:
+        redis_client.setex(_auth_block_key(site_id), ttl_sec, str(reason_code))
+    except Exception:
+        # 監査に残せれば十分。Redisに依存しすぎない
+        logging.warning(f"[rewrite/auth_block] setex failed site_id={site_id} reason={reason_code}")
+
+def _get_blocked_site_ids_from_redis(limit: int = 512) -> List[int]:
+    """
+    取得時にクエリから除外するため、現在ブロック中の site_id をまとめて取り出す。
+    keys/scan は重いので scan_iter を低頻度で使う想定（候補プラン取得の瞬間だけ）。
+    """
+    blocked: List[int] = []
+    try:
+        it = redis_client.scan_iter(match="rewrite:auth_block:*", count=limit)
+        for k in it:
+            # k は bytes になる環境がある
+            ks = k.decode() if isinstance(k, (bytes, bytearray)) else str(k)
+            try:
+                site_id = int(ks.rsplit(":", 1)[-1])
+                blocked.append(site_id)
+            except Exception:
+                continue
+    except Exception:
+        # Redis不調時は“除外なし”で進める（停止させない）
+        pass
+    return blocked
 
 # ========== ユーティリティ（article_generator.py と同系の振る舞い） ==========
 
@@ -1031,7 +1073,7 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
     """
     app = current_app._get_current_object()
     with app.app_context():
-        # 1) まず ID だけを FOR UPDATE SKIP LOCKED で取得（JOINしない）
+        # 1) まず ID だけを FOR UPDATE SKIP LOCKED で取得
         id_q = db.session.query(ArticleRewritePlan.id).filter(
             ArticleRewritePlan.user_id == user_id,
             ArticleRewritePlan.is_active.is_(True),
@@ -1040,11 +1082,22 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
             ArticleRewritePlan.priority_score.desc(),
             ArticleRewritePlan.created_at.asc(),
         )
+        # plan_id 指定はそのまま尊重
         if plan_id:
             id_q = id_q.filter(ArticleRewritePlan.id == plan_id)
 
         # Postgresに「どのテーブルをロックするか」を明示
         id_q = id_q.with_for_update(skip_locked=True, of=ArticleRewritePlan)
+
+        # 1.1) ブロック中サイトをクエリ段階で除外（Redisで軽量に収集）
+        blocked_site_ids = _get_blocked_site_ids_from_redis()
+        if blocked_site_ids and not plan_id:
+            try:
+                # site_id 列があるため直接除外（追加JOIN不要）
+                id_q = id_q.filter(~ArticleRewritePlan.site_id.in_(blocked_site_ids))
+            except Exception:
+                # IN 句で落ちたら“あとで弾く”方針にフォールバック
+                pass
 
         target_id = id_q.limit(1).scalar()
         if not target_id:
@@ -1058,6 +1111,11 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
         if not plan:
             return {"status": "empty", "message": f"ID={target_id} の計画が見つかりません"}
 
+        # 2.1) サイトが“認証ブロック中”なら、このプランは選ばない（queuedのまま保持・スロット非占有）
+        if _is_site_auth_blocked(plan.site_id):
+            return {"status": "skipped(site_blocked)", "plan_id": plan.id, "site_id": plan.site_id}
+
+        # 2.2) ここで初めて running 化（ブロック確認後に行うのが重要）
         plan.status = "running"
         plan.started_at = datetime.utcnow()
         plan.attempts = (plan.attempts or 0) + 1  # ※ドライランでカウントしたくない場合は後段で調整
@@ -1365,10 +1423,15 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
                             "error": f"transient_wp_error:{status}",
                         }
                     else:
-                        # 恒久的（permanent）と判断：通常の error 終了
+                        # 恒久的（permanent）と判断
+                        # 401/403 は“サイト認証ブロック”を発火し、以降のプランは取得段階で除外する
                         log.wp_status = "error"
                         if not log.error_message:
                             log.error_message = f"permanent_wp_error:{status}"
+                        if status in (401, 403):
+                            _set_site_auth_block(site.id, status, AUTH_BLOCK_TTL_SEC)
+                            # UI で分かるようにメッセージを明示
+                            log.error_message = (log.error_message or "") + "; site_auth_blocked"
                         # plan 側にも分類を明示
                         plan.last_error = f"permanent:wp_status={status}"
                         db.session.commit()
