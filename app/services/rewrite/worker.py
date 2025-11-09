@@ -35,6 +35,10 @@ try:
 except Exception:
     _rewrite_retry = None
 
+# フォールバック解決のキャッシュ
+_tick_fn_cache = None
+_retry_fn_cache = None
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("rewrite_worker")
 
@@ -69,44 +73,59 @@ def _resolve_funcs():
     return tick_fn, retry_fn
 
 def _job_rewrite_tick(app):
-    """
-    rewrite_tick 実体を段階解決して実行。
-    優先: app.tasks → app.services.rewrite.bulk_runner → app.services.rewrite.executor
-    """
-    tick_fn = _rewrite_tick
-    if tick_fn is None:
-        # 動的解決（ここで見つかれば以後はこれが使われる）
-        tick_fn, _ = _resolve_funcs()
-
-    if not tick_fn:
-        logger.error("rewrite_tick が見つかりません（app.tasks 等 未定義）")
+    global _tick_fn_cache
+    fn = _rewrite_tick
+    if fn is None:
+        if _tick_fn_cache is None:
+            tick_fn, _ = _resolve_funcs()
+            _tick_fn_cache = tick_fn
+        fn = _tick_fn_cache
+    if fn is None:
+        # bulk_runner には rewrite_tick_once があるので、それも探す
+        try:
+            br = importlib.import_module("app.services.rewrite.bulk_runner")
+            if hasattr(br, "rewrite_tick_once"):
+                fn = getattr(br, "rewrite_tick_once")
+                _tick_fn_cache = fn
+                logger.info("rewrite_tick を bulk_runner.rewrite_tick_once へフォールバック")
+        except Exception as e:
+            logger.debug("bulk_runner fallback failed: %s", e)
+    if fn is None:
+        logger.error("rewrite_tick が見つかりません（app.tasks もフォールバックも未定義）")
         return
-
-    try:
-        with app.app_context():
-            tick_fn()
-    except Exception as e:
-        logger.exception("rewrite_tick 実行エラー: %s", e)
-
+    with app.app_context():
+        # 引数違いに対応（fn(app, ...) or fn()）
+        try:
+            return fn(app, dry_run=None)
+        except TypeError:
+            return fn()
 
 def _job_rewrite_retry(app):
-    """
-    rewrite_retry 実体を段階解決して実行（未定義ならスキップ）。
-    """
-    retry_fn = _rewrite_retry
-    if retry_fn is None:
-        # 動的解決
-        _, retry_fn = _resolve_funcs()
-
-    if not retry_fn:
+    global _retry_fn_cache
+    fn = _rewrite_retry
+    if fn is None:
+        if _retry_fn_cache is None:
+            _, retry_fn = _resolve_funcs()
+            _retry_fn_cache = retry_fn
+        fn = _retry_fn_cache
+    if fn is None:
+        # bulk_runner の失敗再試行APIにフォールバック
+        try:
+            br = importlib.import_module("app.services.rewrite.bulk_runner")
+            if hasattr(br, "retry_failed_plans"):
+                fn = getattr(br, "retry_failed_plans")
+                _retry_fn_cache = fn
+                logger.info("rewrite_retry を bulk_runner.retry_failed_plans へフォールバック")
+        except Exception as e:
+            logger.debug("bulk_runner retry fallback failed: %s", e)
+    if fn is None:
         logger.warning("rewrite_retry が未定義のためスキップ（致命的ではありません）")
         return
-
-    try:
-        with app.app_context():
-            retry_fn()
-    except Exception as e:
-        logger.exception("rewrite_retry 実行エラー: %s", e)
+    with app.app_context():
+        try:
+            return fn(app)
+        except TypeError:
+            return fn()
 
 
 def main():
