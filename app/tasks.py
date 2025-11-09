@@ -1136,20 +1136,24 @@ def init_scheduler(app):
     )
 
     # 🆕 リライト：常時キュー消化（短周期）
-    scheduler.add_job(
-        func=_rewrite_tick_job,
-        trigger="interval",
-        seconds=int(os.getenv("REWRITE_TICK_SEC", "30")),
-        args=[app],
-        id="rewrite_tick",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=300,
-    )
-    app.logger.info("Scheduler started: rewrite_tick every %ss", os.getenv("REWRITE_TICK_SEC", "30"))
+    # 既定は無効。独立ワーカー（app/services/rewrite/worker.py）で回す前提。
+    if os.getenv("REWRITE_SCHED_ENABLE_IN_TASKS", "0") == "1":
+        scheduler.add_job(
+            func=_rewrite_tick_job,
+            trigger="interval",
+            seconds=int(os.getenv("REWRITE_TICK_SEC", "30")),
+            args=[app],
+            id="rewrite_tick",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=300,
+        )
+        app.logger.info("Scheduler started (tasks.py): rewrite_tick every %ss", os.getenv("REWRITE_TICK_SEC", "30"))
+    else:
+        app.logger.info("Scheduler disabled (tasks.py): rewrite_tick (set REWRITE_SCHED_ENABLE_IN_TASKS=1 to enable)")
 
-    # 🆕 SERP 温め（夜間）
+    # 🆕 SERP 温め（夜間） ※これは従来どおり動かす（必要に応じて別ENVで切り替え可）
     serp_h = int(os.getenv("SERP_WARMUP_UTC_HOUR", "18"))
     serp_m = int(os.getenv("SERP_WARMUP_UTC_MIN",  "40"))
     scheduler.add_job(
@@ -1165,21 +1169,24 @@ def init_scheduler(app):
     app.logger.info(f"Scheduler started: serp_warmup_nightly daily at {serp_h:02d}:{serp_m:02d} UTC")
 
     # 🆕 リライト：失敗計画の再キュー（時間経過・回数上限内）
-    scheduler.add_job(
-        func=_rewrite_retry_job,
-        trigger="interval",
-        minutes=int(os.getenv("REWRITE_RETRY_EVERY_MIN", "20")),
-        args=[app],
-        id="rewrite_retry",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=600,
-    )
-    app.logger.info("Scheduler started: rewrite_retry every %s minutes", os.getenv("REWRITE_RETRY_EVERY_MIN", "20"))
-
+    if os.getenv("REWRITE_SCHED_ENABLE_IN_TASKS", "0") == "1":
+        scheduler.add_job(
+            func=_rewrite_retry_job,
+            trigger="interval",
+            minutes=int(os.getenv("REWRITE_RETRY_EVERY_MIN", "20")),
+            args=[app],
+            id="rewrite_retry",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=600,
+        )
+        app.logger.info("Scheduler started (tasks.py): rewrite_retry every %s minutes", os.getenv("REWRITE_RETRY_EVERY_MIN", "20"))
+    else:
+        app.logger.info("Scheduler disabled (tasks.py): rewrite_retry (set REWRITE_SCHED_ENABLE_IN_TASKS=1 to enable)")
     # 🆕 リライト：エラー自動回収スイーパー（専用ENVで間隔/条件を独立制御）
-    if os.getenv("REWRITE_ERR_SWEEP_ENABLED", "1") == "1":
+    # これも tasks 側では既定で無効。独立ワーカーに任せる。
+    if os.getenv("REWRITE_SCHED_ENABLE_IN_TASKS", "0") == "1" and os.getenv("REWRITE_ERR_SWEEP_ENABLED", "1") == "1":
         scheduler.add_job(
             func=_rewrite_error_sweeper_job,
             trigger="interval",
@@ -1193,7 +1200,7 @@ def init_scheduler(app):
         )
         app.logger.info("Scheduler started: rewrite_error_sweeper every %s minutes", os.getenv("REWRITE_ERR_SWEEP_EVERY_MIN", "12"))
     else:
-        app.logger.info("Scheduler skipped: rewrite_error_sweeper (REWRITE_ERR_SWEEP_ENABLED!=1)")
+        app.logger.info("Scheduler disabled (tasks.py): rewrite_error_sweeper (set REWRITE_SCHED_ENABLE_IN_TASKS=1 to enable)")
 
     # ✅ 内部SEO ナイトリー実行（環境変数でON/OFF可能／レガシー運用）
     #   - デフォルト: 毎日 18:15 UTC = JST 03:15
