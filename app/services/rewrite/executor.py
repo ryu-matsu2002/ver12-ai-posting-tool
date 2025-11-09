@@ -15,7 +15,7 @@ from sqlalchemy.orm import joinedload, selectinload
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup, NavigableString, Comment
 from openai import OpenAI, BadRequestError
-
+import html  # ★ 追加：フォールバックのテキスト化に使用
 from app import db
 from app import redis_client  # ← 追加：サイト隔離フラグの持続化に利用
 # フォールバック収集を ChatGPT検索API に切替
@@ -173,18 +173,22 @@ def _tok(s: str) -> int:
     return int(len(s) / 1.8)
 
 def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float, user_id: Optional[int] = None) -> str:
-    used = sum(_tok(m.get("content", "")) for m in msgs)
-    available = CTX_LIMIT - used - 16
-    max_t = min(max_t, max(1, available))
+    def _recalc_max_tokens(messages: List[Dict[str, str]], desired: int) -> int:
+        used = sum(_tok(m.get("content", "")) for m in messages)
+        available = CTX_LIMIT - used - 16
+        return min(desired, max(1, available))
+
+    # 初回 max_tokens を計算
+    max_t = _recalc_max_tokens(msgs, max_t)
     if max_t < 1:
         raise ValueError("Calculated max_tokens is below minimum.")
 
-    def _call(m: int) -> str:
+    def _call(messages: List[Dict[str, str]], m: int) -> str:
         # 一部SDKで timeout キーワード未対応 → フォールバック
         try:
             res = client.chat.completions.create(
                 model=MODEL,
-                messages=msgs,
+                messages=messages,
                 max_tokens=m,
                 temperature=temp,
                 top_p=TOP_P,
@@ -193,7 +197,7 @@ def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float, user_id: Optional
         except TypeError:
             res = client.chat.completions.create(
                 model=MODEL,
-                messages=msgs,
+                messages=messages,
                 max_tokens=m,
                 temperature=temp,
                 top_p=TOP_P,
@@ -225,13 +229,56 @@ def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float, user_id: Optional
             logging.warning("⚠️ OpenAI response was cut off due to max_tokens.")
         return content
 
-    try:
-        return _call(max_t)
-    except BadRequestError as e:
-        if "max_tokens" in str(e):
-            retry_t = max(1, int(max_t * SHRINK))
-            return _call(retry_t)
-        raise
+    # ★ 段階的縮約ロジック
+    def _shrink_messages(messages: List[Dict[str, str]], target_chars: int) -> List[Dict[str, str]]:
+        def clamp_text(text: str, limit: int) -> str:
+            if text is None:
+                return ""
+            if len(text) <= limit:
+                return text
+            return text[:limit]
+        shrunk: List[Dict[str, str]] = []
+        for m in messages:
+            c = m.get("content", "")
+            # HTMLを含んでいそうならテキスト抽出して短縮（タグを除去）
+            if "<" in c and ">" in c:
+                try:
+                    text_only = BeautifulSoup(c, "html.parser").get_text(" ", strip=True)
+                except Exception:
+                    text_only = html.unescape(c)
+                shrunk.append({**m, "content": clamp_text(text_only, target_chars)})
+            else:
+                shrunk.append({**m, "content": clamp_text(c, target_chars)})
+        return shrunk
+
+    tries = 0
+    curr_msgs = msgs
+    while True:
+        try:
+            # 現在のメッセージ長に合わせて max_tokens を都度再計算
+            curr_max_t = _recalc_max_tokens(curr_msgs, max_t)
+            return _call(curr_msgs, curr_max_t)
+        except BadRequestError as e:
+            emsg = str(e)
+            # 1) max_tokens 指摘 → そのまま縮小
+            if "max_tokens" in emsg:
+                max_t = max(1, int(max_t * SHRINK))
+                continue
+            # 2) 文脈長超過 → メッセージ自体を縮約して再試行（最大3回）
+            if ("context_length_exceeded" in emsg) or ("maximum context length" in emsg) or ("This model's maximum context length" in emsg):
+                tries += 1
+                if tries >= 3:
+                    raise
+                # 試行ごとに強めに圧縮
+                # 1回目: ~90k字, 2回目: ~60k字, 3回目: ~40k字相当（実トークンは概算）
+                target = {1: 90000, 2: 60000}.get(tries, 40000)
+                curr_msgs = _shrink_messages(curr_msgs, target_chars=target)
+                # メッセージ縮約に伴い max_tokens も再調整
+                max_t = _recalc_max_tokens(curr_msgs, max_t)
+                continue
+            # それ以外は従来通り上に投げる
+            raise
+
 def _safe_json_loads(s: str):
     try:
         return json.loads(s)
