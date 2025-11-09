@@ -255,7 +255,7 @@ def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float, user_id: Optional
                 max_tokens=m,
                 temperature=temp,
                 top_p=TOP_P,
-                timeout=120,
+                timeout=300,
             )
         except TypeError:
             res = client.chat.completions.create(
