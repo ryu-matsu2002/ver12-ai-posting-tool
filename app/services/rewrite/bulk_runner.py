@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import logging
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timedelta, timezone
 
@@ -67,18 +68,35 @@ def _pick_next_plan_id() -> Optional[Tuple[int, int]]:
     """
     次に実行すべき queued 計画を 1 件返す。(plan_id, user_id)
     """
-    row = (
-        db.session.query(ArticleRewritePlan.id, ArticleRewritePlan.user_id)
+    # 401/403で隔離中のsiteを除外するため、候補を複数件取得して順に判定
+    candidates = (
+        db.session.query(
+            ArticleRewritePlan.id,
+            ArticleRewritePlan.user_id,
+            ArticleRewritePlan.site_id,
+        )
         .filter(
             ArticleRewritePlan.is_active.is_(True),
             ArticleRewritePlan.status == "queued",
         )
-        .order_by(ArticleRewritePlan.priority_score.desc(),
-                  ArticleRewritePlan.created_at.asc())
-        .limit(1)
-        .first()
+        .order_by(
+            ArticleRewritePlan.priority_score.desc(),
+            ArticleRewritePlan.created_at.asc(),
+        )
+        .limit(20)
+        .all()
     )
-    return (row[0], row[1]) if row else None
+    for pid, uid, sid in candidates:
+        try:
+            # executor側のRedisチェックを利用
+            if rewrite_executor._is_site_auth_blocked(sid):
+                logging.info(f"[rewrite/pick] skip plan_id={pid} site_id={sid} (auth_blocked)")
+                continue
+            return (pid, uid)
+        except Exception as e:
+            logging.warning(f"[rewrite/pick] auth_block check failed plan_id={pid} site_id={sid}: {e}")
+            continue
+    return None
 
 
 def rewrite_tick_once(app, *, dry_run: Optional[bool] = None) -> Optional[Dict[str, Any]]:
