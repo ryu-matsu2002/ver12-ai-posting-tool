@@ -127,6 +127,9 @@ REWRITE_IMMEDIATE_RETRY = _env_int("REWRITE_IMMEDIATE_RETRY", 2)
 REWRITE_MAX_ATTEMPTS     = _env_int("REWRITE_MAX_ATTEMPTS", 6)
 # 401/403 の自動隔離 TTL（秒）。既定 24h
 AUTH_BLOCK_TTL_SEC       = _env_int("REWRITE_AUTH_BLOCK_TTL_SEC", 24 * 60 * 60)
+# running貼り付きの判定しきい値（分）。既定 30分
+STUCK_THRESHOLD_MIN      = _env_int("REWRITE_STUCK_THRESHOLD_MIN", 30)
+STUCK_RECOVER_THROTTLE_S = _env_int("REWRITE_STUCK_RECOVER_THROTTLE_S", 60)
 
 # ========== 401/403 サイト隔離（Redis） ==========
 def _auth_block_key(site_id: int) -> str:
@@ -166,6 +169,66 @@ def _get_blocked_site_ids_from_redis(limit: int = 512) -> List[int]:
         # Redis不調時は“除外なし”で進める（停止させない）
         pass
     return blocked
+
+# ========== running貼り付きの自動回復（軽量ウォッチドッグ） ==========
+def _recover_stuck_plans_once() -> Dict[str, int]:
+    """
+    しきい値超の running を自動回復する。
+    - attempts < REWRITE_MAX_ATTEMPTS: queued に戻して priority を微減点
+    - attempts >= 上限: failed に確定
+    Redisキーで60秒に1回だけ実行（多重実行抑制）。
+    """
+    stats = {"requeued": 0, "failed": 0}
+    try:
+        key = "rewrite:stuck_recover:throttle"
+        if redis_client.get(key):
+            return stats
+        # 60秒スロットル
+        redis_client.setex(key, STUCK_RECOVER_THROTTLE_S, "1")
+    except Exception:
+        # Redis不調なら実行自体は続ける（止めない）
+        pass
+
+    try:
+        # 1) 再キュー対象（attempts < 上限）
+        q1 = text(f"""
+            UPDATE article_rewrite_plans
+            SET status='queued',
+                started_at=NULL,
+                finished_at=NULL,
+                -- 試行回数に応じて軽く優先度を減点（枯渇回避）
+                priority_score = COALESCE(priority_score, 0) - LEAST(GREATEST(attempts,0)*0.5, 5)
+            WHERE status='running'
+              AND started_at < now() - interval '{STUCK_THRESHOLD_MIN} minutes'
+              AND COALESCE(attempts,0) < :max_attempts
+            RETURNING id
+        """)
+        rows1 = db.session.execute(q1, {"max_attempts": REWRITE_MAX_ATTEMPTS}).fetchall()
+        stats["requeued"] = len(rows1)
+
+        # 2) 上限到達は failed に確定
+        q2 = text(f"""
+            UPDATE article_rewrite_plans
+            SET status='failed',
+                finished_at=now(),
+                attempts=COALESCE(attempts,0)+1,
+                last_error = COALESCE(last_error,'') || CASE WHEN position('stuck_timeout' in COALESCE(last_error,''))=0 THEN ';stuck_timeout' ELSE '' END
+            WHERE status='running'
+              AND started_at < now() - interval '{STUCK_THRESHOLD_MIN} minutes'
+              AND COALESCE(attempts,0) >= :max_attempts
+            RETURNING id
+        """)
+        rows2 = db.session.execute(q2, {"max_attempts": REWRITE_MAX_ATTEMPTS}).fetchall()
+        stats["failed"] = len(rows2)
+
+        db.session.commit()
+    except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        logging.warning(f"[rewrite/stuck_recover] skipped: {e}")
+    return stats
 
 # ========== ユーティリティ（article_generator.py と同系の振る舞い） ==========
 
@@ -1120,6 +1183,12 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
     """
     app = current_app._get_current_object()
     with app.app_context():
+        # 0) 実行前に running 貼り付きの軽量回復を一度だけ実行（60秒スロットル）
+        try:
+            _recover_stuck_plans_once()
+        except Exception:
+            pass
+
         # 1) まず ID だけを FOR UPDATE SKIP LOCKED で取得
         id_q = db.session.query(ArticleRewritePlan.id).filter(
             ArticleRewritePlan.user_id == user_id,
