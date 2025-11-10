@@ -170,13 +170,7 @@ window.addEventListener('DOMContentLoaded', () => {
     try{
       const q = $("#search-box").value.trim();
       const url = q ? `/admin/rewrite/users?q=${encodeURIComponent(q)}` : `/admin/rewrite/users`;
-      // 一覧と進捗を並列取得（合計/行表示を progress に同期）
-      const [data, prog] = await Promise.all([
-        fetchJSON(url),
-        fetchJSON(`/admin/rewrite/progress`)  // uid なし → users[] と totals を返す
-      ]);
-      const progUsers = Array.isArray(prog.users) ? prog.users : [];
-      const progMap = new Map(progUsers.map(u => [String(u.user_id), u]));
+      const data = await fetchJSON(url);
 
       // ID昇順でクライアントソート（API順に依存しない）
       const items = (data.items || []).slice().sort((a,b) => (a.user_id||0) - (b.user_id||0));
@@ -187,12 +181,10 @@ window.addEventListener('DOMContentLoaded', () => {
       const lastStarted = getMarked();
 
       items.forEach(u=>{
-        // 進捗側の数値で上書き（なければ従来値）
-        const pu = progMap.get(String(u.user_id));
-        const queued  = pu ? Number(pu.queued  || 0) : Number(u.queued  || 0);
-        const running = pu ? Number(pu.running || 0) : Number(u.running || 0);
-        const success = pu ? Number(pu.success || 0) : Number(u.success || 0);
-        const error   = pu ? rawError(pu.error)       : rawError(u.error); // 失敗は最新ログベース
+        const queued  = Number(u.queued)  || 0;
+        const running = Number(u.running) || 0;
+        const success = Number(u.success) || 0;
+        const error   = rawError(u.error); // 最新ログベースの失敗をそのまま
         const siteCnt = (typeof u.site_count === "number") ? u.site_count : (u.site_cnt || u.sites || 0);
         const targetArticles = (typeof u.target_articles === "number")
           ? u.target_articles
@@ -236,21 +228,19 @@ window.addEventListener('DOMContentLoaded', () => {
       $("#sum-running").textContent = sumR;
       $("#sum-success").textContent = sumS;
       $("#sum-error").textContent   = sumE;
-      // progress 側の last_updated があればそれを表示
-      const ts = prog && prog.last_updated ? new Date(prog.last_updated).toLocaleString() : new Date().toLocaleString();
-      $("#last-updated").textContent = "更新: " + ts;
-      // 追加：取得済みの progress を渡して二度目の fetch を避ける
-      await applyRunningBadges(prog);
+      $("#last-updated").textContent = "更新: " + new Date().toLocaleString();
+      // 追加：/admin/rewrite/progress の users スナップショットで「実行中」表示に差し替え
+      await applyRunningBadges();
     }catch(err){
       tbody.innerHTML = `<tr><td colspan="9" class="text-danger text-center py-3">読み込み失敗: ${err.message}</td></tr>`;
     }
   }
 
   // 追加：実行中ユーザーのボタンを「実行中」に変更し、バッジを出す
-  async function applyRunningBadges(progressOptional){
+  async function applyRunningBadges(){
     try{
-      const progress = progressOptional || await fetchJSON(`/admin/rewrite/progress`);
-      const list = progress.users || [];
+      const prog = await fetchJSON(`/admin/rewrite/progress`); // uidなし → users[] が返る
+      const list = prog.users || [];
       list.forEach(u => {
         const row = tbody.querySelector(`tr[data-user-id="${u.user_id}"]`);
         if(!row) return;
