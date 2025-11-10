@@ -170,7 +170,13 @@ window.addEventListener('DOMContentLoaded', () => {
     try{
       const q = $("#search-box").value.trim();
       const url = q ? `/admin/rewrite/users?q=${encodeURIComponent(q)}` : `/admin/rewrite/users`;
-      const data = await fetchJSON(url);
+      // 一覧と進捗を並列取得（合計/行表示を progress に同期）
+      const [data, prog] = await Promise.all([
+        fetchJSON(url),
+        fetchJSON(`/admin/rewrite/progress`)  // uid なし → users[] と totals を返す
+      ]);
+      const progUsers = Array.isArray(prog.users) ? prog.users : [];
+      const progMap = new Map(progUsers.map(u => [String(u.user_id), u]));
 
       // ID昇順でクライアントソート（API順に依存しない）
       const items = (data.items || []).slice().sort((a,b) => (a.user_id||0) - (b.user_id||0));
@@ -181,10 +187,12 @@ window.addEventListener('DOMContentLoaded', () => {
       const lastStarted = getMarked();
 
       items.forEach(u=>{
-        const queued  = Number(u.queued)  || 0;
-        const running = Number(u.running) || 0;
-        const success = Number(u.success) || 0;
-        const error   = rawError(u.error); // 最新ログベースの失敗をそのまま
+        // 進捗側の数値で上書き（なければ従来値）
+        const pu = progMap.get(String(u.user_id));
+        const queued  = pu ? Number(pu.queued  || 0) : Number(u.queued  || 0);
+        const running = pu ? Number(pu.running || 0) : Number(u.running || 0);
+        const success = pu ? Number(pu.success || 0) : Number(u.success || 0);
+        const error   = pu ? rawError(pu.error)       : rawError(u.error); // 失敗は最新ログベース
         const siteCnt = (typeof u.site_count === "number") ? u.site_count : (u.site_cnt || u.sites || 0);
         const targetArticles = (typeof u.target_articles === "number")
           ? u.target_articles
@@ -193,6 +201,8 @@ window.addEventListener('DOMContentLoaded', () => {
         sumQ += queued; sumR += running; sumS += success; sumE += error;
 
         const tr = document.createElement("tr");
+        // 行に user_id を持たせて、後段の実行中バッジ適用で参照する
+        tr.setAttribute("data-user-id", String(u.user_id));
         if (lastStarted && String(u.user_id) === String(lastStarted)) {
           tr.classList.add("table-primary"); // 直近で「開始」を押したユーザーを可視化
         }
@@ -226,9 +236,46 @@ window.addEventListener('DOMContentLoaded', () => {
       $("#sum-running").textContent = sumR;
       $("#sum-success").textContent = sumS;
       $("#sum-error").textContent   = sumE;
-      $("#last-updated").textContent = "更新: " + new Date().toLocaleString();
+      // progress 側の last_updated があればそれを表示
+      const ts = prog && prog.last_updated ? new Date(prog.last_updated).toLocaleString() : new Date().toLocaleString();
+      $("#last-updated").textContent = "更新: " + ts;
+      // 追加：取得済みの progress を渡して二度目の fetch を避ける
+      await applyRunningBadges(prog);
     }catch(err){
       tbody.innerHTML = `<tr><td colspan="9" class="text-danger text-center py-3">読み込み失敗: ${err.message}</td></tr>`;
+    }
+  }
+
+  // 追加：実行中ユーザーのボタンを「実行中」に変更し、バッジを出す
+  async function applyRunningBadges(progressOptional){
+    try{
+      const progress = progressOptional || await fetchJSON(`/admin/rewrite/progress`);
+      const list = progress.users || [];
+      list.forEach(u => {
+        const row = tbody.querySelector(`tr[data-user-id="${u.user_id}"]`);
+        if(!row) return;
+        const btn = row.querySelector('button[data-action="enqueue"]');
+        const runningBadge = row.querySelector('[data-role="running-badge"]');
+        const isRunning = !!u.is_running;
+        if (btn){
+          if (isRunning){
+            btn.textContent = "実行中";
+            btn.classList.remove("btn-primary");
+            btn.classList.add("btn-secondary");
+            btn.disabled = true;
+            if (runningBadge) runningBadge.classList.remove("d-none");
+          }else{
+            btn.textContent = "開始";
+            btn.classList.remove("btn-secondary");
+            btn.classList.add("btn-primary");
+            btn.disabled = false;
+            if (runningBadge) runningBadge.classList.add("d-none");
+          }
+        }
+      });
+    }catch(e){
+      // サイレント失敗（一覧自体は表示できているためUX優先）
+      console.warn("applyRunningBadges failed:", e);
     }
   }
 
@@ -290,6 +337,11 @@ window.addEventListener('DOMContentLoaded', () => {
         markStarted(uid);
         if (row) row.classList.add("table-primary");
         if (runningBadge) runningBadge.classList.remove("d-none");
+        // 押した直後も実行中表示に切替（サーバ側の取りこぼしがあっても即時反映）
+        btn.textContent = "実行中";
+        btn.classList.remove("btn-primary");
+        btn.classList.add("btn-secondary");
+        btn.disabled = true;
       }
       else if(act === "retry"){
         await fetchJSON("/admin/rewrite/retry_failed",{
@@ -299,7 +351,7 @@ window.addEventListener('DOMContentLoaded', () => {
         });
       }
 
-      await loadUsers();
+      await loadUsers(); // 行再描画後に applyRunningBadges も再実行される
     }catch(err){
       alert("操作失敗: " + err.message);
     }finally{

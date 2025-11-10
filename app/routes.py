@@ -1792,15 +1792,17 @@ def admin_rewrite_progress():
 
     uid = request.args.get("user_id", type=int)
 
-    # ---- queued / running は plans からリアルタイム集計
-    plans_q = db.session.query(ArticleRewritePlan)
+    # ---- queued / running は plans（is_active=TRUE）からリアルタイム集計
+    base_plans_q = db.session.query(ArticleRewritePlan).filter(ArticleRewritePlan.is_active.is_(True))
     if uid:
-        plans_q = plans_q.filter(ArticleRewritePlan.user_id == uid)
+        base_plans_q = base_plans_q.filter(ArticleRewritePlan.user_id == uid)
+
     plan_agg = (
         db.session.query(
             func.sum(case((ArticleRewritePlan.status == "queued", 1), else_=0)).label("queued"),
             func.sum(case((ArticleRewritePlan.status.in_(["running","in_progress"]), 1), else_=0)).label("running"),
         )
+        .filter(ArticleRewritePlan.is_active.is_(True))
         .filter(*( [ArticleRewritePlan.user_id == uid] if uid else [] ))
         .one()
     )
@@ -1833,10 +1835,42 @@ def admin_rewrite_progress():
         "error":   int(logs_row.get("error", 0) or 0),
     }
 
+    # --- ユーザー別の実行フラグ（一覧ボタンの文言切替材料）
+    users_snapshot = None
+    user_snapshot  = None
+    if uid:
+        user_snapshot = {
+            "user_id": uid,
+            "queued":  totals["queued"],
+            "running": totals["running"],
+            "is_running": (totals["queued"] + totals["running"]) > 0,
+        }
+    else:
+        # 一覧用：is_active=TRUE かつ queued/running の件数を user_id ごとに集計
+        rows = (
+            db.session.query(
+                ArticleRewritePlan.user_id.label("user_id"),
+                func.sum(case((ArticleRewritePlan.status == "queued", 1), else_=0)).label("queued"),
+                func.sum(case((ArticleRewritePlan.status.in_(["running","in_progress"]), 1), else_=0)).label("running"),
+            )
+            .filter(ArticleRewritePlan.is_active.is_(True))
+            .group_by(ArticleRewritePlan.user_id)
+            .all()
+        )
+        users_snapshot = [
+            {
+                "user_id": r.user_id,
+                "queued":  int(r.queued or 0),
+                "running": int(r.running or 0),
+                "is_running": (int(r.queued or 0) + int(r.running or 0)) > 0,
+            }
+            for r in rows
+        ]
+
     # 最近30件は従来どおり plans を表示（UIのテーブル互換）
     try:
         recent_plans = (
-            plans_q.order_by(
+            base_plans_q.order_by(
                 func.coalesce(
                     ArticleRewritePlan.finished_at,
                     ArticleRewritePlan.started_at,
@@ -1913,6 +1947,9 @@ def admin_rewrite_progress():
             "success": int(totals.get("success", 0)),
             "error": int(totals.get("error", 0)),
         },
+        # 追加：一覧で使うスナップショット（uid指定時は user_snapshot、未指定時は users_snapshot）
+        "user": user_snapshot,
+        "users": users_snapshot,
         "recent": recent,
         "last_updated": datetime.utcnow().isoformat() + "Z",
     })
