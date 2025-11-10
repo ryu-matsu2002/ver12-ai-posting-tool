@@ -6,6 +6,11 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.executors.pool import ThreadPoolExecutor
 import importlib
 import logging
+# ===== リライト専用プロセスの役割を強制指定（.envより優先） =====
+# ここは最優先で「ハード上書き」する。setdefaultではダメ。
+os.environ["JOBS_ROLE"] = "rewrite"
+os.environ["SCHEDULER_ENABLED"] = "1"
+
 # --- ENV helpers ---
 def _env_int(k: str, default: int) -> int:
     """
