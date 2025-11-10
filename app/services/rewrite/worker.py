@@ -6,7 +6,16 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.executors.pool import ThreadPoolExecutor
 import importlib
 import logging
-
+# --- ENV helpers ---
+def _env_int(k: str, default: int) -> int:
+    """
+    環境変数 k を int で取得。未設定/不正は default。
+    """
+    try:
+        return int(os.getenv(k, str(default)))
+    except Exception:
+        return default
+      
 # ---- アプリ生成の取り出し（どちらの構成でも動くようフォールバック） ----
 _app = None
 def _get_app():
@@ -135,15 +144,21 @@ def main():
 
     app = _get_app()
 
+    # ---- 実行プール/ジョブ既定を ENV 化（過剰並列でのスキップ連発・APIバースト抑制） ----
+    default_workers = _env_int("REWRITE_EXEC_DEFAULT_WORKERS", 8)   # 既定 8
+    pool_workers    = _env_int("REWRITE_EXEC_POOL_WORKERS",    16)  # 既定 16
+    job_max_inst    = _env_int("REWRITE_JOB_MAX_INSTANCES",     4)  # 既定 4
+    misfire_grace   = _env_int("REWRITE_MISFIRE_GRACE_SEC",    60)  # 既定 60
+
     scheduler = BackgroundScheduler(
         executors={
-            "default": ThreadPoolExecutor(max_workers=32),
-            "rewrite_pool": ThreadPoolExecutor(max_workers=64),
+            "default": ThreadPoolExecutor(max_workers=default_workers),
+            "rewrite_pool": ThreadPoolExecutor(max_workers=pool_workers),
         },
         job_defaults={
             "coalesce": False,
-            "max_instances": 4,
-            "misfire_grace_time": 60,
+            "max_instances": job_max_inst,
+            "misfire_grace_time": misfire_grace,
         },
         timezone="Asia/Tokyo",
     )
@@ -157,34 +172,48 @@ def main():
     tick_job_id = f"rewrite_tick:{slot}"
     retry_job_id = f"rewrite_retry:{slot}"
 
-    # rewrite_tick（5秒ごと）
+    # ---- tick / retry の間隔・並列・coalesce を ENV 化 ----
+    tick_sec            = _env_int("REWRITE_TICK_SEC", 5)              # 既定 5秒
+    tick_max_instances  = _env_int("REWRITE_TICK_MAX_INST", 1)         # 既定 1
+    retry_sec           = _env_int("REWRITE_RETRY_SEC", 120)           # 既定 120秒
+    retry_max_instances = _env_int("REWRITE_RETRY_MAX_INST", 1)        # 既定 1
+    coalesce_tick       = os.getenv("REWRITE_TICK_COALESCE", "1") == "1"
+    coalesce_retry      = os.getenv("REWRITE_RETRY_COALESCE", "1") == "1"
+
+    logger.info(
+        "RewriteWorker slot=%s conf: tick_sec=%s tick_max_instances=%s retry_sec=%s retry_max_inst=%s "
+        "default_workers=%s pool_workers=%s job_max_inst=%s misfire_grace=%s",
+        slot, tick_sec, tick_max_instances, retry_sec, retry_max_instances,
+        default_workers, pool_workers, job_max_inst, misfire_grace
+    )
+
+    # rewrite_tick
     scheduler.add_job(
         func=_job_rewrite_tick,
         args=[app],
         trigger="interval",
-        seconds=5,
+        seconds=tick_sec,
         id=tick_job_id,
         executor="rewrite_pool",
-        coalesce=True,              # 遅延時は1回に圧縮
-        replace_existing=True,      # 再起動時に置換
-        misfire_grace_time=10,      # 軽い遅延を許容
-        next_run_time=datetime.now(timezone.utc),  # 即初回起動
-        # 既存ジョブが max_instances=1 のまま残っていた可能性に対処（明示上書き）
-        max_instances=3,
+        coalesce=coalesce_tick,
+        replace_existing=True,
+        misfire_grace_time=_env_int("REWRITE_TICK_MISFIRE_SEC", 10),
+        next_run_time=datetime.now(timezone.utc),
+        max_instances=tick_max_instances,
     )
 
-    # rewrite_retry（30秒ごと）
+    # rewrite_retry
     scheduler.add_job(
         func=_job_rewrite_retry,
         args=[app],
         trigger="interval",
-        seconds=30,
+        seconds=retry_sec,
         id=retry_job_id,
         executor="rewrite_pool",
-        max_instances=1,
-        coalesce=True,
+        max_instances=retry_max_instances,
+        coalesce=coalesce_retry,
         replace_existing=True,
-        misfire_grace_time=30,
+        misfire_grace_time=_env_int("REWRITE_RETRY_MISFIRE_SEC", 30),
         next_run_time=datetime.now(timezone.utc),
     )
 
