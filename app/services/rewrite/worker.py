@@ -148,26 +148,43 @@ def main():
         timezone="Asia/Tokyo",
     )
 
-    # 高頻度でrewriteのtickを回す（I/Oが多い想定なのでThreadPoolで十分）
+    # ─────────────────────────────────────────────
+    # REWRITE_SLOT 環境変数でジョブIDを一意化
+    # 同一IDだと複数ワーカーが競合し、skip連発・置換事故が起きるため
+    # ─────────────────────────────────────────────
+    from datetime import datetime, timezone
+    slot = os.environ.get("REWRITE_SLOT", "0")
+    tick_job_id = f"rewrite_tick:{slot}"
+    retry_job_id = f"rewrite_retry:{slot}"
+
+    # rewrite_tick（5秒ごと）
     scheduler.add_job(
         func=_job_rewrite_tick,
         args=[app],
         trigger="interval",
         seconds=5,
-        id="rewrite_tick",
+        id=tick_job_id,
         executor="rewrite_pool",
-        replace_existing=True,
+        max_instances=1,            # 同一ワーカー内で重複実行防止
+        coalesce=True,              # 遅延時は1回に圧縮
+        replace_existing=True,      # 再起動時に置換
+        misfire_grace_time=10,      # 軽い遅延を許容
+        next_run_time=datetime.now(timezone.utc),  # 即初回起動
     )
 
-    # 失敗再試行（定義が無ければ自動的にスキップされる）
+    # rewrite_retry（30秒ごと）
     scheduler.add_job(
         func=_job_rewrite_retry,
         args=[app],
         trigger="interval",
         seconds=30,
-        id="rewrite_retry",
+        id=retry_job_id,
         executor="rewrite_pool",
+        max_instances=1,
+        coalesce=True,
         replace_existing=True,
+        misfire_grace_time=30,
+        next_run_time=datetime.now(timezone.utc),
     )
 
     logger.info("Starting Rewrite Worker scheduler ...")
