@@ -165,11 +165,12 @@ def main():
         seconds=5,
         id=tick_job_id,
         executor="rewrite_pool",
-        max_instances=1,            # 同一ワーカー内で重複実行防止
         coalesce=True,              # 遅延時は1回に圧縮
         replace_existing=True,      # 再起動時に置換
         misfire_grace_time=10,      # 軽い遅延を許容
         next_run_time=datetime.now(timezone.utc),  # 即初回起動
+        # 既存ジョブが max_instances=1 のまま残っていた可能性に対処（明示上書き）
+        max_instances=3,
     )
 
     # rewrite_retry（30秒ごと）
