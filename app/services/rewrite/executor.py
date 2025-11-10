@@ -34,8 +34,8 @@ from app.models import (
 )
 from app.wp_client import (
     fetch_single_post,
-    update_post_content,
     resolve_wp_post_id,
+    update_post_content,
     update_post_meta,
 )
 
@@ -73,6 +73,14 @@ def _update_wp_with_retry(site, wp_post_id: int, new_html: str, *, max_retry: Op
                 current_app.logger.warning("[rewrite] WP update error status=%s post_id=%s err=%s", last_status, wp_post_id, e)
             else:
                 current_app.logger.warning("[rewrite] WP update error post_id=%s err=%s", wp_post_id, e)
+            # 401/403 は即時にサイト隔離し、これ以上のリトライを行わない（無限ループ防止）
+            try:
+                if last_status in (401, 403):
+                    _set_site_auth_block(site.id, int(last_status), AUTH_BLOCK_TTL_SEC)
+                    current_app.logger.error("[rewrite] auth_blocked site_id=%s status=%s (no further retries)", site.id, last_status)
+                    return False, last_status
+            except Exception:
+                pass    
         else:
             # update_post_content が False を返すケースでは HTTP ステータスは取得できない
             # last_status は None のまま（＝分類は後段で推定）
@@ -1234,7 +1242,9 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
         # 2.2) ここで初めて running 化（ブロック確認後に行うのが重要）
         plan.status = "running"
         plan.started_at = datetime.utcnow()
-        plan.attempts = (plan.attempts or 0) + 1  # ※ドライランでカウントしたくない場合は後段で調整
+        # ✅ attempts は “本実行のみ” カウントする。dry_run では増やさない。
+        if not dry_run:
+            plan.attempts = (plan.attempts or 0) + 1
         db.session.commit()
 
         article: Article = plan.article
@@ -1511,6 +1521,20 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
                         (status == 408) or
                         (500 <= int(status or 0) <= 599)
                     )
+                    # 401/403 はすでに _update_wp_with_retry 内で auth_block 済み。ここでは恒久扱い。
+                    if status in (401, 403):
+                        log.wp_status = "error"
+                        if not log.error_message:
+                            log.error_message = f"permanent_wp_error:{status}; site_auth_blocked"
+                        plan.last_error = f"permanent:wp_status={status}"
+                        db.session.commit()
+                        return {
+                            "status": "error",
+                            "plan_id": plan.id,
+                            "article_id": article.id,
+                            "wp_post_id": wp_post_id,
+                            "error": f"permanent_wp_error:{status}"
+                        }
                     if is_transient:
                         # バックオフ：attempts に応じて優先度を軽く下げて再キュー（マイグレーション不要）
                         try:
