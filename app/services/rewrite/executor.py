@@ -41,6 +41,7 @@ from app.wp_client import (
     update_post_content,
     update_post_meta,
 )
+import difflib  # ★ 追加：差分率計算
 
 def _rewrite_hard_stop() -> bool:
     """
@@ -116,9 +117,9 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 TOKENS = {
-    "policy": 1600,     # 方針テキスト（微増してcut-offを緩和）
-    "rewrite": 3600,    # 本文リライト
-    "summary": 400,     # diff 概要
+    "policy": int(os.getenv("TOKENS_POLICY", "1200")),
+    "rewrite": int(os.getenv("TOKENS_REWRITE", "2800")),
+    "summary": int(os.getenv("TOKENS_SUMMARY", "350")),
 }
 TEMP = {
     "policy": 0.4,
@@ -948,6 +949,15 @@ def _strip_html_min(s: str) -> str:
     s = re.sub(r"\s+", " ", s)
     return s.strip()
 
+def _text_change_ratio(before_html: str, after_html: str) -> float:
+    """編集前後のテキスト差分率（0.0〜1.0）を返す。小変更なら要約生成を省略。"""
+    b = _strip_html_min(before_html or "")
+    a = _strip_html_min(after_html or "")
+    if not b and not a:
+        return 0.0
+    sm = difflib.SequenceMatcher(a=b, b=a)
+    return 1.0 - sm.ratio()
+
 def _smart_truncate(s: str, limit: int = META_MAX) -> str:
     if not s:
         return ""
@@ -1492,13 +1502,17 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
         # 5) 本文リライト（リンク保護）
         edited_html = _rewrite_html(original_html, policy_text, user_id=article.user_id)
 
-        # 6) 監査ログ（差分要約をLLMで要約）
-        sys = "あなたは日本語の編集者です。修正前後の本文の違いを箇条書きで簡潔に要約してください。具体的に。"
-        usr = f"【修正前】\n{_strip_html_min(original_html)[:3000]}\n\n【修正後】\n{_strip_html_min(edited_html)[:3000]}"
-        diff_summary = _chat(
-            [{"role": "system", "content": sys}, {"role": "user", "content": usr}],
-            TOKENS["summary"], TEMP["summary"], user_id=article.user_id
-        )
+        # 6) 監査ログ（差分要約：小変更ならスキップ）
+        change_ratio =  _text_change_ratio(original_html, edited_html)
+        if change_ratio >= float(os.getenv("REWRITE_DIFF_SUMMARY_THRESHOLD", "0.04")):
+            sys = "あなたは日本語の編集者です。修正前後の本文の違いを箇条書きで簡潔に要約してください。具体的に。"
+            usr = f"【修正前】\n{_strip_html_min(original_html)[:3000]}\n\n【修正後】\n{_strip_html_min(edited_html)[:3000]}"
+            diff_summary = _chat(
+                [{"role": "system", "content": sys}, {"role": "user", "content": usr}],
+                TOKENS["summary"], TEMP["summary"], user_id=article.user_id
+            )
+        else:
+            diff_summary = f"(auto) 変更が小さいため要約生成を省略: change_ratio={change_ratio:.3f}"
 
         # 7) ログ保存（WP結果は後で上書き）
         log = ArticleRewriteLog(
