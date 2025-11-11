@@ -1132,3 +1132,34 @@ def collect_and_cache_for_article(article_id: int, *, limit: int = 6,
                                                  qna_required=qna_required, article_title=art.title or "")
     saved = cache_outlines(article_id, outlines)
     return {"ok": True, "query": query, **saved}
+
+
+# ─────────────────────────────────────────
+# 追加：同期Playwrightをイベントループ外スレッドで実行する薄いラッパ
+# 既存の _fetch_page_outline は変更しない。次ステップで呼出し側のみ切替える。
+# ─────────────────────────────────────────
+def _call_in_fresh_thread(fn, *args, **kwargs):
+    import threading, queue, traceback
+    q = queue.Queue(maxsize=1)
+    def _run():
+        try:
+            q.put((True, fn(*args, **kwargs)))
+        except Exception as e:
+            # 元のスタックを持たせてデバッグ容易化
+            e.__serp_thread_tb__ = traceback.format_exc()
+            q.put((False, e))
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    t.join()
+    ok, val = q.get()
+    if ok:
+        return val
+    raise val
+
+def fetch_page_outline_threadsafe(url: str, *, timeout_ms: int = 18000, lang: str = "ja", gl: str = "jp") -> Dict[str, Any]:
+    """
+    _fetch_page_outline を「新規スレッド」で実行して
+    'Sync API inside the asyncio loop' エラーを回避するためのエントリ。
+    次ステップで executor 側をこれに切替える。
+    """
+    return _call_in_fresh_thread(_fetch_page_outline, url, timeout_ms=timeout_ms, lang=lang, gl=gl)
