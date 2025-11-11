@@ -129,40 +129,46 @@ def _prompt_for_search(keyword: str, limit: int) -> str:
 
 def _web_search_urls(keyword: str, limit: int, model: str) -> List[str]:
     """
-    OpenAI Responses API + web_search ツールで URL を取得。
-    返却は必ず urls: List[str]（JSONスキーマで強制）。
+    OpenAI Chat Completions API（gpt-4o-mini-search-preview）で上位URLを取得。
+    検索結果は JSON 形式 {"urls": [...]} でパース。
     """
     client = _mk_client()
     if not client:
         return []
-    prompt = _prompt_for_search(keyword, limit)
     try:
-        resp = client.responses.create(
-            model=model or _DEFAULT_MODEL,
-            input=[
-                {"role": "system", "content": prompt},
+        resp = client.chat.completions.create(
+            model=model or "gpt-4o-mini-search-preview",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "あなたはWeb検索エンジンです。"
+                        "次のクエリに関連する日本語ページの上位URLを"
+                        f"{limit}件以内でJSON形式にして出力してください。"
+                        "例: {\"urls\": [\"https://example.com\", ...]}"
+                    ),
+                },
                 {"role": "user", "content": keyword},
             ],
-            tools=[{"type": "web_search"}],
-            tool_choice="required",
             temperature=0.0,
-            max_output_tokens=256,
+            max_tokens=600,
         )
-        # aggregate text（SDK差異に耐える）
-        text = getattr(resp, "output_text", "") or getattr(resp, "text", "")
-        if not text:
-            try:
-                text = resp.to_dict().get("output_text", "")  # type: ignore
-            except Exception:
-                text = ""
+
+        # 応答テキストの抽出（Chat API形式）
+        text = resp.choices[0].message.content if resp.choices else ""
+
         urls = _extract_urls_from_json_object(text)
         if not urls:
+            logging.warning(f"[OPENAI-WEB_SEARCH] no urls extracted for keyword={keyword!r}")
             return []
+
         urls = [x for x in (_normalize_url(u) for u in urls) if x]
         urls = _cap_per_domain(urls, _MAX_PER_DOMAIN)
-        return urls[:limit]
+        logging.info(f"[OPENAI-WEB_SEARCH] success {len(urls)} urls for '{keyword}'")
+        return urls
+
     except Exception as e:
-        log.warning("[OPENAI-WEB_SEARCH] failed: %s", e)
+        logging.warning(f"[OPENAI-WEB_SEARCH] failed: {e}")
         return []
 
 def _search_with_openai(keyword: str, limit: int, model: str) -> List[str]:
