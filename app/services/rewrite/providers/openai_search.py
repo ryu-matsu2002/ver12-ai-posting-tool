@@ -134,40 +134,31 @@ def _prompt_for_search(keyword: str, limit: int) -> str:
 
 def _web_search_urls(keyword: str, limit: int, model: str) -> List[str]:
     """
-    OpenAI Chat Completions API（gpt-4o-mini-search-preview）で上位URLを取得。
-    このモデルは検索統合型のため、余分なパラメータ（temperature, max_tokens 等）は禁止。
-    返却は JSON 形式 {"urls": [...]} として抽出。
+    最新SDK対応版: gpt-4o-mini-search-preview を用いて上位URLを取得。
+    OpenAI Python v1.x 系での公式構文を使用。
     """
-    client = _mk_client()
-    if not client:
-        return []
     try:
-        # --- 検索要求を送信（旧SDK構文に合わせる） ---
-        resp = client.ChatCompletion.create(
+        from openai import OpenAI
+        client = OpenAI()
+
+        response = client.chat.completions.create(
             model=model or "gpt-4o-mini-search-preview",
             messages=[
                 {
                     "role": "system",
                     "content": (
-                        "あなたはWeb検索エンジンとして振る舞います。"
-                        "次のクエリに関連する日本語のWebページの上位URLを返してください。"
-                        "出力は必ずJSON形式で、キーは 'urls'、値はURLの配列。"
-                        "文章やコメントは絶対に書かず、例のように出力："
+                        "あなたはWeb検索エンジンとして動作します。"
+                        "次のクエリに関連する日本語の上位記事URLを返してください。"
+                        "必ずJSON形式で出力してください。形式: "
                         "{\"urls\": [\"https://example.com\", \"https://example2.com\"]}"
                     ),
                 },
                 {"role": "user", "content": keyword},
-            ]
+            ],
         )
 
-        text = resp["choices"][0]["message"]["content"] if "choices" in resp else ""
-
-        # --- JSON形式でも自然文でもURLを抽出できるよう拡張 ---
+        text = response.choices[0].message.content.strip()
         urls = _extract_urls_from_json_object(text)
-        if not urls:
-            import re
-            urls = re.findall(r"https?://[^\s\"'<>]+", text or "")
-
         if not urls:
             logging.warning(f"[OPENAI-WEB_SEARCH] no urls extracted for keyword={keyword!r}")
             return []
