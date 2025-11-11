@@ -10,7 +10,7 @@ from typing import Dict, List, Tuple, Optional
 import statistics
 
 from flask import current_app
-from sqlalchemy import select, text
+from sqlalchemy import select, text, func, or_
 from sqlalchemy.orm import joinedload, selectinload
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup, NavigableString, Comment
@@ -41,6 +41,21 @@ from app.wp_client import (
     update_post_content,
     update_post_meta,
 )
+
+def _rewrite_hard_stop() -> bool:
+    """
+    グローバル停止フラグ。
+    環境変数 REWRITE_HARD_STOP が 1/true/on/yes のいずれかならデキューを即停止。
+    既定は停止しない（= 従来どおり実行）。
+    """
+    v = os.getenv("REWRITE_HARD_STOP", "").strip().lower()
+    return v in ("1", "true", "on", "yes")
+
+def _max_rewrite_attempts() -> int:
+    try:
+        return max(1, int(os.getenv("MAX_REWRITE_ATTEMPTS", "3")))
+    except Exception:
+        return 3
 
 def _ensure_wp_post_id(site, article) -> Optional[int]:
     """
@@ -1201,10 +1216,21 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
             pass
 
         # 1) まず ID だけを FOR UPDATE SKIP LOCKED で取得
+        # ---- グローバル即時停止（キルスイッチ） ----
+        if _rewrite_hard_stop():
+            current_app.logger.warning("[rewrite] HARD_STOP enabled; skip dequeuing.")
+            return {"status": "stopped", "message": "REWRITE_HARD_STOP is set"}
+
         id_q = db.session.query(ArticleRewritePlan.id).filter(
             ArticleRewritePlan.user_id == user_id,
             ArticleRewritePlan.is_active.is_(True),
             ArticleRewritePlan.status == "queued",
+            # attempts 上限（None は 0 扱いで許容）— 既存のREWRITE_MAX_ATTEMPTSを採用
+            or_(ArticleRewritePlan.attempts.is_(None),
+                ArticleRewritePlan.attempts < REWRITE_MAX_ATTEMPTS),
+            # 未来予約は除外（NULL は即実行可）
+            or_(ArticleRewritePlan.scheduled_at.is_(None),
+                ArticleRewritePlan.scheduled_at <= func.now()),
         ).order_by(
             ArticleRewritePlan.priority_score.desc(),
             ArticleRewritePlan.created_at.asc(),
