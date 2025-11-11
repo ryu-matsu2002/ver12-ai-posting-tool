@@ -50,11 +50,16 @@ def _mk_client() -> Optional[object]:
     if not _has_openai():
         return None
     try:
+        # --- 旧SDK互換: OpenAIクラスがない場合は直接モジュール参照 ---
+        import openai
+        openai.api_key = _API_KEY
         if _BASE_URL:
-            return OpenAI(api_key=_API_KEY, base_url=_BASE_URL)
-        return OpenAI(api_key=_API_KEY)
-    except Exception:
+            openai.base_url = _BASE_URL
+        return openai
+    except Exception as e:
+        logging.warning(f"[openai_search] _mk_client failed: {e}")
         return None
+
 
 # ===== 便利関数 =====
 def _normalize_url(u: str) -> Optional[str]:
