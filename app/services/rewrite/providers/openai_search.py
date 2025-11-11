@@ -149,13 +149,15 @@ def _web_search_urls(keyword: str, limit: int, model: str) -> List[str]:
                 {
                     "role": "system",
                     "content": (
-                        "あなたはWeb検索エンジンです。"
-                        "次のクエリに関連する日本語のWebページの上位URLをできるだけ多く返してください。"
-                        "文章中に含めても構いません。"
+                        "あなたはWeb検索エンジンとして振る舞います。"
+                        "次のクエリに関連する日本語のWebページの上位URLを返してください。"
+                        "出力は必ずJSON形式で、キーは 'urls'、値はURLの配列。"
+                        "文章やコメントは絶対に書かず、例のように出力："
+                        "{\"urls\": [\"https://example.com\", \"https://example2.com\"]}"
                     ),
                 },
                 {"role": "user", "content": keyword},
-            ],
+            ]
         )
 
         text = resp["choices"][0]["message"]["content"] if "choices" in resp else ""
