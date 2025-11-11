@@ -144,7 +144,7 @@ def _web_search_urls(keyword: str, limit: int, model: str) -> List[str]:
                 {"role": "user", "content": keyword},
             ],
             tools=[{"type": "web_search"}],
-            tool_choice={"type": "tool", "tool_name": "web_search"},
+            tool_choice="web_search",
             temperature=0.0,
             max_output_tokens=256,
         )
