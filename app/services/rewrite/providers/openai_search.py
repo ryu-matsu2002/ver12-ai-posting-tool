@@ -142,24 +142,30 @@ def _web_search_urls(keyword: str, limit: int, model: str) -> List[str]:
     if not client:
         return []
     try:
-        resp = client.chat.completions.create(
+        # --- 検索要求を送信（旧SDK構文に合わせる） ---
+        resp = client.ChatCompletion.create(
             model=model or "gpt-4o-mini-search-preview",
             messages=[
                 {
                     "role": "system",
                     "content": (
                         "あなたはWeb検索エンジンです。"
-                        "次のクエリに関連する日本語のWebページの上位URLを"
-                        f"{limit}件以内でJSON形式に出力してください。"
-                        "形式: {\"urls\": [\"https://example.com\", ...]}"
+                        "次のクエリに関連する日本語のWebページの上位URLをできるだけ多く返してください。"
+                        "文章中に含めても構いません。"
                     ),
                 },
                 {"role": "user", "content": keyword},
-            ]
+            ],
         )
 
-        text = resp.choices[0].message.content if resp.choices else ""
+        text = resp["choices"][0]["message"]["content"] if "choices" in resp else ""
+
+        # --- JSON形式でも自然文でもURLを抽出できるよう拡張 ---
         urls = _extract_urls_from_json_object(text)
+        if not urls:
+            import re
+            urls = re.findall(r"https?://[^\s\"'<>]+", text or "")
+
         if not urls:
             logging.warning(f"[OPENAI-WEB_SEARCH] no urls extracted for keyword={keyword!r}")
             return []
