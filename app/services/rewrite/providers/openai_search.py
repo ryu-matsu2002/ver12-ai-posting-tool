@@ -130,7 +130,8 @@ def _prompt_for_search(keyword: str, limit: int) -> str:
 def _web_search_urls(keyword: str, limit: int, model: str) -> List[str]:
     """
     OpenAI Chat Completions API（gpt-4o-mini-search-preview）で上位URLを取得。
-    検索結果は JSON 形式 {"urls": [...]} でパース。
+    このモデルは検索統合型のため、余分なパラメータ（temperature, max_tokens 等）は禁止。
+    返却は JSON 形式 {"urls": [...]} として抽出。
     """
     client = _mk_client()
     if not client:
@@ -143,20 +144,16 @@ def _web_search_urls(keyword: str, limit: int, model: str) -> List[str]:
                     "role": "system",
                     "content": (
                         "あなたはWeb検索エンジンです。"
-                        "次のクエリに関連する日本語ページの上位URLを"
-                        f"{limit}件以内でJSON形式にして出力してください。"
-                        "例: {\"urls\": [\"https://example.com\", ...]}"
+                        "次のクエリに関連する日本語のWebページの上位URLを"
+                        f"{limit}件以内でJSON形式に出力してください。"
+                        "形式: {\"urls\": [\"https://example.com\", ...]}"
                     ),
                 },
                 {"role": "user", "content": keyword},
-            ],
-            temperature=0.0,
-            max_tokens=600,
+            ]
         )
 
-        # 応答テキストの抽出（Chat API形式）
         text = resp.choices[0].message.content if resp.choices else ""
-
         urls = _extract_urls_from_json_object(text)
         if not urls:
             logging.warning(f"[OPENAI-WEB_SEARCH] no urls extracted for keyword={keyword!r}")
