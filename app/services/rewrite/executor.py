@@ -21,7 +21,10 @@ from app import redis_client  # ← 追加：サイト隔離フラグの持続�
 # フォールバック収集を ChatGPT検索API に切替
 from app.services.rewrite.providers import openai_search as osearch
 # 見出し抽出は自前HTTP＋BS4。serp_collectorの軽量ユーティリティだけを直接利用
-from app.services.rewrite.serp_collector import _fetch_page_outline as fetch_page_outline
+from app.services.rewrite.serp_collector import (
+    _fetch_page_outline as fetch_page_outline,           # 既存呼び出し維持
+    fetch_page_outline_threadsafe,                       # フォールバック時のみ使用
+)
 from app.models import (
     Article,
     Site,
@@ -1310,7 +1313,7 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
                 if urls:
                     saved_outlines = []
                     for u in urls:
-                        outline = fetch_page_outline(u, lang="ja", gl="jp")
+                        outline = fetch_page_outline_threadsafe(u, lang="ja", gl="jp")
                         if outline:
                             saved_outlines.append(outline)
 
