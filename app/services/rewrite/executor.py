@@ -1340,8 +1340,28 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
                     saved_outlines = []
                     for u in urls:
                         outline = fetch_page_outline_threadsafe(u, lang="ja", gl="jp")
+                        # ★ 修正版：見出しが空でもURLだけキャッシュに残す
                         if outline:
+                            # 通常のアウトライン
                             saved_outlines.append(outline)
+                        else:
+                            # fallback：最低限URL情報だけ記録してキャッシュ化
+                            saved_outlines.append({
+                                "url": u,
+                                "h": [],
+                                "title": "",
+                                "snippet": "",
+                                "fetched_at": datetime.utcnow().isoformat()
+                            })
+
+                    # URL単位でキャッシュを保存（空アウトラインも含める）
+                    cache = SerpOutlineCache(
+                        article_id=article.id,
+                        outlines=saved_outlines,
+                        fetched_at=datetime.utcnow()
+                    )
+                    db.session.add(cache)
+                    db.session.commit()
 
                     if saved_outlines:
                         cache = SerpOutlineCache(
