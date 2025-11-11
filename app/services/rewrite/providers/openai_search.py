@@ -33,7 +33,7 @@ from app.models import Article, SerpOutlineCache
 log = logging.getLogger(__name__)
 
 # ===== 環境変数 =====
-_MODE = os.environ.get("SERP_OPENAI_MODE", "none").strip().lower()   # "none" | "search" | "rerank"
+_MODE = os.environ.get("SERP_OPENAI_MODE", "none").strip().lower()   # "none" | "search"
 _DEFAULT_MODEL = os.environ.get("SERP_OPENAI_MODEL", "gpt-4o-mini-search-preview")
 _API_KEY = os.environ.get("OPENAI_API_KEY", "")
 _BASE_URL = os.environ.get("OPENAI_BASE_URL", "").strip() or None   # Azure等で必要なら指定
@@ -91,151 +91,119 @@ def _cap_per_domain(urls: List[str], k: int) -> List[str]:
         out.append(u)
     return out
 
-def _extract_json_url_array(text: str) -> List[str]:
-    text = (text or "").strip()
-    # 素のJSON配列
-    if text.startswith("[") and text.endswith("]"):
-        try:
-            obj = json.loads(text)
-            if isinstance(obj, list):
-                return [x for x in obj if isinstance(x, str)]
-        except Exception:
-            pass
-    # コードブロック救済
+def _extract_urls_from_json_object(text: str) -> List[str]:
+    """
+    Responses API の json_schema（{"urls":[...]}）想定で安全抽出。
+    """
     try:
-        start = text.find("[")
-        end = text.rfind("]")
-        if 0 <= start < end:
-            obj = json.loads(text[start:end+1])
-            if isinstance(obj, list):
-                return [x for x in obj if isinstance(x, str)]
+        obj = json.loads((text or "").strip())
+        if isinstance(obj, dict) and isinstance(obj.get("urls"), list):
+            return [x for x in obj["urls"] if isinstance(x, str)]
     except Exception:
-        pass
+        # 予期せぬ書式でも壊れないように冗長救済
+        try:
+            start = text.find("{")
+            end = text.rfind("}")
+            if 0 <= start < end:
+                obj = json.loads(text[start:end+1])
+                if isinstance(obj, dict) and isinstance(obj.get("urls"), list):
+                    return [x for x in obj["urls"] if isinstance(x, str)]
+        except Exception:
+            return []
     return []
-
-def _prompt_for_rerank(keyword: str, limit: int, items_len: int) -> str:
-    return (
-        "You are an assistant that re-ranks web results for a given Japanese query.\n"
-        f"Return ONLY a JSON array of up to {limit} URLs (strings), no extra text.\n"
-        "- Prefer highly relevant, long-form article pages with substantial headings\n"
-        "- Avoid tag/category index pages or thin/ads pages\n"
-        "- Cap = 2 per domain\n"
-        "日本語クエリに対して関連性が高い順に、最大件数のURLをJSON配列で返してください。"
-    )
+ 
 
 def _prompt_for_search(keyword: str, limit: int) -> str:
+    # モデルには web_search ツールを必ず使わせ、JSONスキーマ準拠の応答だけを要求
     return (
-        "You are a Japanese web search assistant. For the given query, return ONLY a JSON array "
-        f"of up to {limit} high-quality result URLs (strings). No prose, markdown or code fences.\n"
+        "You are a web search assistant for Japanese queries. "
+        "Use the web_search tool to find high-quality article pages and return ONLY a JSON object "
+        'with the shape {"urls": [string, ...]}.\n'
+        f"- Up to {limit} result URLs.\n"
         "- Prefer informative article pages with H2/H3 headings\n"
-        "- Avoid thin pages, tag/category index pages, ads\n"
+        "- Avoid tag/category index pages and thin/ads pages\n"
         "- Cap: 2 per domain\n"
-        "日本語クエリに対して関連性の高い記事URLを最大件数、JSON配列のみで返してください。"
+        "日本語クエリに対して関連性の高い記事URLのみを収集し、JSONオブジェクト（urls配列）だけを返してください。"
     )
 
-# ===== DDG 候補（フォールバック用） =====
-def _ddg_candidates(keyword: str, limit: int) -> List[Dict[str, str]]:
-    """
-    serp_collector の DDG 取得関数に委譲（遅延 import でループ回避）。
-    返り値: [{"url": "...", "title": "...", "snippet": "..."}, ...]
-    """
-    try:
-        from app.services.rewrite.serp_collector import _search_top_urls_duckduckgo
-        return _search_top_urls_duckduckgo(keyword, limit=limit, lang="ja", gl="jp")
-    except Exception:
-        return []
 
-# ===== OpenAI 実行（search / rerank） =====
-def _search_with_openai(keyword: str, limit: int, model: str) -> List[str]:
+def _web_search_urls(keyword: str, limit: int, model: str) -> List[str]:
+    """
+    OpenAI Responses API + web_search ツールで URL を取得。
+    返却は必ず urls: List[str]（JSONスキーマで強制）。
+    """
     client = _mk_client()
     if not client:
         return []
-    sys_prompt = _prompt_for_search(keyword, limit)
+    prompt = _prompt_for_search(keyword, limit)
     try:
-        resp = client.chat.completions.create(
-            model=model or _DEFAULT_MODEL,
-            messages=[
-                {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": keyword},
-            ],
-            max_tokens=256,
-        )
-        text = resp.choices[0].message.content if resp and resp.choices else ""
-        urls = _extract_json_url_array(text)
-        if urls:
-            urls = [x for x in (_normalize_url(u) for u in urls) if x]
-            urls = _cap_per_domain(urls, _MAX_PER_DOMAIN)
-            return urls[:limit]
-        return []
-    except Exception as e:
-        log.warning("[OPENAI-SEARCH] failed: %s", e)
-        return []
-
-def _rerank_with_openai(keyword: str, limit: int, candidates: List[Dict[str, str]], model: str) -> List[str]:
-    client = _mk_client()
-    if not client:
-        return []
-
-    prompt = _prompt_for_rerank(keyword, limit, len(candidates))
-    try:
-        content = {
-            "keyword": keyword,
-            "limit": limit,
-            "candidates": candidates[: max(limit * 4, 12)],
-        }
-        # Responses API 互換呼び出し
         resp = client.responses.create(
             model=model or _DEFAULT_MODEL,
             input=[
                 {"role": "system", "content": prompt},
-                {"role": "user", "content": json.dumps(content, ensure_ascii=False)},
+                {"role": "user", "content": keyword},
             ],
+            tools=[{"type": "web_search"}],
+            tool_choice={"type": "tool", "tool_name": "web_search"},
             temperature=0.0,
             max_output_tokens=256,
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "urls",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "urls": {
+                                "type": "array",
+                                "items": {"type": "string"}
+                            }
+                        },
+                        "required": ["urls"],
+                        "additionalProperties": False
+                    },
+                    "strict": True
+                }
+            },
         )
-        text = getattr(resp, "output_text", "") or resp.to_dict().get("output_text", "")
-        urls = _extract_json_url_array(text)
-        if urls:
-            urls = [x for x in (_normalize_url(u) for u in urls) if x]
-            urls = _cap_per_domain(urls, _MAX_PER_DOMAIN)
-            return urls[:limit]
-        return []
+        # aggregate text（SDK差異に耐える）
+        text = getattr(resp, "output_text", "") or getattr(resp, "text", "")
+        if not text:
+            try:
+                text = resp.to_dict().get("output_text", "")  # type: ignore
+            except Exception:
+                text = ""
+        urls = _extract_urls_from_json_object(text)
+        if not urls:
+            return []
+        urls = [x for x in (_normalize_url(u) for u in urls) if x]
+        urls = _cap_per_domain(urls, _MAX_PER_DOMAIN)
+        return urls[:limit]
     except Exception as e:
-        log.warning("[OPENAI-RERANK] failed: %s", e)
+        log.warning("[OPENAI-WEB_SEARCH] failed: %s", e)
         return []
+
+def _search_with_openai(keyword: str, limit: int, model: str) -> List[str]:
+    # 直接 web_search を使う一本化
+    return _web_search_urls(keyword, limit, model)
 
 # ===== 公開：URL配列のみ返す軽量API =====
 def search_top_urls(keyword: str, limit: int = 6, model: str | None = None) -> List[str]:
     """
-    - MODE=none   : 何もせず空を返す（呼び出し元がDDGフォールバック）
-    - MODE=search : OpenAIのSearchモデルで直接URL取得（失敗時はDDG）
-    - MODE=rerank : DDG候補をOpenAIで再ランキング（失敗時はDDG素抜き）
+    - MODE=none   : 空配列（検索なし）
+    - MODE=search : OpenAI Responses API の web_search で直接URL取得（フォールバックなし）
     """
     limit = max(1, int(limit or _RESULT_LIMIT_FALLBACK))
 
-    if _MODE not in ("none", "search", "rerank"):
+    if _MODE not in ("none", "search"):
         return []
 
     if _MODE == "none":
         return []
 
-    if _MODE == "search":
-        urls = _search_with_openai(keyword, limit, model or _DEFAULT_MODEL)
-        if urls:
-            return urls
-        cands = _ddg_candidates(keyword, max(limit * 2, 10))
-        return [c["url"] for c in cands[:limit] if isinstance(c, dict) and c.get("url")]
-
-    # rerank
-    cands = _ddg_candidates(keyword, max(limit * 3, 12))
-    if not cands:
-        return []
-    if not _has_openai():
-        return [c["url"] for c in cands[:limit] if isinstance(c, dict) and c.get("url")]
-    urls = _rerank_with_openai(keyword, limit, cands, model or _DEFAULT_MODEL)
-    if urls:
-        return urls
-    return [c["url"] for c in cands[:limit] if isinstance(c, dict) and c.get("url")]
+    # MODE=search：web_search 一本化（フォールバックなし）
+    urls = _search_with_openai(keyword, limit, model or _DEFAULT_MODEL)
+    return urls
 
 # ===== executor 互換：URLをキャッシュに保存するエントリポイント =====
 def _recent_cache(article_id: int, ttl_days: int) -> Optional[SerpOutlineCache]:
@@ -325,29 +293,13 @@ def search_and_cache_for_article(
         # 2) URL 収集
         urls: List[str] = search_top_urls(q, limit=limit, model=_DEFAULT_MODEL)
         urls = [u for u in urls if isinstance(u, str)]
-        # DDGフォールバックとして title/snippet を持つ候補が来る場合もケア
         outlines: List[Dict[str, Any]] = []
 
-        if urls:
-            for u in urls:
-                norm = _normalize_url(u)
-                if not norm:
-                    continue
-                outlines.append({"url": norm})
-        else:
-            # MODE=none 等で空の場合は DDG から候補を確保
-            cands = _ddg_candidates(q, max(limit * 2, 10))
-            for c in cands[:limit]:
-                if not isinstance(c, dict) or not c.get("url"):
-                    continue
-                norm = _normalize_url(c["url"])
-                if not norm:
-                    continue
-                outlines.append({
-                    "url": norm,
-                    "title": c.get("title", "") or "",
-                    "snippet": c.get("snippet", "") or "",
-                })
+        for u in urls:
+            norm = _normalize_url(u)
+            if not norm:
+                continue
+            outlines.append({"url": norm})
 
         if not outlines:
             return {"ok": False, "error": "no_results"}
@@ -361,8 +313,9 @@ def search_and_cache_for_article(
             fetched_at=datetime.now(timezone.utc),
             outlines=outlines,
             query=q,
-            provider=_MODE if _MODE in ("search", "rerank") else "ddg",
-            k=len(outlines),
+            # 旧スキーマ互換性のため JSON 内にメタ付与（カラムは無い）
+            # "provider": "web_search"
+            # "k": len(outlines)
         )
         db.session.add(rec)
         db.session.commit()
