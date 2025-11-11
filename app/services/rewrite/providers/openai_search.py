@@ -147,24 +147,6 @@ def _web_search_urls(keyword: str, limit: int, model: str) -> List[str]:
             tool_choice={"type": "tool", "tool_name": "web_search"},
             temperature=0.0,
             max_output_tokens=256,
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "urls",
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "urls": {
-                                "type": "array",
-                                "items": {"type": "string"}
-                            }
-                        },
-                        "required": ["urls"],
-                        "additionalProperties": False
-                    },
-                    "strict": True
-                }
-            },
         )
         # aggregate text（SDK差異に耐える）
         text = getattr(resp, "output_text", "") or getattr(resp, "text", "")
