@@ -259,7 +259,10 @@ def _request_with_retry(method: str, url: str, headers: Dict[str, str], params=N
             current_app.logger.warning("[WP] retrying %s %s (attempt=%s)", method, url, attempt + 1)
             time.sleep(backoff)
         try:
+            start = time.time()
             resp = requests.request(method.upper(), url, headers=headers, params=params, json=json_body, timeout=timeout)
+            elapsed = round(time.time() - start, 2)
+            current_app.logger.info("[WP] %s %s -> %s (%.2fs)", method, url.split('/wp-json/')[-1], resp.status_code, elapsed)
             if 200 <= resp.status_code < 300:
                 return resp
             if resp.status_code in (429, 500, 502, 503, 504):
