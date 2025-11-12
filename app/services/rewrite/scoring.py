@@ -1,13 +1,14 @@
 """
-rewrite/scoring.py
+# app/services/rewrite/scoring.py
 ────────────────────────────
 AIリライト対象を自動スコアリングして
 ArticleRewritePlan にUPSERTする。
 ────────────────────────────
+（改修）スコアリングの“前段”で、WPに実在・公開・非topicに限定
 """
 
 from datetime import datetime
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, exists, not_
 from app import db
 from app.models import (
     Article,
@@ -15,13 +16,29 @@ from app.models import (
     GSCMetric,
     GSCUrlStatus,
     ArticleRewritePlan,
+    ContentIndex,   # ★ 追加：WP実在・公開・topic除外の判定に使用
 )
 
 def build_rewrite_candidates(user_id=None, site_id=None, limit=10000):
     """
     各記事のスコアを算出して article_rewrite_plans にUPSERTする。
     """
-    # === 対象記事の基本クエリ ===
+    # === 対象記事の基本クエリ（WP実在・公開・非topicを前処理で限定） ===
+    #
+    # 条件：
+    #  - ContentIndex.site_id = Article.site_id
+    #  - ContentIndex.wp_post_id = Article.wp_post_id（＝WP上に“実在”）
+    #  - ContentIndex.status = 'publish'（公開）
+    #  - ContentIndex.url NOT ILIKE '%topic%'（topic除外）
+    # ※ 内部SEOと同方針。is_topic_url相当はSQL側のILIKEで代替。
+    ci_exists = exists().where(
+        and_(
+            ContentIndex.site_id == Article.site_id,
+            ContentIndex.wp_post_id == Article.wp_post_id,
+            ContentIndex.status == 'publish',
+            not_(ContentIndex.url.ilike('%topic%')),
+        )
+    )
     query = (
         db.session.query(
             Article.id.label("article_id"),
@@ -45,6 +62,8 @@ def build_rewrite_candidates(user_id=None, site_id=None, limit=10000):
             ),
         )
         .filter(Article.status == "posted")
+        # ★ 追加：WP実在・公開・非topicに限定（未投稿/ドラフトをここで除外）
+        .filter(ci_exists)
     )
 
     if user_id:
