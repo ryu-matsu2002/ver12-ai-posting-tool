@@ -46,8 +46,9 @@ import difflib  # ★ 追加：差分率計算
 # 環境変数でGSC取得をスキップ可能に
 # -----------------------------------------------------------------------------
 SKIP_GSC = os.getenv("REWRITE_SKIP_GSC", "0").lower() in ("1", "true", "on", "yes")
-# 追加：ゼロ課金で配線検証するための LLM スキップ（既存挙動は維持：デフォルトOFF）
+# LLM完全スキップ（ゼロ課金・配線健全性チェック用）
 SKIP_LLM = os.getenv("REWRITE_SKIP_LLM", "0").lower() in ("1", "true", "on", "yes")
+
 
 def _rewrite_hard_stop() -> bool:
     """
@@ -119,6 +120,7 @@ def _update_wp_with_retry(site, wp_post_id: int, new_html: str, *, max_retry: Op
         # 短い間隔での軽い再試行（sleepは入れずに即時リトライ。ジョブのスループットを優先）
 
 # === OpenAI 設定（article_generator.py と同じ流儀） ===
+# OpenAI クライアントはモジュール読み込み時に初期化（SKIP_LLM時も生成は可）
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
@@ -269,6 +271,9 @@ def _tok(s: str) -> int:
     return int(len(s) / 1.8)
 
 def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float, user_id: Optional[int] = None) -> str:
+    if SKIP_LLM:
+        logging.info("[rewrite/_chat] LLM skipped -> return stub text")
+        return "（LLMスキップ中）"
     def _recalc_max_tokens(messages: List[Dict[str, str]], desired: int) -> int:
         used = sum(_tok(m.get("content", "")) for m in messages)
         available = CTX_LIMIT - used - 16
@@ -280,6 +285,14 @@ def _chat(msgs: List[Dict[str, str]], max_t: int, temp: float, user_id: Optional
         raise ValueError("Calculated max_tokens is below minimum.")
 
     def _call(messages: List[Dict[str, str]], m: int) -> str:
+        # ★ LLM全停止スイッチ：REWRITE_SKIP_LLM=1 のときは一切APIを叩かない
+        if SKIP_LLM:
+            logging.info("[rewrite/_call] SKIPPED by REWRITE_SKIP_LLM=1 (returning stub text)")
+            # それぞれの用途で破綻しないように、簡潔なダミー文言を返す
+            # - ポリシー: 箇条書きの手順風
+            # - 本文: 「本文は概ね良好。軽微な校正のみ。」等の中立テキスト
+            # 呼び出し元で用途が異なるため、ここでは中立な短文を返す
+            return "（LLMスキップ中: 検証モード。本文は保持、差分要約は簡略化。）"
         # 一部SDKで timeout キーワード未対応 → フォールバック
         try:
             res = client.chat.completions.create(
@@ -1047,6 +1060,10 @@ def _rewrite_html(original_html: str, policy_text: str, user_id: Optional[int]) 
     本文リライト（リンク完全保護）。<a> はすべて [[LINK_i]] に置換し、LLMへ。
     戻りで [[LINK_i]] を厳密復元する。
     """
+    if SKIP_LLM:
+        logging.info("[rewrite/_rewrite_html] LLM skipped -> return original_html (no-op)")
+        # LLMを使わずWP配線だけ検証するため、本文は無改変で返す
+        return original_html
     masked, mapping = _mask_links(original_html or "")
     # 保護ブロックも“丸ごと”凍結（リンクと同様に厳密復元）
     p_masked, p_mapping = _mask_protected_blocks(masked)
