@@ -1342,108 +1342,30 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
         outlines = _collect_serp_outline(article)
         if not outlines:
             logging.info("[rewrite] outlines empty for article_id=%s (SERP参考0件)", article.id)
-
-            # === 修正版: OpenAI Search APIで直接URL収集しキャッシュ ===
-            try:
-                urls = osearch.search_top_urls(article.keyword or article.title or "", limit=6)
-                if urls:
-                    saved_outlines = []
-                    for u in urls:
-                        outline = fetch_page_outline_threadsafe(u, lang="ja", gl="jp")
-                        # ★ 修正版：見出しが空でもURLだけキャッシュに残す
-                        if outline:
-                            # 通常のアウトライン
-                            saved_outlines.append(outline)
-                        else:
-                            # fallback：最低限URL情報だけ記録してキャッシュ化
-                            saved_outlines.append({
-                                "url": u,
-                                "h": [],
-                                "title": "",
-                                "snippet": "",
-                                "fetched_at": datetime.utcnow().isoformat()
-                            })
-
-                    # URL単位でキャッシュを保存（空アウトラインも含める）
-                    cache = SerpOutlineCache(
-                        article_id=article.id,
-                        outlines=saved_outlines,
-                        fetched_at=datetime.utcnow()
-                    )
-                    db.session.add(cache)
-                    db.session.commit()
-
-                    if saved_outlines:
-                        cache = SerpOutlineCache(
-                            article_id=article.id,
-                            outlines=saved_outlines,
-                            fetched_at=datetime.utcnow()
-                        )
-                        db.session.add(cache)
-                        db.session.commit()
-
-                        outlines = saved_outlines
-                        logging.info(
-                            "[rewrite/fallback] ✅ OpenAI search success: article_id=%s keyword=%r n=%s",
-                            article.id, (article.keyword or ""), len(saved_outlines),
-                        )
-                    else:
-                        logging.warning(
-                            "[rewrite/fallback] ⚠️ OpenAI search returned URLs but no outlines could be fetched (article_id=%s)",
-                            article.id,
-                        )
-                else:
-                    logging.warning(
-                        "[rewrite/fallback] ⚠️ OpenAI search returned no URLs for article_id=%s keyword=%r",
-                        article.id, (article.keyword or ""),
-                    )
-            except Exception as e:
-                logging.exception("[rewrite/fallback] ❌ Exception during OpenAI search for article_id=%s: %r", article.id, e)
-
-            # --- 0件継続時の通知強化（デバッグ・ハンドオフ用のヒントを添付） ---
-            if not outlines:
-                try:
-                    debug_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "runtime", "serp_debug"))
-                except Exception:
-                    debug_dir = "runtime/serp_debug"
-                logging.info(
-                    "[rewrite/fallback] outlines STILL empty after attempt: article_id=%s keyword=%r title=%r debug_dir=%s",
-                    article.id, (article.keyword or ""), (article.title or ""), debug_dir
-                )
-
-                # ここで“停止するか/続行するか”を環境変数で切り替え
-                if SERP_REQUIRED_FOR_REWRITE:
-                    reason = "serp_outlines_empty"
-                    if dry_run:
-                        # ドライラン時は再キューして早期終了（attemptsは加算しない）
-                        plan.status = "queued"
-                        plan.started_at = None
-                        plan.finished_at = None
-                        try:
-                            if plan.attempts and plan.attempts > 0:
-                                plan.attempts -= 1
-                        except Exception:
-                            pass
-                        db.session.commit()
-                        return {
-                            "status": "done(dry)",
-                            "plan_id": plan.id,
-                            "article_id": article.id,
-                            "wp_post_id": None,
-                            "note": "SERP=0件のため停止（再キュー済み）"
-                        }
-                    else:
-                        plan.status = "error"
-                        plan.last_error = f"permanent:{reason}"
-                        plan.finished_at = datetime.utcnow()
-                        db.session.commit()
-                        return {
-                            "status": "error",
-                            "plan_id": plan.id,
-                            "article_id": article.id,
-                            "wp_post_id": None,
-                            "error": reason
-                        } 
+            # HARD STOP: フォールバック検索や再試行を一切行わない
+            reason = "serp_outlines_empty"
+            if dry_run:
+                # ドライランは副作用ゼロで即終了（再キューしない）
+                return {
+                    "status": "skipped",
+                    "reason": reason,
+                    "plan_id": plan.id,
+                    "article_id": article.id,
+                    "wp_post_id": None,
+                    "note": "SERP=0件（ドライラン停止）"
+                }
+            # 本実行は非回復エラーで即終了（再キュー禁止）
+            plan.status = "error"
+            plan.last_error = f"permanent:{reason}"
+            plan.finished_at = datetime.utcnow()
+            db.session.commit()
+            return {
+                "status": "error",
+                "plan_id": plan.id,
+                "article_id": article.id,
+                "wp_post_id": None,
+                "error": reason
+            } 
   
 
         # 3.4) URLだけキャッシュされて「h（見出し配列）」が空のときの軽量補完
