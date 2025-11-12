@@ -14,7 +14,7 @@ from app import db
 from app.models import Article, ArticleRewritePlan
 from app.services.rewrite import serp_collector as serp
 from app.services.rewrite import executor as rewrite_executor
-
+from app.services.rewrite.executor import REWRITE_MAX_ATTEMPTS  # attempts 上限と整合
 
 def enqueue_user_rewrite(
     user_id: int,
@@ -77,7 +77,9 @@ def _pick_next_plan_id() -> Optional[Tuple[int, int]]:
         )
         .filter(
             ArticleRewritePlan.is_active.is_(True),
-            ArticleRewritePlan.status == "queued",
+            ArticleRewritePlan.status.in_(["queued", "waiting"]),
+            # None も許容しつつ、上限未満に限定
+            ((ArticleRewritePlan.attempts.is_(None)) | (ArticleRewritePlan.attempts < REWRITE_MAX_ATTEMPTS)),
         )
         .order_by(
             ArticleRewritePlan.priority_score.desc(),
@@ -92,6 +94,7 @@ def _pick_next_plan_id() -> Optional[Tuple[int, int]]:
             if rewrite_executor._is_site_auth_blocked(sid):
                 logging.info(f"[rewrite/pick] skip plan_id={pid} site_id={sid} (auth_blocked)")
                 continue
+            logging.info(f"[rewrite/pick] picked plan_id={pid} user_id={uid} site_id={sid}")
             return (pid, uid)
         except Exception as e:
             logging.warning(f"[rewrite/pick] auth_block check failed plan_id={pid} site_id={sid}: {e}")
