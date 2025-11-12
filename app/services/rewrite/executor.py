@@ -42,6 +42,10 @@ from app.wp_client import (
     update_post_meta,
 )
 import difflib  # ★ 追加：差分率計算
+# -----------------------------------------------------------------------------
+# 環境変数でGSC取得をスキップ可能に
+# -----------------------------------------------------------------------------
+SKIP_GSC = os.getenv("REWRITE_SKIP_GSC", "0").lower() in ("1", "true", "on", "yes")
 
 def _rewrite_hard_stop() -> bool:
     """
@@ -428,6 +432,10 @@ def _collect_wp_html(site: Site, article: Article) -> Tuple[Optional[int], Optio
     return wp_id, None
 
 def _collect_gsc_snapshot(site_id: int, article: Article) -> Dict:
+    # 環境変数によるGSC取得スキップ
+    if SKIP_GSC:
+        logging.info("[rewrite/_collect_gsc_snapshot] skipped by env REWRITE_SKIP_GSC")
+        return {}
     """
     GSCのインデックス状況と最近のパフォーマンスを軽くスナップショット。
     無ければ空構造を返す（LLMに“無い”ことを伝える）。
@@ -1338,7 +1346,12 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
             db.session.commit()
             return {"status": "error", "message": plan.last_error, "plan_id": plan.id}
 
-        gsc_snap = _collect_gsc_snapshot(site.id, article)
+        # GSCスナップショット取得（環境変数でスキップ対応）
+        if SKIP_GSC:
+            logging.info("[rewrite] GSC snapshot skipped by env REWRITE_SKIP_GSC")
+            gsc_snap = {}
+        else:
+            gsc_snap = _collect_gsc_snapshot(site.id, article)
         outlines = _collect_serp_outline(article)
         if not outlines:
             logging.info("[rewrite] outlines empty for article_id=%s (SERP参考0件)", article.id)
