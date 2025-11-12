@@ -251,6 +251,7 @@ def resolve_wp_post_id(site: Site, art: Article, *, save: bool = True) -> Option
         current_app.logger.warning("[WP] resolve error site_id=%s article_id=%s: %s", getattr(site, "id", "?"), getattr(art, "id", "?"), e)
         return None
 
+
 def _request_with_retry(method: str, url: str, headers: Dict[str, str], params=None, json_body=None, timeout=TIMEOUT) -> requests.Response:
     last_exc = None
     for attempt, backoff in enumerate([0] + RETRY_BACKOFF):

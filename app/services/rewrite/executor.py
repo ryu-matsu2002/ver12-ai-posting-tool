@@ -1346,7 +1346,6 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
             db.session.commit()
             return {"status": "error", "message": plan.last_error, "plan_id": plan.id}
 
-
         # GSCスナップショット取得（環境変数でスキップ対応）
         if SKIP_GSC:
             logging.info("[rewrite] GSC snapshot skipped by env REWRITE_SKIP_GSC")
