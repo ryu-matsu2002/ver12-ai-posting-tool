@@ -1379,7 +1379,6 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
                 "wp_post_id": None,
                 "error": reason
             } 
-  
 
         # 3.4) URLだけキャッシュされて「h（見出し配列）」が空のときの軽量補完
         #     - OpenAI再ランキングや URL のみ保存モード(SERP_ONLY_URLS=1)運用時の安全弁
