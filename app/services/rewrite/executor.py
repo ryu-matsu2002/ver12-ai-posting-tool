@@ -46,6 +46,8 @@ import difflib  # ★ 追加：差分率計算
 # 環境変数でGSC取得をスキップ可能に
 # -----------------------------------------------------------------------------
 SKIP_GSC = os.getenv("REWRITE_SKIP_GSC", "0").lower() in ("1", "true", "on", "yes")
+# 追加：ゼロ課金で配線検証するための LLM スキップ（既存挙動は維持：デフォルトOFF）
+SKIP_LLM = os.getenv("REWRITE_SKIP_LLM", "0").lower() in ("1", "true", "on", "yes")
 
 def _rewrite_hard_stop() -> bool:
     """
@@ -1355,30 +1357,32 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
         outlines = _collect_serp_outline(article)
         if not outlines:
             logging.info("[rewrite] outlines empty for article_id=%s (SERP参考0件)", article.id)
-            # HARD STOP: フォールバック検索や再試行を一切行わない
-            reason = "serp_outlines_empty"
-            if dry_run:
-                # ドライランは副作用ゼロで即終了（再キューしない）
+            # 以前はここで即エラー終了していたが、運用要件に合わせて分岐可にする
+            if os.getenv("SERP_REQUIRED_FOR_REWRITE", "0") == "1":
+                reason = "serp_outlines_empty"
+                if dry_run:
+                    return {
+                        "status": "skipped",
+                        "reason": reason,
+                        "plan_id": plan.id,
+                        "article_id": article.id,
+                        "wp_post_id": None,
+                        "note": "SERP=0件（ドライラン停止）"
+                    }
+                plan.status = "error"
+                plan.last_error = f"permanent:{reason}"
+                plan.finished_at = datetime.utcnow()
+                db.session.commit()
                 return {
-                    "status": "skipped",
-                    "reason": reason,
+                    "status": "error",
                     "plan_id": plan.id,
                     "article_id": article.id,
                     "wp_post_id": None,
-                    "note": "SERP=0件（ドライラン停止）"
+                    "error": reason
                 }
-            # 本実行は非回復エラーで即終了（再キュー禁止）
-            plan.status = "error"
-            plan.last_error = f"permanent:{reason}"
-            plan.finished_at = datetime.utcnow()
-            db.session.commit()
-            return {
-                "status": "error",
-                "plan_id": plan.id,
-                "article_id": article.id,
-                "wp_post_id": None,
-                "error": reason
-            } 
+            # SERPが無くても続行（GSCや本文のみで方針を作り、最低限の整形を行う）
+            # → 実運用では SERP/GSC をONに戻す前提。オフ時は速度検証や配線確認用途。
+            # SERP不要モードでは“本文のみ”で継続（outlines は空のまま進行） 
 
         # 3.4) URLだけキャッシュされて「h（見出し配列）」が空のときの軽量補完
         #     - OpenAI再ランキングや URL のみ保存モード(SERP_ONLY_URLS=1)運用時の安全弁
@@ -1414,8 +1418,11 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
         referenced_count = len(referenced_urls)
         referenced_sources = _take_sources_with_titles(outlines, limit=8)
 
-        # 4) 方針作成
-        policy_text = _build_policy_text(article, gsc_snap, outlines, gap_summary_json)
+        # 4) 方針作成（LLMスキップ時はダミーの方針文に置換）
+        if SKIP_LLM:
+            policy_text = "(auto) REWRITE_SKIP_LLM=1 によりLLM生成をスキップ。本文は無変更。"
+        else:
+            policy_text = _build_policy_text(article, gsc_snap, outlines, gap_summary_json)
         # 人が一覧で判断しやすいよう、参照件数・URL・不足の要点を方針末尾に追記
         try:
             missing_topics = (gap_summary_json or {}).get("missing_topics") or []
@@ -1433,8 +1440,11 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
 
         # 4.5)（削除）— 以降は _build_gap_analysis の結果をそのまま使う
 
-        # 5) 本文リライト（リンク保護）
-        edited_html = _rewrite_html(original_html, policy_text, user_id=article.user_id)
+        # 5) 本文リライト
+        if SKIP_LLM:
+            edited_html = original_html  # LLM呼び出しゼロ。配線・並列・WP以外の性能を検証可能。
+        else:
+            edited_html = _rewrite_html(original_html, policy_text, user_id=article.user_id)
 
         # 6) 監査ログ（差分要約：小変更ならスキップ）
         change_ratio =  _text_change_ratio(original_html, edited_html)
@@ -1457,7 +1467,7 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
             policy_text=policy_text,
             diff_summary=diff_summary,
             snapshot_before=original_html,
-            snapshot_after=edited_html if dry_run else None,  # ドライラン時のみ“予定”として残す
+            snapshot_after=edited_html if (dry_run or SKIP_LLM) else None,  # LLMスキップ時も“予定”として残す
             wp_status="unknown",
             wp_post_id=wp_post_id,
             executed_at=datetime.utcnow(),
@@ -1470,6 +1480,32 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
         )
         db.session.add(log)
         db.session.commit()
+
+        # --- LLMスキップ（ゼロ課金で配線とWP以降の処理を一切走らせない検証モード） ---
+        # 本番ではREWRITE_SKIP_LLM=0で運用。配線・並列健全性の確認テスト専用。
+        if SKIP_LLM:
+            # LLM未使用なので snapshot_after は保存しない（意図的に差分ゼロを示す）
+            try:
+                # 監査上、方針は残し本文は未更新を明示
+                log.diff_summary = "(auto) LLM skipped: no content change"
+                log.wp_status = "skipped_llm"
+                db.session.add(log)
+            except Exception:
+                pass
+            try:
+                plan.status = "done"
+                plan.finished_at = datetime.utcnow()
+                db.session.add(plan)
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+            return {
+                "status": "success",
+                "plan_id": plan.id,
+                "article_id": article.id,
+                "wp_post_id": wp_post_id,
+                "note": "LLM skipped (zero cost test)"
+            }
 
         wp_ok = False
         wp_err = None
