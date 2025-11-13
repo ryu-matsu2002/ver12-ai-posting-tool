@@ -180,14 +180,23 @@ def _search_with_openai(keyword: str, limit: int, model: str) -> List[str]:
 def search_top_urls(keyword: str, limit: int = 6, model: str | None = None) -> List[str]:
     """
     - MODE=none   : 空配列（検索なし）
-    - MODE=search : OpenAI Responses API の web_search で直接URL取得（フォールバックなし）
+    - MODE=search : OpenAI web_search で直接URL取得（フォールバックなし）
     """
     limit = max(1, int(limit or _RESULT_LIMIT_FALLBACK))
 
-    if _MODE not in ("none", "search"):
+    # 明示的に検索を無効化しているケース
+    if _MODE == "none":
+        log.info("[OPENAI-SEARCH] MODE=none のため検索をスキップします keyword=%r", keyword)
         return []
 
-    if _MODE == "none":
+    # 想定外の MODE は安全側に倒してスキップ
+    if _MODE != "search":
+        log.warning("[OPENAI-SEARCH] 未対応の SERP_OPENAI_MODE=%r のため検索をスキップします keyword=%r", _MODE, keyword)
+        return []
+
+    # MODE=search だが API キー等が無い（＝実質オフ）
+    if not _has_openai():
+        log.warning("[OPENAI-SEARCH] OPENAI_API_KEY が未設定のため検索をスキップします keyword=%r", keyword)
         return []
 
     # MODE=search：web_search 一本化（フォールバックなし）
@@ -282,6 +291,24 @@ def search_and_cache_for_article(
         # 2) URL 収集
         urls: List[str] = search_top_urls(q, limit=limit, model=_DEFAULT_MODEL)
         urls = [u for u in urls if isinstance(u, str)]
+
+        # --- URL が 1件も返ってこなかった場合の分類 ---
+        if not urls:
+            # MODE=none / 想定外MODE のときは「検索自体が無効化されている」
+            if _MODE != "search":
+                err = f"openai_search_mode_disabled:{_MODE}"
+                log.warning("[openai_search] MODE=%r のため検索は実行されませんでした article_id=%s", _MODE, article_id)
+                return {"ok": False, "error": err}
+
+            # MODE=search だが API キー未設定 → 設定ミス or 意図的オフ
+            if not _has_openai():
+                log.warning("[openai_search] OPENAI_API_KEY 未設定のため検索を実行できません article_id=%s", article_id)
+                return {"ok": False, "error": "openai_search_not_configured"}
+
+            # ここまで来て 0 件 = 「検索は実行されたが結果が 0 件」とみなす
+            log.info("[openai_search] search_top_urls から URL が 0 件でした article_id=%s query=%r", article_id, q)
+            return {"ok": False, "error": "no_results"}
+
         outlines: List[Dict[str, Any]] = []
 
         for u in urls:
@@ -289,9 +316,6 @@ def search_and_cache_for_article(
             if not norm:
                 continue
             outlines.append({"url": norm})
-
-        if not outlines:
-            return {"ok": False, "error": "no_results"}
 
         # 3) 全要素 h が空なら、先頭K件だけ軽量見出し抽出
         _fill_headings_if_needed(outlines, _HEADINGS_FILL_K, lang, gl)
