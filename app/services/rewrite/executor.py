@@ -500,17 +500,13 @@ def _collect_gsc_snapshot(site_id: int, article: Article) -> Dict:
 
 def _collect_serp_outline(article: Article) -> List[Dict]:
     """
-    競合見出しアウトラインを取得する。
-    手順:
-      1) SerpOutlineCache の最新レコードを確認
-      2) 無ければ SERP_PROVIDER / SERP_OPENAI_MODE を見て検索→キャッシュ作成を試行
-      3) それでも無ければ空配列
-
-    ※ SERP_OPENAI_MODE=none の場合は検索を呼ばないので、この関数を配線しても
-       SERP 用の API 課金は発生しない。
+    競合見出しアウトライン（キャッシュ + 必要に応じてSERP検索）を取り出す。
+    - まず SerpOutlineCache の最新を参照
+    - なければ SERP_OPENAI_MODE=search のときだけ OpenAI検索でキャッシュを作成
+    - それでも何も無ければ空配列
     """
+    # 1) まずは既存キャッシュ
     try:
-        # 1) 既存キャッシュ（最新1件）
         q = (
             db.session.query(SerpOutlineCache)
             .filter(SerpOutlineCache.article_id == article.id)
@@ -519,53 +515,65 @@ def _collect_serp_outline(article: Article) -> List[Dict]:
         rec = q.first()
         if rec and rec.outlines:
             return rec.outlines
+    except Exception as e:
+        logging.info(f"[rewrite/_collect_serp_outline] cache lookup skipped: {e}")
 
-        # 2) キャッシュが無い場合のみ、検索プロバイダ経由でキャッシュ作成を試みる
-        provider = os.getenv("SERP_PROVIDER", "ddg").lower()
-        mode = os.getenv("SERP_OPENAI_MODE", "none").strip().lower()
-        limit = int(os.getenv("SERP_RESULT_LIMIT", "6") or "6")
+    # 2) SERPモードが search のときだけ、OpenAI検索でキャッシュを作成
+    mode = os.getenv("SERP_OPENAI_MODE", "none").strip().lower()
+    if mode != "search":
+        # 完全OFFモード：ここでは検索しない
+        logging.info(
+            "[rewrite/_collect_serp_outline] SERP_OPENAI_MODE=%s → searchは呼ばずに空配列",
+            mode,
+        )
+        return []
 
-        fetch_result = None
+    try:
+        # env から制限件数を取得（デフォルト6）
+        try:
+            limit = int(os.getenv("SERP_RESULT_LIMIT", "6"))
+        except Exception:
+            limit = 6
 
-        # --- OpenAI 検索プロバイダ（web_search） ---
-        # MODE=search のときだけ OpenAI 側を呼ぶ。MODE=none のときは一切呼ばない。
-        if provider == "openai" and mode == "search":
-            try:
-                fetch_result = osearch.search_and_cache_for_article(
-                    article_id=article.id,
-                    limit=limit,
-                    lang="ja",
-                    gl="jp",
-                    force=False,  # SerpOutlineCache 側の TTL ロジックに従う
-                )
-                logging.info(
-                    "[rewrite/_collect_serp_outline] openai_search result for article_id=%s: %s",
-                    article.id,
-                    fetch_result,
-                )
-            except Exception as e:
-                logging.warning(
-                    "[rewrite/_collect_serp_outline] openai_search failed for article_id=%s: %s",
-                    article.id,
-                    e,
-                )
+        res = osearch.search_and_cache_for_article(
+            article_id=article.id,
+            limit=limit,
+            lang="ja",
+            gl="jp",
+            force=False,
+        )
+        logging.info(
+            "[rewrite/_collect_serp_outline] openai_search result article_id=%s res=%s",
+            article.id,
+            res,
+        )
 
-        # （将来 DDG / Playwright 経路を有効にする場合はここに追加）
-
-        # 3) 検索後にもう一度キャッシュを取り直す
-        if fetch_result and fetch_result.get("ok"):
-            rec = (
+        if res.get("ok") and res.get("cache_id"):
+            rec2 = (
                 db.session.query(SerpOutlineCache)
-                .filter(SerpOutlineCache.article_id == article.id)
-                .order_by(SerpOutlineCache.fetched_at.desc())
+                .filter(SerpOutlineCache.id == res["cache_id"])
                 .first()
             )
-            if rec and rec.outlines:
-                return rec.outlines
+            if rec2 and rec2.outlines:
+                logging.info(
+                    "[rewrite/_collect_serp_outline] fetched %s outlines via OpenAI for article_id=%s",
+                    len(rec2.outlines),
+                    article.id,
+                )
+                return rec2.outlines or []
 
     except Exception as e:
-        logging.info(f"[rewrite/_collect_serp_outline] skipped: {e}")
+        logging.warning(
+            "[rewrite/_collect_serp_outline] openai_search failed for article_id=%s: %s",
+            article.id,
+            e,
+        )
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
 
+    # 3) それでも何も無ければ空配列
     return []
 
 
