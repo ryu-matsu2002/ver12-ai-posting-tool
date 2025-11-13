@@ -500,9 +500,17 @@ def _collect_gsc_snapshot(site_id: int, article: Article) -> Dict:
 
 def _collect_serp_outline(article: Article) -> List[Dict]:
     """
-    競合見出しアウトライン（キャッシュ）を取り出す。無ければ空配列。
+    競合見出しアウトラインを取得する。
+    手順:
+      1) SerpOutlineCache の最新レコードを確認
+      2) 無ければ SERP_PROVIDER / SERP_OPENAI_MODE を見て検索→キャッシュ作成を試行
+      3) それでも無ければ空配列
+
+    ※ SERP_OPENAI_MODE=none の場合は検索を呼ばないので、この関数を配線しても
+       SERP 用の API 課金は発生しない。
     """
     try:
+        # 1) 既存キャッシュ（最新1件）
         q = (
             db.session.query(SerpOutlineCache)
             .filter(SerpOutlineCache.article_id == article.id)
@@ -511,8 +519,53 @@ def _collect_serp_outline(article: Article) -> List[Dict]:
         rec = q.first()
         if rec and rec.outlines:
             return rec.outlines
+
+        # 2) キャッシュが無い場合のみ、検索プロバイダ経由でキャッシュ作成を試みる
+        provider = os.getenv("SERP_PROVIDER", "ddg").lower()
+        mode = os.getenv("SERP_OPENAI_MODE", "none").strip().lower()
+        limit = int(os.getenv("SERP_RESULT_LIMIT", "6") or "6")
+
+        fetch_result = None
+
+        # --- OpenAI 検索プロバイダ（web_search） ---
+        # MODE=search のときだけ OpenAI 側を呼ぶ。MODE=none のときは一切呼ばない。
+        if provider == "openai" and mode == "search":
+            try:
+                fetch_result = osearch.search_and_cache_for_article(
+                    article_id=article.id,
+                    limit=limit,
+                    lang="ja",
+                    gl="jp",
+                    force=False,  # SerpOutlineCache 側の TTL ロジックに従う
+                )
+                logging.info(
+                    "[rewrite/_collect_serp_outline] openai_search result for article_id=%s: %s",
+                    article.id,
+                    fetch_result,
+                )
+            except Exception as e:
+                logging.warning(
+                    "[rewrite/_collect_serp_outline] openai_search failed for article_id=%s: %s",
+                    article.id,
+                    e,
+                )
+
+        # （将来 DDG / Playwright 経路を有効にする場合はここに追加）
+
+        # 3) 検索後にもう一度キャッシュを取り直す
+        if fetch_result and fetch_result.get("ok"):
+            rec = (
+                db.session.query(SerpOutlineCache)
+                .filter(SerpOutlineCache.article_id == article.id)
+                .order_by(SerpOutlineCache.fetched_at.desc())
+                .first()
+            )
+            if rec and rec.outlines:
+                return rec.outlines
+
     except Exception as e:
         logging.info(f"[rewrite/_collect_serp_outline] skipped: {e}")
+
     return []
 
 
