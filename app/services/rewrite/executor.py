@@ -49,6 +49,9 @@ SKIP_GSC = os.getenv("REWRITE_SKIP_GSC", "0").lower() in ("1", "true", "on", "ye
 # LLM完全スキップ（ゼロ課金・配線健全性チェック用）
 SKIP_LLM = os.getenv("REWRITE_SKIP_LLM", "0").lower() in ("1", "true", "on", "yes")
 
+class SerpRateLimitedError(Exception):
+    """Search API がレート制限に達したことを示す軽量例外。"""
+    pass
 
 def _rewrite_hard_stop() -> bool:
     """
@@ -547,6 +550,11 @@ def _collect_serp_outline(article: Article) -> List[Dict]:
             article.id,
             res,
         )
+
+        # Search API のレート制限にかかった場合は、
+        # 呼び出し側（execute_one_plan）で“再キュー”制御を行う
+        if not res.get("ok") and res.get("error") == "rate_limited":
+            raise SerpRateLimitedError("serp_rate_limited")
 
         if res.get("ok") and res.get("cache_id"):
             rec2 = (
@@ -1477,7 +1485,34 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
             gsc_snap = {}
         else:
             gsc_snap = _collect_gsc_snapshot(site.id, article)
-        outlines = _collect_serp_outline(article)
+        # SERP 取得：Search API がレート制限に達している場合は
+        # このプランを「何もせず queued に戻して」スロット開放を待つ
+        try:
+            outlines = _collect_serp_outline(article)
+        except SerpRateLimitedError:
+            # status/running を元に戻し、attempts を“本実行扱いしない”よう補正
+            plan.status = "queued"
+            plan.started_at = None
+            plan.finished_at = None
+            if not dry_run and plan.attempts:
+                try:
+                    plan.attempts -= 1
+                except Exception:
+                    pass
+            db.session.commit()
+            current_app.logger.info(
+                "[rewrite] SERP rate-limited; plan re-queued plan_id=%s article_id=%s",
+                plan.id,
+                article.id,
+            )
+            return {
+                "status": "rate_limited",
+                "plan_id": plan.id,
+                "article_id": article.id,
+                "wp_post_id": None,
+                "note": "SERP rate limited; plan re-queued.",
+            }
+        
         if not outlines:
             logging.info("[rewrite] outlines empty for article_id=%s (SERP参考0件)", article.id)
             # 以前はここで即エラー終了していたが、運用要件に合わせて分岐可にする

@@ -42,6 +42,70 @@ _MAX_PER_DOMAIN = int(os.environ.get("SERP_MAX_PER_DOMAIN", "2") or "2")
 _CACHE_TTL_DAYS = int(os.environ.get("SERP_CACHE_TTL_DAYS", "14") or "14")
 _HEADINGS_FILL_K = int(os.environ.get("SERP_HEADINGS_FILL_K", "3") or "3")
 
+# ===== Search API レート制限用（全ワーカー共通）=====
+# ※ 実際の値は毎回 os.environ から読むので、ここはデフォルトの説明レベル
+#   REWRITE_SERP_MAX_RPM           : 1分あたりの最大呼び出し回数（例: 1）
+#   REWRITE_SERP_MIN_INTERVAL_SEC  : 呼び出し間隔の下限（秒, 例: 900=15分）
+
+def _acquire_serp_slot() -> bool:
+    """
+    グローバルな Search API レート制限。
+    - Redis に "rewrite:serp:last_call_ts" を保存し、
+      前回から REWRITE_SERP_MIN_INTERVAL_SEC 秒未満なら False を返す。
+    - 失敗時（Redis未設定など）は安全側（False）で返し、検索を行わない。
+    """
+    # 1) 環境変数から上限と最小間隔を取得
+    try:
+        max_rpm = float(os.environ.get("REWRITE_SERP_MAX_RPM", "1") or "1")
+    except Exception:
+        max_rpm = 1.0
+
+    try:
+        min_interval = int(os.environ.get("REWRITE_SERP_MIN_INTERVAL_SEC", "0") or "0")
+    except Exception:
+        min_interval = 0
+
+    # max_rpm が 0 以下なら「1rpm」とみなす
+    if max_rpm <= 0:
+        max_rpm = 1.0
+
+    # min_interval が指定されていなければ、rpm から自動計算しつつ、
+    # デフォルト 900秒（15分）よりは短くならないようにする
+    if min_interval <= 0:
+        base = int(60.0 / max_rpm)
+        if base <= 0:
+            base = 60
+        # 15分を下回らないようにする（過剰課金防止のセーフティ）
+        min_interval = max(base, 900)
+
+    # 2) Redis クライアント取得
+    try:
+        from app import redis_client  # type: ignore
+    except Exception:
+        log.warning("[openai_search] redis_client not available; skip SERP to avoid overuse")
+        return False
+
+    key = "rewrite:serp:last_call_ts"
+    try:
+        now = datetime.now(timezone.utc).timestamp()
+        last_raw = redis_client.get(key)
+        if last_raw is not None:
+            try:
+                last = float(last_raw)
+            except Exception:
+                last = 0.0
+            # 前回からの経過秒数が下限に満たない場合は「まだ打てない」
+            if now - last < min_interval:
+                return False
+
+        # スロット取得：現在時刻を書き込み（TTLは適当に1日）
+        redis_client.set(key, str(now), ex=86400)
+        return True
+    except Exception as e:
+        log.warning("[openai_search] rate-limit check failed: %s", e)
+        # ここで True にすると暴走の危険があるので、安全側（検索しない）
+        return False
+
 # ===== OpenAI クライアント =====
 def _has_openai() -> bool:
     return bool(OpenAI and _API_KEY)
@@ -287,6 +351,17 @@ def search_and_cache_for_article(
             fresh = _recent_cache(article_id, _CACHE_TTL_DAYS)
             if fresh:
                 return {"ok": True, "skipped": "recent_cache", "cache_id": fresh.id}
+
+        # 1.5) Search API レート制限チェック（MODE=search & APIキー有効時のみ）
+        if _MODE == "search" and _has_openai():
+            # グローバルスロットが取れない場合は「rate_limited」として即返す
+            if not _acquire_serp_slot():
+                log.info(
+                    "[openai_search] rate-limited; skip search article_id=%s query=%r",
+                    article_id,
+                    q,
+                )
+                return {"ok": False, "error": "rate_limited"}
 
         # 2) URL 収集
         urls: List[str] = search_top_urls(q, limit=limit, model=_DEFAULT_MODEL)
