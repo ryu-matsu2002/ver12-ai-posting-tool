@@ -1296,6 +1296,53 @@ def _validate_html_for_publish(before_html: str, after_html: str) -> Tuple[bool,
     return True, "ok"
 # ===============================================================================
 
+# ========== キューから「公平に」1件だけ取り出すヘルパー ==========
+
+def _dequeue_next_plan_id_fair(session) -> Optional[int]:
+    """
+    ユーザーごとの進捗を見ながら、次に実行すべき plan.id を1件だけ取得する。
+
+    ポリシー:
+      1) status='queued' のものだけを対象にする
+      2) すでに status='running' のプランを持つユーザーは除外
+      3) ユーザーごとの「最後に動いた started_at」が一番古いユーザーを優先
+
+    これにより:
+      - 同じユーザーが同時に複数本走らない
+      - 長く放置されているユーザーから順に処理される
+    """
+    sql = text("""
+        SELECT p.id
+        FROM article_rewrite_plans AS p
+        WHERE p.status = 'queued'
+          -- すでに running のプランを持っているユーザーはスキップ
+          AND NOT EXISTS (
+              SELECT 1
+              FROM article_rewrite_plans AS r
+              WHERE r.user_id = p.user_id
+                AND r.status = 'running'
+          )
+        ORDER BY
+          -- ユーザーごとの「最後に動いた started_at」が古いユーザーを優先
+          COALESCE(
+              (
+                  SELECT MAX(r2.started_at)
+                  FROM article_rewrite_plans AS r2
+                  WHERE r2.user_id = p.user_id
+                    AND r2.started_at IS NOT NULL
+                    AND r2.status IN ('done', 'error', 'failed', 'skipped_wp', 'running')
+              ),
+              TIMESTAMPTZ '1970-01-01'
+          ) ASC,
+          -- 同じユーザー内では単純に id 昇順
+          p.id
+        FOR UPDATE SKIP LOCKED
+        LIMIT 1
+    """)
+    row = session.execute(sql).first()
+    return row[0] if row else None
+
+
 # ========== メイン：1件実行 ==========
 
 def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bool = True) -> Dict:
@@ -1313,44 +1360,42 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
         except Exception:
             pass
 
-        # 1) まず ID だけを FOR UPDATE SKIP LOCKED で取得
+                # 1) 実行対象の plan.id を決める
         # ---- グローバル即時停止（キルスイッチ） ----
         if _rewrite_hard_stop():
             current_app.logger.warning("[rewrite] HARD_STOP enabled; skip dequeuing.")
             return {"status": "stopped", "message": "REWRITE_HARD_STOP is set"}
 
-        id_q = db.session.query(ArticleRewritePlan.id).filter(
-            ArticleRewritePlan.user_id == user_id,
-            ArticleRewritePlan.is_active.is_(True),
-            ArticleRewritePlan.status == "queued",
-            # attempts 上限（None は 0 扱いで許容）— 既存のREWRITE_MAX_ATTEMPTSを採用
-            or_(ArticleRewritePlan.attempts.is_(None),
-                ArticleRewritePlan.attempts < REWRITE_MAX_ATTEMPTS),
-            # 未来予約は除外（NULL は即実行可）
-            or_(ArticleRewritePlan.scheduled_at.is_(None),
-                ArticleRewritePlan.scheduled_at <= func.now()),
-        ).order_by(
-            ArticleRewritePlan.priority_score.desc(),
-            ArticleRewritePlan.created_at.asc(),
-        )
-        # plan_id 指定はそのまま尊重
-        if plan_id:
-            id_q = id_q.filter(ArticleRewritePlan.id == plan_id)
-
-        # Postgresに「どのテーブルをロックするか」を明示
-        id_q = id_q.with_for_update(skip_locked=True, of=ArticleRewritePlan)
-
-        # 1.1) ブロック中サイトをクエリ段階で除外（Redisで軽量に収集）
         blocked_site_ids = _get_blocked_site_ids_from_redis()
-        if blocked_site_ids and not plan_id:
-            try:
-                # site_id 列があるため直接除外（追加JOIN不要）
-                id_q = id_q.filter(~ArticleRewritePlan.site_id.in_(blocked_site_ids))
-            except Exception:
-                # IN 句で落ちたら“あとで弾く”方針にフォールバック
-                pass
 
-        target_id = id_q.limit(1).scalar()
+        with db.session.begin():
+            if plan_id:
+                # 明示指定された plan_id を優先（フィルタ条件はこれまで通り維持）
+                id_q = db.session.query(ArticleRewritePlan.id).filter(
+                    ArticleRewritePlan.id == plan_id,
+                    ArticleRewritePlan.is_active.is_(True),
+                    ArticleRewritePlan.status == "queued",
+                    or_(ArticleRewritePlan.attempts.is_(None),
+                        ArticleRewritePlan.attempts < REWRITE_MAX_ATTEMPTS),
+                    or_(ArticleRewritePlan.scheduled_at.is_(None),
+                        ArticleRewritePlan.scheduled_at <= func.now()),
+                )
+                if blocked_site_ids:
+                    try:
+                        id_q = id_q.filter(~ArticleRewritePlan.site_id.in_(blocked_site_ids))
+                    except Exception:
+                        # IN句で落ちたら「あとで弾く」方針（下の site_blocked チェック）にフォールバック
+                        pass
+                id_q = id_q.with_for_update(skip_locked=True, of=ArticleRewritePlan)
+                target_id = id_q.limit(1).scalar()
+            else:
+                # グローバルキューから「ユーザーごとに公平」に1件だけ取得
+                # ※ _dequeue_next_plan_id_fair 側で:
+                #   - status='queued'
+                #   - すでに running のユーザーは除外
+                #   - 「最後に動いた started_at」が古いユーザーを優先
+                target_id = _dequeue_next_plan_id_fair(db.session)
+
         if not target_id:
             return {"status": "empty", "message": "実行可能な queued 計画が見つかりません"}
 
