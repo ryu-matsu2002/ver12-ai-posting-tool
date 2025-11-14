@@ -1587,7 +1587,8 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
 
             # 環境変数 SERP_REQUIRED_FOR_REWRITE で上書きも可能
             if os.getenv("SERP_REQUIRED_FOR_REWRITE", serp_required_default) == "1":
-                # SERP 必須モード：アウトライン 0 件ならこのプランはリライトせず終了
+                # SERP 必須モード：
+                # いまは SERP=0件なので、「一旦このプランはキューに戻して、あとで SERP が取れたタイミングで再挑戦」
                 reason = "serp_outlines_empty"
                 if dry_run:
                     return {
@@ -1598,16 +1599,30 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
                         "wp_post_id": None,
                         "note": "SERP=0件（ドライラン停止）"
                     }
-                plan.status = "error"
-                plan.last_error = f"permanent:{reason}"
-                plan.finished_at = datetime.utcnow()
+
+                # 永久エラーにはせず、一時待機として再キュー
+                plan.status = "queued"
+                plan.finished_at = None
+                # attempts を増やしてしまっている場合は、過剰カウントにならないよう 1 だけ戻しておく
+                try:
+                    if plan.attempts and plan.attempts > 0:
+                        plan.attempts -= 1
+                except Exception:
+                    pass
+                # 監査用に理由だけ残す（permanent: は付けない）
+                plan.last_error = reason
                 db.session.commit()
+                current_app.logger.info(
+                    "[rewrite] SERP outlines empty; plan re-queued plan_id=%s article_id=%s",
+                    plan.id,
+                    article.id,
+                )
                 return {
-                    "status": "error",
+                    "status": "rate_limited_no_serp",
                     "plan_id": plan.id,
                     "article_id": article.id,
                     "wp_post_id": None,
-                    "error": reason
+                    "error": reason,
                 }
 
             # SERP 不要モード（デバッグ用途など）の場合のみ、
@@ -1738,6 +1753,8 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
 
         wp_ok = False
         wp_err = None
+        # WP更新フェーズ全体で HTTP ステータスコードを参照できるように、必ず初期化しておく
+        last_status: Optional[int] = None
 
         # 8) WP更新（ドライランじゃなければ反映）
         if not dry_run:
