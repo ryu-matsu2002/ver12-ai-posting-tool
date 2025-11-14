@@ -554,6 +554,7 @@ def _collect_serp_outline(article: Article) -> List[Dict]:
         # Search API のレート制限にかかった場合は、
         # 呼び出し側（execute_one_plan）で“再キュー”制御を行う
         if not res.get("ok") and res.get("error") == "rate_limited":
+            # ここでは握り潰さず、上位へ投げる
             raise SerpRateLimitedError("serp_rate_limited")
 
         if res.get("ok") and res.get("cache_id"):
@@ -569,7 +570,12 @@ def _collect_serp_outline(article: Article) -> List[Dict]:
                     article.id,
                 )
                 return rec2.outlines or []
+        # res["ok"] だがアウトラインが空 / cache_id 無しなどの場合は
+        # そのまま下の「空配列」扱いにフォールバック
 
+    except SerpRateLimitedError:
+        # rate limit は必ず呼び出し側で「再キュー」させたいので再スロー
+        raise
     except Exception as e:
         logging.warning(
             "[rewrite/_collect_serp_outline] openai_search failed for article_id=%s: %s",
@@ -580,7 +586,6 @@ def _collect_serp_outline(article: Article) -> List[Dict]:
             db.session.rollback()
         except Exception:
             pass
-
     # 3) それでも何も無ければ空配列
     return []
 
@@ -1574,8 +1579,15 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
         
         if not outlines:
             logging.info("[rewrite] outlines empty for article_id=%s (SERP参考0件)", article.id)
-            # 以前はここで即エラー終了していたが、運用要件に合わせて分岐可にする
-            if os.getenv("SERP_REQUIRED_FOR_REWRITE", "0") == "1":
+
+            # SERP_OPENAI_MODE に応じて「SERP必須かどうか」のデフォルトを変える
+            serp_mode = os.getenv("SERP_OPENAI_MODE", "none").strip().lower()
+            # search モードのときは「SERP必須」をデフォルトにする
+            serp_required_default = "1" if serp_mode == "search" else "0"
+
+            # 環境変数 SERP_REQUIRED_FOR_REWRITE で上書きも可能
+            if os.getenv("SERP_REQUIRED_FOR_REWRITE", serp_required_default) == "1":
+                # SERP 必須モード：アウトライン 0 件ならこのプランはリライトせず終了
                 reason = "serp_outlines_empty"
                 if dry_run:
                     return {
@@ -1597,9 +1609,9 @@ def execute_one_plan(*, user_id: int, plan_id: Optional[int] = None, dry_run: bo
                     "wp_post_id": None,
                     "error": reason
                 }
-            # SERPが無くても続行（GSCや本文のみで方針を作り、最低限の整形を行う）
-            # → 実運用では SERP/GSC をONに戻す前提。オフ時は速度検証や配線確認用途。
-            # SERP不要モードでは“本文のみ”で継続（outlines は空のまま進行） 
+
+            # SERP 不要モード（デバッグ用途など）の場合のみ、
+            # GSC や本文だけでリライトを継続する（従来挙動）
 
         # 3.4) URLだけキャッシュされて「h（見出し配列）」が空のときの軽量補完
         #     - OpenAI再ランキングや URL のみ保存モード(SERP_ONLY_URLS=1)運用時の安全弁
