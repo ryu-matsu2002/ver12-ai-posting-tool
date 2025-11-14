@@ -217,17 +217,55 @@ def rewrite_enqueue_for_user(user_id: int,
 @_safe_job
 def _rewrite_tick_job(app):
     """
-    短い間隔で回し、queued の ArticleRewritePlan を順次処理する。
+    リライト専用 tick:
+      1. （任意）リライトONユーザーの新規記事を plan に自動投入
+      2. rewrite_tick_once を max_per_tick 回だけ実行
     """
     with app.app_context():
-        max_per_tick = int(os.getenv("REWRITE_MAX_PER_TICK", "3"))
-        dry_run = (os.getenv("REWRITE_DRYRUN", "0") == "1")
+        # --- dry_run 判定（REWRITE_DRY_RUN 優先、なければ REWRITE_DRYRUN も見る） ---
+        dry_run_env = os.getenv("REWRITE_DRY_RUN")
+        if dry_run_env is None:
+            dry_run_env = os.getenv("REWRITE_DRYRUN", "0")
+        dry_run = str(dry_run_env).lower() in ("1", "true", "on", "yes")
+
+        # --- 新規記事 → plan 自動投入（環境変数で ON/OFF） ---
+        auto_enq_env = os.getenv("REWRITE_AUTO_ENQUEUE_NEW_ARTICLES", "1")
+        auto_enqueue = str(auto_enq_env).lower() in ("1", "true", "on", "yes")
+
+        if auto_enqueue:
+            try:
+                # executor.py に追加済みのバッチを呼び出し
+                enq_res = rewrite_executor.enqueue_new_articles_for_rewrite(
+                    dry_run=dry_run
+                )
+                current_app.logger.info(
+                    "[rewrite/tick] auto_enqueue enabled=%s inserted=%s skipped=%s total=%s dry_run=%s",
+                    auto_enqueue,
+                    enq_res.get("inserted_count"),
+                    enq_res.get("skipped_count"),
+                    enq_res.get("total_candidates"),
+                    dry_run,
+                )
+            except Exception as e:
+                # ここで失敗しても tick 自体は止めない
+                current_app.logger.warning(
+                    "[rewrite/tick] auto_enqueue failed: %s", e
+                )
+
+        # --- 既存の rewrite_tick_once を N 回だけ実行 ---
+        try:
+            max_per_tick = int(os.getenv("REWRITE_MAX_PER_TICK", "3"))
+        except Exception:
+            max_per_tick = 3
+
         done = 0
         for _ in range(max_per_tick):
             res = rewrite_tick_once(app, dry_run=dry_run)
             if not res:
                 break
+            # 元の実装と同じく「呼び出し回数」をカウント
             done += 1
+
         current_app.logger.info("[rewrite/tick] processed=%s dry_run=%s", done, dry_run)
 
 # --------------------------------------------------------------------------- #

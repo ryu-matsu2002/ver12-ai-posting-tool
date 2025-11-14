@@ -1350,6 +1350,65 @@ def _dequeue_next_plan_id_fair(session) -> Optional[int]:
     row = session.execute(sql).first()
     return row[0] if row else None
 
+def enqueue_new_articles_for_rewrite() -> Dict[str, int]:
+    """
+    リライトON中（= その user_id/site_id で is_active=True の plan が存在する）
+    のサイトについて、まだ一度も plan が作られていない記事を
+    自動で article_rewrite_plans に 'queued' 追加する。
+
+    ・「新規記事」かどうかは厳密な created_at ではなく、
+      『その記事に紐づく plan が1件も無い』かどうかで判定。
+      → 既存記事で漏れていた分も一緒に拾う安全側の設計。
+    """
+    stats = {"inserted": 0}
+    try:
+        sql = text("""
+            INSERT INTO article_rewrite_plans (
+                user_id,
+                site_id,
+                article_id,
+                status,
+                is_active,
+                priority_score
+            )
+            SELECT
+                a.user_id,
+                a.site_id,
+                a.id            AS article_id,
+                'queued'        AS status,
+                TRUE            AS is_active,
+                0.0             AS priority_score
+            FROM articles AS a
+            WHERE
+                -- ① この user/site で、すでにリライトONの plan が存在する
+                EXISTS (
+                    SELECT 1
+                    FROM article_rewrite_plans AS p
+                    WHERE p.user_id = a.user_id
+                      AND p.site_id = a.site_id
+                      AND p.is_active IS TRUE
+                )
+                -- ② まだ一度もリライト plan が作られていない記事だけ対象
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM article_rewrite_plans AS p2
+                    WHERE p2.article_id = a.id
+                )
+                -- ③ すでにWPに投稿済みの記事に限定（ドラフトなどは除外）
+                AND a.posted_url IS NOT NULL
+        """)
+        res = db.session.execute(sql)
+        db.session.commit()
+        stats["inserted"] = res.rowcount or 0
+        if stats["inserted"]:
+            logging.info("[rewrite/enqueue_new] inserted=%s", stats["inserted"])
+    except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        logging.warning(f"[rewrite/enqueue_new] skipped: {e}")
+    return stats
 
 # ========== メイン：1件実行 ==========
 
