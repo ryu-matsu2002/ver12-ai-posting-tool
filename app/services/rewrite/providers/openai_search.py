@@ -355,12 +355,40 @@ def search_and_cache_for_article(
         # 1.5) Search API レート制限チェック（MODE=search & APIキー有効時のみ）
         if _MODE == "search" and _has_openai():
             # グローバルスロットが取れない場合は「rate_limited」として即返す
+            # ただしログは Search API のクールダウン間隔ごとに 1 回だけ出す
             if not _acquire_serp_slot():
-                log.info(
-                    "[openai_search] rate-limited; skip search article_id=%s query=%r",
-                    article_id,
-                    q,
-                )
+                try:
+                    # _acquire_serp_slot() と同じ間隔をログ抑制にも使う
+                    try:
+                        min_interval = int(os.environ.get("REWRITE_SERP_MIN_INTERVAL_SEC", "0") or "0")
+                    except Exception:
+                        min_interval = 0
+                    if min_interval <= 0:
+                        # _acquire_serp_slot 側のデフォルトと同じ 900 秒（=15分）
+                        min_interval = 900
+
+                    from app import redis_client  # 遅延 import
+                    key = "rewrite:serp:last_rate_log_ts"
+                    now = datetime.now(timezone.utc).timestamp()
+                    last_raw = redis_client.get(key)
+                    try:
+                        last = float(last_raw) if last_raw is not None else 0.0
+                    except Exception:
+                        last = 0.0
+
+                    # 前回ログから min_interval 秒以上あいたときだけ info を出す
+                    if now - last >= min_interval:
+                        log.info(
+                            "[openai_search] rate-limited; skip search article_id=%s query=%r",
+                            article_id,
+                            q,
+                        )
+                        # 次にログを出してよい基準時刻として保存
+                        redis_client.set(key, str(now), ex=86400)
+                except Exception:
+                    # ログ抑制処理で落ちても、本体の挙動には影響させない
+                    pass
+
                 return {"ok": False, "error": "rate_limited"}
 
         # 2) URL 収集
