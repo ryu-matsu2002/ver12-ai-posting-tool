@@ -10087,9 +10087,73 @@ def topic_generate_now():
 @bp.route("/<username>/rewrite", methods=["GET"])
 @login_required
 def user_rewrite_dashboard(username):
-    # （username はハイライト用に受け取るだけ。本人チェックは current_user で行う）
-    site_cnt = db.session.query(func.count(Site.id)).filter(Site.user_id == current_user.id).scalar() or 0
-    return render_template("rewrite.html", site_cnt=int(site_cnt))
+    """
+    ログインユーザー専用の「全記事リライトダッシュボード」。
+    - vw_rewrite_state を唯一の真実源として、ユーザー配下のサイト別集計を出す
+    - 管理画面の /admin/rewrite/user/<user_id> をユーザー版に落とし込んだイメージ
+    """
+    from app.services.rewrite.state_view import fetch_user_totals
+
+    user_id = current_user.id
+
+    # サイト別集計（waiting / running / success / failed の件数など）
+    raw_rows = _rewrite_counts_for_user_sites(user_id)
+
+    sites = []
+    for r in raw_rows:
+        site_id = int(r.get("site_id"))
+        site_name = (r.get("site_name") or f"ID {site_id}").strip()
+        target_articles = int(r.get("target_articles") or 0)
+        waiting = int(r.get("waiting") or 0)
+        running = int(r.get("running") or 0)
+        success = int(r.get("success") or 0)
+        failed = int(r.get("failed") or 0)
+        last_update = r.get("last_update")
+
+        # ユーザー用：サイト別の「リライト済み記事一覧」ページへのリンク（※後続ステップで実装）
+        try:
+            site_articles_url = url_for(
+                "main.user_rewrite_site_articles",
+                username=username,
+                site_id=site_id,
+            )
+        except Exception:
+            # まだルート未実装の場合でもテンプレが落ちないように空文字でフォールバック
+            site_articles_url = ""
+
+        sites.append({
+            "site_id": site_id,
+            "site_name": site_name,
+            "target_articles": target_articles,
+            "queued": waiting,
+            "running": running,
+            "success": success,
+            "error": failed,
+            "unknown": 0,  # vw_rewrite_state 側で other を使っていないので 0 固定
+            "last_update": last_update,
+            "site_articles_url": site_articles_url,
+        })
+
+    # ユーザー全体のトータル（カード表示用）
+    totals_raw = fetch_user_totals(user_id)
+    totals = {
+        "queued":  int(totals_raw.get("waiting", 0)),
+        "running": int(totals_raw.get("running", 0)),
+        "success": int(totals_raw.get("success", 0)),
+        "error":   int(totals_raw.get("failed", 0)),
+        "unknown": int(totals_raw.get("other", 0)),
+        "target_articles": sum(s["target_articles"] for s in sites) if sites else 0,
+    }
+
+    site_cnt = len(sites)
+
+    return render_template(
+        "rewrite.html",
+        user=current_user,
+        sites=sites,
+        totals=totals,
+        site_cnt=int(site_cnt),
+    )
 
 @bp.route("/rewrite/enqueue", defaults={"username": None}, methods=["POST"])
 @bp.route("/<username>/rewrite/enqueue", methods=["POST"])

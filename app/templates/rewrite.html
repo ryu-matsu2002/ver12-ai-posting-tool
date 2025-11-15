@@ -5,8 +5,12 @@
 {% block content %}
 <div class="container mt-4">
   <h2 class="mb-3">全記事リライト（あなたのサイト）</h2>
-  <p class="text-muted">あなたの全サイト / 全記事を対象にリライト計画を投入できます。必要に応じてサイトID・記事IDで絞り込みも可能です。</p>
+  <p class="text-muted">
+    あなたの全サイト / 全記事を対象にリライト計画を投入できます。<br>
+    下のフォームから任意のサイトID・記事IDを指定してキュー投入でき、進捗やリライト済み記事を確認できます。
+  </p>
 
+  <!-- キュー投入フォーム -->
   <div class="card mb-3">
     <div class="card-body">
       <form id="enqueue-form" class="row g-2">
@@ -32,6 +36,7 @@
   </div>
 
   <div class="row g-3">
+    <!-- 全体サマリ -->
     <div class="col-md-4">
       <div class="card h-100">
         <div class="card-header">進捗サマリ</div>
@@ -40,15 +45,21 @@
           <div>running: <span id="t-running">0</span></div>
           <div>success: <span id="t-success">0</span></div>
           <div>error: <span id="t-error">0</span></div>
-          <div class="text-muted small mt-2">最終更新: <span id="last-updated">-</span></div>
+          <div class="text-muted small mt-2">
+            最終更新（日本時間）:
+            <span id="last-updated">-</span>
+          </div>
         </div>
       </div>
     </div>
+
+    <!-- 最近の計画 -->
     <div class="col-md-8">
       <div class="card h-100">
         <div class="card-header d-flex justify-content-between align-items-center">
           <span>最近の計画（30件）</span>
-          <div>
+          <div class="d-flex align-items-center gap-2">
+            <label for="filter-status" class="small mb-0">ステータス</label>
             <select id="filter-status" class="form-select form-select-sm">
               <option value="">すべて</option>
               <option value="queued">queued</option>
@@ -66,12 +77,16 @@
                 <th style="width: 100px;">Article</th>
                 <th style="width: 110px;">Status</th>
                 <th style="width: 80px;">Attempts</th>
-                <th>Updated</th>
+                <th style="width: 160px;">更新日時（JST）</th>
                 <th>WP URL</th>
               </tr>
             </thead>
             <tbody id="recent-tbody">
-              <tr><td colspan="6" class="text-center text-muted py-3">リロード/投入で更新</td></tr>
+              <tr>
+                <td colspan="6" class="text-center text-muted py-3">
+                  リロード/投入で更新
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -81,63 +96,192 @@
       </div>
     </div>
   </div>
+
+  <!-- サイトごとの進捗（管理画面の「ユーザー別サイト一覧」と同等のイメージ） -->
+  <div class="card mt-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span>サイトごとの進捗</span>
+      <span class="text-muted small">
+        ※あなたが登録しているサイトのみ表示されます
+      </span>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-sm mb-0 align-middle">
+          <thead class="table-light">
+            <tr>
+              <th style="width:60px;">サイトID</th>
+              <th>サイト名 / URL</th>
+              <th class="text-end" style="width:90px;">対象記事数</th>
+              <th class="text-end" style="width:90px;">待機中</th>
+              <th class="text-end" style="width:90px;">実行中</th>
+              <th class="text-end" style="width:90px;">成功</th>
+              <th class="text-end" style="width:90px;">失敗</th>
+              <th class="text-center" style="width:180px;">最終更新</th>
+              <th class="text-center" style="width:120px;">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% if sites is defined and sites %}
+            {% for row in sites %}
+              <tr>
+                <td>{{ row.site_id }}</td>
+                <td>
+                  {% if row.site_name %}
+                    <div class="fw-bold small">{{ row.site_name }}</div>
+                  {% endif %}
+                  {% if row.site_url %}
+                    <div class="text-muted small">{{ row.site_url }}</div>
+                  {% endif %}
+                </td>
+                <td class="text-end">{{ row.total_count or 0 }}</td>
+                <td class="text-end">{{ row.waiting or 0 }}</td>
+                <td class="text-end">{{ row.running or 0 }}</td>
+                <td class="text-end text-success">{{ row.success or 0 }}</td>
+                <td class="text-end text-danger">{{ row.failed or 0 }}</td>
+                <td class="text-center text-muted small">
+                  {% if row.last_updated %}
+                    {{ row.last_updated }}
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+                <td class="text-center">
+                  {% if row.site_id %}
+                    <a href="{{ url_for('main.user_rewrite_site_articles', site_id=row.site_id) }}"
+                       class="btn btn-outline-primary btn-sm">
+                      記事一覧
+                    </a>
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          {% else %}
+              <tr>
+                <td colspan="9" class="text-center text-muted py-3">
+                  サイトごとの進捗データがまだありません。
+                </td>
+              </tr>
+          {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
 (function(){
   const $ = (s)=>document.querySelector(s);
-  function setMsg(t, ok=true){ const m=$("#enqueue-msg"); m.className=ok?"text-success":"text-danger"; m.textContent=t; }
-  function badgeClass(st){ return st==="success"?"success":st==="running"?"warning":st==="queued"?"secondary":st==="error"?"danger":"light"; }
-  function linkify(u){ if(!u) return ""; const esc=(s)=>String(s).replace(/"/g,'&quot;'); return `<a href="${esc(u)}" target="_blank" rel="noopener">open</a>`; }
 
-  async function fetchJSON(url, opts){ const r=await fetch(url, opts||{}); const j=await r.json(); if(!r.ok||j.ok===false) throw new Error(j.error||("HTTP "+r.status)); return j; }
+  function setMsg(t, ok=true){
+    const m=$("#enqueue-msg");
+    m.className = ok ? "text-success" : "text-danger";
+    m.textContent = t;
+  }
+
+  function badgeClass(st){
+    if (st === "success") return "success";
+    if (st === "running") return "warning";
+    if (st === "queued")  return "secondary";
+    if (st === "error")   return "danger";
+    return "light";
+  }
+
+  function linkify(u){
+    if(!u) return "";
+    const esc=(s)=>String(s).replace(/"/g,'&quot;');
+    return `<a href="${esc(u)}" target="_blank" rel="noopener">open</a>`;
+  }
+
+  // 日本時間でのフォーマット
+  function formatJst(isoString){
+    if (!isoString) return "";
+    const d = new Date(isoString);
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleString("ja-JP", {
+      timeZone: "Asia/Tokyo",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
+  async function fetchJSON(url, opts){
+    const r = await fetch(url, opts || {});
+    const j = await r.json();
+    if(!r.ok || j.ok === false){
+      throw new Error(j.error || ("HTTP " + r.status));
+    }
+    return j;
+  }
 
   async function refresh(){
     const prog = await fetchJSON("/rewrite/progress");
+
     $("#t-queued").textContent  = prog.totals.queued;
     $("#t-running").textContent = prog.totals.running;
     $("#t-success").textContent = prog.totals.success;
     $("#t-error").textContent   = prog.totals.error;
-    $("#last-updated").textContent = new Date(prog.last_updated).toLocaleString();
+    $("#last-updated").textContent = formatJst(prog.last_updated);
 
     const want = $("#filter-status").value;
-    const rows = want ? prog.recent.filter(r=>r.status===want) : prog.recent;
+    const rows = want ? prog.recent.filter(r => r.status === want) : prog.recent;
     const tbody = $("#recent-tbody");
     tbody.innerHTML = "";
-    if(rows.length===0){ tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-3">なし</td></tr>`; return; }
-    rows.forEach(r=>{
+
+    if(!rows || rows.length === 0){
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="6" class="text-center text-muted py-3">なし</td>
+        </tr>`;
+      return;
+    }
+
+    rows.forEach(r => {
       const tr = document.createElement("tr");
       tr.innerHTML = `
         <td>${r.id}</td>
         <td><code>${r.article_id}</code></td>
         <td><span class="badge bg-${badgeClass(r.status)}">${r.status}</span></td>
         <td>${r.attempts ?? ""}</td>
-        <td class="text-muted small">${r.updated_at ? new Date(r.updated_at).toLocaleString() : ""}</td>
-        <td>${linkify(r.posted_url)}</td>`;
+        <td class="text-muted small">${formatJst(r.updated_at)}</td>
+        <td>${linkify(r.posted_url)}</td>
+      `;
       tbody.appendChild(tr);
     });
   }
 
+  // キュー投入
   $("#enqueue-form").addEventListener("submit", async (e)=>{
     e.preventDefault();
     setMsg("投入中…");
     try{
       const body = {
         priority: Number($("#priority").value || 0),
-        site_ids: ($("#site-ids").value || "").trim(),
-        article_ids: ($("#article-ids").value || "").trim()
+        site_ids:   ($("#site-ids").value || "").trim(),
+        article_ids:($("#article-ids").value || "").trim()
       };
       const j = await fetchJSON("/rewrite/enqueue", {
-        method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify(body)
       });
       setMsg(`queued: ${j.result?.queued || 0} 件（skipped: ${j.result?.skipped || 0}）`, true);
       await refresh();
-    }catch(err){ setMsg("投入に失敗: "+err.message, false); }
+    }catch(err){
+      setMsg("投入に失敗: " + err.message, false);
+    }
   });
+
   $("#refresh-btn").addEventListener("click", refresh);
   $("#filter-status").addEventListener("change", refresh);
   $("#load-more").addEventListener("click", async ()=>{
-    // ユーザー版は簡略：必要なら後続でページングを追加
+    // 今はシンプルに再読込だけ
     await refresh();
   });
 
