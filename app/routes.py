@@ -10110,16 +10110,10 @@ def user_rewrite_dashboard(username):
         failed = int(r.get("failed") or 0)
         last_update = r.get("last_update")
 
-        # ユーザー用：サイト別の「リライト済み記事一覧」ページへのリンク（※後続ステップで実装）
-        try:
-            site_articles_url = url_for(
-                "main.user_rewrite_site_articles",
-                username=username,
-                site_id=site_id,
-            )
-        except Exception:
-            # まだルート未実装の場合でもテンプレが落ちないように空文字でフォールバック
-            site_articles_url = ""
+        # ユーザー用：サイト別の「リライト済み記事一覧」ページへのリンク
+        # まだルート未実装なので、ここでは URL は空文字にしておく（後続ステップで差し替え）
+        site_articles_url = ""
+        
 
         sites.append({
             "site_id": site_id,
