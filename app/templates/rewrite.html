@@ -4,7 +4,6 @@
 
 {% block content %}
 <div class="container-fluid mt-4">
-  {# ヘッダー行 #}
   <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h2 class="mb-0">全記事リライト（あなたのサイト）</h2>
   </div>
@@ -54,6 +53,7 @@
                 <a href="{{ _url }}" target="_blank" rel="noopener">{{ _url }}</a>
               {% endif %}
             </td>
+
             <td class="text-center">
               <span class="fw-bold text-primary">{{ r.target_articles or 0 }}</span>
             </td>
@@ -69,19 +69,20 @@
             <td class="text-center">
               <span class="fw-bold text-danger">{{ error }}</span>
             </td>
+
             <td class="text-center small text-muted">
-              {# ★ 時刻表示を「YYYY-MM-DD HH:MM」に統一 #}
+              {# ★ 日付表示を「YYYY-MM-DD HH:MM」に統一 #}
               {% if r.last_update %}
                 {{ r.last_update.strftime("%Y-%m-%d %H:%M") }}
               {% else %}
                 -
               {% endif %}
             </td>
+
             <td class="text-center">
-              {# ★ デザインだけ管理UIと同じボタンにする（中身は次ステップ） #}
+              {# ★ まずは見た目だけ管理UIと同じボタンにする #}
               <a class="btn btn-sm btn-outline-primary disabled"
-                 href="javascript:void(0)"
-                 aria-disabled="true">
+                 href="javascript:void(0)" aria-disabled="true">
                 記事一覧
               </a>
             </td>
