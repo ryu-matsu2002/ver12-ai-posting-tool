@@ -1,18 +1,22 @@
 <!-- templates/rewrite.html（ユーザー用 全記事リライト・サイト一覧） -->
 {% extends "base.html" %}
-{% block title %}全記事リライト（あなたのサイト）{% endblock %}
+{% block title %}ユーザー別サイト一覧 | 全記事リライト{% endblock %}
 
 {% block content %}
 <div class="container-fluid mt-4">
+
+  {# 管理画面と同じヘッダー構成（戻るボタンだけ無し） #}
   <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-    <h2 class="mb-0">全記事リライト（あなたのサイト）</h2>
+    <h2 class="mb-0">ユーザー別サイト一覧</h2>
   </div>
 
+  {# 管理画面と同じユーザー表示（current_user を user 変数に寄せる） #}
+  {% set user = current_user %}
   <div class="mb-2">
     <span class="text-muted">ユーザー:</span>
-    <strong>#{{ current_user.id }}
-      {{ current_user.last_name or '' }} {{ current_user.first_name or '' }}
-      {{ '(' + current_user.username + ')' if current_user.username else '' }}
+    <strong>#{{ user.id }}
+      {{ user.last_name or '' }} {{ user.first_name or '' }}
+      {{ '(' + user.username + ')' if user.username else '' }}
     </strong>
   </div>
 
@@ -21,7 +25,6 @@
       <span>サイトごとの進捗</span>
       <small class="text-muted">ID昇順</small>
     </div>
-
     <div class="table-responsive">
       <table class="table table-striped align-middle mb-0">
         <thead class="table-light">
@@ -53,7 +56,6 @@
                 <a href="{{ _url }}" target="_blank" rel="noopener">{{ _url }}</a>
               {% endif %}
             </td>
-
             <td class="text-center">
               <span class="fw-bold text-primary">{{ r.target_articles or 0 }}</span>
             </td>
@@ -69,17 +71,10 @@
             <td class="text-center">
               <span class="fw-bold text-danger">{{ error }}</span>
             </td>
-
             <td class="text-center small text-muted">
-              {% if r.last_update %}
-                {{ r.last_update.strftime("%Y-%m-%d %H:%M") }}
-              {% else %}
-                -
-              {% endif %}
+              {{ (r.last_update.isoformat() if r.last_update else '') or '-' }}
             </td>
-
             <td class="text-center">
-              {# ユーザー版のサイト別記事一覧へリンク #}
               <a class="btn btn-sm btn-outline-primary"
                  href="{{ url_for('main.user_rewrite_site_articles', site_id=r.site_id) }}">
                 記事一覧

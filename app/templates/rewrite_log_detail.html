@@ -1,72 +1,142 @@
+{# templates/rewrite_log_detail.html #}
 {% extends "base.html" %}
-{% block title %}リライトログ詳細{% endblock %}
+{% block title %}リライト詳細 | 修正方針{% endblock %}
 
 {% block content %}
 <div class="container-fluid mt-4">
-  <nav aria-label="breadcrumb">
-    <ol class="breadcrumb mb-3">
-      <li class="breadcrumb-item">
-        <a href="{{ url_for('main.user_rewrite_dashboard', username=current_user.username) }}">
-          全記事リライト
-        </a>
-      </li>
-      {% if site %}
-      <li class="breadcrumb-item">
-        <a href="{{ url_for('main.user_rewrite_site_articles', site_id=site.id) }}">
-          {{ site.name or site.url or 'サイト' }}
-        </a>
-      </li>
-      {% endif %}
-      <li class="breadcrumb-item active" aria-current="page">
-        修正方針
-      </li>
-    </ol>
-  </nav>
 
-  <h2 class="mb-3">修正方針の詳細</h2>
-
-  <div class="mb-3">
-    <div><strong>ログID:</strong> {{ log.id }}</div>
-    <div><strong>記事ID:</strong> {{ article.id }}</div>
-    <div><strong>タイトル:</strong> {{ article.title }}</div>
-    {% if wp_url %}
-      <div><strong>WPリンク:</strong> <a href="{{ wp_url }}" target="_blank" rel="noopener">{{ wp_url }}</a></div>
-    {% endif %}
-    <div class="text-muted small">
-      実行日時:
-      {% if log.executed_at %}
-        {{ log.executed_at.strftime("%Y-%m-%d %H:%M") }}
+  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div>
+      <h2 class="mb-1">リライト詳細・修正方針</h2>
+      <div class="text-muted small">
+        ログID: <strong>#{{ log.id }}</strong>
+        {% if log.site %}
+          &nbsp;|&nbsp; サイト: <strong>{{ log.site.name or '-' }}</strong>
+        {% elif site %}
+          &nbsp;|&nbsp; サイト: <strong>{{ site.name or '-' }}</strong>
+        {% endif %}
+      </div>
+    </div>
+    <div class="d-flex gap-2">
+      {% if log.site_id %}
+        <a class="btn btn-outline-secondary btn-sm"
+           href="{{ url_for('main.user_rewrite_site_articles', site_id=log.site_id) }}">
+          ← サイト別記事一覧に戻る
+        </a>
       {% else %}
-        -
+        <a class="btn btn-outline-secondary btn-sm"
+           href="{{ url_for('main.rewrite') }}">
+          ← 全記事リライト（一覧）に戻る
+        </a>
       {% endif %}
-      /
-      ステータス: {{ log.wp_status or '-' }}
     </div>
   </div>
 
-  <div class="card mb-3">
-    <div class="card-header fw-bold">修正方針（policy_text 相当）</div>
+  {# --- 基本情報 --- #}
+  <div class="card mb-4">
+    <div class="card-header">
+      基本情報
+    </div>
     <div class="card-body">
-      {# カラム名は環境によって違うかもしれないので安全にフォールバック #}
-      {% set policy = getattr(log, 'policy_text', None) or getattr(log, 'policy', None) %}
+      <dl class="row mb-0">
+        <dt class="col-sm-3 col-lg-2">記事タイトル</dt>
+        <dd class="col-sm-9 col-lg-10">
+          {{ log.article_title or '（タイトル未設定）' }}
+        </dd>
+
+        <dt class="col-sm-3 col-lg-2">記事URL</dt>
+        <dd class="col-sm-9 col-lg-10">
+          {% if log.article_url %}
+            <a href="{{ log.article_url }}" target="_blank" rel="noopener">
+              {{ log.article_url }}
+            </a>
+          {% else %}
+            <span class="text-muted">-</span>
+          {% endif %}
+        </dd>
+
+        <dt class="col-sm-3 col-lg-2">WP URL</dt>
+        <dd class="col-sm-9 col-lg-10">
+          {% if log.wp_url %}
+            <a href="{{ log.wp_url }}" target="_blank" rel="noopener">
+              {{ log.wp_url }}
+            </a>
+          {% else %}
+            <span class="text-muted">-</span>
+          {% endif %}
+        </dd>
+
+        <dt class="col-sm-3 col-lg-2">リライト</dt>
+        <dd class="col-sm-9 col-lg-10">
+          {% set rewrite_status = log.rewrite_status or log.status %}
+          {% if rewrite_status == 'success' %}
+            <span class="badge bg-success">成功</span>
+          {% elif rewrite_status == 'running' %}
+            <span class="badge bg-warning text-dark">実行中</span>
+          {% elif rewrite_status == 'waiting' %}
+            <span class="badge bg-secondary">待機中</span>
+          {% elif rewrite_status == 'failed' %}
+            <span class="badge bg-danger">失敗</span>
+          {% else %}
+            <span class="badge bg-light text-muted">-</span>
+          {% endif %}
+        </dd>
+
+        <dt class="col-sm-3 col-lg-2">WP更新</dt>
+        <dd class="col-sm-9 col-lg-10">
+          {% if log.wp_status == 'success' %}
+            <span class="badge bg-success">WP更新済</span>
+          {% elif log.wp_status == 'retry_queued' %}
+            <span class="badge bg-warning text-dark">再試行待ち</span>
+          {% elif log.wp_status == 'error' %}
+            <span class="badge bg-danger">WPエラー</span>
+          {% else %}
+            <span class="badge bg-light text-muted">-</span>
+          {% endif %}
+        </dd>
+
+        <dt class="col-sm-3 col-lg-2">実行日時</dt>
+        <dd class="col-sm-9 col-lg-10">
+          {% if log.executed_at %}
+            {{ log.executed_at.strftime("%Y-%m-%d %H:%M") }}
+          {% else %}
+            <span class="text-muted">-</span>
+          {% endif %}
+        </dd>
+      </dl>
+    </div>
+  </div>
+
+  {# --- 修正方針 --- #}
+  <div class="card mb-4">
+    <div class="card-header">
+      修正方針（policy）
+    </div>
+    <div class="card-body">
+      {% set policy = log.policy_text or log.policy %}
       {% if policy %}
-        <pre class="mb-0" style="white-space: pre-wrap;">{{ policy }}</pre>
+        <pre class="mb-0" style="white-space:pre-wrap; word-break:break-word;">{{ policy }}</pre>
       {% else %}
-        <span class="text-muted">このログには修正方針テキストが保存されていません。</span>
+        <p class="text-muted mb-0">修正方針は記録されていません。</p>
       {% endif %}
     </div>
   </div>
 
-  <div class="card">
-    <div class="card-header fw-bold">エラーメッセージ / 補足情報</div>
+  {# --- エラー詳細 --- #}
+  <div class="card mb-4">
+    <div class="card-header">
+      エラー詳細
+    </div>
     <div class="card-body">
-      {% set err = getattr(log, 'error_message', None) or getattr(log, 'message', None) %}
-      {% if err %}
-        <pre class="mb-0" style="white-space: pre-wrap;">{{ err }}</pre>
+      {% if log.error_message %}
+        <pre class="mb-0 text-danger" style="white-space:pre-wrap; word-break:break-word;">
+{{ log.error_message }}
+        </pre>
       {% else %}
-        <span class="text-muted">特にエラーメッセージはありません。</span>
+        <p class="text-muted mb-0">エラーは記録されていません。</p>
       {% endif %}
     </div>
   </div>
+
 </div>
 {% endblock %}
