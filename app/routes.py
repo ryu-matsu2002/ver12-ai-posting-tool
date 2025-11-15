@@ -10138,11 +10138,12 @@ def user_rewrite_progress_self(username):
 def user_rewrite_site_articles(username, site_id):
     """
     ログインユーザー自身のサイトに対するリライト済み記事一覧。
-    管理側 admin_rewrite_site_articles を簡略化したユーザー版。
+    管理側 admin_rewrite_site_articles と同じ集計ロジックで、
+    HTML も管理テンプレと揃えやすい形に整形する。
     """
     from sqlalchemy import text as _sql
     from urllib.parse import urljoin
-    from app.models import Site, Article, ArticleRewriteLog
+    from app.models import Site
     from app.services.rewrite.state_view import fetch_site_totals
 
     # サイトが current_user 所有かチェック
@@ -10155,13 +10156,14 @@ def user_rewrite_site_articles(username, site_id):
     page   = max(1, request.args.get("page", type=int) or 1)
     per    = min(100, max(10, request.args.get("per", type=int) or 50))
 
+    # 許容ステータス（success / failed の2系統）
     allowed = {"success", "failed"}
     if status not in allowed:
         status = "success"
 
     bucket = "success" if status == "success" else "failed"
 
-    # サイト全体の統一カウント（ヘッダー用）
+    # ── サイト全体の統一カウント（ヘッダー用） ─────────────────
     totals = fetch_site_totals(user_id=current_user.id, site_id=site_id)
     stats = {
         "queued":  int(totals.get("waiting", 0)),
@@ -10170,9 +10172,10 @@ def user_rewrite_site_articles(username, site_id):
         "error":   int(totals.get("failed", 0)),
         "unknown": int(totals.get("other", 0)),
     }
+    # 管理テンプレ互換：display_error を必ず持たせる
     stats["display_error"] = stats.get("error", 0)
 
-    # 一覧対象となる article_id を vw_rewrite_state から抽出
+    # ── 一覧対象 article_id を vw_rewrite_state から抽出（管理側と同じ） ──
     ids_sql = _sql("""
       SELECT article_id
       FROM vw_rewrite_state
@@ -10207,6 +10210,7 @@ def user_rewrite_site_articles(username, site_id):
         or 0
     )
 
+    # ── 詳細行を取得（管理側と同じロジック） ────────────────────────
     rows = []
     if article_ids:
         if status == "success":
@@ -10280,52 +10284,88 @@ def user_rewrite_site_articles(username, site_id):
                 db.session.execute(detail_sql, {"ids": article_ids}).mappings()
             )
 
-    # テンプレ用に構造を整形
+    # ── テンプレ互換: articles 配列を構築（管理テンプレと同じキー構成） ──
     articles = []
-    base_url = site.url or ""
+    base_url = (site.site_url or site.url or "").rstrip("/")
+    _last_dt = None
+
     for r in rows:
+        dt = r.get("executed_at")
+        if dt and (_last_dt is None or dt > _last_dt):
+            _last_dt = dt
+
         wp_post_id = r.get("wp_post_id")
-        if wp_post_id:
-            wp_url = urljoin(base_url.rstrip("/") + "/", f"?p={wp_post_id}")
+        if status == "success" and wp_post_id and base_url:
+            wp_url = urljoin(base_url + "/", f"?p={wp_post_id}")
         else:
             wp_url = None
 
+        # 管理テンプレと同じキー名
         articles.append(
             {
-                "log_id":      r.get("log_id"),
-                "article_id":  r.get("article_id"),
-                "title":       r.get("title"),
-                "executed_at": r.get("executed_at"),
-                "wp_url":      wp_url,
-                "wp_status":   r.get("wp_status") or ("success" if status == "success" else "error"),
+                "id":         r.get("article_id"),
+                "article_id": r.get("article_id"),
+                "title":      r.get("title"),
+                "status":     status,  # success / failed
+                "updated_at": (dt.isoformat() if dt else None),
+                "posted_url": None,
+                "wp_url":     wp_url,
+                "plan_id":    r.get("plan_id"),
+                "log_id":     r.get("log_id"),
             }
         )
 
-    # ページング用URL
-    base_list_url = url_for("main.user_rewrite_site_articles", site_id=site_id)
+    last_updated = _last_dt.isoformat() if _last_dt else None
+
+    # ── ページネーション情報（管理テンプレと同じ構造） ───────────────
+    total_pages = (total_count + per - 1) // per if per > 0 else 1
+    first_idx = ((page - 1) * per + 1) if total_count > 0 else 0
+    last_idx  = min(page * per, total_count)
+
     prev_url = (
-        url_for("main.user_rewrite_site_articles", site_id=site_id, status=status, page=page - 1, per=per)
+        url_for(
+            "main.user_rewrite_site_articles",
+            site_id=site_id,
+            status=status,
+            page=page - 1,
+            per=per,
+        )
         if page > 1
         else None
     )
     next_url = (
-        url_for("main.user_rewrite_site_articles", site_id=site_id, status=status, page=page + 1, per=per)
+        url_for(
+            "main.user_rewrite_site_articles",
+            site_id=site_id,
+            status=status,
+            page=page + 1,
+            per=per,
+        )
         if page * per < total_count
         else None
     )
 
+    pagination = {
+        "total": total_count,
+        "page": page,
+        "per": per,
+        "pages": total_pages,
+        "first": first_idx,
+        "last": last_idx,
+        "prev_url": prev_url,
+        "next_url": next_url,
+    }
+
     return render_template(
         "rewrite_site_articles.html",
         site=site,
+        site_id=site_id,
         stats=stats,
         status=status,
-        page=page,
         per=per,
-        total_count=total_count,
         articles=articles,
-        base_list_url=base_list_url,
-        prev_url=prev_url,
-        next_url=next_url,
+        pagination=pagination,
+        last_updated=last_updated,
     )
 
 
