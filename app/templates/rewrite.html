@@ -1,18 +1,17 @@
-<!-- templates/rewrite.html （ユーザー用 全記事リライトダッシュボード） -->
+<!-- templates/rewrite.html（ユーザー用 全記事リライト・サイト一覧） -->
 {% extends "base.html" %}
 {% block title %}全記事リライト（あなたのサイト）{% endblock %}
 
 {% block content %}
 <div class="container-fluid mt-4">
-
+  {# ヘッダー行 #}
   <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h2 class="mb-0">全記事リライト（あなたのサイト）</h2>
   </div>
 
   <div class="mb-2">
     <span class="text-muted">ユーザー:</span>
-    <strong>
-      #{{ current_user.id }}
+    <strong>#{{ current_user.id }}
       {{ current_user.last_name or '' }} {{ current_user.first_name or '' }}
       {{ '(' + current_user.username + ')' if current_user.username else '' }}
     </strong>
@@ -71,11 +70,20 @@
               <span class="fw-bold text-danger">{{ error }}</span>
             </td>
             <td class="text-center small text-muted">
-              {{ (r.last_update.isoformat() if r.last_update else '') or '-' }}
+              {# ★ 時刻表示を「YYYY-MM-DD HH:MM」に統一 #}
+              {% if r.last_update %}
+                {{ r.last_update.strftime("%Y-%m-%d %H:%M") }}
+              {% else %}
+                -
+              {% endif %}
             </td>
             <td class="text-center">
-              {# ★ここは次ステップでユーザー用「記事一覧」ページを作ってからリンク化する #}
-              <span class="text-muted small">記事一覧（ユーザー用）は次のステップで実装</span>
+              {# ★ デザインだけ管理UIと同じボタンにする（中身は次ステップ） #}
+              <a class="btn btn-sm btn-outline-primary disabled"
+                 href="javascript:void(0)"
+                 aria-disabled="true">
+                記事一覧
+              </a>
             </td>
           </tr>
           {% else %}
@@ -89,6 +97,5 @@
       </table>
     </div>
   </div>
-
 </div>
 {% endblock %}
