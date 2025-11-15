@@ -1,49 +1,42 @@
 {# templates/rewrite_site_articles.html（ユーザー用 サイト別リライト記事一覧） #}
 {% extends "base.html" %}
-{% block title %}全記事リライト | サイト別記事一覧{% endblock %}
+{% block title %}サイト別 リライト済み記事一覧{% endblock %}
 
 {% block content %}
 <div class="container-fluid mt-4">
 
-  {# パンくず（ユーザー用トップ：リライト機能：サイト一覧 へ） #}
+  {# パンくず（見た目は管理画面と同じ構成） #}
   <nav aria-label="breadcrumb">
     <ol class="breadcrumb">
       <li class="breadcrumb-item">
         <a href="{{ url_for('main.user_rewrite_dashboard') }}">リライト機能：サイト一覧</a>
       </li>
-      <li class="breadcrumb-item active" aria-current="page">
-        サイト別記事一覧
-      </li>
+      <li class="breadcrumb-item active" aria-current="page">サイト別記事一覧</li>
     </ol>
   </nav>
 
-  {# 見出し + サイト名 / 戻るボタン #}
+  {# status_filter → 管理テンプレと同じ名前で扱えるように変数を合わせる #}
+  {% set status = status_filter %}
+
+  {# 見出し + 戻るボタン（構造・クラスは管理テンプレと同じ） #}
   <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
     <h3 class="mb-0">
       {{ site.site_name or site.name or "サイト" }}
-      {% if site.id %}
-        <small class="text-muted ms-2" style="font-size:.9rem;">(ID: {{ site.id }})</small>
-      {% endif %}
+      <small class="text-muted ms-2" style="font-size:.9rem;">(ID: {{ site.id }})</small>
 
-      {# サイト全体の成功 / 失敗バッジ #}
-      {% set total = (stats.success or 0) + (stats.failed or 0) %}
-      {% if total > 0 and (stats.failed or 0) == 0 %}
+      {# サイト全体のステータスバッジ（成功だけ / 失敗だけの場合に表示） #}
+      {% set total = (stats.success or 0) + (stats.error or stats.failed or 0) %}
+      {% if total > 0 and (stats.error or stats.failed or 0) == 0 %}
         <span class="badge bg-success ms-2">success</span>
       {% elif total > 0 and (stats.success or 0) == 0 %}
         <span class="badge bg-danger ms-2">error</span>
       {% endif %}
     </h3>
 
-    <div class="d-flex gap-2">
-      <a class="btn btn-outline-secondary btn-sm"
-         href="javascript:history.back();">
-        戻る
-      </a>
-      <button type="button" class="btn btn-outline-primary btn-sm"
-              onclick="window.location.reload();">
-        進捗を更新
-      </button>
-    </div>
+    <a class="btn btn-outline-secondary btn-sm"
+       href="javascript:history.back();">
+      戻る
+    </a>
   </div>
 
   {# サイトURLリンク #}
@@ -55,13 +48,15 @@
     </div>
   {% endif %}
 
-  {# サマリカード（管理ページ風デザイン） #}
-  <div class="row g-2 text-center mb-3">
+  {# 統計カード（待機/実行中/成功/失敗） — 管理テンプレと同じ構造 #}
+  <div class="row g-2 text-center mb-2">
     <div class="col-6 col-md-3">
       <div class="card h-100 position-relative">
         <div class="card-body p-2">
           <div class="fw-bold">待機中</div>
-          <div class="fs-5 text-secondary">{{ stats.waiting or 0 }}</div>
+          <div class="fs-5 text-secondary">
+            {{ (stats.queued or stats.waiting or 0) }}
+          </div>
         </div>
       </div>
     </div>
@@ -70,7 +65,9 @@
       <div class="card h-100 position-relative">
         <div class="card-body p-2">
           <div class="fw-bold">実行中</div>
-          <div class="fs-5 text-warning">{{ stats.running or 0 }}</div>
+          <div class="fs-5 text-warning">
+            {{ (stats.running or 0) }}
+          </div>
         </div>
       </div>
     </div>
@@ -79,7 +76,9 @@
       <div class="card h-100 position-relative">
         <div class="card-body p-2">
           <div class="fw-bold">成功</div>
-          <div class="fs-5 text-success">{{ stats.success or 0 }}</div>
+          <div class="fs-5 text-success">
+            {{ (stats.success or 0) }}
+          </div>
         </div>
         {# 成功カード → フィルタリンク #}
         <a class="stretched-link"
@@ -93,9 +92,13 @@
       <div class="card h-100 position-relative">
         <div class="card-body p-2">
           <div class="fw-bold">失敗</div>
-          <div class="fs-5 text-danger">{{ stats.failed or 0 }}</div>
+          <div class="fs-5 text-danger">
+            {{ (stats.display_error
+                if (stats.display_error is defined and stats.display_error is not none)
+                else (stats.error or stats.failed or 0)) }}
+          </div>
         </div>
-        {# 失敗カード → フィルタリンク（ユーザー側は status='error' を使用） #}
+        {# 失敗カード → フィルタリンク（ユーザー側は status='error' を使う実装） #}
         <a class="stretched-link"
            href="{{ url_for('main.user_rewrite_site_articles',
                             site_id=site.id,
@@ -104,7 +107,7 @@
     </div>
   </div>
 
-  {# 対象記事数カード #}
+  {# 対象記事数カード（管理テンプレの下部カード相当） #}
   <div class="row g-2 mb-3">
     <div class="col-12 col-md-4 col-lg-3">
       <div class="card">
@@ -118,45 +121,35 @@
     </div>
   </div>
 
-  {# 成功 / 失敗フィルタボタン #}
-  <div class="mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+  {# 成功 / 失敗フィルタトグル — 管理テンプレと同じ見た目 #}
+  <div class="mb-3">
     <div class="btn-group">
-      <a class="btn btn-sm {% if status_filter == 'success' or not status_filter %}btn-primary{% else %}btn-outline-primary{% endif %}"
+      <a class="btn btn-sm {% if status=='success' or not status %}btn-primary{% else %}btn-outline-primary{% endif %}"
          href="{{ url_for('main.user_rewrite_site_articles',
                           site_id=site.id,
                           status='success') }}">
         成功のみ
       </a>
-      <a class="btn btn-sm {% if status_filter == 'error' %}btn-danger{% else %}btn-outline-danger{% endif %}"
+      <a class="btn btn-sm {% if status in ['failed','error'] %}btn-danger{% else %}btn-outline-danger{% endif %}"
          href="{{ url_for('main.user_rewrite_site_articles',
                           site_id=site.id,
                           status='error') }}">
         失敗のみ
       </a>
     </div>
-
-    <div class="small text-muted">
-      {% if status_filter == 'success' %}
-        表示: 成功のみ
-      {% elif status_filter == 'error' %}
-        表示: 失敗のみ
-      {% else %}
-        表示: すべて
-      {% endif %}
-      {% if updated_at %}
-        ／ 更新: {{ updated_at.strftime("%Y-%m-%d %H:%M") }}
-      {% endif %}
-    </div>
+    {% if updated_at %}
+      <small class="text-muted ms-2">更新: {{ updated_at.strftime("%Y-%m-%d %H:%M") }}</small>
+    {% endif %}
   </div>
 
-  {# 記事テーブル #}
+  {# 記事テーブル — 管理テンプレの構造を踏襲しつつ、ユーザー用データ構造(logs)に対応 #}
   <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
       <span>
         リライト済み記事一覧
-        {% if status_filter == 'error' %}
+        {% if status in ['failed','error'] %}
           <small class="text-danger">(失敗)</small>
-        {% elif status_filter == 'success' %}
+        {% elif status == 'success' %}
           <small class="text-success">(成功)</small>
         {% endif %}
       </span>
@@ -173,67 +166,78 @@
             <th>タイトル</th>
             <th class="text-center" style="width:120px;">ステータス</th>
             <th class="text-center" style="width:180px;">最終更新</th>
-            <th class="text-center" style="width:120px;">WPリンク</th>
+            <th style="min-width:120px;">WPリンク</th>
             <th class="text-center" style="width:140px;">修正方針</th>
           </tr>
         </thead>
         <tbody>
           {% if logs and logs|length %}
             {% for row in logs %}
-              {% set rewrite_status = row.rewrite_status or row.status %}
+              {% set st = row.rewrite_status or row.status or '-' %}
+              {% set cls = "secondary" %}
+              {% if st == "success" %}
+                {% set cls = "success" %}
+              {% elif st in ["error","failed"] %}
+                {% set cls = "danger" %}
+              {% elif st == "running" %}
+                {% set cls = "warning" %}
+              {% elif st in ["waiting","queued"] %}
+                {% set cls = "secondary" %}
+              {% endif %}
+
               <tr>
                 <td class="text-center fw-bold">
                   {{ row.article_id or row.id }}
                 </td>
                 <td>
-                  <div class="fw-semibold">
-                    {{ row.article_title or '（タイトル未設定）' }}
-                  </div>
+                  {{ row.article_title or '（タイトル未設定）' }}
+                  {% if row.article_id %}
+                    <span class="text-muted ms-2">(#{{ row.article_id }})</span>
+                  {% endif %}
                   {% if row.article_url %}
-                    <a href="{{ row.article_url }}" target="_blank" rel="noopener">
-                      {{ row.article_url }}
-                    </a>
+                    <div>
+                      <a href="{{ row.article_url }}" target="_blank" rel="noopener">
+                        {{ row.article_url }}
+                      </a>
+                    </div>
                   {% endif %}
                 </td>
                 <td class="text-center">
-                  {% if rewrite_status == 'success' %}
-                    <span class="badge bg-success">success</span>
-                  {% elif rewrite_status == 'failed' %}
-                    <span class="badge bg-danger">error</span>
-                  {% elif rewrite_status == 'running' %}
-                    <span class="badge bg-warning text-dark">running</span>
-                  {% elif rewrite_status == 'waiting' %}
-                    <span class="badge bg-secondary">waiting</span>
-                  {% else %}
-                    <span class="badge bg-light text-muted">-</span>
-                  {% endif %}
+                  <span class="badge bg-{{ cls }}">{{ st }}</span>
                 </td>
-                <td class="text-center small text-muted">
+                <td class="text-center text-muted">
                   {% if row.executed_at %}
-                    {{ row.executed_at.strftime("%Y-%m-%d %H:%M") }}
+                    {{ row.executed_at|tojson|safe|replace('"','')|replace('T',' ') }}
                   {% else %}
                     -
                   {% endif %}
                 </td>
-                <td class="text-center">
-                  {% if row.wp_url %}
+                <td>
+                  {% if row.posted_url %}
+                    <a href="{{ row.posted_url }}" target="_blank" rel="noopener">open</a>
+                  {% elif row.wp_url %}
                     <a href="{{ row.wp_url }}" target="_blank" rel="noopener">open</a>
                   {% else %}
                     <span class="text-muted">-</span>
                   {% endif %}
                 </td>
                 <td class="text-center">
-                  <a class="btn btn-sm btn-outline-primary"
-                     href="{{ url_for('main.user_rewrite_log_detail', log_id=row.id) }}">
-                    修正方針
-                  </a>
+                  {% if row.id %}
+                    <a class="btn btn-outline-primary btn-sm"
+                       href="{{ url_for('main.user_rewrite_log_detail', log_id=row.id) }}"
+                       target="_blank" rel="noopener">
+                      修正方針
+                    </a>
+                  {% else %}
+                    <span class="text-muted">-</span>
+                  {% endif %}
                 </td>
               </tr>
             {% endfor %}
           {% else %}
             <tr>
-              <td colspan="6" class="text-center text-muted py-3">
-                このサイトのリライト済み記事はまだありません。
+              <td colspan="6" class="text-center text-muted py-4">
+                データがありません
               </td>
             </tr>
           {% endif %}
@@ -241,34 +245,18 @@
       </table>
     </div>
 
-    {# ページネーション #}
+    {# ページネーション（構造は管理テンプレと同等） #}
     {% if pagination %}
       <div class="card-footer d-flex justify-content-between align-items-center">
-        <div class="small text-muted">
-          ページ {{ pagination.page }} / {{ pagination.pages }}
+        <div class="text-muted small">
+          {{ pagination.total or 0 }} 件中 {{ pagination.first or 0 }}–{{ pagination.last or 0 }} を表示
         </div>
-        <nav>
-          <ul class="pagination pagination-sm mb-0">
-            <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
-              <a class="page-link"
-                 href="{% if pagination.has_prev %}{{ url_for('main.user_rewrite_site_articles',
-                                                             site_id=site.id,
-                                                             page=pagination.page-1,
-                                                             status=status_filter) }}{% else %}#{% endif %}">
-                前へ
-              </a>
-            </li>
-            <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
-              <a class="page-link"
-                 href="{% if pagination.has_next %}{{ url_for('main.user_rewrite_site_articles',
-                                                             site_id=site.id,
-                                                             page=pagination.page+1,
-                                                             status=status_filter) }}{% else %}#{% endif %}">
-                次へ
-              </a>
-            </li>
-          </ul>
-        </nav>
+        <div class="btn-group">
+          <a class="btn btn-outline-secondary btn-sm {% if not pagination.prev_url %}disabled{% endif %}"
+             href="{{ pagination.prev_url or '#' }}">前へ</a>
+          <a class="btn btn-outline-secondary btn-sm {% if not pagination.next_url %}disabled{% endif %}"
+             href="{{ pagination.next_url or '#' }}">次へ</a>
+        </div>
       </div>
     {% endif %}
   </div>
