@@ -5,11 +5,11 @@
 {% block content %}
 <div class="container-fluid mt-4">
 
-  {# パンくず（管理版とほぼ同じ構成 / ユーザー用ルートに合わせる） #}
+  {# パンくず（ユーザー用トップ：リライト機能：サイト一覧 へ） #}
   <nav aria-label="breadcrumb">
     <ol class="breadcrumb">
       <li class="breadcrumb-item">
-        <a href="{{ url_for('main.user_rewrite') }}">リライト機能：サイト一覧</a>
+        <a href="{{ url_for('main.user_rewrite_dashboard') }}">リライト機能：サイト一覧</a>
       </li>
       <li class="breadcrumb-item active" aria-current="page">
         サイト別記事一覧
@@ -25,7 +25,7 @@
         <small class="text-muted ms-2" style="font-size:.9rem;">(ID: {{ site.id }})</small>
       {% endif %}
 
-      {# サイト全体の成功 / 失敗バッジ（管理版と同じロジック） #}
+      {# サイト全体の成功 / 失敗バッジ #}
       {% set total = (stats.success or 0) + (stats.failed or 0) %}
       {% if total > 0 and (stats.failed or 0) == 0 %}
         <span class="badge bg-success ms-2">success</span>
@@ -81,7 +81,7 @@
           <div class="fw-bold">成功</div>
           <div class="fs-5 text-success">{{ stats.success or 0 }}</div>
         </div>
-        {# 成功カードをフィルタリンク化 #}
+        {# 成功カード → フィルタリンク #}
         <a class="stretched-link"
            href="{{ url_for('main.user_rewrite_site_articles',
                             site_id=site.id,
@@ -95,7 +95,7 @@
           <div class="fw-bold">失敗</div>
           <div class="fs-5 text-danger">{{ stats.failed or 0 }}</div>
         </div>
-        {# 失敗カードをフィルタリンク化（ユーザー側は status='error' を使う） #}
+        {# 失敗カード → フィルタリンク（ユーザー側は status='error' を使用） #}
         <a class="stretched-link"
            href="{{ url_for('main.user_rewrite_site_articles',
                             site_id=site.id,
@@ -104,7 +104,7 @@
     </div>
   </div>
 
-  {# 対象記事数カード（管理版に合わせて別カードで表示） #}
+  {# 対象記事数カード #}
   <div class="row g-2 mb-3">
     <div class="col-12 col-md-4 col-lg-3">
       <div class="card">
@@ -118,7 +118,7 @@
     </div>
   </div>
 
-  {# 成功 / 失敗フィルタボタン（管理版と同じ見た目） #}
+  {# 成功 / 失敗フィルタボタン #}
   <div class="mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div class="btn-group">
       <a class="btn btn-sm {% if status_filter == 'success' or not status_filter %}btn-primary{% else %}btn-outline-primary{% endif %}"
@@ -149,7 +149,7 @@
     </div>
   </div>
 
-  {# 記事テーブル（管理版と同じ table デザイン） #}
+  {# 記事テーブル #}
   <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
       <span>
@@ -241,7 +241,7 @@
       </table>
     </div>
 
-    {# ページネーション（見た目を管理版に寄せる） #}
+    {# ページネーション #}
     {% if pagination %}
       <div class="card-footer d-flex justify-content-between align-items-center">
         <div class="small text-muted">
