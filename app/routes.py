@@ -10088,66 +10088,18 @@ def topic_generate_now():
 @login_required
 def user_rewrite_dashboard(username):
     """
-    ログインユーザー専用の「全記事リライトダッシュボード」。
-    - vw_rewrite_state を唯一の真実源として、ユーザー配下のサイト別集計を出す
-    - 管理画面の /admin/rewrite/user/<user_id> をユーザー版に落とし込んだイメージ
+    ログインユーザー自身のサイト一覧＋リライト進捗を表示するユーザー用ダッシュボード。
+    管理画面 /admin/rewrite/user/<id> と同じ集計ロジックを使う。
     """
-    from app.services.rewrite.state_view import fetch_user_totals
-
-    user_id = current_user.id
-
-    # サイト別集計（waiting / running / success / failed の件数など）
-    raw_rows = _rewrite_counts_for_user_sites(user_id)
-
-    sites = []
-    for r in raw_rows:
-        site_id = int(r.get("site_id"))
-        site_name = (r.get("site_name") or f"ID {site_id}").strip()
-        target_articles = int(r.get("target_articles") or 0)
-        waiting = int(r.get("waiting") or 0)
-        running = int(r.get("running") or 0)
-        success = int(r.get("success") or 0)
-        failed = int(r.get("failed") or 0)
-        last_update = r.get("last_update")
-
-        # ユーザー用：サイト別の「リライト済み記事一覧」ページへのリンク
-        # まだルート未実装なので、ここでは URL は空文字にしておく（後続ステップで差し替え）
-        site_articles_url = ""
-        
-
-        sites.append({
-            "site_id": site_id,
-            "site_name": site_name,
-            "target_articles": target_articles,
-            "queued": waiting,
-            "running": running,
-            "success": success,
-            "error": failed,
-            "unknown": 0,  # vw_rewrite_state 側で other を使っていないので 0 固定
-            "last_update": last_update,
-            "site_articles_url": site_articles_url,
-        })
-
-    # ユーザー全体のトータル（カード表示用）
-    totals_raw = fetch_user_totals(user_id)
-    totals = {
-        "queued":  int(totals_raw.get("waiting", 0)),
-        "running": int(totals_raw.get("running", 0)),
-        "success": int(totals_raw.get("success", 0)),
-        "error":   int(totals_raw.get("failed", 0)),
-        "unknown": int(totals_raw.get("other", 0)),
-        "target_articles": sum(s["target_articles"] for s in sites) if sites else 0,
-    }
-
-    site_cnt = len(sites)
+    # 管理用と同じヘルパを再利用
+    rows = _rewrite_counts_for_user_sites(current_user.id)
 
     return render_template(
         "rewrite.html",
         user=current_user,
-        sites=sites,
-        totals=totals,
-        site_cnt=int(site_cnt),
+        rows=rows,
     )
+
 
 @bp.route("/rewrite/enqueue", defaults={"username": None}, methods=["POST"])
 @bp.route("/<username>/rewrite/enqueue", methods=["POST"])
@@ -10172,4 +10124,21 @@ def user_rewrite_enqueue_self(username):
 def user_rewrite_progress_self(username):
     # 管理APIに委譲（user_id 指定）
     with current_app.test_request_context(f"/admin/rewrite/progress?user_id={current_user.id}"):
-        return admin_rewrite_progress()        
+        return admin_rewrite_progress()
+
+@bp.route("/rewrite/site/<int:site_id>", defaults={"username": None}, methods=["GET"])
+@bp.route("/<username>/rewrite/site/<int:site_id>", methods=["GET"])
+@login_required
+def user_rewrite_site_articles(username, site_id):
+    """
+    ユーザー用：指定サイトのリライト済み記事一覧ページ。
+    いまはプレースホルダ。後続ステップで管理画面と同等の一覧UIを実装する。
+    """
+    from app.models import Site
+
+    site = db.session.get(Site, site_id)
+    if (not site) or site.user_id != current_user.id:
+        abort(404)
+
+    # TODO: 後で admin_rewrite_site_articles 相当の一覧ページを実装する
+    return f"サイトID {site_id} のリライト記事一覧ページ（ユーザー用）は後で実装します。", 200
