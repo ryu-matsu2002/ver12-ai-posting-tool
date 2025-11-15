@@ -3,23 +3,120 @@
 {% block title %}ユーザー別サイト一覧 | 全記事リライト{% endblock %}
 
 {% block content %}
-<div class="container-fluid mt-4">
+<div class="container-fluid mt-4 rw-rewrite-user">
 
-  {# 管理画面と同じヘッダー構成（戻るボタンだけ無し） #}
+  <!-- このページ専用のスタイル（管理画面と同じ雰囲気を強制再現） -->
+  <style>
+    .rw-rewrite-user .card {
+      border: 1px solid #dee2e6;
+      border-radius: 0.5rem;
+      background-color: #ffffff;
+      box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.03);
+    }
+    .rw-rewrite-user .card-header {
+      padding: 0.6rem 1rem;
+      border-bottom: 1px solid #dee2e6;
+      background-color: #f8f9fa;
+      font-weight: 500;
+    }
+    .rw-rewrite-user .table {
+      margin-bottom: 0;
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.95rem;
+    }
+    .rw-rewrite-user .table thead th {
+      border-bottom: 1px solid #dee2e6;
+      background-color: #f8f9fa;
+      font-weight: 600;
+      padding: 0.6rem 0.75rem;
+      white-space: nowrap;
+    }
+    .rw-rewrite-user .table tbody td {
+      padding: 0.55rem 0.75rem;
+      vertical-align: middle;
+      border-top: 1px solid #dee2e6;
+    }
+    .rw-rewrite-user .table-striped tbody tr:nth-of-type(odd) {
+      background-color: rgba(0, 0, 0, 0.01);
+    }
+    .rw-rewrite-user .table-striped tbody tr:hover {
+      background-color: rgba(13, 110, 253, 0.03);
+    }
+    .rw-rewrite-user .fw-semibold {
+      font-weight: 600;
+    }
+    .rw-rewrite-user .fw-bold {
+      font-weight: 700;
+    }
+    .rw-rewrite-user .text-primary {
+      color: #0d6efd !important;
+    }
+    .rw-rewrite-user .text-secondary {
+      color: #6c757d !important;
+    }
+    .rw-rewrite-user .text-warning {
+      color: #fd7e14 !important;
+    }
+    .rw-rewrite-user .text-success {
+      color: #198754 !important;
+    }
+    .rw-rewrite-user .text-danger {
+      color: #dc3545 !important;
+    }
+    .rw-rewrite-user a {
+      text-decoration: none;
+    }
+    .rw-rewrite-user a:hover {
+      text-decoration: underline;
+    }
+    .rw-rewrite-user .btn {
+      font-size: 0.8rem;
+      padding: 0.2rem 0.75rem;
+      border-radius: 999px;
+    }
+    .rw-rewrite-user .btn-outline-primary {
+      color: #0d6efd;
+      border-color: #0d6efd;
+      background-color: transparent;
+    }
+    .rw-rewrite-user .btn-outline-primary:hover {
+      color: #ffffff;
+      background-color: #0d6efd;
+      border-color: #0d6efd;
+      text-decoration: none;
+    }
+    .rw-rewrite-user .btn-sm {
+      line-height: 1.2;
+    }
+    .rw-rewrite-user .mb-0 {
+      margin-bottom: 0 !important;
+    }
+    .rw-rewrite-user .mb-2 {
+      margin-bottom: 0.5rem !important;
+    }
+    .rw-rewrite-user .mb-3 {
+      margin-bottom: 1rem !important;
+    }
+  </style>
+
+  <!-- 見出し行（管理画面と同じ構成・ユーザー側は戻るボタンなし） -->
   <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h2 class="mb-0">ユーザー別サイト一覧</h2>
   </div>
 
-  {# 管理画面と同じユーザー表示 #}
+  <!-- ユーザー情報行（管理テンプレと同じ書式） -->
   {% set user = current_user %}
   <div class="mb-2">
     <span class="text-muted">ユーザー:</span>
-    <strong>#{{ user.id }}
+    <strong>
+      #{{ user.id }}
       {{ user.last_name or '' }} {{ user.first_name or '' }}
       {{ '(' + user.username + ')' if user.username else '' }}
     </strong>
   </div>
 
+  <!-- サイトごとの進捗テーブル（管理テンプレと完全同じ構造） -->
   <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
       <span>サイトごとの進捗</span>
