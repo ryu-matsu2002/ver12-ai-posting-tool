@@ -71,7 +71,6 @@
             </td>
 
             <td class="text-center small text-muted">
-              {# ★ 日付表示を「YYYY-MM-DD HH:MM」に統一 #}
               {% if r.last_update %}
                 {{ r.last_update.strftime("%Y-%m-%d %H:%M") }}
               {% else %}
@@ -80,9 +79,9 @@
             </td>
 
             <td class="text-center">
-              {# ★ まずは見た目だけ管理UIと同じボタンにする #}
-              <a class="btn btn-sm btn-outline-primary disabled"
-                 href="javascript:void(0)" aria-disabled="true">
+              {# ユーザー版のサイト別記事一覧へリンク #}
+              <a class="btn btn-sm btn-outline-primary"
+                 href="{{ url_for('main.user_rewrite_site_articles', site_id=r.site_id) }}">
                 記事一覧
               </a>
             </td>

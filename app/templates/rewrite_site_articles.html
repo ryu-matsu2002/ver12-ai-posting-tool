@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}サイト別リライト済み記事一覧{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+  <nav aria-label="breadcrumb">
+    <ol class="breadcrumb mb-3">
+      <li class="breadcrumb-item">
+        <a href="{{ url_for('main.user_rewrite_dashboard', username=current_user.username) }}">
+          全記事リライト
+        </a>
+      </li>
+      <li class="breadcrumb-item active" aria-current="page">
+        サイト別記事一覧
+      </li>
+    </ol>
+  </nav>
+
+  <h2 class="mb-2">{{ site.name or site.url or 'サイト' }} のリライト記事</h2>
+  <p class="text-muted mb-3">
+    成功 / 失敗したリライト記事の一覧です。
+  </p>
+
+  <div class="row g-3 mb-3">
+    <div class="col-md-8 col-lg-6">
+      <div class="card">
+        <div class="card-header">進捗サマリ</div>
+        <div class="card-body">
+          <div>queued: <span class="fw-bold">{{ stats.queued }}</span></div>
+          <div>running: <span class="fw-bold">{{ stats.running }}</span></div>
+          <div>success: <span class="fw-bold text-success">{{ stats.success }}</span></div>
+          <div>error: <span class="fw-bold text-danger">{{ stats.error }}</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4 col-lg-6 d-flex align-items-end justify-content-md-end">
+      <div class="btn-group ms-md-auto" role="group">
+        <a href="{{ base_list_url }}?status=success" class="btn btn-sm {% if status == 'success' %}btn-primary{% else %}btn-outline-primary{% endif %}">
+          成功のみ
+        </a>
+        <a href="{{ base_list_url }}?status=failed" class="btn btn-sm {% if status == 'failed' %}btn-primary{% else %}btn-outline-primary{% endif %}">
+          失敗のみ
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span>
+        リライト済み記事一覧
+        <span class="text-muted small">（{{ total_count }}件中 {{ (page - 1) * per + 1 }}〜{{ (page - 1) * per + articles|length }}件）</span>
+      </span>
+    </div>
+
+    <div class="table-responsive">
+      <table class="table table-sm table-striped align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th style="width: 80px;">ID</th>
+            <th>タイトル</th>
+            <th style="width: 140px;" class="text-center">ステータス</th>
+            <th style="width: 180px;" class="text-center">最終更新</th>
+            <th style="width: 120px;" class="text-center">WPリンク</th>
+            <th style="width: 140px;" class="text-center">修正方針</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for a in articles %}
+          <tr>
+            <td><code>{{ a.article_id }}</code></td>
+            <td>{{ a.title or '(タイトル未設定)' }}</td>
+            <td class="text-center">
+              {% if a.wp_status == 'success' %}
+                <span class="badge bg-success">success</span>
+              {% else %}
+                <span class="badge bg-danger">{{ a.wp_status }}</span>
+              {% endif %}
+            </td>
+            <td class="text-center small text-muted">
+              {% if a.executed_at %}
+                {{ a.executed_at.strftime("%Y-%m-%d %H:%M") }}
+              {% else %}
+                -
+              {% endif %}
+            </td>
+            <td class="text-center">
+              {% if a.wp_url %}
+                <a href="{{ a.wp_url }}" target="_blank" rel="noopener">open</a>
+              {% else %}
+                <span class="text-muted">-</span>
+              {% endif %}
+            </td>
+            <td class="text-center">
+              {% if a.log_id %}
+                <a class="btn btn-sm btn-outline-primary"
+                   href="{{ url_for('main.user_rewrite_log_detail', log_id=a.log_id) }}">
+                  修正方針
+                </a>
+              {% else %}
+                <span class="text-muted small">なし</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="6" class="text-center text-muted py-3">対象記事がありません。</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card-footer d-flex justify-content-between align-items-center">
+      <div class="text-muted small">
+        ページ {{ page }} / {{ (total_count // per) + (1 if total_count % per else 0) }}
+      </div>
+      <div>
+        {% if prev_url %}
+          <a href="{{ prev_url }}" class="btn btn-sm btn-outline-secondary">前へ</a>
+        {% endif %}
+        {% if next_url %}
+          <a href="{{ next_url }}" class="btn btn-sm btn-outline-secondary">次へ</a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

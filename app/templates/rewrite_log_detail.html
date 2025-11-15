@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}リライトログ詳細{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+  <nav aria-label="breadcrumb">
+    <ol class="breadcrumb mb-3">
+      <li class="breadcrumb-item">
+        <a href="{{ url_for('main.user_rewrite_dashboard', username=current_user.username) }}">
+          全記事リライト
+        </a>
+      </li>
+      {% if site %}
+      <li class="breadcrumb-item">
+        <a href="{{ url_for('main.user_rewrite_site_articles', site_id=site.id) }}">
+          {{ site.name or site.url or 'サイト' }}
+        </a>
+      </li>
+      {% endif %}
+      <li class="breadcrumb-item active" aria-current="page">
+        修正方針
+      </li>
+    </ol>
+  </nav>
+
+  <h2 class="mb-3">修正方針の詳細</h2>
+
+  <div class="mb-3">
+    <div><strong>ログID:</strong> {{ log.id }}</div>
+    <div><strong>記事ID:</strong> {{ article.id }}</div>
+    <div><strong>タイトル:</strong> {{ article.title }}</div>
+    {% if wp_url %}
+      <div><strong>WPリンク:</strong> <a href="{{ wp_url }}" target="_blank" rel="noopener">{{ wp_url }}</a></div>
+    {% endif %}
+    <div class="text-muted small">
+      実行日時:
+      {% if log.executed_at %}
+        {{ log.executed_at.strftime("%Y-%m-%d %H:%M") }}
+      {% else %}
+        -
+      {% endif %}
+      /
+      ステータス: {{ log.wp_status or '-' }}
+    </div>
+  </div>
+
+  <div class="card mb-3">
+    <div class="card-header fw-bold">修正方針（policy_text 相当）</div>
+    <div class="card-body">
+      {# カラム名は環境によって違うかもしれないので安全にフォールバック #}
+      {% set policy = getattr(log, 'policy_text', None) or getattr(log, 'policy', None) %}
+      {% if policy %}
+        <pre class="mb-0" style="white-space: pre-wrap;">{{ policy }}</pre>
+      {% else %}
+        <span class="text-muted">このログには修正方針テキストが保存されていません。</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header fw-bold">エラーメッセージ / 補足情報</div>
+    <div class="card-body">
+      {% set err = getattr(log, 'error_message', None) or getattr(log, 'message', None) %}
+      {% if err %}
+        <pre class="mb-0" style="white-space: pre-wrap;">{{ err }}</pre>
+      {% else %}
+        <span class="text-muted">特にエラーメッセージはありません。</span>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -10081,7 +10081,7 @@ def topic_generate_now():
 
 
 # ─────────────────────────────────────────
-# ユーザー画面（本人専用簡易版）
+# リライト機能ユーザー画面（本人専用簡易版）
 # ─────────────────────────────────────────
 @bp.route("/rewrite", defaults={"username": None}, methods=["GET"])
 @bp.route("/<username>/rewrite", methods=["GET"])
@@ -10126,19 +10126,247 @@ def user_rewrite_progress_self(username):
     with current_app.test_request_context(f"/admin/rewrite/progress?user_id={current_user.id}"):
         return admin_rewrite_progress()
 
+# ─────────────────────────────────────────
+# ユーザー用: サイト別のリライト済み記事一覧
+# URL:
+#   /rewrite/site/<site_id>
+#   /<username>/rewrite/site/<site_id>
+# ─────────────────────────────────────────
 @bp.route("/rewrite/site/<int:site_id>", defaults={"username": None}, methods=["GET"])
 @bp.route("/<username>/rewrite/site/<int:site_id>", methods=["GET"])
 @login_required
 def user_rewrite_site_articles(username, site_id):
     """
-    ユーザー用：指定サイトのリライト済み記事一覧ページ。
-    いまはプレースホルダ。後続ステップで管理画面と同等の一覧UIを実装する。
+    ログインユーザー自身のサイトに対するリライト済み記事一覧。
+    管理側 admin_rewrite_site_articles を簡略化したユーザー版。
     """
-    from app.models import Site
+    from sqlalchemy import text as _sql
+    from urllib.parse import urljoin
+    from app.models import Site, Article, ArticleRewriteLog
+    from app.services.rewrite.state_view import fetch_site_totals
 
+    # サイトが current_user 所有かチェック
     site = db.session.get(Site, site_id)
-    if (not site) or site.user_id != current_user.id:
+    if not site or site.user_id != current_user.id:
         abort(404)
 
-    # TODO: 後で admin_rewrite_site_articles 相当の一覧ページを実装する
-    return f"サイトID {site_id} のリライト記事一覧ページ（ユーザー用）は後で実装します。", 200
+    # クエリパラメータ
+    status = (request.args.get("status") or "").strip().lower()
+    page   = max(1, request.args.get("page", type=int) or 1)
+    per    = min(100, max(10, request.args.get("per", type=int) or 50))
+
+    allowed = {"success", "failed"}
+    if status not in allowed:
+        status = "success"
+
+    bucket = "success" if status == "success" else "failed"
+
+    # サイト全体の統一カウント（ヘッダー用）
+    totals = fetch_site_totals(user_id=current_user.id, site_id=site_id)
+    stats = {
+        "queued":  int(totals.get("waiting", 0)),
+        "running": int(totals.get("running", 0)),
+        "success": int(totals.get("success", 0)),
+        "error":   int(totals.get("failed", 0)),
+        "unknown": int(totals.get("other", 0)),
+    }
+    stats["display_error"] = stats.get("error", 0)
+
+    # 一覧対象となる article_id を vw_rewrite_state から抽出
+    ids_sql = _sql("""
+      SELECT article_id
+      FROM vw_rewrite_state
+      WHERE user_id = :uid AND site_id = :sid AND final_bucket = :bucket
+      ORDER BY log_executed_at DESC NULLS LAST,
+               plan_created_at DESC NULLS LAST,
+               article_id DESC
+      LIMIT :limit OFFSET :offset
+    """)
+    id_rows = db.session.execute(
+        ids_sql,
+        {
+            "uid": current_user.id,
+            "sid": site_id,
+            "bucket": bucket,
+            "limit": per,
+            "offset": (page - 1) * per,
+        },
+    ).fetchall()
+    article_ids = [int(r[0]) for r in id_rows]
+
+    # 総件数（ページネーション用）
+    total_sql = _sql("""
+      SELECT COUNT(*) FROM vw_rewrite_state
+      WHERE user_id = :uid AND site_id = :sid AND final_bucket = :bucket
+    """)
+    total_count = int(
+        db.session.execute(
+            total_sql,
+            {"uid": current_user.id, "sid": site_id, "bucket": bucket},
+        ).scalar()
+        or 0
+    )
+
+    rows = []
+    if article_ids:
+        if status == "success":
+            # 各記事の最新 success ログ
+            detail_sql = _sql("""
+              WITH latest AS (
+                SELECT
+                  l.id         AS log_id,
+                  l.article_id,
+                  l.plan_id,
+                  l.wp_post_id,
+                  l.executed_at,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY l.article_id
+                    ORDER BY l.executed_at DESC, l.id DESC
+                  ) AS rn
+                FROM article_rewrite_logs l
+                WHERE l.article_id = ANY(:ids)
+                  AND l.wp_status = 'success'
+              )
+              SELECT
+                lt.log_id,
+                a.id          AS article_id,
+                a.title       AS title,
+                lt.plan_id    AS plan_id,
+                lt.wp_post_id AS wp_post_id,
+                lt.executed_at AS executed_at
+              FROM latest lt
+              JOIN articles a ON a.id = lt.article_id
+              WHERE lt.rn = 1
+              ORDER BY lt.executed_at DESC NULLS LAST, a.id DESC
+            """)
+            rows = list(
+                db.session.execute(detail_sql, {"ids": article_ids}).mappings()
+            )
+        else:
+            # 各記事の最新 failed 系ログ
+            detail_sql = _sql("""
+              WITH latest AS (
+                SELECT
+                  l.id         AS log_id,
+                  l.article_id,
+                  l.plan_id,
+                  l.wp_post_id,
+                  l.executed_at,
+                  l.wp_status,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY l.article_id
+                    ORDER BY l.executed_at DESC, l.id DESC
+                  ) AS rn
+                FROM article_rewrite_logs l
+                WHERE l.article_id = ANY(:ids)
+                  AND l.wp_status IN (
+                    'failed','error','canceled','aborted','timeout','stale'
+                  )
+              )
+              SELECT
+                lt.log_id,
+                a.id          AS article_id,
+                a.title       AS title,
+                lt.plan_id    AS plan_id,
+                lt.wp_post_id AS wp_post_id,
+                lt.executed_at AS executed_at,
+                lt.wp_status  AS wp_status
+              FROM latest lt
+              JOIN articles a ON a.id = lt.article_id
+              WHERE lt.rn = 1
+              ORDER BY lt.executed_at DESC NULLS LAST, a.id DESC
+            """)
+            rows = list(
+                db.session.execute(detail_sql, {"ids": article_ids}).mappings()
+            )
+
+    # テンプレ用に構造を整形
+    articles = []
+    base_url = site.url or ""
+    for r in rows:
+        wp_post_id = r.get("wp_post_id")
+        if wp_post_id:
+            wp_url = urljoin(base_url.rstrip("/") + "/", f"?p={wp_post_id}")
+        else:
+            wp_url = None
+
+        articles.append(
+            {
+                "log_id":      r.get("log_id"),
+                "article_id":  r.get("article_id"),
+                "title":       r.get("title"),
+                "executed_at": r.get("executed_at"),
+                "wp_url":      wp_url,
+                "wp_status":   r.get("wp_status") or ("success" if status == "success" else "error"),
+            }
+        )
+
+    # ページング用URL
+    base_list_url = url_for("main.user_rewrite_site_articles", site_id=site_id)
+    prev_url = (
+        url_for("main.user_rewrite_site_articles", site_id=site_id, status=status, page=page - 1, per=per)
+        if page > 1
+        else None
+    )
+    next_url = (
+        url_for("main.user_rewrite_site_articles", site_id=site_id, status=status, page=page + 1, per=per)
+        if page * per < total_count
+        else None
+    )
+
+    return render_template(
+        "rewrite_site_articles.html",
+        site=site,
+        stats=stats,
+        status=status,
+        page=page,
+        per=per,
+        total_count=total_count,
+        articles=articles,
+        base_list_url=base_list_url,
+        prev_url=prev_url,
+        next_url=next_url,
+    )
+
+
+# ─────────────────────────────────────────
+# ユーザー用: リライトログ詳細（修正方針）
+# URL:
+#   /rewrite/log/<log_id>
+#   /<username>/rewrite/log/<log_id>
+# ─────────────────────────────────────────
+@bp.route("/rewrite/log/<int:log_id>", defaults={"username": None}, methods=["GET"])
+@bp.route("/<username>/rewrite/log/<int:log_id>", methods=["GET"])
+@login_required
+def user_rewrite_log_detail(username, log_id):
+    """
+    ログID単位の詳細。
+    管理画面の修正方針詳細をユーザー向けに簡略表示。
+    """
+    from urllib.parse import urljoin
+    from app.models import ArticleRewriteLog, Article, Site
+
+    log = db.session.get(ArticleRewriteLog, log_id)
+    if not log:
+        abort(404)
+
+    article = db.session.get(Article, log.article_id)
+    if not article or article.user_id != current_user.id:
+        # 他人の記事のログは見せない
+        abort(404)
+
+    site = db.session.get(Site, article.site_id) if article.site_id else None
+
+    # WPリンク（あくまで簡易。permalink構造は考慮しない）
+    wp_url = None
+    if site and getattr(log, "wp_post_id", None):
+        wp_url = urljoin((site.url or "").rstrip("/") + "/", f"?p={log.wp_post_id}")
+
+    return render_template(
+        "rewrite_log_detail.html",
+        log=log,
+        article=article,
+        site=site,
+        wp_url=wp_url,
+    )
+
